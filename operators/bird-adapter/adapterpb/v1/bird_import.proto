@@ -64,6 +64,9 @@ message ListSessionsRequest {}
 message ListSessionsResponse { repeated SessionInfo sessions = 1; }
 
 // SessionInfo contains information about a single BIRD import session.
+//
+// A session with replacing set is pending: it takes over the name once the
+// import in replacing, which holds the name until then, has stopped.
 message SessionInfo {
   // Name of the configuration/module this session belongs to.
   string name = 1;
@@ -73,6 +76,12 @@ message SessionInfo {
   int64 created_at = 3;
   // Current state of the gRPC connection to the gateway.
   ConnectionState connection_state = 4;
+  // The import that holds the name now, still feeding the RIB or stopping,
+  // while this session waits to replace it.
+  //
+  // Absent when no replacement is pending, and always absent in the nested
+  // session.
+  SessionInfo replacing = 5;
 }
 
 // ConnectionState represents the state of the gRPC connection.

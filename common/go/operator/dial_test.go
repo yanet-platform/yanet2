@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
@@ -117,4 +118,31 @@ func Test_DialGateway_TLS(t *testing.T) {
 			require.NoError(t, err)
 		})
 	}
+}
+
+// Test_DialGatewayWith_DialOptionsKeepCredentials verifies that an extra
+// dial option carrying plaintext credentials does not turn the TLS the
+// gateway config selects into plaintext.
+func Test_DialGatewayWith_DialOptionsKeepCredentials(t *testing.T) {
+	t.Parallel()
+
+	ca := tlscert.NewCA(t)
+	server := ca.IssueServer(t, "127.0.0.1")
+	endpoint := serveHealth(t, grpc.Creds(credentials.NewTLS(&tls.Config{
+		Certificates: []tls.Certificate{server.Certificate},
+		MinVersion:   tls.VersionTLS12,
+	})))
+
+	conn, err := operator.DialGatewayWith(operator.GatewayConfig{
+		Name:     "numa0",
+		Endpoint: xcfg.MustNonEmptyString(endpoint),
+		TLS:      &xgrpc.ClientTLSConfig{CAFile: ca.BundleFile()},
+	}, []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	_, err = grpc_health_v1.NewHealthClient(conn).Check(ctx, &grpc_health_v1.HealthCheckRequest{})
+	require.NoError(t, err)
 }

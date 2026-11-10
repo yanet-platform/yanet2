@@ -72,6 +72,11 @@ type options struct {
 	GRPCServer *grpcServerOption
 	// Readiness is nil when the operator reports no readiness.
 	Readiness *readinessOption
+	// Listener is nil when the embedded server binds its endpoint.
+	Listener net.Listener
+	// GatewayDialOptions follow the defaults of every registration
+	// connection.
+	GatewayDialOptions []grpc.DialOption
 	// Log is the fallback logger for operator components.
 	Log *zap.Logger
 }
@@ -138,6 +143,31 @@ func WithGRPCServer(cfg GRPCServerConfig, services ...ServiceRegistrar) Option {
 			Config:   cfg,
 			Services: services,
 		}
+	}
+}
+
+// WithListener hands the embedded gRPC server an already open listener to
+// serve instead of binding the endpoint its config names.
+//
+// It takes effect only with WithGRPCServer. The listener is advertised to
+// the gateways under its own address unless the config names another, and
+// the server closes it when it stops. A nil listener binds the endpoint.
+func WithListener(listener net.Listener) Option {
+	return func(o *options) {
+		o.Listener = listener
+	}
+}
+
+// WithGatewayDialOptions adds gRPC dial options to the connections that
+// register the operator in its gateways; they cannot replace the transport
+// credentials the gateway config selects.
+//
+// A context dialer among them lets the registration run over an in-memory
+// transport; the gateway endpoints then need a scheme that skips name
+// resolution, such as passthrough.
+func WithGatewayDialOptions(dialOptions ...grpc.DialOption) Option {
+	return func(o *options) {
+		o.GatewayDialOptions = append(o.GatewayDialOptions, dialOptions...)
 	}
 }
 
@@ -214,6 +244,12 @@ type Operator[T any] struct {
 	serviceNames      []string
 	readiness         *readiness.Tracker
 
+	// listener is served in place of one bound to the endpoint when set.
+	listener net.Listener
+	// gatewayDialOptions follow the defaults of every registration
+	// connection.
+	gatewayDialOptions []grpc.DialOption
+
 	log *zap.Logger
 }
 
@@ -286,18 +322,20 @@ func NewOperator[T any](
 	)
 
 	return &Operator[T]{
-		server:            server,
-		endpoint:          endpoint,
-		advertiseEndpoint: advertiseEndpoint,
-		reconciler:        reconciler,
-		actuator:          actuator,
-		preRun:            opts.PreRun,
-		workers:           opts.Workers,
-		gateways:          opts.Gateways,
-		register:          opts.Register,
-		serviceNames:      serviceNames,
-		readiness:         tracker,
-		log:               log,
+		server:             server,
+		endpoint:           endpoint,
+		advertiseEndpoint:  advertiseEndpoint,
+		listener:           opts.Listener,
+		reconciler:         reconciler,
+		actuator:           actuator,
+		preRun:             opts.PreRun,
+		workers:            opts.Workers,
+		gateways:           opts.Gateways,
+		register:           opts.Register,
+		gatewayDialOptions: opts.GatewayDialOptions,
+		serviceNames:       serviceNames,
+		readiness:          tracker,
+		log:                log,
 	}
 }
 
@@ -418,6 +456,7 @@ func (m *Operator[T]) runners(listener net.Listener) []Runner {
 		m.serviceNames,
 		advertiseEndpoint,
 		WithGatewayRegInterval(m.register.Interval.Unwrap()),
+		WithGatewayRegDialOptions(m.gatewayDialOptions...),
 		WithGatewayRegLog(m.log),
 	)
 
@@ -453,6 +492,9 @@ func (m *Operator[T]) stopInOrder(
 func (m *Operator[T]) makeListener() (net.Listener, error) {
 	if m.server == nil {
 		return &noopListener{}, nil
+	}
+	if m.listener != nil {
+		return m.listener, nil
 	}
 
 	return net.Listen("tcp", m.endpoint)

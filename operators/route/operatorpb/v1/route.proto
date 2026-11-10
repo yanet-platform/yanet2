@@ -115,6 +115,13 @@ message Update {
   bool is_delete = 2;
   // The route to add to the RIB.
   Route route = 3;
+  // Marks a liveness probe that changes no routes; as the first message of
+  // a stream it starts the session of the RIB it names, like any other.
+  //
+  // The sender detects a dead stream through its failure. The receiver reads
+  // only the name of a heartbeat, ignores its other fields, and ends a
+  // stream whose session another stream has superseded.
+  bool heartbeat = 4;
 }
 
 message UpdateSummary {}

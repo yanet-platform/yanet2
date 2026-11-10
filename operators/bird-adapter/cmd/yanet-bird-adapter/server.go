@@ -177,6 +177,11 @@ func runServer() error {
 
 	wg, ctx := errgroup.WithContext(context.Background())
 
+	// The startup import retries under its own context, so the shutdown
+	// stops it before it waits for the imports.
+	startupCtx, cancelStartup := context.WithCancel(ctx)
+	defer cancelStartup()
+
 	// Start gRPC server
 	wg.Go(func() error {
 		log.Info("gRPC server listening", zap.String("addr", cfg.ListenAddr))
@@ -194,7 +199,7 @@ func runServer() error {
 	if startupConfig := cfg.BIRD.Unwrap(); startupConfig != nil {
 		// Apply the configured startup BIRD import.
 		wg.Go(func() error {
-			runStartupImport(ctx, log, adapterService, *startupConfig, cfg.Logging.Level.String())
+			runStartupImport(startupCtx, log, adapterService, *startupConfig, cfg.Logging.Level.String())
 			return nil
 		})
 	}
@@ -203,6 +208,16 @@ func runServer() error {
 	wg.Go(func() error {
 		err := xcmd.WaitInterrupted(ctx)
 		log.Info("caught signal", zap.Error(err))
+
+		// The imports stop before the gRPC server, so a setup call in
+		// flight fails fast instead of holding up the graceful stop.
+		cancelStartup()
+		closeCtx, cancelClose := context.WithTimeout(context.Background(), xgrpc.GracefulStopTimeout)
+		defer cancelClose()
+		if err := adapterService.Close(closeCtx); err != nil {
+			log.Warn("failed to stop BIRD imports", zap.Error(err))
+		}
+
 		log.Info("shutting down gRPC server")
 
 		xgrpc.StopGracefully(grpcServer, xgrpc.GracefulStopTimeout, func() {

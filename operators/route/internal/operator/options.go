@@ -1,14 +1,20 @@
 package operator
 
 import (
+	"net"
 	"time"
 
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 )
 
 type options struct {
 	Log     *zap.Logger
 	Metrics MetricsFactory
+	// Listener is nil when the operator binds its server endpoint.
+	Listener net.Listener
+	// GatewayDialOptions follow the defaults of every gateway connection.
+	GatewayDialOptions []grpc.DialOption
 }
 
 func newOptions() *options {
@@ -36,6 +42,29 @@ func WithLog(log *zap.Logger) Option {
 func WithMetrics(factory MetricsFactory) Option {
 	return func(o *options) {
 		o.Metrics = factory
+	}
+}
+
+// WithListener hands the operator's gRPC server an already open listener to
+// serve instead of binding the configured server endpoint.
+//
+// The server closes it when it stops.
+func WithListener(listener net.Listener) Option {
+	return func(o *options) {
+		o.Listener = listener
+	}
+}
+
+// WithGatewayDialOptions adds gRPC dial options to every gateway connection,
+// of the actuators and of the registration alike; they cannot replace the
+// transport credentials the gateway config selects.
+//
+// A context dialer among them lets the operator reach its gateways over an
+// in-memory transport; the gateway endpoints then need a scheme that skips
+// name resolution, such as passthrough.
+func WithGatewayDialOptions(dialOptions ...grpc.DialOption) Option {
+	return func(o *options) {
+		o.GatewayDialOptions = append(o.GatewayDialOptions, dialOptions...)
 	}
 }
 
@@ -156,6 +185,7 @@ type gatewayActuatorOptions struct {
 	StaticRoutes []StaticRouteConfig
 	ExpectBird   bool
 	OnFIBBuilt   func(module string, stats FIBBuildStats)
+	DialOptions  []grpc.DialOption
 	Log          *zap.Logger
 }
 
@@ -214,6 +244,15 @@ func WithGatewayActuatorStaticRoutes(routes []StaticRouteConfig) GatewayActuator
 func WithGatewayActuatorExpectBird(expect bool) GatewayActuatorOption {
 	return func(o *gatewayActuatorOptions) {
 		o.ExpectBird = expect
+	}
+}
+
+// WithGatewayActuatorDialOptions adds gRPC dial options to the gateway
+// connection; they cannot replace the transport credentials the gateway
+// config selects.
+func WithGatewayActuatorDialOptions(dialOptions ...grpc.DialOption) GatewayActuatorOption {
+	return func(o *gatewayActuatorOptions) {
+		o.DialOptions = append(o.DialOptions, dialOptions...)
 	}
 }
 
