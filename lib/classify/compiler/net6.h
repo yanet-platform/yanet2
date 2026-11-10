@@ -967,6 +967,10 @@ classify_compile_net6_commit(
 	struct classify_compile_net6 *net6_compile = compile;
 	struct classify_attr_net6 *net6_attr = attr;
 
+	// The attribute starts empty, so the common unwind frees only the
+	// members a failed step already initialised.
+	memset(net6_attr, 0, sizeof(*net6_attr));
+
 	/*
 	 * The half matches are built directly in the embedded attribute:
 	 * their pages are addressed through relative pointers, so trees

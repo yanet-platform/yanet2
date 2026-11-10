@@ -4,11 +4,12 @@
 // Pins the regression of combining the high and the low address halves
 // through the shared classification: unique networks grouped across rules,
 // masks spanning both halves, networks shared and nested across rules, a
-// wildcard network, and the source with destination joint. Every scenario
-// compiles an explicit classifier - the destination attribute alone, or
-// the source and destination pair with their joint - decodes its ruleset
-// and classifies synthetic packets through the packet getters and the
-// library lookup core.
+// wildcard network, and the source with destination joint. Every
+// classification scenario compiles an explicit classifier - the
+// destination attribute alone, or the source and destination pair with
+// their joint - decodes its ruleset and classifies synthetic packets
+// through the packet getters and the library lookup core. One more
+// scenario pins the unwind of a failed attribute commit.
 
 #include "lib/classify/compiler/net6.h"
 #include "lib/classify/classify.h"
@@ -551,6 +552,89 @@ run_src_dst_test(struct memory_context *mctx, void *memory) {
 	test_filter_net6_both_free(mctx, &flt);
 }
 
+// The context the commit below allocates from: an allocator without any
+// arena, so the first allocation of the commit is refused.
+static struct memory_context *starved_commit_context;
+
+// Runs the attribute commit on the starved context instead of the
+// compile one.
+static int
+starved_net6_commit(
+	struct memory_context *memory_context, void *compile, void *attr
+) {
+	(void)memory_context;
+	return classify_compile_net6_commit(
+		starved_commit_context, compile, attr
+	);
+}
+
+// Verifies that a commit refused its first allocation fails, frees
+// nothing it did not allocate, and leaves the garbage-filled attribute
+// and the stage zeroed.
+static void
+run_failed_commit_zeroes_attr_test(struct memory_context *mctx, void *memory) {
+	(void)memory;
+
+	struct block_allocator starved_allocator;
+	block_allocator_init(&starved_allocator);
+	struct memory_context starved_ctx;
+	assert(memory_context_init(
+		       &starved_ctx, "starved", &starved_allocator
+	       ) == 0);
+	starved_commit_context = &starved_ctx;
+
+	struct block_allocator *allocator = ADDR_OF(&mctx->block_allocator);
+	size_t initial = block_allocator_free_size(allocator);
+
+	uint8_t addr[NET6_LEN] = {0};
+	addr[0] = 0x20;
+	struct net6 nets[1] = {net6_halves(addr, 2, 1)};
+	struct test_rule rule = rule_dst(nets, 1);
+	const struct classifier_rule *rules[1] = {&rule.rule};
+
+	struct classify_compile_net6 *compile = classify_compile_net6_create(
+		mctx, rules, 1, test_rule_get_dsts, "failed_commit"
+	);
+	assert(compile != NULL);
+	const struct classify_attr_ops ops = {
+		.size = classify_compile_net6_size,
+		.rule_is_any = classify_compile_net6_rule_is_any,
+		.hash = classify_compile_net6_hash,
+		.compare = classify_compile_net6_compare,
+		.iter = classify_compile_net6_iter,
+		.rule_iter = classify_compile_net6_rule_iter,
+		.commit = starved_net6_commit,
+		.free_compile = classify_compile_net6_free,
+	};
+
+	struct classify_attr_net6 attr;
+	memset(&attr, 0x5a, sizeof(attr));
+	struct classifier stage;
+	memset(&stage, 0x5a, sizeof(stage));
+	assert(classify_attr_compile(
+		       mctx,
+		       "failed_commit",
+		       &ops,
+		       compile,
+		       rules,
+		       1,
+		       &attr,
+		       &stage
+	       ) == -1);
+
+	struct classify_attr_net6 zero_attr;
+	memset(&zero_attr, 0, sizeof(zero_attr));
+	assert(memcmp(&attr, &zero_attr, sizeof(attr)) == 0);
+	struct classifier zero_stage;
+	memset(&zero_stage, 0, sizeof(zero_stage));
+	assert(memcmp(&stage, &zero_stage, sizeof(stage)) == 0);
+	assert(starved_ctx.bfree_count == 0);
+	assert(block_allocator_free_size(&starved_allocator) == 0);
+	assert(block_allocator_free_size(allocator) == initial);
+
+	memory_context_fini(&starved_ctx);
+}
+
 int
 main(void) {
 	void *memory = malloc(1 << 24);
@@ -559,6 +643,7 @@ main(void) {
 	run_scenario(run_shared_networks_test, memory);
 	run_scenario(run_nested_networks_test, memory);
 	run_scenario(run_src_dst_test, memory);
+	run_scenario(run_failed_commit_zeroes_attr_test, memory);
 
 	free(memory);
 	return 0;
