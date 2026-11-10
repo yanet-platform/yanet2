@@ -62,6 +62,12 @@ impl EthernetHeader {
         self.src = addr.octets();
     }
 
+    /// Swaps the source and destination MAC addresses, as a reply to the
+    /// frame carries them.
+    pub fn swap_addrs(&mut self) {
+        core::mem::swap(&mut self.dst, &mut self.src);
+    }
+
     /// Ethertype of the payload, or the tag protocol identifier when a VLAN
     /// tag follows.
     pub fn ethertype(&self) -> u16 {
@@ -178,6 +184,15 @@ mod tests {
             [0xa, 0xb, 0xc, 0xd, 0xe, 0xf, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15],
             frame[..12]
         );
+        assert_eq!(FRAME[12..], frame[12..]);
+    }
+
+    #[test]
+    fn test_ethernet_swap_addrs_exchanges_frame_bytes() {
+        let mut frame = FRAME;
+        let (eth, _) = EthernetHeader::parse_mut(&mut frame).unwrap();
+        eth.swap_addrs();
+        assert_eq!([7, 8, 9, 10, 11, 12, 1, 2, 3, 4, 5, 6], frame[..12]);
         assert_eq!(FRAME[12..], frame[12..]);
     }
 
@@ -335,6 +350,17 @@ mod tests {
             let (header, rest) = EthernetHeader::parse(&buf).unwrap();
             prop_assert_eq!(&model, &EthFields::read(header));
             prop_assert_eq!(&[1, 2, 3][..], rest);
+        }
+
+        #[test]
+        fn test_ethernet_swap_addrs_changes_only_the_addresses(start in eth_fields(), payload in vec(any::<u8>(), 0..=32)) {
+            let mut buf = start.to_bytes(&payload);
+            let (header, _) = EthernetHeader::parse_mut(&mut buf).unwrap();
+            header.swap_addrs();
+            let model = EthFields { dst: start.src, src: start.dst, ethertype: start.ethertype };
+            let (header, rest) = EthernetHeader::parse(&buf).unwrap();
+            prop_assert_eq!(&model, &EthFields::read(header));
+            prop_assert_eq!(&payload[..], rest);
         }
 
         #[test]

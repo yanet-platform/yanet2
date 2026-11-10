@@ -2,13 +2,14 @@ use core::net::Ipv4Addr;
 
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, byteorder::network_endian::U16};
 
-use crate::{ParseError, checksum, split_header, split_header_mut};
+use crate::{Adjusted, Mode, ParseError, Unadjusted, checksum, mutation, split_header, split_header_mut};
 
 /// IPv4 fixed header (20 bytes, options excluded).
 ///
-/// Every field is covered by the header checksum, so each setter updates it
-/// incrementally. A rewritten address must also be reported to the L4 header
-/// to fix its pseudo-header checksum.
+/// The header checksum covers every field, so the fields change through a
+/// mutation: one that keeps the checksum valid, or one that stores the fields
+/// alone for a checksum filled after it. A rewritten address must also be
+/// reported to the L4 header to fix its pseudo-header checksum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, FromBytes, IntoBytes, KnownLayout, Immutable, Unaligned)]
 #[repr(C)]
 pub struct Ipv4Header {
@@ -27,6 +28,78 @@ pub struct Ipv4Header {
 impl Ipv4Header {
     /// Bytes of the header without options.
     pub const MIN_LEN: usize = 20;
+
+    /// Writes a header without options at the start of the buffer and
+    /// starts an unadjusted mutation of it: version 4 and five words long,
+    /// every other field zero.
+    ///
+    /// The bytes the header covers are not read, so it may land on a copy of
+    /// another packet's headers or on a fresh buffer alike. Its checksum is
+    /// filled once the fields are set.
+    ///
+    /// # Errors
+    ///
+    /// [`ParseError::Truncated`] when the buffer is shorter than the header.
+    #[inline]
+    pub fn init(buf: &mut [u8]) -> Result<Ipv4Mutation<'_, Unadjusted>, ParseError> {
+        let (header, _) = split_header_mut::<Self>(buf)?;
+        // Two stores: the fields after the first eight bytes are those a
+        // header built anew sets, so their own stores replace the second.
+        let (head, tail) = header.as_mut_bytes().split_at_mut(8);
+        head.copy_from_slice(&[(4 << 4) | (Self::MIN_LEN / 4) as u8, 0, 0, 0, 0, 0, 0, 0]);
+        tail.fill(0);
+        Ok(header.mutate_unadjusted())
+    }
+
+    /// The fixed header at the start of the input and the bytes after it,
+    /// its fields unchecked.
+    ///
+    /// Reads the header of a packet the input does not hold whole, such as a
+    /// copy of its headers or the first segment of a chained frame.
+    ///
+    /// # Errors
+    ///
+    /// [`ParseError::Truncated`] when the input is shorter than the fixed
+    /// header.
+    #[inline]
+    pub fn from_prefix(buf: &[u8]) -> Result<(&Self, &[u8]), ParseError> {
+        split_header(buf)
+    }
+
+    /// Same as [`Ipv4Header::from_prefix`] for in-place editing.
+    ///
+    /// # Errors
+    ///
+    /// The same as [`Ipv4Header::from_prefix`].
+    #[inline]
+    pub fn from_prefix_mut(buf: &mut [u8]) -> Result<(&mut Self, &mut [u8]), ParseError> {
+        split_header_mut(buf)
+    }
+
+    /// Starts a mutation that keeps the checksum valid.
+    #[inline]
+    pub fn mutate(&mut self) -> Ipv4Mutation<'_> {
+        Ipv4Mutation {
+            header: self,
+            mode: mutation::adjusted(),
+        }
+    }
+
+    /// Starts a mutation that stores the fields alone, for a checksum filled
+    /// anew after it.
+    #[inline]
+    pub fn mutate_unadjusted(&mut self) -> Ipv4Mutation<'_, Unadjusted> {
+        Ipv4Mutation { header: self, mode: Unadjusted }
+    }
+
+    /// Fills the checksum of a header without options, over its fixed part.
+    ///
+    /// A header with options takes its checksum over them too, from the
+    /// packet's view of both.
+    #[inline]
+    pub fn fill_checksum(&mut self) {
+        fill_header_checksum(self, &[]);
+    }
 
     /// IP version, 4 for a header that parsed.
     pub fn version(&self) -> u8 {
@@ -100,93 +173,158 @@ impl Ipv4Header {
         Ipv4Addr::from(self.dst)
     }
 
-    fn tos_word(&self) -> u16 {
-        u16::from_be_bytes([self.version_ihl, self.tos])
-    }
-
-    fn ttl_word(&self) -> u16 {
-        u16::from_be_bytes([self.ttl, self.protocol])
-    }
-
-    fn replace_checksum(&mut self, old: u16, new: u16) {
-        self.checksum.set(checksum::update(self.checksum.get(), old, new));
-    }
-
-    /// Sets the DSCP; the bits above six are dropped and ECN is kept.
-    pub fn set_dscp(&mut self, dscp: u8) {
-        let old = self.tos_word();
-        self.tos = ((dscp & 0x3f) << 2) | (self.tos & 3);
-        self.replace_checksum(old, self.tos_word());
-    }
-
-    /// Sets the ECN codepoint; the bits above two are dropped.
-    pub fn set_ecn(&mut self, ecn: u8) {
-        let old = self.tos_word();
-        self.tos = (self.tos & 0xfc) | (ecn & 3);
-        self.replace_checksum(old, self.tos_word());
-    }
-
-    /// Sets the total length and updates the checksum.
-    ///
-    /// A packet view keeps the split it was parsed with: after a length
-    /// change, parse the packet again to see the new payload.
-    pub fn set_total_len(&mut self, total_len: u16) {
-        let old = self.total_len.get();
-        self.total_len.set(total_len);
-        self.replace_checksum(old, total_len);
-    }
-
-    /// Sets the identification and updates the checksum.
-    pub fn set_id(&mut self, id: u16) {
-        let old = self.id.get();
-        self.id.set(id);
-        self.replace_checksum(old, id);
-    }
-
-    /// Sets the TTL and updates the checksum.
-    pub fn set_ttl(&mut self, ttl: u8) {
-        let old = self.ttl_word();
-        self.ttl = ttl;
-        self.replace_checksum(old, self.ttl_word());
-    }
-
-    /// Sets the protocol and updates the header checksum.
-    ///
-    /// The L4 pseudo-header checksum covers the protocol too and is left as
-    /// it was.
-    pub fn set_protocol(&mut self, protocol: u8) {
-        let old = self.ttl_word();
-        self.protocol = protocol;
-        self.replace_checksum(old, self.ttl_word());
-    }
-
     /// Decrements the TTL and returns the new value.
     ///
     /// Returns `None` and leaves the header untouched when the TTL is already
     /// 1 or 0, i.e. the packet must not be forwarded.
     #[must_use = "a packet whose TTL cannot be decremented must not be forwarded"]
+    #[inline]
     pub fn decrement_ttl(&mut self) -> Option<u8> {
         if self.ttl <= 1 {
             return None;
         }
-        self.set_ttl(self.ttl - 1);
-        Some(self.ttl)
+        let ttl = self.ttl - 1;
+        self.mutate().set_ttl(ttl).finish();
+        Some(ttl)
+    }
+}
+
+/// A change of IPv4 header fields, in the mode chosen when it starts.
+///
+/// An adjusting mutation keeps the header checksum valid and ends with
+/// [`Ipv4Mutation::finish`], which adjusts it once for every change; an
+/// unadjusted one stores the fields alone and ends with
+/// [`Ipv4Mutation::finish_unadjusted`], the checksum then filled anew. Each
+/// setter takes the mutation and returns it, so the changes chain; a chain
+/// left without its finish is an unused value the compiler warns about,
+/// though an early return between the start and the finish goes unseen.
+#[must_use = "a mutation ends with finish or finish_unadjusted"]
+#[derive(Debug)]
+pub struct Ipv4Mutation<'a, M = Adjusted> {
+    header: &'a mut Ipv4Header,
+    mode: M,
+}
+
+impl<M> Ipv4Mutation<'_, M>
+where
+    M: Mode,
+{
+    /// Sets the header length in 32-bit words and the version, 4, that
+    /// shares its byte; the bits above four are dropped.
+    ///
+    /// The change covers this byte alone: options the new length takes in or
+    /// leaves out are not summed, so a header whose options change takes its
+    /// checksum anew. A packet view keeps the split it was parsed with.
+    #[inline]
+    pub fn set_ihl(mut self, ihl: u8) -> Self {
+        let new = (4 << 4) | (ihl & 0x0f);
+        let old = core::mem::replace(&mut self.header.version_ihl, new);
+        self.mode.add16(mutation::first_byte(old), mutation::first_byte(new));
+        self
     }
 
-    /// Replaces the source address and returns the previous one.
-    pub fn set_src(&mut self, addr: Ipv4Addr) -> Ipv4Addr {
-        let old = core::mem::replace(&mut self.src, addr.octets());
-        self.checksum
-            .set(checksum::update_bytes(self.checksum.get(), &old, &self.src));
-        Ipv4Addr::from(old)
+    /// Sets the DSCP; the bits above six are dropped and ECN is kept.
+    #[inline]
+    pub fn set_dscp(mut self, dscp: u8) -> Self {
+        let old = self.header.tos;
+        self.header.tos = ((dscp & 0x3f) << 2) | (old & 3);
+        let new = self.header.tos;
+        self.mode.add16(mutation::second_byte(old), mutation::second_byte(new));
+        self
     }
 
-    /// Replaces the destination address and returns the previous one.
-    pub fn set_dst(&mut self, addr: Ipv4Addr) -> Ipv4Addr {
-        let old = core::mem::replace(&mut self.dst, addr.octets());
-        self.checksum
-            .set(checksum::update_bytes(self.checksum.get(), &old, &self.dst));
-        Ipv4Addr::from(old)
+    /// Sets the ECN codepoint; the bits above two are dropped.
+    #[inline]
+    pub fn set_ecn(mut self, ecn: u8) -> Self {
+        let old = self.header.tos;
+        self.header.tos = (old & 0xfc) | (ecn & 3);
+        let new = self.header.tos;
+        self.mode.add16(mutation::second_byte(old), mutation::second_byte(new));
+        self
+    }
+
+    /// Sets the total length.
+    ///
+    /// A packet view keeps the split it was parsed with: after a length
+    /// change, parse the packet again to see the new payload.
+    #[inline]
+    pub fn set_total_len(mut self, total_len: u16) -> Self {
+        let old = mutation::word16(self.header.total_len);
+        self.header.total_len.set(total_len);
+        self.mode.add16(old, total_len.to_be());
+        self
+    }
+
+    /// Sets the identification.
+    #[inline]
+    pub fn set_id(mut self, id: u16) -> Self {
+        let old = mutation::word16(self.header.id);
+        self.header.id.set(id);
+        self.mode.add16(old, id.to_be());
+        self
+    }
+
+    /// Sets the flags and fragment offset word.
+    #[inline]
+    pub fn set_frag(mut self, frag: u16) -> Self {
+        let old = mutation::word16(self.header.frag);
+        self.header.frag.set(frag);
+        self.mode.add16(old, frag.to_be());
+        self
+    }
+
+    /// Sets the TTL.
+    #[inline]
+    pub fn set_ttl(mut self, ttl: u8) -> Self {
+        let old = core::mem::replace(&mut self.header.ttl, ttl);
+        self.mode.add16(mutation::first_byte(old), mutation::first_byte(ttl));
+        self
+    }
+
+    /// Sets the protocol.
+    ///
+    /// The L4 pseudo-header checksum covers the protocol too and is left as
+    /// it was.
+    #[inline]
+    pub fn set_protocol(mut self, protocol: u8) -> Self {
+        let old = core::mem::replace(&mut self.header.protocol, protocol);
+        self.mode
+            .add16(mutation::second_byte(old), mutation::second_byte(protocol));
+        self
+    }
+
+    /// Sets the source address.
+    #[inline]
+    pub fn set_src(mut self, addr: Ipv4Addr) -> Self {
+        let old = core::mem::replace(&mut self.header.src, addr.octets());
+        self.mode.add_octets(old, addr.octets());
+        self
+    }
+
+    /// Sets the destination address.
+    #[inline]
+    pub fn set_dst(mut self, addr: Ipv4Addr) -> Self {
+        let old = core::mem::replace(&mut self.header.dst, addr.octets());
+        self.mode.add_octets(old, addr.octets());
+        self
+    }
+}
+
+impl<'a> Ipv4Mutation<'a> {
+    /// Ends the mutation: adjusts the header checksum once for every change.
+    #[inline]
+    pub fn finish(self) -> &'a mut Ipv4Header {
+        let Self { header, mode } = self;
+        header.checksum = mutation::adjust(header.checksum, mode);
+        header
+    }
+}
+
+impl<'a> Ipv4Mutation<'a, Unadjusted> {
+    /// Ends the mutation and leaves the checksum to be filled.
+    #[inline]
+    pub fn finish_unadjusted(self) -> &'a mut Ipv4Header {
+        self.header
     }
 }
 
@@ -194,9 +332,22 @@ impl Ipv4Header {
 ///
 /// Each part's sum is non-zero unless its bytes are, and one end-around
 /// carry folds the pair, so this equals the sum of the contiguous bytes.
+#[inline]
 fn header_sum(header: &Ipv4Header, options: &[u8]) -> u16 {
-    let acc = u32::from(checksum::sum(header.as_bytes())) + u32::from(checksum::sum(options));
+    let sum = checksum::sum(header.as_bytes());
+    if options.is_empty() {
+        return sum;
+    }
+    let acc = u32::from(sum) + u32::from(checksum::sum(options));
     ((acc >> 16) + (acc & 0xffff)) as u16
+}
+
+/// Stores the header checksum computed anew over the header and its options.
+#[inline]
+fn fill_header_checksum(header: &mut Ipv4Header, options: &[u8]) {
+    header.checksum = U16::ZERO;
+    let sum = header_sum(header, options);
+    header.checksum.set(!sum);
 }
 
 fn header_checksum_is_valid(header: &Ipv4Header, options: &[u8]) -> bool {
@@ -306,9 +457,7 @@ impl<'a> Ipv4PacketMut<'a> {
 
     /// Recomputes the header checksum from scratch over header and options.
     pub fn recompute_checksum(&mut self) {
-        self.header.checksum.set(0);
-        let sum = header_sum(self.header, self.options);
-        self.header.checksum.set(!sum);
+        fill_header_checksum(self.header, self.options);
     }
 }
 
@@ -482,11 +631,11 @@ mod tests {
     fn test_ipv4_decrement_ttl_stops_at_one() {
         let (mut buf, total) = build(0, &[]);
         let p = Ipv4PacketMut::parse(&mut buf[..total]).unwrap();
-        p.header.set_ttl(1);
+        p.header.mutate().set_ttl(1).finish();
         assert_eq!(None, p.header.decrement_ttl());
         assert_eq!(1, p.header.ttl());
         assert!(p.checksum_is_valid());
-        p.header.set_ttl(0);
+        p.header.mutate().set_ttl(0).finish();
         assert_eq!(None, p.header.decrement_ttl());
     }
 
@@ -507,22 +656,62 @@ mod tests {
         for ttl in 2..=255u8 {
             let (mut buf, total) = build(0, &[]);
             let p = Ipv4PacketMut::parse(&mut buf[..total]).unwrap();
-            p.header.set_ttl(ttl);
+            p.header.mutate().set_ttl(ttl).finish();
             assert_eq!(Some(ttl - 1), p.header.decrement_ttl());
             assert_matches_recompute(&mut buf[..total]);
         }
     }
 
     #[test]
-    fn test_ipv4_setters_return_previous_address() {
-        let (mut buf, total) = build(0, &[]);
-        let p = Ipv4PacketMut::parse(&mut buf[..total]).unwrap();
-        assert_eq!(Ipv4Addr::new(10, 0, 0, 1), p.header.set_src(Ipv4Addr::new(1, 1, 1, 1)));
-        assert_eq!(
-            Ipv4Addr::new(192, 168, 0, 199),
-            p.header.set_dst(Ipv4Addr::new(2, 2, 2, 2))
-        );
-        assert_eq!(Ipv4Addr::new(1, 1, 1, 1), p.header.src());
+    fn test_ipv4_init_refuses_short_buffer() {
+        let mut buf = [0u8; 20];
+        for len in 0..Ipv4Header::MIN_LEN {
+            let expected = ParseError::Truncated { needed: 20, available: len };
+            assert_eq!(expected, Ipv4Header::init(&mut buf[..len]).unwrap_err(), "len {len}");
+        }
+    }
+
+    #[test]
+    fn test_ipv4_set_ihl_writes_version_four_and_drops_bits_above_four() {
+        let mut buf = [0x65u8; 20];
+        let (header, _) = Ipv4Header::from_prefix_mut(&mut buf).unwrap();
+        let header = header.mutate_unadjusted().set_ihl(0xf6).finish_unadjusted();
+        assert_eq!(6, header.ihl());
+        assert_eq!(4, header.version());
+    }
+
+    /// verifies that the length's change keeps the checksum valid over a span
+    /// whose added options sum to zero.
+    #[test]
+    fn test_ipv4_set_ihl_adjusts_checksum_for_the_length() {
+        let mut buf = [0u8; 24];
+        Ipv4Header::init(&mut buf).unwrap().finish_unadjusted().fill_checksum();
+        Ipv4Header::from_prefix_mut(&mut buf)
+            .unwrap()
+            .0
+            .mutate()
+            .set_ihl(6)
+            .finish();
+        assert_eq!(0xffff, checksum::sum(&buf));
+    }
+
+    #[test]
+    fn test_ipv4_from_prefix_reads_header_of_packet_beyond_input() {
+        let (buf, _) = build(0, &[1, 2, 3]);
+        let (header, rest) = Ipv4Header::from_prefix(&buf[..20]).unwrap();
+        assert_eq!(23, header.total_len());
+        assert!(rest.is_empty());
+    }
+
+    #[test]
+    fn test_ipv4_from_prefix_refuses_short_input() {
+        let (mut buf, _) = build(0, &[]);
+        for len in 0..Ipv4Header::MIN_LEN {
+            let expected = ParseError::Truncated { needed: 20, available: len };
+            assert_eq!(expected, Ipv4Header::from_prefix(&buf[..len]).unwrap_err(), "len {len}");
+        }
+        let expected = ParseError::Truncated { needed: 20, available: 19 };
+        assert_eq!(expected, Ipv4Header::from_prefix_mut(&mut buf[..19]).unwrap_err());
     }
 
     #[test]
@@ -647,14 +836,14 @@ mod tests {
         Ok(vec![header.as_bytes(), &*options, &*payload])
     }
 
-    /// A mutation of the IPv4 header through its setters.
+    /// A change of an IPv4 header field.
     #[derive(Debug, Clone)]
     enum Op {
         Dscp(u8),
         Ecn(u8),
         Id(u16),
+        Frag(u16),
         Ttl(u8),
-        DecrementTtl,
         Protocol(u8),
         /// Taken modulo the room the buffer leaves for the payload.
         TotalLen(u16),
@@ -662,71 +851,106 @@ mod tests {
         Dst([u8; 4]),
     }
 
-    /// Random sequences of header mutations.
-    fn ops() -> impl Strategy<Value = Vec<Op>> {
-        let op = prop_oneof![
+    /// A step of a header's changes: a mutation, or the TTL's decrement,
+    /// which runs its own.
+    #[derive(Debug, Clone)]
+    enum Step {
+        Mutation(Vec<Op>),
+        DecrementTtl,
+    }
+
+    /// A random change of a header field.
+    fn op() -> impl Strategy<Value = Op> {
+        prop_oneof![
             any::<u8>().prop_map(Op::Dscp),
             any::<u8>().prop_map(Op::Ecn),
             any::<u16>().prop_map(Op::Id),
+            any::<u16>().prop_map(Op::Frag),
             any::<u8>().prop_map(Op::Ttl),
-            Just(Op::DecrementTtl),
             any::<u8>().prop_map(Op::Protocol),
             any::<u16>().prop_map(Op::TotalLen),
             any::<[u8; 4]>().prop_map(Op::Src),
             any::<[u8; 4]>().prop_map(Op::Dst),
-        ];
-        vec(op, 0..=16)
+        ]
     }
 
-    /// Runs the mutations on a packet with a valid checksum.
+    /// Random steps of header changes.
+    fn steps() -> impl Strategy<Value = Vec<Step>> {
+        let step = prop_oneof![
+            4 => vec(op(), 0..=8).prop_map(Step::Mutation),
+            1 => Just(Step::DecrementTtl),
+        ];
+        vec(step, 0..=6)
+    }
+
+    /// Applies the change through the mutation and to the model of the
+    /// fields; the total length stays within the room the payload leaves.
+    fn apply<'a, M>(mutation: Ipv4Mutation<'a, M>, op: &Op, model: &mut Fields, room: usize) -> Ipv4Mutation<'a, M>
+    where
+        M: Mode,
+    {
+        match *op {
+            Op::Dscp(dscp) => {
+                model.dscp = dscp & 0x3f;
+                mutation.set_dscp(dscp)
+            }
+            Op::Ecn(ecn) => {
+                model.ecn = ecn & 3;
+                mutation.set_ecn(ecn)
+            }
+            Op::Id(id) => {
+                model.id = id;
+                mutation.set_id(id)
+            }
+            Op::Frag(frag) => {
+                model.frag = frag;
+                mutation.set_frag(frag)
+            }
+            Op::Ttl(ttl) => {
+                model.ttl = ttl;
+                mutation.set_ttl(ttl)
+            }
+            Op::Protocol(protocol) => {
+                model.protocol = protocol;
+                mutation.set_protocol(protocol)
+            }
+            Op::TotalLen(total_len) => {
+                let total_len = (model.header_len() + usize::from(total_len) % room) as u16;
+                model.total_len = total_len;
+                mutation.set_total_len(total_len)
+            }
+            Op::Src(src) => {
+                model.src = src;
+                mutation.set_src(Ipv4Addr::from(src))
+            }
+            Op::Dst(dst) => {
+                model.dst = dst;
+                mutation.set_dst(Ipv4Addr::from(dst))
+            }
+        }
+    }
+
+    /// Runs the steps on a packet with a valid checksum.
     ///
     /// Returns the buffer and the model of the fields after the same
-    /// mutations, with the checksum as stored.
-    fn run(start: &Fields, payload: &[u8], ops: &[Op]) -> (Vec<u8>, Fields) {
+    /// changes, with the checksum as stored.
+    fn run(start: &Fields, payload: &[u8], steps: &[Step]) -> (Vec<u8>, Fields) {
         let mut buf = start.to_bytes(payload);
         Ipv4PacketMut::parse(&mut buf).unwrap().recompute_checksum();
         let mut model = Ipv4Packet::parse(&buf).map(|packet| Fields::read(&packet)).unwrap();
-        for op in ops {
+        for step in steps {
             let header = Ipv4PacketMut::parse(&mut buf).unwrap().header;
-            match *op {
-                Op::Dscp(dscp) => {
-                    header.set_dscp(dscp);
-                    model.dscp = dscp & 0x3f;
+            match step {
+                Step::Mutation(ops) => {
+                    let mutation = ops.iter().fold(header.mutate(), |mutation, op| {
+                        apply(mutation, op, &mut model, payload.len() + 1)
+                    });
+                    mutation.finish();
                 }
-                Op::Ecn(ecn) => {
-                    header.set_ecn(ecn);
-                    model.ecn = ecn & 3;
-                }
-                Op::Id(id) => {
-                    header.set_id(id);
-                    model.id = id;
-                }
-                Op::Ttl(ttl) => {
-                    header.set_ttl(ttl);
-                    model.ttl = ttl;
-                }
-                Op::DecrementTtl => {
+                Step::DecrementTtl => {
                     let expected = (model.ttl > 1).then(|| model.ttl - 1);
                     assert_eq!(expected, header.decrement_ttl());
                     model.ttl = expected.unwrap_or(model.ttl);
-                }
-                Op::Protocol(protocol) => {
-                    header.set_protocol(protocol);
-                    model.protocol = protocol;
-                }
-                Op::TotalLen(total_len) => {
-                    let room = payload.len() + 1;
-                    let total_len = (start.header_len() + usize::from(total_len) % room) as u16;
-                    header.set_total_len(total_len);
-                    model.total_len = total_len;
-                }
-                Op::Src(src) => {
-                    assert_eq!(Ipv4Addr::from(model.src), header.set_src(Ipv4Addr::from(src)));
-                    model.src = src;
-                }
-                Op::Dst(dst) => {
-                    assert_eq!(Ipv4Addr::from(model.dst), header.set_dst(Ipv4Addr::from(dst)));
-                    model.dst = dst;
                 }
             }
             model.checksum = header.checksum();
@@ -809,8 +1033,8 @@ mod tests {
         }
 
         #[test]
-        fn test_ipv4_setters_change_only_their_field((start, payload) in packet_fields(), ops in ops()) {
-            let (buf, model) = run(&start, &payload, &ops);
+        fn test_ipv4_mutation_changes_only_its_fields((start, payload) in packet_fields(), steps in steps()) {
+            let (buf, model) = run(&start, &payload, &steps);
             let packet = Ipv4Packet::parse(&buf).unwrap();
             prop_assert_eq!(&model, &Fields::read(&packet));
             let payload_len = usize::from(model.total_len) - start.header_len();
@@ -818,13 +1042,84 @@ mod tests {
         }
 
         #[test]
-        fn test_ipv4_incremental_checksum_equals_recompute((start, payload) in packet_fields(), ops in ops()) {
-            let (mut buf, _) = run(&start, &payload, &ops);
+        fn test_ipv4_mutation_checksum_equals_recompute((start, payload) in packet_fields(), steps in steps()) {
+            let (mut buf, _) = run(&start, &payload, &steps);
             let mut packet = Ipv4PacketMut::parse(&mut buf).unwrap();
             prop_assert!(packet.checksum_is_valid());
             let incremental = packet.header.checksum();
             packet.recompute_checksum();
             prop_assert!(testing::same_checksum(incremental, packet.header.checksum()));
+        }
+
+        #[test]
+        fn test_ipv4_unadjusted_mutation_stores_fields_alone(
+            (start, payload) in packet_fields(),
+            ops in vec(op(), 0..=16),
+        ) {
+            let mut buf = start.to_bytes(&payload);
+            let mut model = start.clone();
+            let header = Ipv4PacketMut::parse(&mut buf).unwrap().header;
+            let mutation = ops
+                .iter()
+                .fold(header.mutate_unadjusted(), |mutation, op| apply(mutation, op, &mut model, payload.len() + 1));
+            mutation.finish_unadjusted();
+            let payload_len = usize::from(model.total_len) - start.header_len();
+            let packet = Ipv4Packet::parse(&buf).unwrap();
+            prop_assert_eq!(&model, &Fields::read(&packet));
+            prop_assert_eq!(&payload[..payload_len], packet.payload);
+        }
+
+        #[test]
+        fn test_ipv4_init_writes_empty_header_over_junk(junk in any::<[u8; 20]>()) {
+            let mut buf = junk;
+            Ipv4Header::init(&mut buf).unwrap().finish_unadjusted();
+            let mut expected = [0; 20];
+            expected[0] = 0x45;
+            prop_assert_eq!(expected, buf);
+        }
+
+        #[test]
+        fn test_ipv4_init_and_setters_read_back_fields(fields in fields(), junk in any::<[u8; 20]>()) {
+            let mut buf = junk;
+            Ipv4Header::init(&mut buf)
+                .unwrap()
+                .set_dscp(fields.dscp)
+                .set_ecn(fields.ecn)
+                .set_total_len(fields.total_len)
+                .set_id(fields.id)
+                .set_frag(fields.frag)
+                .set_ttl(fields.ttl)
+                .set_protocol(fields.protocol)
+                .set_src(Ipv4Addr::from(fields.src))
+                .set_dst(Ipv4Addr::from(fields.dst))
+                .finish_unadjusted();
+            let (header, _) = Ipv4Header::from_prefix(&buf).unwrap();
+            prop_assert_eq!((4, 5), (header.version(), header.ihl()));
+            let read = Fields {
+                dscp: header.dscp(),
+                ecn: header.ecn(),
+                total_len: header.total_len(),
+                id: header.id(),
+                frag: header.frag(),
+                ttl: header.ttl(),
+                protocol: header.protocol(),
+                checksum: header.checksum(),
+                src: header.src().octets(),
+                dst: header.dst().octets(),
+                options: Vec::new(),
+            };
+            prop_assert_eq!(Fields { checksum: 0, options: Vec::new(), ..fields }, read);
+        }
+
+        #[test]
+        fn test_ipv4_fill_checksum_validates_header_without_options(
+            (start, payload) in packet_fields(),
+        ) {
+            let start = Fields { options: Vec::new(), ..start };
+            let total_len = (start.header_len() + payload.len()) as u16;
+            let mut buf = Fields { total_len, ..start }.to_bytes(&payload);
+            Ipv4PacketMut::parse(&mut buf).unwrap().header.fill_checksum();
+            prop_assert!(Ipv4Packet::parse(&buf).unwrap().checksum_is_valid());
         }
     }
 }

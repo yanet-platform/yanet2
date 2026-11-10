@@ -5,15 +5,20 @@ use zerocopy::{
     byteorder::network_endian::{U16, U32},
 };
 
-use crate::{ParseError, checksum, split_header, split_header_mut};
+use crate::{
+    Adjusted, IPPROTO_TCP, Mode, ParseError, Unadjusted, checksum,
+    mutation::{self, Sealed},
+    split_header, split_header_mut,
+};
 
 /// The bits of the data offset and flags word that hold the nine flags.
 const FLAG_BITS: u16 = 0x01ff;
 
 /// TCP fixed header (20 bytes, options excluded).
 ///
-/// Setters keep the checksum consistent incrementally; the checksum is never
-/// stored as zero by an update.
+/// The fields change through a mutation, which keeps the checksum valid and
+/// never stores it as zero, or stores the fields alone for a checksum filled
+/// over the pseudo header and the segment after it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, FromBytes, IntoBytes, KnownLayout, Immutable, Unaligned)]
 #[repr(C)]
 pub struct TcpHeader {
@@ -21,7 +26,9 @@ pub struct TcpHeader {
     dst_port: U16,
     seq: U32,
     ack: U32,
-    offset_flags: U16,
+    /// The data offset, three reserved bits and the nonce flag.
+    offset: u8,
+    flags: u8,
     window: U16,
     checksum: U16,
     urgent: U16,
@@ -67,7 +74,7 @@ impl TcpHeader {
 
     /// Header length in 32-bit words.
     pub fn data_offset(&self) -> u8 {
-        (self.offset_flags.get() >> 12) as u8
+        self.offset >> 4
     }
 
     /// Header length in bytes, options included.
@@ -77,7 +84,12 @@ impl TcpHeader {
 
     /// Flag bits, including the nonce bit.
     pub fn flags(&self) -> u16 {
-        self.offset_flags.get() & FLAG_BITS
+        self.offset_flags() & FLAG_BITS
+    }
+
+    /// The data offset and flags word, in host byte order.
+    fn offset_flags(&self) -> u16 {
+        u16::from_be_bytes([self.offset, self.flags])
     }
 
     /// Receive window, before any window scaling.
@@ -96,75 +108,200 @@ impl TcpHeader {
         self.urgent.get()
     }
 
-    /// Sets the source port and updates the checksum.
-    pub fn set_src_port(&mut self, port: u16) {
-        let old = self.src_port.get();
-        self.src_port.set(port);
-        self.update_word(old, port);
+    /// Writes a header without options at the start of the buffer and
+    /// starts an unadjusted mutation of it: the data offset five words, every
+    /// other field zero.
+    ///
+    /// The bytes the header covers are not read, so it may land on a copy of
+    /// another packet's headers or on a fresh buffer alike. Its checksum is
+    /// filled once the segment is in place.
+    ///
+    /// # Errors
+    ///
+    /// [`ParseError::Truncated`] when the buffer is shorter than the header.
+    #[inline]
+    pub fn init(buf: &mut [u8]) -> Result<TcpMutation<'_, Unadjusted>, ParseError> {
+        let (header, _) = split_header_mut::<Self>(buf)?;
+        *header = Self {
+            src_port: U16::ZERO,
+            dst_port: U16::ZERO,
+            seq: U32::ZERO,
+            ack: U32::ZERO,
+            offset: ((Self::MIN_LEN / 4) as u8) << 4,
+            flags: 0,
+            window: U16::ZERO,
+            checksum: U16::ZERO,
+            urgent: U16::ZERO,
+        };
+        Ok(header.mutate_unadjusted())
     }
 
-    /// Sets the destination port and updates the checksum.
-    pub fn set_dst_port(&mut self, port: u16) {
-        let old = self.dst_port.get();
-        self.dst_port.set(port);
-        self.update_word(old, port);
+    /// Starts a mutation that keeps the checksum valid.
+    #[inline]
+    pub fn mutate(&mut self) -> TcpMutation<'_> {
+        TcpMutation {
+            header: self,
+            mode: mutation::adjusted(),
+        }
     }
 
-    /// Sets the sequence number and updates the checksum.
-    pub fn set_seq(&mut self, seq: u32) {
-        let old = self.seq.get();
-        self.seq.set(seq);
-        self.update_bytes(&old.to_be_bytes(), &seq.to_be_bytes());
+    /// Starts a mutation that stores the fields alone, for a checksum filled
+    /// anew after it.
+    #[inline]
+    pub fn mutate_unadjusted(&mut self) -> TcpMutation<'_, Unadjusted> {
+        TcpMutation { header: self, mode: Unadjusted }
     }
 
-    /// Sets the acknowledgment number and updates the checksum.
-    pub fn set_ack(&mut self, ack: u32) {
-        let old = self.ack.get();
-        self.ack.set(ack);
-        self.update_bytes(&old.to_be_bytes(), &ack.to_be_bytes());
+    /// Fills the checksum of the segment the bytes hold, its header, options
+    /// and payload, over the IPv4 pseudo header.
+    ///
+    /// # Errors
+    ///
+    /// [`ParseError::Truncated`] when the bytes are shorter than the fixed
+    /// header.
+    #[inline]
+    pub fn fill_checksum_ipv4(segment: &mut [u8], src: Ipv4Addr, dst: Ipv4Addr) -> Result<(), ParseError> {
+        split_header_mut::<Self>(segment)?.0.checksum = U16::ZERO;
+        let sum = checksum::l4_checksum_ipv4(src, dst, IPPROTO_TCP, segment);
+        split_header_mut::<Self>(segment)?.0.checksum.set(sum);
+        Ok(())
     }
 
-    /// Sets the flags and updates the checksum; the data offset is kept and
-    /// the bits above the nine flags are dropped.
-    pub fn set_flags(&mut self, flags: u16) {
-        let old = self.offset_flags.get();
-        let new = (old & !FLAG_BITS) | (flags & FLAG_BITS);
-        self.offset_flags.set(new);
-        self.update_word(old, new);
+    /// Fills the checksum of the segment the bytes hold over the IPv6 pseudo
+    /// header, as [`TcpHeader::fill_checksum_ipv4`] does over IPv4.
+    ///
+    /// # Errors
+    ///
+    /// The same as [`TcpHeader::fill_checksum_ipv4`].
+    #[inline]
+    pub fn fill_checksum_ipv6(segment: &mut [u8], src: Ipv6Addr, dst: Ipv6Addr) -> Result<(), ParseError> {
+        split_header_mut::<Self>(segment)?.0.checksum = U16::ZERO;
+        let sum = checksum::l4_checksum_ipv6(src, dst, IPPROTO_TCP, segment);
+        split_header_mut::<Self>(segment)?.0.checksum.set(sum);
+        Ok(())
+    }
+}
+
+/// A change of TCP header fields, in the mode chosen when it starts.
+///
+/// An adjusting mutation keeps the checksum valid and ends with
+/// [`TcpMutation::finish`], which adjusts the checksum once for every change;
+/// an unadjusted one stores the fields alone and ends with
+/// [`TcpMutation::finish_unadjusted`], its checksum then filled over the
+/// pseudo header and the segment. Each setter takes the mutation and returns
+/// it, so the changes chain; a chain left without its finish is an unused
+/// value the compiler warns about, though an early return between the start
+/// and the finish goes unseen.
+#[must_use = "a mutation ends with finish or finish_unadjusted"]
+#[derive(Debug)]
+pub struct TcpMutation<'a, M = Adjusted> {
+    header: &'a mut TcpHeader,
+    mode: M,
+}
+
+impl<M> TcpMutation<'_, M>
+where
+    M: Mode,
+{
+    /// Sets the source port.
+    #[inline]
+    pub fn set_src_port(mut self, port: u16) -> Self {
+        let old = mutation::word16(self.header.src_port);
+        self.header.src_port.set(port);
+        self.mode.add16(old, port.to_be());
+        self
     }
 
-    /// Sets the window and updates the checksum.
-    pub fn set_window(&mut self, window: u16) {
-        let old = self.window.get();
-        self.window.set(window);
-        self.update_word(old, window);
+    /// Sets the destination port.
+    #[inline]
+    pub fn set_dst_port(mut self, port: u16) -> Self {
+        let old = mutation::word16(self.header.dst_port);
+        self.header.dst_port.set(port);
+        self.mode.add16(old, port.to_be());
+        self
     }
 
-    /// Sets the urgent pointer and updates the checksum.
-    pub fn set_urgent(&mut self, urgent: u16) {
-        let old = self.urgent.get();
-        self.urgent.set(urgent);
-        self.update_word(old, urgent);
+    /// Sets the sequence number.
+    #[inline]
+    pub fn set_seq(mut self, seq: u32) -> Self {
+        let old = mutation::word32(self.header.seq);
+        self.header.seq.set(seq);
+        self.mode.add32(old, seq.to_be());
+        self
     }
 
-    /// Fixes the checksum after the IPv4 source or destination changed.
-    pub fn replace_ipv4_addr(&mut self, old: Ipv4Addr, new: Ipv4Addr) {
-        self.update_bytes(&old.octets(), &new.octets());
+    /// Sets the acknowledgment number.
+    #[inline]
+    pub fn set_ack(mut self, ack: u32) -> Self {
+        let old = mutation::word32(self.header.ack);
+        self.header.ack.set(ack);
+        self.mode.add32(old, ack.to_be());
+        self
     }
 
-    /// Fixes the checksum after the IPv6 source or destination changed.
-    pub fn replace_ipv6_addr(&mut self, old: Ipv6Addr, new: Ipv6Addr) {
-        self.update_bytes(&old.octets(), &new.octets());
+    /// Sets the flags; the data offset is kept and the bits above the nine
+    /// flags are dropped.
+    #[inline]
+    pub fn set_flags(mut self, flags: u16) -> Self {
+        let old = self.header.offset_flags();
+        let word = (old & !FLAG_BITS) | (flags & FLAG_BITS);
+        self.header.offset = (word >> 8) as u8;
+        self.header.flags = word as u8;
+        self.mode.add16(old.to_be(), word.to_be());
+        self
     }
 
-    fn update_word(&mut self, old: u16, new: u16) {
-        self.checksum
-            .set(checksum::update_no_zero(self.checksum.get(), old, new));
+    /// Sets the window.
+    #[inline]
+    pub fn set_window(mut self, window: u16) -> Self {
+        let old = mutation::word16(self.header.window);
+        self.header.window.set(window);
+        self.mode.add16(old, window.to_be());
+        self
     }
 
-    fn update_bytes(&mut self, old: &[u8], new: &[u8]) {
-        self.checksum
-            .set(checksum::update_bytes_no_zero(self.checksum.get(), old, new));
+    /// Sets the urgent pointer.
+    #[inline]
+    pub fn set_urgent(mut self, urgent: u16) -> Self {
+        let old = mutation::word16(self.header.urgent);
+        self.header.urgent.set(urgent);
+        self.mode.add16(old, urgent.to_be());
+        self
+    }
+}
+
+impl<'a> TcpMutation<'a> {
+    /// Accounts a change of the IPv4 source or destination, which the
+    /// pseudo header carries.
+    #[inline]
+    pub fn replace_ipv4_addr(mut self, old: Ipv4Addr, new: Ipv4Addr) -> Self {
+        self.mode.add_octets(old.octets(), new.octets());
+        self
+    }
+
+    /// Accounts a change of the IPv6 source or destination, which the
+    /// pseudo header carries.
+    #[inline]
+    pub fn replace_ipv6_addr(mut self, old: Ipv6Addr, new: Ipv6Addr) -> Self {
+        self.mode.add_octets(old.octets(), new.octets());
+        self
+    }
+
+    /// Ends the mutation: adjusts the checksum once for every change, never
+    /// storing it as zero.
+    #[inline]
+    pub fn finish(self) -> &'a mut TcpHeader {
+        let Self { header, mode } = self;
+        header.checksum = mutation::adjust_no_zero(header.checksum, mode);
+        header
+    }
+}
+
+impl<'a> TcpMutation<'a, Unadjusted> {
+    /// Ends the mutation and leaves the checksum to be filled.
+    #[inline]
+    pub fn finish_unadjusted(self) -> &'a mut TcpHeader {
+        self.header
     }
 }
 
@@ -244,10 +381,7 @@ mod tests {
     use proptest::{collection::vec, prelude::*};
 
     use super::*;
-    use crate::{
-        IPPROTO_TCP,
-        testing::{self, Family, L4Op},
-    };
+    use crate::testing::{self, Family, L4Op};
 
     /// Builds a segment with the given number of option words and a valid
     /// checksum for the given IPv4 addresses; returns the buffer and the
@@ -344,6 +478,38 @@ mod tests {
         assert_eq!(expected, TcpPacket::parse(&buf[..19]).unwrap_err());
     }
 
+    #[test]
+    fn test_tcp_init_refuses_short_buffer() {
+        let mut buf = [0u8; 20];
+        for len in 0..TcpHeader::MIN_LEN {
+            let expected = ParseError::Truncated { needed: 20, available: len };
+            assert_eq!(expected, TcpHeader::init(&mut buf[..len]).unwrap_err(), "len {len}");
+        }
+    }
+
+    #[test]
+    fn test_tcp_fill_checksum_refuses_short_segment() {
+        let mut buf = [0u8; 20];
+        let (src, dst) = (Ipv4Addr::new(10, 0, 0, 1), Ipv4Addr::new(10, 0, 0, 2));
+        for len in 0..TcpHeader::MIN_LEN {
+            let expected = ParseError::Truncated { needed: 20, available: len };
+            let error = TcpHeader::fill_checksum_ipv4(&mut buf[..len], src, dst).unwrap_err();
+            assert_eq!(expected, error, "len {len}");
+        }
+    }
+
+    #[test]
+    fn test_tcp_mutation_never_yields_zero_checksum() {
+        let mut header = TcpHeader::read_from_bytes(&[0; 20]).unwrap();
+        // Inner sum all-ones would store zero; it must be stored as all-ones.
+        header.checksum.set(0x0001);
+        let header = header
+            .mutate()
+            .replace_ipv4_addr(Ipv4Addr::new(0, 0, 0, 0), Ipv4Addr::new(0, 0, 0, 1))
+            .finish();
+        assert_eq!(0xffff, header.checksum());
+    }
+
     /// TCP header fields as built and read back; the data offset follows the
     /// options.
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -437,7 +603,7 @@ mod tests {
         Ok(vec![header.as_bytes(), &*options, &*payload])
     }
 
-    /// A mutation of a TCP header: one of those the L4 headers share, or a
+    /// A change of a TCP header: one of those the L4 headers share, or a
     /// change of a field only TCP carries.
     #[derive(Debug, Clone)]
     enum TcpOp {
@@ -449,49 +615,67 @@ mod tests {
         Urgent(u16),
     }
 
-    /// Random sequences of TCP header mutations, the shared ones as likely as
-    /// the TCP ones together.
-    fn tcp_ops() -> impl Strategy<Value = Vec<TcpOp>> {
-        let op = prop_oneof![
+    /// Random mutations of a TCP header, the shared changes as likely as the
+    /// TCP ones together.
+    fn tcp_mutations() -> impl Strategy<Value = Vec<Vec<TcpOp>>> {
+        testing::mutations(prop_oneof![
             5 => testing::l4_op().prop_map(TcpOp::L4),
             1 => any::<u32>().prop_map(TcpOp::Seq),
             1 => any::<u32>().prop_map(TcpOp::Ack),
             1 => any::<u16>().prop_map(TcpOp::Flags),
             1 => any::<u16>().prop_map(TcpOp::Window),
             1 => any::<u16>().prop_map(TcpOp::Urgent),
-        ];
-        vec(op, 0..=16)
+        ])
     }
 
-    /// Applies the mutation through the header's setters and tracks the
-    /// pseudo-header source and destination.
-    fn apply(header: &mut TcpHeader, family: Family, op: &TcpOp, addrs: &mut ([u8; 16], [u8; 16])) {
+    /// Applies the change through the mutation and tracks the pseudo-header
+    /// source and destination.
+    fn apply<'a>(
+        mutation: TcpMutation<'a>,
+        family: Family,
+        op: &TcpOp,
+        addrs: &mut ([u8; 16], [u8; 16]),
+    ) -> TcpMutation<'a> {
         match *op {
-            TcpOp::L4(ref op) => testing::apply(header, family, op, addrs),
-            TcpOp::Seq(seq) => header.set_seq(seq),
-            TcpOp::Ack(ack) => header.set_ack(ack),
-            TcpOp::Flags(flags) => header.set_flags(flags),
-            TcpOp::Window(window) => header.set_window(window),
-            TcpOp::Urgent(urgent) => header.set_urgent(urgent),
+            TcpOp::L4(ref op) => testing::apply(mutation, family, op, addrs),
+            TcpOp::Seq(seq) => mutation.set_seq(seq),
+            TcpOp::Ack(ack) => mutation.set_ack(ack),
+            TcpOp::Flags(flags) => mutation.set_flags(flags),
+            TcpOp::Window(window) => mutation.set_window(window),
+            TcpOp::Urgent(urgent) => mutation.set_urgent(urgent),
         }
     }
 
-    impl testing::L4Header for TcpHeader {
-        fn set_src_port(&mut self, port: u16) {
-            TcpHeader::set_src_port(self, port);
+    impl testing::L4Mutation for TcpMutation<'_> {
+        fn set_src_port(self, port: u16) -> Self {
+            TcpMutation::set_src_port(self, port)
         }
 
-        fn set_dst_port(&mut self, port: u16) {
-            TcpHeader::set_dst_port(self, port);
+        fn set_dst_port(self, port: u16) -> Self {
+            TcpMutation::set_dst_port(self, port)
         }
 
-        fn replace_ipv4_addr(&mut self, old: Ipv4Addr, new: Ipv4Addr) {
-            TcpHeader::replace_ipv4_addr(self, old, new);
+        fn replace_ipv4_addr(self, old: Ipv4Addr, new: Ipv4Addr) -> Self {
+            TcpMutation::replace_ipv4_addr(self, old, new)
         }
 
-        fn replace_ipv6_addr(&mut self, old: Ipv6Addr, new: Ipv6Addr) {
-            TcpHeader::replace_ipv6_addr(self, old, new);
+        fn replace_ipv6_addr(self, old: Ipv6Addr, new: Ipv6Addr) -> Self {
+            TcpMutation::replace_ipv6_addr(self, old, new)
         }
+    }
+
+    /// Fills the segment's checksum over the family's pseudo header of the
+    /// addresses.
+    fn fill(segment: &mut [u8], family: Family, (src, dst): ([u8; 16], [u8; 16])) -> Result<(), ParseError> {
+        match family {
+            Family::V4 => TcpHeader::fill_checksum_ipv4(segment, Family::v4(src), Family::v4(dst)),
+            Family::V6 => TcpHeader::fill_checksum_ipv6(segment, Ipv6Addr::from(src), Ipv6Addr::from(dst)),
+        }
+    }
+
+    /// The fields of a header without options.
+    fn bare(fields: Fields) -> Fields {
+        Fields { options: Vec::new(), ..fields }
     }
 
     /// Asserts that the error carries the values the input bytes hold.
@@ -555,30 +739,32 @@ mod tests {
         }
 
         #[test]
-        fn test_tcp_setters_change_only_their_field(
+        fn test_tcp_mutation_changes_only_its_fields(
             start in fields(),
             payload in vec(any::<u8>(), 0..=32),
             family in testing::family(),
             addrs in any::<([u8; 16], [u8; 16])>(),
-            ops in tcp_ops(),
+            mutations in tcp_mutations(),
         ) {
             let mut buf = start.to_bytes(&payload);
             let mut model = start.clone();
             let mut addrs = addrs;
-            for op in &ops {
-                let packet = TcpPacketMut::parse(&mut buf).unwrap();
-                apply(packet.header, family, op, &mut addrs);
-                match *op {
-                    TcpOp::L4(L4Op::SrcPort(port)) => model.src_port = port,
-                    TcpOp::L4(L4Op::DstPort(port)) => model.dst_port = port,
-                    TcpOp::L4(L4Op::Src(_) | L4Op::Dst(_)) => {}
-                    TcpOp::Seq(seq) => model.seq = seq,
-                    TcpOp::Ack(ack) => model.ack = ack,
-                    TcpOp::Flags(flags) => model.flags = flags & 0x01ff,
-                    TcpOp::Window(window) => model.window = window,
-                    TcpOp::Urgent(urgent) => model.urgent = urgent,
+            for ops in &mutations {
+                let mut mutation = TcpPacketMut::parse(&mut buf).unwrap().header.mutate();
+                for op in ops {
+                    mutation = apply(mutation, family, op, &mut addrs);
+                    match *op {
+                        TcpOp::L4(L4Op::SrcPort(port)) => model.src_port = port,
+                        TcpOp::L4(L4Op::DstPort(port)) => model.dst_port = port,
+                        TcpOp::L4(L4Op::Src(_) | L4Op::Dst(_)) => {}
+                        TcpOp::Seq(seq) => model.seq = seq,
+                        TcpOp::Ack(ack) => model.ack = ack,
+                        TcpOp::Flags(flags) => model.flags = flags & 0x01ff,
+                        TcpOp::Window(window) => model.window = window,
+                        TcpOp::Urgent(urgent) => model.urgent = urgent,
+                    }
                 }
-                model.checksum = packet.header.checksum();
+                model.checksum = mutation.finish().checksum();
             }
             let packet = TcpPacket::parse(&buf).unwrap();
             prop_assert_eq!(&model, &Fields::read(&packet));
@@ -586,23 +772,98 @@ mod tests {
         }
 
         #[test]
-        fn test_tcp_incremental_checksum_verifies_over_pseudo_header(
+        fn test_tcp_mutation_checksum_verifies_over_pseudo_header(
             start in fields(),
             payload in vec(any::<u8>(), 0..=32),
             family in testing::family(),
             addrs in any::<([u8; 16], [u8; 16])>(),
-            ops in tcp_ops(),
+            mutations in tcp_mutations(),
         ) {
             let start = Fields { checksum: 0, ..start };
             let mut buf = start.to_bytes(&payload);
             let sum = family.l4_checksum(addrs.0, addrs.1, IPPROTO_TCP, &buf);
             buf[16..18].copy_from_slice(&sum.to_be_bytes());
             let mut addrs = addrs;
-            for op in &ops {
-                let packet = TcpPacketMut::parse(&mut buf).unwrap();
-                apply(packet.header, family, op, &mut addrs);
-                prop_assert_ne!(0, packet.header.checksum());
+            for ops in &mutations {
+                let header = TcpPacketMut::parse(&mut buf).unwrap().header;
+                let mutation = ops
+                    .iter()
+                    .fold(header.mutate(), |mutation, op| apply(mutation, family, op, &mut addrs));
+                prop_assert_ne!(0, mutation.finish().checksum());
             }
+            prop_assert!(family.l4_is_valid(addrs.0, addrs.1, IPPROTO_TCP, &buf));
+        }
+
+        #[test]
+        fn test_tcp_unadjusted_mutation_stores_fields_alone(
+            start in fields(),
+            new in fields(),
+            payload in vec(any::<u8>(), 0..=32),
+        ) {
+            let mut buf = start.to_bytes(&payload);
+            TcpPacketMut::parse(&mut buf)
+                .unwrap()
+                .header
+                .mutate_unadjusted()
+                .set_src_port(new.src_port)
+                .set_dst_port(new.dst_port)
+                .set_seq(new.seq)
+                .set_ack(new.ack)
+                .set_flags(new.flags)
+                .set_window(new.window)
+                .set_urgent(new.urgent)
+                .finish_unadjusted();
+            let packet = TcpPacket::parse(&buf).unwrap();
+            let expected = Fields { checksum: start.checksum, options: start.options.clone(), ..new };
+            prop_assert_eq!(expected, Fields::read(&packet));
+            prop_assert_eq!(&payload[..], packet.payload);
+        }
+
+        #[test]
+        fn test_tcp_init_writes_empty_header_over_junk(junk in any::<[u8; 20]>()) {
+            let mut buf = junk;
+            TcpHeader::init(&mut buf).unwrap().finish_unadjusted();
+            let packet = TcpPacket::parse(&buf).unwrap();
+            let empty = Fields {
+                src_port: 0,
+                dst_port: 0,
+                seq: 0,
+                ack: 0,
+                flags: 0,
+                window: 0,
+                checksum: 0,
+                urgent: 0,
+                options: Vec::new(),
+            };
+            prop_assert_eq!(empty, Fields::read(&packet));
+        }
+
+        #[test]
+        fn test_tcp_init_and_setters_read_back_fields(fields in fields(), junk in any::<[u8; 20]>()) {
+            let mut buf = junk;
+            TcpHeader::init(&mut buf)
+                .unwrap()
+                .set_src_port(fields.src_port)
+                .set_dst_port(fields.dst_port)
+                .set_seq(fields.seq)
+                .set_ack(fields.ack)
+                .set_flags(fields.flags)
+                .set_window(fields.window)
+                .set_urgent(fields.urgent)
+                .finish_unadjusted();
+            let packet = TcpPacket::parse(&buf).unwrap();
+            prop_assert_eq!(bare(Fields { checksum: 0, ..fields }), Fields::read(&packet));
+        }
+
+        #[test]
+        fn test_tcp_fill_checksum_verifies_over_pseudo_header(
+            start in fields(),
+            payload in vec(any::<u8>(), 0..=32),
+            family in testing::family(),
+            addrs in any::<([u8; 16], [u8; 16])>(),
+        ) {
+            let mut buf = start.to_bytes(&payload);
+            fill(&mut buf, family, addrs).unwrap();
             prop_assert!(family.l4_is_valid(addrs.0, addrs.1, IPPROTO_TCP, &buf));
         }
     }

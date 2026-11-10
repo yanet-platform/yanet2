@@ -140,30 +140,38 @@ pub fn l4_op() -> impl Strategy<Value = L4Op> {
     ]
 }
 
-/// Random sequences of L4 mutations.
-pub fn l4_ops() -> impl Strategy<Value = Vec<L4Op>> {
-    vec(l4_op(), 0..=16)
+/// Random mutations, each a sequence of changes, so that both single
+/// changes and long runs of them adjust a checksum once.
+pub fn mutations<T>(change: impl Strategy<Value = T>) -> impl Strategy<Value = Vec<Vec<T>>>
+where
+    T: core::fmt::Debug,
+{
+    vec(vec(change, 0..=8), 0..=4)
 }
 
-/// The setters TCP and UDP headers share, for the common mutation driver.
-pub trait L4Header {
-    fn set_src_port(&mut self, port: u16);
-    fn set_dst_port(&mut self, port: u16);
-    fn replace_ipv4_addr(&mut self, old: Ipv4Addr, new: Ipv4Addr);
-    fn replace_ipv6_addr(&mut self, old: Ipv6Addr, new: Ipv6Addr);
+/// The changes TCP and UDP mutations share, for the common mutation driver.
+pub trait L4Mutation: Sized {
+    fn set_src_port(self, port: u16) -> Self;
+    fn set_dst_port(self, port: u16) -> Self;
+    fn replace_ipv4_addr(self, old: Ipv4Addr, new: Ipv4Addr) -> Self;
+    fn replace_ipv6_addr(self, old: Ipv6Addr, new: Ipv6Addr) -> Self;
 }
 
-/// Applies the mutation and tracks the pseudo-header source and destination.
-pub fn apply<H: L4Header>(header: &mut H, family: Family, op: &L4Op, addrs: &mut ([u8; 16], [u8; 16])) {
+/// Applies the change through the mutation and tracks the pseudo-header
+/// source and destination.
+pub fn apply<M>(mutation: M, family: Family, op: &L4Op, addrs: &mut ([u8; 16], [u8; 16])) -> M
+where
+    M: L4Mutation,
+{
     let (addr, new) = match *op {
-        L4Op::SrcPort(port) => return header.set_src_port(port),
-        L4Op::DstPort(port) => return header.set_dst_port(port),
+        L4Op::SrcPort(port) => return mutation.set_src_port(port),
+        L4Op::DstPort(port) => return mutation.set_dst_port(port),
         L4Op::Src(new) => (&mut addrs.0, new),
         L4Op::Dst(new) => (&mut addrs.1, new),
     };
+    let old = core::mem::replace(addr, new);
     match family {
-        Family::V4 => header.replace_ipv4_addr(Family::v4(*addr), Family::v4(new)),
-        Family::V6 => header.replace_ipv6_addr(Ipv6Addr::from(*addr), Ipv6Addr::from(new)),
+        Family::V4 => mutation.replace_ipv4_addr(Family::v4(old), Family::v4(new)),
+        Family::V6 => mutation.replace_ipv6_addr(Ipv6Addr::from(old), Ipv6Addr::from(new)),
     }
-    *addr = new;
 }

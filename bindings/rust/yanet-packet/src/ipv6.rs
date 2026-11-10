@@ -26,6 +26,53 @@ pub struct Ipv6Header {
 impl Ipv6Header {
     pub const LEN: usize = 40;
 
+    /// Writes a header at the start of the buffer and returns it: version 6,
+    /// every other field zero.
+    ///
+    /// The bytes the header covers are not read, so it may land on a copy of
+    /// another packet's headers or on a fresh buffer alike.
+    ///
+    /// # Errors
+    ///
+    /// [`ParseError::Truncated`] when the buffer is shorter than the header.
+    #[inline]
+    pub fn init(buf: &mut [u8]) -> Result<&mut Self, ParseError> {
+        let (header, _) = split_header_mut::<Self>(buf)?;
+        *header = Self {
+            version_tc_flow: U32::new(6 << 28),
+            payload_len: U16::ZERO,
+            next_header: 0,
+            hop_limit: 0,
+            src: [0; 16],
+            dst: [0; 16],
+        };
+        Ok(header)
+    }
+
+    /// The header at the start of the input and the bytes after it, its
+    /// fields unchecked.
+    ///
+    /// Reads the header of a packet the input does not hold whole, such as a
+    /// copy of its headers or the first segment of a chained frame.
+    ///
+    /// # Errors
+    ///
+    /// [`ParseError::Truncated`] when the input is shorter than the header.
+    #[inline]
+    pub fn from_prefix(buf: &[u8]) -> Result<(&Self, &[u8]), ParseError> {
+        split_header(buf)
+    }
+
+    /// Same as [`Ipv6Header::from_prefix`] for in-place editing.
+    ///
+    /// # Errors
+    ///
+    /// The same as [`Ipv6Header::from_prefix`].
+    #[inline]
+    pub fn from_prefix_mut(buf: &mut [u8]) -> Result<(&mut Self, &mut [u8]), ParseError> {
+        split_header_mut(buf)
+    }
+
     /// Splits the header and its payload off the front of the input.
     ///
     /// A zero payload length (jumbogram) yields an empty payload.
@@ -242,6 +289,34 @@ mod tests {
         let (h, payload) = Ipv6Header::parse(&buf).unwrap();
         assert_eq!(0, h.payload_len());
         assert!(payload.is_empty());
+    }
+
+    #[test]
+    fn test_ipv6_init_refuses_short_buffer() {
+        let mut buf = [0u8; 40];
+        for len in 0..Ipv6Header::LEN {
+            let expected = ParseError::Truncated { needed: 40, available: len };
+            assert_eq!(expected, Ipv6Header::init(&mut buf[..len]).unwrap_err(), "len {len}");
+        }
+    }
+
+    #[test]
+    fn test_ipv6_from_prefix_reads_header_of_packet_beyond_input() {
+        let buf = packet();
+        let (header, rest) = Ipv6Header::from_prefix(&buf[..40]).unwrap();
+        assert_eq!(6, header.payload_len());
+        assert!(rest.is_empty());
+    }
+
+    #[test]
+    fn test_ipv6_from_prefix_refuses_short_input() {
+        let mut buf = packet();
+        for len in 0..Ipv6Header::LEN {
+            let expected = ParseError::Truncated { needed: 40, available: len };
+            assert_eq!(expected, Ipv6Header::from_prefix(&buf[..len]).unwrap_err(), "len {len}");
+        }
+        let expected = ParseError::Truncated { needed: 40, available: 39 };
+        assert_eq!(expected, Ipv6Header::from_prefix_mut(&mut buf[..39]).unwrap_err());
     }
 
     #[test]
@@ -478,6 +553,24 @@ mod tests {
             prop_assert_eq!(6, header.version());
             prop_assert_eq!(&fields, &Fields::read(header));
             prop_assert_eq!(&payload[..], rest);
+        }
+
+        #[test]
+        fn test_ipv6_init_writes_empty_header_over_junk(junk in any::<[u8; 40]>()) {
+            let mut buf = junk;
+            Ipv6Header::init(&mut buf).unwrap();
+            let (header, _) = Ipv6Header::parse(&buf).unwrap();
+            let empty = Fields {
+                traffic_class: 0,
+                flow_label: 0,
+                next_header: 0,
+                hop_limit: 0,
+                src: [0; 16],
+                dst: [0; 16],
+            };
+            prop_assert_eq!(6, header.version());
+            prop_assert_eq!(0, header.payload_len());
+            prop_assert_eq!(empty, Fields::read(header));
         }
 
         #[test]
