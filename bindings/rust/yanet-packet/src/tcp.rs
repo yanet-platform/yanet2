@@ -136,6 +136,21 @@ impl TcpHeader {
         Ok(header.mutate_unadjusted())
     }
 
+    /// The fixed header at the start of the input and the bytes after it,
+    /// its fields unchecked.
+    ///
+    /// Reads the header of a segment the input does not hold whole, such as
+    /// the first segment of a chained frame or a first fragment.
+    ///
+    /// # Errors
+    ///
+    /// [`ParseError::Truncated`] when the input is shorter than the fixed
+    /// header.
+    #[inline]
+    pub fn from_prefix(buf: &[u8]) -> Result<(&Self, &[u8]), ParseError> {
+        split_header(buf)
+    }
+
     /// Starts a mutation that keeps the checksum valid.
     #[inline]
     pub fn mutate(&mut self) -> TcpMutation<'_> {
@@ -476,6 +491,24 @@ mod tests {
         assert!(TcpPacket::parse(&buf[..20]).is_ok());
         let expected = ParseError::Truncated { needed: 20, available: 19 };
         assert_eq!(expected, TcpPacket::parse(&buf[..19]).unwrap_err());
+    }
+
+    #[test]
+    fn test_tcp_from_prefix_reads_header_of_segment_beyond_input() {
+        let (buf, _) = build([1, 2, 3, 4], [5, 6, 7, 8], 2, &[7, 7, 7]);
+        let (header, rest) = TcpHeader::from_prefix(&buf[..20]).unwrap();
+        assert_eq!(7, header.data_offset());
+        assert_eq!(0x01020304, header.seq());
+        assert!(rest.is_empty());
+    }
+
+    #[test]
+    fn test_tcp_from_prefix_refuses_short_input() {
+        let (buf, _) = build([1, 2, 3, 4], [5, 6, 7, 8], 0, &[]);
+        for len in 0..TcpHeader::MIN_LEN {
+            let expected = ParseError::Truncated { needed: 20, available: len };
+            assert_eq!(expected, TcpHeader::from_prefix(&buf[..len]).unwrap_err(), "len {len}");
+        }
     }
 
     #[test]
