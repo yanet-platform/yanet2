@@ -7,10 +7,13 @@ use zerocopy::{
 
 use crate::{ParseError, checksum, split_header, split_header_mut};
 
+/// The bits of the data offset and flags word that hold the nine flags.
+const FLAG_BITS: u16 = 0x01ff;
+
 /// TCP fixed header (20 bytes, options excluded).
 ///
-/// Port and address setters keep the checksum consistent incrementally; the
-/// checksum is never stored as zero by an update.
+/// Setters keep the checksum consistent incrementally; the checksum is never
+/// stored as zero by an update.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, FromBytes, IntoBytes, KnownLayout, Immutable, Unaligned)]
 #[repr(C)]
 pub struct TcpHeader {
@@ -74,7 +77,7 @@ impl TcpHeader {
 
     /// Flag bits, including the nonce bit.
     pub fn flags(&self) -> u16 {
-        self.offset_flags.get() & 0x01ff
+        self.offset_flags.get() & FLAG_BITS
     }
 
     /// Receive window, before any window scaling.
@@ -107,27 +110,61 @@ impl TcpHeader {
         self.update_word(old, port);
     }
 
+    /// Sets the sequence number and updates the checksum.
+    pub fn set_seq(&mut self, seq: u32) {
+        let old = self.seq.get();
+        self.seq.set(seq);
+        self.update_bytes(&old.to_be_bytes(), &seq.to_be_bytes());
+    }
+
+    /// Sets the acknowledgment number and updates the checksum.
+    pub fn set_ack(&mut self, ack: u32) {
+        let old = self.ack.get();
+        self.ack.set(ack);
+        self.update_bytes(&old.to_be_bytes(), &ack.to_be_bytes());
+    }
+
+    /// Sets the flags and updates the checksum; the data offset is kept and
+    /// the bits above the nine flags are dropped.
+    pub fn set_flags(&mut self, flags: u16) {
+        let old = self.offset_flags.get();
+        let new = (old & !FLAG_BITS) | (flags & FLAG_BITS);
+        self.offset_flags.set(new);
+        self.update_word(old, new);
+    }
+
+    /// Sets the window and updates the checksum.
+    pub fn set_window(&mut self, window: u16) {
+        let old = self.window.get();
+        self.window.set(window);
+        self.update_word(old, window);
+    }
+
+    /// Sets the urgent pointer and updates the checksum.
+    pub fn set_urgent(&mut self, urgent: u16) {
+        let old = self.urgent.get();
+        self.urgent.set(urgent);
+        self.update_word(old, urgent);
+    }
+
     /// Fixes the checksum after the IPv4 source or destination changed.
     pub fn replace_ipv4_addr(&mut self, old: Ipv4Addr, new: Ipv4Addr) {
-        self.checksum.set(checksum::update_bytes_no_zero(
-            self.checksum.get(),
-            &old.octets(),
-            &new.octets(),
-        ));
+        self.update_bytes(&old.octets(), &new.octets());
     }
 
     /// Fixes the checksum after the IPv6 source or destination changed.
     pub fn replace_ipv6_addr(&mut self, old: Ipv6Addr, new: Ipv6Addr) {
-        self.checksum.set(checksum::update_bytes_no_zero(
-            self.checksum.get(),
-            &old.octets(),
-            &new.octets(),
-        ));
+        self.update_bytes(&old.octets(), &new.octets());
     }
 
     fn update_word(&mut self, old: u16, new: u16) {
         self.checksum
             .set(checksum::update_no_zero(self.checksum.get(), old, new));
+    }
+
+    fn update_bytes(&mut self, old: &[u8], new: &[u8]) {
+        self.checksum
+            .set(checksum::update_bytes_no_zero(self.checksum.get(), old, new));
     }
 }
 
@@ -209,7 +246,7 @@ mod tests {
     use super::*;
     use crate::{
         IPPROTO_TCP,
-        testing::{self, L4Op},
+        testing::{self, Family, L4Op},
     };
 
     /// Builds a segment with the given number of option words and a valid
@@ -400,6 +437,45 @@ mod tests {
         Ok(vec![header.as_bytes(), &*options, &*payload])
     }
 
+    /// A mutation of a TCP header: one of those the L4 headers share, or a
+    /// change of a field only TCP carries.
+    #[derive(Debug, Clone)]
+    enum TcpOp {
+        L4(L4Op),
+        Seq(u32),
+        Ack(u32),
+        Flags(u16),
+        Window(u16),
+        Urgent(u16),
+    }
+
+    /// Random sequences of TCP header mutations, the shared ones as likely as
+    /// the TCP ones together.
+    fn tcp_ops() -> impl Strategy<Value = Vec<TcpOp>> {
+        let op = prop_oneof![
+            5 => testing::l4_op().prop_map(TcpOp::L4),
+            1 => any::<u32>().prop_map(TcpOp::Seq),
+            1 => any::<u32>().prop_map(TcpOp::Ack),
+            1 => any::<u16>().prop_map(TcpOp::Flags),
+            1 => any::<u16>().prop_map(TcpOp::Window),
+            1 => any::<u16>().prop_map(TcpOp::Urgent),
+        ];
+        vec(op, 0..=16)
+    }
+
+    /// Applies the mutation through the header's setters and tracks the
+    /// pseudo-header source and destination.
+    fn apply(header: &mut TcpHeader, family: Family, op: &TcpOp, addrs: &mut ([u8; 16], [u8; 16])) {
+        match *op {
+            TcpOp::L4(ref op) => testing::apply(header, family, op, addrs),
+            TcpOp::Seq(seq) => header.set_seq(seq),
+            TcpOp::Ack(ack) => header.set_ack(ack),
+            TcpOp::Flags(flags) => header.set_flags(flags),
+            TcpOp::Window(window) => header.set_window(window),
+            TcpOp::Urgent(urgent) => header.set_urgent(urgent),
+        }
+    }
+
     impl testing::L4Header for TcpHeader {
         fn set_src_port(&mut self, port: u16) {
             TcpHeader::set_src_port(self, port);
@@ -484,18 +560,23 @@ mod tests {
             payload in vec(any::<u8>(), 0..=32),
             family in testing::family(),
             addrs in any::<([u8; 16], [u8; 16])>(),
-            ops in testing::l4_ops(),
+            ops in tcp_ops(),
         ) {
             let mut buf = start.to_bytes(&payload);
             let mut model = start.clone();
             let mut addrs = addrs;
             for op in &ops {
                 let packet = TcpPacketMut::parse(&mut buf).unwrap();
-                testing::apply(packet.header, family, op, &mut addrs);
+                apply(packet.header, family, op, &mut addrs);
                 match *op {
-                    L4Op::SrcPort(port) => model.src_port = port,
-                    L4Op::DstPort(port) => model.dst_port = port,
-                    L4Op::Src(_) | L4Op::Dst(_) => {}
+                    TcpOp::L4(L4Op::SrcPort(port)) => model.src_port = port,
+                    TcpOp::L4(L4Op::DstPort(port)) => model.dst_port = port,
+                    TcpOp::L4(L4Op::Src(_) | L4Op::Dst(_)) => {}
+                    TcpOp::Seq(seq) => model.seq = seq,
+                    TcpOp::Ack(ack) => model.ack = ack,
+                    TcpOp::Flags(flags) => model.flags = flags & 0x01ff,
+                    TcpOp::Window(window) => model.window = window,
+                    TcpOp::Urgent(urgent) => model.urgent = urgent,
                 }
                 model.checksum = packet.header.checksum();
             }
@@ -510,7 +591,7 @@ mod tests {
             payload in vec(any::<u8>(), 0..=32),
             family in testing::family(),
             addrs in any::<([u8; 16], [u8; 16])>(),
-            ops in testing::l4_ops(),
+            ops in tcp_ops(),
         ) {
             let start = Fields { checksum: 0, ..start };
             let mut buf = start.to_bytes(&payload);
@@ -519,7 +600,7 @@ mod tests {
             let mut addrs = addrs;
             for op in &ops {
                 let packet = TcpPacketMut::parse(&mut buf).unwrap();
-                testing::apply(packet.header, family, op, &mut addrs);
+                apply(packet.header, family, op, &mut addrs);
                 prop_assert_ne!(0, packet.header.checksum());
             }
             prop_assert!(family.l4_is_valid(addrs.0, addrs.1, IPPROTO_TCP, &buf));

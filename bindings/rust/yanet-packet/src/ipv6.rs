@@ -119,6 +119,29 @@ impl Ipv6Header {
         self.version_tc_flow.set(word | (u32::from(traffic_class) << 20));
     }
 
+    /// Sets the flow label; the version and the traffic class are kept, and
+    /// the bits above twenty are dropped.
+    pub fn set_flow_label(&mut self, flow_label: u32) {
+        let word = self.version_tc_flow.get() & !0x000f_ffff;
+        self.version_tc_flow.set(word | (flow_label & 0x000f_ffff));
+    }
+
+    /// Sets the payload length.
+    ///
+    /// The L4 pseudo-header checksum covers the upper-layer length too and is
+    /// left as it was.
+    pub fn set_payload_len(&mut self, payload_len: u16) {
+        self.payload_len.set(payload_len);
+    }
+
+    /// Sets the next header.
+    ///
+    /// The L4 pseudo-header checksum covers the upper-layer protocol too and
+    /// is left as it was.
+    pub fn set_next_header(&mut self, next_header: u8) {
+        self.next_header = next_header;
+    }
+
     /// Sets the hop limit; the IPv6 header carries no checksum to update.
     pub fn set_hop_limit(&mut self, hop_limit: u8) {
         self.hop_limit = hop_limit;
@@ -266,6 +289,28 @@ mod tests {
     }
 
     #[test]
+    fn test_ipv6_set_flow_label_keeps_traffic_class() {
+        let mut buf = packet();
+        let (h, _) = Ipv6Header::parse_mut(&mut buf).unwrap();
+        h.set_flow_label(0xfff1_2345);
+        assert_eq!(0x12345, h.flow_label());
+        assert_eq!(0xb8, h.traffic_class());
+        assert_eq!(6, h.version());
+    }
+
+    #[test]
+    fn test_ipv6_set_payload_len_changes_only_the_length() {
+        let mut buf = packet();
+        let (h, _) = Ipv6Header::parse_mut(&mut buf).unwrap();
+        h.set_payload_len(4);
+        let (h, payload) = Ipv6Header::parse(&buf).unwrap();
+        assert_eq!(4, h.payload_len());
+        assert_eq!([1, 2, 3, 4], payload);
+        assert_eq!(packet()[..4], buf[..4]);
+        assert_eq!(packet()[6..], buf[6..]);
+    }
+
+    #[test]
     fn test_ipv6_set_addresses_returns_previous() {
         let mut buf = packet();
         let (h, _) = Ipv6Header::parse_mut(&mut buf).unwrap();
@@ -358,6 +403,8 @@ mod tests {
     #[derive(Debug, Clone)]
     enum Op {
         TrafficClass(u8),
+        FlowLabel(u32),
+        NextHeader(u8),
         HopLimit(u8),
         Src([u8; 16]),
         Dst([u8; 16]),
@@ -367,6 +414,8 @@ mod tests {
     fn op() -> impl Strategy<Value = Op> {
         prop_oneof![
             any::<u8>().prop_map(Op::TrafficClass),
+            any::<u32>().prop_map(Op::FlowLabel),
+            any::<u8>().prop_map(Op::NextHeader),
             any::<u8>().prop_map(Op::HopLimit),
             any::<[u8; 16]>().prop_map(Op::Src),
             any::<[u8; 16]>().prop_map(Op::Dst),
@@ -445,6 +494,14 @@ mod tests {
                     Op::TrafficClass(traffic_class) => {
                         header.set_traffic_class(traffic_class);
                         model.traffic_class = traffic_class;
+                    }
+                    Op::FlowLabel(flow_label) => {
+                        header.set_flow_label(flow_label);
+                        model.flow_label = flow_label & 0x000f_ffff;
+                    }
+                    Op::NextHeader(next_header) => {
+                        header.set_next_header(next_header);
+                        model.next_header = next_header;
                     }
                     Op::HopLimit(hop_limit) => {
                         header.set_hop_limit(hop_limit);
