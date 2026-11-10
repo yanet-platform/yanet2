@@ -898,68 +898,6 @@ classify_compile_net6_free(
 	);
 }
 
-// Rebuild helper of the commit below: the high half trie value walk
-// over the region boundaries with the values resolved per region.
-struct net6_lpm_revalue_ctx {
-	struct lpm *lpm;
-	const uint32_t *values;
-	uint8_t prev_from[LPM_KEY_SIZE_MAX];
-	uint32_t prev_value;
-};
-
-static inline int
-net6_lpm_revalue_cb(
-	uint8_t key_size, const uint8_t *from, uint32_t index, void *data
-) {
-	struct net6_lpm_revalue_ctx *ctx = data;
-
-	if (ctx->prev_value != LPM_VALUE_INVALID) {
-		uint8_t to[key_size];
-		memcpy(to, from, key_size);
-		filter_key_dec(key_size, to);
-		if (lpm_insert(
-			    ctx->lpm,
-			    key_size,
-			    ctx->prev_from,
-			    to,
-			    ctx->prev_value
-		    )) {
-			return -1;
-		}
-	}
-
-	memcpy(ctx->prev_from, from, key_size);
-	ctx->prev_value = ctx->values[index];
-	return 0;
-}
-
-// Overwrites the high half trie values in place: every region interval
-// receives its resolved value, a uniform region its final class, a
-// split region its marked dense row.
-static inline int
-net6_lpm_revalue(
-	struct lpm *lpm, const struct range_index *ri, const uint32_t *values
-) {
-	struct net6_lpm_revalue_ctx ctx;
-	ctx.lpm = lpm;
-	ctx.values = values;
-	ctx.prev_value = LPM_VALUE_INVALID;
-
-	if (radix_walk(&ri->radix, 8, net6_lpm_revalue_cb, &ctx)) {
-		return -1;
-	}
-
-	if (ctx.prev_value != LPM_VALUE_INVALID) {
-		uint8_t to[8];
-		memset(to, 0xff, 8);
-		if (lpm_insert(lpm, 8, ctx.prev_from, to, ctx.prev_value)) {
-			return -1;
-		}
-	}
-
-	return 0;
-}
-
 static inline int
 classify_compile_net6_commit(
 	struct memory_context *memory_context, void *compile, void *attr
@@ -975,13 +913,13 @@ classify_compile_net6_commit(
 	 * The half matches are built directly in the embedded attribute:
 	 * their pages are addressed through relative pointers, so trees
 	 * built elsewhere cannot move in.
+	 *
+	 * The high half trie stays empty until its values are resolved
+	 * below.
 	 */
 	char hi_name[MEMORY_CONTEXT_NAME_SIZE];
 	classify_leaf_name(hi_name, sizeof(hi_name), net6_compile->name, "hi");
 	if (lpm_init(&net6_attr->hi, memory_context, hi_name)) {
-		goto error;
-	}
-	if (range_index_build_lpm(&net6_compile->ri_hi, 8, &net6_attr->hi)) {
 		goto error;
 	}
 	char lo_name[MEMORY_CONTEXT_NAME_SIZE];
@@ -1005,9 +943,9 @@ classify_compile_net6_commit(
 	 */
 	struct value_table *comb = &net6_compile->comb;
 
-	// The trie walk below delivers region ordinals, so the resolved
-	// values are indexed by ordinal and reach the row of every ordinal
-	// through the region values of the partition.
+	// The high half trie build walks the partition by region ordinal,
+	// so the resolved values are indexed by ordinal and reach the row
+	// of every ordinal through the region values of the partition.
 	const uint32_t *hi_values = ADDR_OF(&net6_compile->ri_hi.values);
 	uint32_t hi_count = net6_compile->ri_hi.count;
 
@@ -1115,8 +1053,8 @@ classify_compile_net6_commit(
 		value_table_free(comb);
 	}
 
-	int revalue_rc = net6_lpm_revalue(
-		&net6_attr->hi, &net6_compile->ri_hi, lpm_values
+	int hi_rc = range_index_build_lpm_values(
+		&net6_compile->ri_hi, 8, lpm_values, &net6_attr->hi
 	);
 
 	memory_bfree(
@@ -1130,7 +1068,7 @@ classify_compile_net6_commit(
 		sizeof(uint32_t) * (hi_count ? hi_count : 1)
 	);
 
-	if (revalue_rc) {
+	if (hi_rc) {
 		goto error;
 	}
 

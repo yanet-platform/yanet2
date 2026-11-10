@@ -4,12 +4,14 @@
 // Pins the regression of combining the high and the low address halves
 // through the shared classification: unique networks grouped across rules,
 // masks spanning both halves, networks shared and nested across rules, a
-// wildcard network, and the source with destination joint. Every
-// classification scenario compiles an explicit classifier - the
-// destination attribute alone, or the source and destination pair with
-// their joint - decodes its ruleset and classifies synthetic packets
-// through the packet getters and the library lookup core. One more
-// scenario pins the unwind of a failed attribute commit.
+// wildcard network, the source with destination joint, and the high half
+// trie built once with its final values matching the former build with
+// the region ordinals overwritten by those values. Every classification
+// scenario compiles an explicit classifier - the destination attribute
+// alone, or the source and destination pair with their joint - decodes
+// its ruleset and classifies synthetic packets through the packet getters
+// and the library lookup core. One more scenario pins the unwind of a
+// failed attribute commit.
 
 #include "lib/classify/compiler/net6.h"
 #include "lib/classify/classify.h"
@@ -635,6 +637,259 @@ run_failed_commit_zeroes_attr_test(struct memory_context *mctx, void *memory) {
 	memory_context_fini(&starved_ctx);
 }
 
+/*
+ * Reference of the high half trie of one compile: the partition range
+ * starts captured before the commit releases them and a trie built over
+ * them twice, first with the region ordinals and then with the values
+ * the commit resolved.
+ */
+struct test_hi_reference {
+	struct lpm lpm;
+	uint8_t (*starts)[8];
+	uint32_t count;
+};
+
+// The commit wrapper below has no data argument of its own.
+static struct test_hi_reference test_hi_ref;
+
+// Appends one partition range start to the reference.
+static int
+test_hi_reference_collect(
+	uint8_t key_size, const uint8_t *key, uint32_t value, void *data
+) {
+	(void)value;
+	assert(key_size == 8);
+
+	struct test_hi_reference *ref = data;
+	ref->starts = realloc(ref->starts, (ref->count + 1) * 8);
+	assert(ref->starts != NULL);
+	memcpy(ref->starts[ref->count], key, 8);
+	++ref->count;
+	return 0;
+}
+
+// Builds the ordinal pass of the reference out of the partition and
+// commits the attribute.
+static int
+test_commit_with_hi_reference(
+	struct memory_context *mctx, void *compile, void *attr
+) {
+	struct classify_compile_net6 *net6_compile = compile;
+	struct test_hi_reference *ref = &test_hi_ref;
+
+	assert(lpm_init(&ref->lpm, mctx, "hi_ref") == 0);
+	assert(range_index_build_lpm(&net6_compile->ri_hi, 8, &ref->lpm) == 0);
+	assert(radix_walk(
+		       &net6_compile->ri_hi.radix,
+		       8,
+		       test_hi_reference_collect,
+		       ref
+	       ) == 0);
+
+	return classify_compile_net6_commit(mctx, compile, attr);
+}
+
+// Overwrites every partition range of the reference with the value the
+// committed trie holds at the range start.
+static void
+test_hi_reference_revalue(struct test_hi_reference *ref, const struct lpm *hi) {
+	for (uint32_t idx = 0; idx < ref->count; ++idx) {
+		uint8_t to[8];
+		if (idx + 1 < ref->count) {
+			memcpy(to, ref->starts[idx + 1], 8);
+			filter_key_dec(8, to);
+		} else {
+			memset(to, 0xff, 8);
+		}
+		uint32_t value = lpm_lookup(hi, 8, ref->starts[idx]);
+		assert(lpm_insert(&ref->lpm, 8, ref->starts[idx], to, value) ==
+		       0);
+	}
+}
+
+// Returns the index of a page of the trie.
+static uint32_t
+test_lpm_page_index(const struct lpm *lpm, const struct lpm_page *page) {
+	for (uint32_t idx = 0; idx < lpm->page_count; ++idx) {
+		if (lpm_page(lpm, idx) == page) {
+			return idx;
+		}
+	}
+	assert(0);
+	return 0;
+}
+
+// Asserts that two tries hold the same pages in the same order with the
+// same leaf values and the same child page indices.
+static void
+assert_lpm_equal(const struct lpm *first, const struct lpm *second) {
+	assert(first->page_count == second->page_count);
+
+	for (uint32_t page_idx = 0; page_idx < first->page_count; ++page_idx) {
+		struct lpm_page *first_page = lpm_page(first, page_idx);
+		struct lpm_page *second_page = lpm_page(second, page_idx);
+		for (uint32_t slot = 0; slot < 256; ++slot) {
+			union lpm_value *first_value =
+				first_page->values + slot;
+			union lpm_value *second_value =
+				second_page->values + slot;
+			if (first_value->value & LPM_VALUE_FLAG) {
+				assert(first_value->value == second_value->value
+				);
+				continue;
+			}
+			assert(!(second_value->value & LPM_VALUE_FLAG));
+			assert(test_lpm_page_index(
+				       first, ADDR_OF(&first_value->page)
+			       ) ==
+			       test_lpm_page_index(
+				       second, ADDR_OF(&second_value->page)
+			       ));
+		}
+	}
+}
+
+// Returns the next value of a fixed seed generator.
+static uint32_t
+test_rand(uint64_t *state) {
+	*state = *state * 6364136223846793005ull + 1442695040888963407ull;
+	return (uint32_t)(*state >> 33);
+}
+
+// Builds a network of the given address masked to the leading hi_bits
+// of the high half and the leading lo_bits of the low one.
+static struct net6
+net6_bits(const uint8_t addr[NET6_LEN], uint8_t hi_bits, uint8_t lo_bits) {
+	struct net6 net = {0};
+	for (uint8_t bit = 0; bit < hi_bits; ++bit) {
+		net.mask[bit / 8] |= 0x80 >> (bit % 8);
+	}
+	for (uint8_t bit = 0; bit < lo_bits; ++bit) {
+		net.mask[8 + bit / 8] |= 0x80 >> (bit % 8);
+	}
+	for (uint32_t idx = 0; idx < NET6_LEN; ++idx) {
+		net.addr[idx] = addr[idx] & net.mask[idx];
+	}
+	return net;
+}
+
+// Returns the first rule network covering the address, the brute force
+// oracle of a one network per rule ruleset.
+static uint32_t
+test_first_match(
+	const struct net6 *nets, uint32_t count, const uint8_t addr[NET6_LEN]
+) {
+	for (uint32_t rule_idx = 0; rule_idx < count; ++rule_idx) {
+		const struct net6 *net = nets + rule_idx;
+		uint32_t idx = 0;
+		while (idx < NET6_LEN &&
+		       (addr[idx] & net->mask[idx]) == net->addr[idx]) {
+			++idx;
+		}
+		if (idx == NET6_LEN) {
+			return rule_idx;
+		}
+	}
+	return CLASSIFY_RULE_INVALID;
+}
+
+#define TEST_HI_SINGLE_BUILD_RULES 96
+
+// Verifies that the high half trie built in one pass with the resolved
+// values equals the ordinal build overwritten with the same values, page
+// by page, and classifies seeded overlapping prefixes as the oracle.
+static void
+run_hi_single_build_test(struct memory_context *mctx, void *memory) {
+	(void)memory;
+
+	uint64_t seed = 0x6e657436;
+	uint8_t bytes[4] = {0x00, 0x01, 0x80, 0xff};
+
+	struct net6 nets[TEST_HI_SINGLE_BUILD_RULES];
+	struct test_rule rules[TEST_HI_SINGLE_BUILD_RULES];
+	const struct classifier_rule *rule_ptrs[TEST_HI_SINGLE_BUILD_RULES];
+	for (uint32_t idx = 0; idx < TEST_HI_SINGLE_BUILD_RULES; ++idx) {
+		uint8_t addr[NET6_LEN] = {0x20, 0x01, 0x0d, 0xb8};
+		for (uint32_t byte = 4; byte < NET6_LEN; ++byte) {
+			addr[byte] = bytes[test_rand(&seed) % 4];
+		}
+		uint8_t hi_bits = 16 + test_rand(&seed) % 49;
+		uint8_t lo_bits =
+			test_rand(&seed) % 4 ? 0 : test_rand(&seed) % 65;
+		nets[idx] = net6_bits(addr, hi_bits, lo_bits);
+		rules[idx] = rule_dst(nets + idx, 1);
+		rule_ptrs[idx] = &rules[idx].rule;
+	}
+
+	struct classify_compile_net6 *compile = classify_compile_net6_create(
+		mctx,
+		rule_ptrs,
+		TEST_HI_SINGLE_BUILD_RULES,
+		test_rule_get_dsts,
+		"test_net6_dst"
+	);
+	assert(compile != NULL);
+	const struct classify_attr_ops ops = {
+		.size = classify_compile_net6_size,
+		.rule_is_any = classify_compile_net6_rule_is_any,
+		.hash = classify_compile_net6_hash,
+		.compare = classify_compile_net6_compare,
+		.iter = classify_compile_net6_iter,
+		.rule_iter = classify_compile_net6_rule_iter,
+		.commit = test_commit_with_hi_reference,
+		.free_compile = classify_compile_net6_free,
+	};
+
+	struct test_filter_net6_dst flt;
+	memset(&flt, 0, sizeof(flt));
+	memset(&test_hi_ref, 0, sizeof(test_hi_ref));
+	struct classifier stage_dst = {0};
+	assert(classify_attr_compile(
+		       mctx,
+		       "test_net6_dst",
+		       &ops,
+		       compile,
+		       rule_ptrs,
+		       TEST_HI_SINGLE_BUILD_RULES,
+		       &flt.dst_attr,
+		       &stage_dst
+	       ) == 0);
+	assert(classify_decode(
+		       mctx,
+		       "rule_map",
+		       &stage_dst,
+		       rule_ptrs,
+		       TEST_HI_SINGLE_BUILD_RULES,
+		       &flt.rule_map
+	       ) == 0);
+	classifier_fini(&stage_dst, mctx, TEST_HI_SINGLE_BUILD_RULES);
+
+	test_hi_reference_revalue(&test_hi_ref, &flt.dst_attr.hi);
+	assert(test_hi_ref.lpm.page_count > 1);
+	assert_lpm_equal(&flt.dst_attr.hi, &test_hi_ref.lpm);
+
+	uint8_t src[NET6_LEN] = {0};
+	for (uint32_t idx = 0; idx < TEST_HI_SINGLE_BUILD_RULES; ++idx) {
+		uint8_t addr[NET6_LEN];
+		memcpy(addr, nets[idx].addr, NET6_LEN);
+		assert(classify_dst(&flt, src, addr) ==
+		       test_first_match(nets, TEST_HI_SINGLE_BUILD_RULES, addr)
+		);
+
+		for (uint32_t byte = 4; byte < NET6_LEN; ++byte) {
+			addr[byte] |= bytes[test_rand(&seed) % 4] &
+				      ~nets[idx].mask[byte];
+		}
+		assert(classify_dst(&flt, src, addr) ==
+		       test_first_match(nets, TEST_HI_SINGLE_BUILD_RULES, addr)
+		);
+	}
+
+	lpm_free(&test_hi_ref.lpm);
+	free(test_hi_ref.starts);
+	test_filter_net6_dst_free(mctx, &flt);
+}
+
 int
 main(void) {
 	void *memory = malloc(1 << 24);
@@ -644,6 +899,7 @@ main(void) {
 	run_scenario(run_nested_networks_test, memory);
 	run_scenario(run_src_dst_test, memory);
 	run_scenario(run_failed_commit_zeroes_attr_test, memory);
+	run_scenario(run_hi_single_build_test, memory);
 
 	free(memory);
 	return 0;
