@@ -784,8 +784,30 @@ func parsePackets(list *dataplane.PacketList) ([]*framework.PacketInfo, error) {
 }
 
 // warnUnoptimizedOnce guards the non-optimized build warning so it prints
-// at most once per process regardless of how many benchmarks call Bench.
+// at most once per process regardless of how many benchmarks run.
 var warnUnoptimizedOnce sync.Once
+
+// warnUnoptimized warns, once per process, that benchmark numbers of a
+// build without optimizations or with sanitizers are not representative.
+func warnUnoptimized(b *testing.B) {
+	warnUnoptimizedOnce.Do(func() {
+		if C.dataplane_ut_build_optimized() == 0 {
+			b.Logf("WARNING: dataplane built without optimizations (or with sanitizers); benchmark numbers are NOT representative — rebuild meson with buildtype=debugoptimized or release and b_sanitize=none.")
+		}
+	})
+}
+
+// reportThroughput reports the rate of b.N rounds over packets carrying
+// totalBytes in total, in Gbit/s and Mpps.
+func reportThroughput(b *testing.B, totalBytes int64, packets int) {
+	elapsed := b.Elapsed()
+	if elapsed > 0 {
+		bits := float64(totalBytes) * float64(b.N) * 8
+		handled := float64(packets) * float64(b.N)
+		b.ReportMetric(bits/elapsed.Seconds()/1e9, "Gbit/s")
+		b.ReportMetric(handled/elapsed.Seconds()/1e6, "Mpps")
+	}
+}
 
 // benchOptions configures a Bench run.
 type benchOptions struct {
@@ -842,11 +864,7 @@ func (m *Harness) Bench(
 		o(opts)
 	}
 
-	warnUnoptimizedOnce.Do(func() {
-		if C.dataplane_ut_build_optimized() == 0 {
-			b.Logf("WARNING: dataplane built without optimizations (or with sanitizers); benchmark numbers are NOT representative — rebuild meson with buildtype=debugoptimized or release and b_sanitize=none.")
-		}
-	})
+	warnUnoptimized(b)
 
 	pinner := runtime.Pinner{}
 	defer pinner.Unpin()
@@ -912,13 +930,7 @@ func (m *Harness) Bench(
 		b.Fatalf("failed to recycle benchmark packets: rc=%d", rc)
 	}
 
-	elapsed := b.Elapsed()
-	if elapsed > 0 {
-		bits := float64(totalBytes) * float64(b.N) * 8
-		pkts := float64(numPkts) * float64(b.N)
-		b.ReportMetric(bits/elapsed.Seconds()/1e9, "Gbit/s")
-		b.ReportMetric(pkts/elapsed.Seconds()/1e6, "Mpps")
-	}
+	reportThroughput(b, totalBytes, numPkts)
 }
 
 // toCStringArray converts a Go string slice to a slice of *C.char values and
