@@ -37,6 +37,9 @@ const (
 	// importHeartbeatInterval is how long a stream stays silent before an
 	// idle tick sends a heartbeat on it, whatever the dump timeout.
 	importHeartbeatInterval = 5 * time.Second
+	// importIdleInterval is how often a quiet import checks for a due
+	// heartbeat and retries its MPLS push, apart from the dump timeout.
+	importIdleInterval = time.Second
 	// importHealthyUptime is how long an attempt must stay up for the retry
 	// delay to start over from its initial value.
 	importHealthyUptime = 10 * time.Minute
@@ -686,6 +689,7 @@ func (m *importHolder) newExport(attempt *importAttempt) *bird.Export {
 
 	options := []bird.ExportReaderOption{
 		bird.WithExportReaderIdle(onIdle),
+		bird.WithExportReaderIdleInterval(importIdleInterval),
 		bird.WithExportReaderLog(m.routeLog),
 	}
 	if m.birdDialer != nil {

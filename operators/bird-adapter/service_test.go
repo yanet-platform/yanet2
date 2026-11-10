@@ -675,9 +675,9 @@ func Test_AdapterService_SetupConfig_NoSocketsStartsNoStream(t *testing.T) {
 }
 
 // Test_AdapterService_IdleImportSendsHeartbeats verifies that an import
-// whose BIRD stays quiet after its table sends a named heartbeat on the first
-// dump tick after five silent seconds, so a short dump timeout cannot flood
-// the route operator.
+// whose BIRD stays quiet after its table sends a named heartbeat every five
+// silent seconds whatever its dump timeout, so a short one cannot flood the
+// route operator and a long one cannot delay the heartbeats.
 func Test_AdapterService_IdleImportSendsHeartbeats(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -687,11 +687,16 @@ func Test_AdapterService_IdleImportSendsHeartbeats(t *testing.T) {
 		{
 			name:        "dump timeout above the heartbeat interval",
 			dumpTimeout: 7 * time.Second,
-			interval:    7 * time.Second,
+			interval:    5 * time.Second,
 		},
 		{
 			name:        "dump timeout below the heartbeat interval",
 			dumpTimeout: time.Millisecond,
+			interval:    5 * time.Second,
+		},
+		{
+			name:        "dump timeout of an hour",
+			dumpTimeout: time.Hour,
 			interval:    5 * time.Second,
 		},
 	}

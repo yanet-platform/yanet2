@@ -33,17 +33,21 @@ type Export struct {
 	updater  Updater
 	notifier Notifier
 	onIdle   func(context.Context)
-	dial     Dialer
-	log      *zap.Logger
+	// idleInterval is how often the idle callback runs while no routes
+	// wait, the dump timeout when zero.
+	idleInterval time.Duration
+	dial         Dialer
+	log          *zap.Logger
 }
 
 // ExportReaderOption configures the Export constructor.
 type ExportReaderOption func(*exportReaderOptions)
 
 type exportReaderOptions struct {
-	OnIdle func(context.Context)
-	Dial   Dialer
-	Log    *zap.Logger
+	OnIdle       func(context.Context)
+	IdleInterval time.Duration
+	Dial         Dialer
+	Log          *zap.Logger
 }
 
 func newExportReaderOptions() *exportReaderOptions {
@@ -60,12 +64,20 @@ func dialUnix(ctx context.Context, path string) (net.Conn, error) {
 	return dialer.DialContext(ctx, "unix", path)
 }
 
-// WithExportReaderIdle sets the callback the reader runs on every dump tick
-// that finds no routes to dump, so the consumer can retry what an earlier
+// WithExportReaderIdle sets the callback the reader runs on every idle tick
+// that finds no routes waiting, so the consumer can retry what an earlier
 // update failed to deliver without waiting for new routes.
 func WithExportReaderIdle(onIdle func(context.Context)) ExportReaderOption {
 	return func(o *exportReaderOptions) {
 		o.OnIdle = onIdle
+	}
+}
+
+// WithExportReaderIdleInterval sets how often the idle callback runs, the
+// dump timeout by default.
+func WithExportReaderIdleInterval(interval time.Duration) ExportReaderOption {
+	return func(o *exportReaderOptions) {
+		o.IdleInterval = interval
 	}
 }
 
@@ -100,13 +112,14 @@ func NewExportReader(cfg *Config, onUpdate Updater, onFlush Notifier, options ..
 		})
 	}
 	return &Export{
-		sockets:  sockets,
-		cfg:      cfg,
-		updater:  onUpdate,
-		notifier: onFlush,
-		onIdle:   opts.OnIdle,
-		dial:     opts.Dial,
-		log:      opts.Log,
+		sockets:      sockets,
+		cfg:          cfg,
+		updater:      onUpdate,
+		notifier:     onFlush,
+		onIdle:       opts.OnIdle,
+		idleInterval: opts.IdleInterval,
+		dial:         opts.Dial,
+		log:          opts.Log,
 	}
 }
 
@@ -186,6 +199,13 @@ func (m *Export) Run(ctx context.Context) error {
 		m.log.Info("starting batch processor for bird route updates")
 		batch := make([]rib.Route, 0, m.cfg.DumpThreshold)
 		tick := time.NewTicker(m.cfg.DumpTimeout)
+		defer tick.Stop()
+		idleInterval := m.idleInterval
+		if idleInterval <= 0 {
+			idleInterval = m.cfg.DumpTimeout
+		}
+		idle := time.NewTicker(idleInterval)
+		defer idle.Stop()
 		timeout := false
 		for {
 			select {
@@ -200,10 +220,14 @@ func (m *Export) Run(ctx context.Context) error {
 				}
 			case <-tick.C:
 				if len(batch) == 0 {
-					m.onIdle(ctx)
 					continue
 				}
 				timeout = true
+			case <-idle.C:
+				if len(batch) == 0 {
+					m.onIdle(ctx)
+				}
+				continue
 			}
 
 			if timeout || len(batch) >= m.cfg.DumpThreshold {
