@@ -18,7 +18,8 @@ import (
 )
 
 // Test_Export_Run_IdleTick verifies that a reader whose socket stays silent
-// runs the idle callback on its first dump tick.
+// runs the idle callback on its first idle tick, one dump timeout after the
+// start by default.
 func Test_Export_Run_IdleTick(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		listener, dial := listenBIRDExport(t)
@@ -49,6 +50,52 @@ func Test_Export_Run_IdleTick(t *testing.T) {
 
 		require.Error(t, export.Run(ctx))
 		require.Equal(t, cfg.DumpTimeout, idleAfter, "the idle callback did not run on the first tick")
+	})
+}
+
+// Test_Export_Run_IdleIntervalApartFromDumpTimeout verifies that the idle
+// callback runs every idle interval, however long the dump timeout, also
+// while a route waits for its dump.
+func Test_Export_Run_IdleIntervalApartFromDumpTimeout(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		listener, dial := listenBIRDExport(t)
+		serveBIRDExport(t, listener, func(connection net.Conn) error {
+			_, _ = connection.Write(updateChunk())
+			_, _ = io.Copy(io.Discard, connection)
+			return nil
+		})
+
+		cfg := bird.DefaultConfig()
+		cfg.Sockets = []string{"bird.sock"}
+		cfg.DumpTimeout = time.Hour
+		cfg.DumpThreshold = 1000
+
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		defer cancel()
+		started := time.Now()
+		var idleAt []time.Duration
+		onIdle := func(context.Context) {
+			idleAt = append(idleAt, time.Since(started))
+			if len(idleAt) == 3 {
+				cancel()
+			}
+		}
+		dumped := false
+		export := bird.NewExportReader(
+			cfg,
+			func(context.Context, []rib.Route) error {
+				dumped = true
+				return nil
+			},
+			func(context.Context) error { return nil },
+			bird.WithExportReaderIdle(onIdle),
+			bird.WithExportReaderIdleInterval(time.Second),
+			dial,
+		)
+
+		require.Error(t, export.Run(ctx))
+		require.False(t, dumped, "the route must still wait for its dump")
+		require.Equal(t, []time.Duration{time.Second, 2 * time.Second, 3 * time.Second}, idleAt)
 	})
 }
 

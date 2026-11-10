@@ -37,8 +37,8 @@ const (
 	// importHeartbeatInterval is how long a stream stays silent before an
 	// idle tick sends a heartbeat on it, whatever the dump timeout.
 	importHeartbeatInterval = 5 * time.Second
-	// importIdleInterval is how often a quiet import checks for a due
-	// heartbeat and retries its MPLS push, apart from the dump timeout.
+	// importIdleInterval is how often an import checks for a due heartbeat
+	// and retries its MPLS push, apart from the dump timeout.
 	importIdleInterval = time.Second
 	// importHealthyUptime is how long an attempt must stay up for the retry
 	// delay to start over from its initial value.
@@ -669,8 +669,8 @@ func (m *importHolder) newExport(attempt *importAttempt) *bird.Export {
 	}
 
 	// An idle tick sends a heartbeat once the stream has been silent for the
-	// heartbeat interval; its unacknowledged bytes let the kernel find a
-	// half-open connection while BIRD is quiet.
+	// heartbeat interval, also while routes wait for their dump; its
+	// unacknowledged bytes let the kernel find a half-open connection.
 	//
 	// A failed heartbeat ends the attempt. Idle ticks push MPLS too, so a
 	// failed push is retried even while BIRD sends nothing.

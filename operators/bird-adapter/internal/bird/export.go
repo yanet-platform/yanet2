@@ -33,8 +33,8 @@ type Export struct {
 	updater  Updater
 	notifier Notifier
 	onIdle   func(context.Context)
-	// idleInterval is how often the idle callback runs while no routes
-	// wait, the dump timeout when zero.
+	// idleInterval is how often the idle callback runs, the dump timeout
+	// when zero.
 	idleInterval time.Duration
 	dial         Dialer
 	log          *zap.Logger
@@ -64,9 +64,9 @@ func dialUnix(ctx context.Context, path string) (net.Conn, error) {
 	return dialer.DialContext(ctx, "unix", path)
 }
 
-// WithExportReaderIdle sets the callback the reader runs on every idle tick
-// that finds no routes waiting, so the consumer can retry what an earlier
-// update failed to deliver without waiting for new routes.
+// WithExportReaderIdle sets the callback the reader runs on every idle tick,
+// whether or not routes wait for their dump, so the consumer can retry what
+// an earlier update failed to deliver without waiting for new routes.
 func WithExportReaderIdle(onIdle func(context.Context)) ExportReaderOption {
 	return func(o *exportReaderOptions) {
 		o.OnIdle = onIdle
@@ -224,9 +224,7 @@ func (m *Export) Run(ctx context.Context) error {
 				}
 				timeout = true
 			case <-idle.C:
-				if len(batch) == 0 {
-					m.onIdle(ctx)
-				}
+				m.onIdle(ctx)
 				continue
 			}
 
