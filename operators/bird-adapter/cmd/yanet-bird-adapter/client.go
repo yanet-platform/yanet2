@@ -215,6 +215,16 @@ func runListSessions() error {
 		fmt.Printf("Sockets:    %s\n", strings.Join(session.Sockets, ", "))
 		fmt.Printf("Created:    %s (uptime: %s)\n", createdAt.Format(time.RFC3339), uptime)
 		fmt.Printf("Connection: %s\n", connStateStr)
+		if holding := session.GetReplacing(); holding != nil {
+			holdingCreatedAt := time.Unix(0, holding.GetCreatedAt())
+			fmt.Println("Status:     pending, takes over once the holder below stops")
+			fmt.Printf("Holding:    sockets %s, created %s (uptime: %s), connection %s\n",
+				strings.Join(holding.GetSockets(), ", "),
+				holdingCreatedAt.Format(time.RFC3339),
+				time.Since(holdingCreatedAt).Round(time.Second),
+				connectionStateToString(holding.GetConnectionState()),
+			)
+		}
 		fmt.Println(strings.Repeat("-", 80))
 	}
 

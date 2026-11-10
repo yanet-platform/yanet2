@@ -1133,3 +1133,188 @@ func receiveEvent[T any](t *testing.T, events <-chan T) T {
 		return zero
 	}
 }
+
+// Test_AdapterService_SetupConfig_QueuedSetupGivesUpAtDeadline verifies that
+// a setup queued behind a stuck setup of the same name returns at its
+// deadline, leaves the running import alone and never runs later.
+func Test_AdapterService_SetupConfig_QueuedSetupGivesUpAtDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		network := memnet.NewNetwork()
+		serveBIRDExport(t, network.Listen("first.sock"), quietBIRDExport)
+		serveBIRDExport(t, network.Listen("second.sock"), quietBIRDExport)
+		serveBIRDExport(t, network.Listen("third.sock"), quietBIRDExport)
+		commits := make(chan int, 4)
+		recorder := &feedRIBRecorder{Handle: func(idx int, stream feedRIBServerStream) error {
+			for {
+				update, err := stream.Recv()
+				if err != nil {
+					return err
+				}
+				if update.GetRoute() == nil && !update.GetHeartbeat() {
+					commits <- idx
+				}
+			}
+		}}
+		stalling := newStallingListener(t, network.Listen(memoryRouteOperator))
+		serveRouteService(t, stalling, recorder)
+		service := startMemoryImport(t, network, newImportRequest(t, "first.sock"))
+		require.Equal(t, 0, receiveOpened(t, commits))
+
+		stalling.Stall.Store(true)
+		var stuck errgroup.Group
+		stuck.Go(func() error {
+			_, err := service.SetupConfig(t.Context(), newImportRequest(t, "second.sock"))
+			return err
+		})
+		receiveEvent(t, stalling.Parked)
+
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		queued := time.Now()
+		_, err := service.SetupConfig(ctx, newImportRequest(t, "third.sock"))
+		require.Equal(t, codes.DeadlineExceeded, status.Code(err))
+		require.Equal(t, time.Second, time.Since(queued))
+
+		// The stuck setup fails at its connect timeout; the one that gave up
+		// would then find the route operator answering again.
+		stalling.Stall.Store(false)
+		require.Equal(t, codes.Unavailable, status.Code(stuck.Wait()))
+		requireImportSockets(t, service, "first.sock")
+		streams := recorder.Streams()
+		require.Len(t, streams, 1)
+		require.NoError(t, streams[0].Err(), "a withdrawn setup ended the running stream")
+	})
+}
+
+// Test_AdapterService_SetupConfig_OtherNameNotDelayed verifies that a setup
+// stuck on a route operator that never answers does not hold up the setup
+// of another name.
+func Test_AdapterService_SetupConfig_OtherNameNotDelayed(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		network := memnet.NewNetwork()
+		serveBIRDExport(t, network.Listen("bird.sock"), quietBIRDExport)
+		recorder := &feedRIBRecorder{Handle: func(idx int, stream feedRIBServerStream) error {
+			<-stream.Context().Done()
+			return stream.Context().Err()
+		}}
+		stalling := newStallingListener(t, network.Listen(memoryRouteOperator))
+		serveRouteService(t, stalling, recorder)
+		service := newMemoryService(t, network)
+
+		stalling.Stall.Store(true)
+		var stuck errgroup.Group
+		stuck.Go(func() error {
+			_, err := service.SetupConfig(t.Context(), newImportRequest(t, "bird.sock"))
+			return err
+		})
+		receiveEvent(t, stalling.Parked)
+		stalling.Stall.Store(false)
+
+		other := newImportRequest(t, "bird.sock")
+		other.Name = "bird1"
+		started := time.Now()
+		_, err := service.SetupConfig(t.Context(), other)
+		require.NoError(t, err)
+		require.Zero(t, time.Since(started), "the setup of another name waited for the stuck one")
+		require.Error(t, stuck.Wait())
+	})
+}
+
+// Test_AdapterService_ListSessions_ShowsPendingReplacement verifies that
+// while replacements wait for the import that holds the name, the newest one
+// is listed with that holder, never a superseded one in between, and that
+// once the setups return the newest is listed alone.
+func Test_AdapterService_ListSessions_ShowsPendingReplacement(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		network := memnet.NewNetwork()
+		serveBIRDExport(t, network.Listen("first.sock"), quietBIRDExport)
+		serveBIRDExport(t, network.Listen("second.sock"), quietBIRDExport)
+		serveBIRDExport(t, network.Listen("third.sock"), quietBIRDExport)
+		recorder := &feedRIBRecorder{Handle: func(idx int, stream feedRIBServerStream) error {
+			<-stream.Context().Done()
+			return stream.Context().Err()
+		}}
+		serveRouteService(t, network.Listen(memoryRouteOperator), recorder)
+		holdExit := &blockingLogCore{
+			Message: "stopped BIRD import",
+			Blocked: make(chan struct{}),
+			Release: make(chan struct{}),
+		}
+		service := startMemoryImport(t, network, newImportRequest(t, "first.sock"),
+			birdadapter.WithAdapterServiceLog(zap.New(holdExit)),
+		)
+		t.Cleanup(holdExit.Unblock)
+
+		var setups errgroup.Group
+		setups.Go(func() error {
+			_, err := service.SetupConfig(t.Context(), newImportRequest(t, "second.sock"))
+			return err
+		})
+		receiveEvent(t, holdExit.Blocked)
+		requirePendingReplacement(t, service, "second.sock", "first.sock")
+
+		setups.Go(func() error {
+			_, err := service.SetupConfig(t.Context(), newImportRequest(t, "third.sock"))
+			return err
+		})
+		requirePendingReplacement(t, service, "third.sock", "first.sock")
+
+		holdExit.Unblock()
+		require.NoError(t, setups.Wait())
+		requirePendingReplacement(t, service, "third.sock", "")
+	})
+}
+
+// requirePendingReplacement waits until every goroutine of the bubble blocks
+// and requires the only listed import to read socket and to replace the one
+// reading holding, or nothing when holding is empty.
+func requirePendingReplacement(t *testing.T, service *birdadapter.AdapterService, socket string, holding string) {
+	t.Helper()
+	requireImportSockets(t, service, socket)
+	sessions, err := service.ListSessions(t.Context(), &adapterpb.ListSessionsRequest{})
+	require.NoError(t, err)
+	replacing := sessions.GetSessions()[0].GetReplacing()
+	if holding == "" {
+		require.Nil(t, replacing)
+		return
+	}
+	require.NotNil(t, replacing, "the pending replacement is listed without the import holding the name")
+	require.Equal(t, []string{holding}, replacing.GetSockets())
+	require.Nil(t, replacing.GetReplacing())
+}
+
+// stallingListener hands out connections, except that while Stall is set it
+// parks each new one unanswered on Parked; the test closes them at its end.
+type stallingListener struct {
+	net.Listener
+	Stall  atomic.Bool
+	Parked chan net.Conn
+}
+
+// newStallingListener wraps listener in a stallingListener that closes the
+// parked connections once the test ends.
+func newStallingListener(t *testing.T, listener net.Listener) *stallingListener {
+	t.Helper()
+	stalling := &stallingListener{Listener: listener, Parked: make(chan net.Conn, 4)}
+	t.Cleanup(func() {
+		for {
+			select {
+			case connection := <-stalling.Parked:
+				_ = connection.Close()
+			default:
+				return
+			}
+		}
+	})
+	return stalling
+}
+
+func (m *stallingListener) Accept() (net.Conn, error) {
+	for {
+		connection, err := m.Listener.Accept()
+		if err != nil || !m.Stall.Load() {
+			return connection, err
+		}
+		m.Parked <- connection
+	}
+}
