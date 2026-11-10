@@ -6,19 +6,21 @@ import (
 	"io"
 	"net"
 	"net/netip"
-	"os"
-	"path/filepath"
 	"slices"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/status"
+	"google.golang.org/grpc/test/bufconn"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/readiness"
@@ -828,84 +830,96 @@ func TestListConfigs_ConfiguredModule_ReportedOnceBeforeAndAfterRIB(t *testing.T
 // Test_RouteService_FeedRIB_IdleBirdImportReplaysAfterTransportRestart
 // verifies that an idle BIRD import replays its table into the RIB after the
 // route operator's gRPC server restarts: the replayed route stays, the route
-// withdrawn during the outage leaves after the RIB TTL and the bird-session
-// scope returns to READY.
+// withdrawn during the outage leaves exactly one RIB TTL after the old
+// session ended and the bird-session scope returns to READY.
 func Test_RouteService_FeedRIB_IdleBirdImportReplaysAfterTransportRestart(t *testing.T) {
-	kept := netip.MustParsePrefix("2001:db8:1::/48")
-	withdrawn := netip.MustParsePrefix("2001:db8:2::/48")
-	// BIRD exports both routes to the first connection; the second one
-	// was withdrawn by the time the import reconnects.
-	socket := startBIRDExportSocket(t, func(idx int) []netip.Prefix {
-		if idx == 0 {
-			return []netip.Prefix{kept, withdrawn}
+	synctest.Test(t, func(t *testing.T) {
+		kept := netip.MustParsePrefix("2001:db8:1::/48")
+		withdrawn := netip.MustParsePrefix("2001:db8:2::/48")
+		network := newMemoryNetwork()
+		// BIRD exports both routes to the first connection; the second one
+		// was withdrawn by the time the import reconnects.
+		serveBIRDExportSocket(t, network.Listen("bird.sock"), func(idx int) []netip.Prefix {
+			if idx == 0 {
+				return []netip.Prefix{kept, withdrawn}
+			}
+			return []netip.Prefix{kept}
+		})
+
+		store := newRIBStore()
+		tracker := readiness.NewTracker(specs("bird-session", "rib"))
+		sessions := newBirdRIBReadiness(ReadinessConfig{
+			RateThreshold:   1000,
+			StabilityWindow: 50 * time.Millisecond,
+			SampleInterval:  20 * time.Millisecond,
+			ReconnectGrace:  time.Minute,
+		}, store, "route0", tracker)
+		svc := NewRouteService(neigh.NewNeighTable(),
+			WithRouteServiceRIBStore(store),
+			WithRouteServiceRIBTTL(DefaultRIBTTL),
+			WithRouteServiceOnRIBSessionStart(sessions.OnSessionStart),
+			WithRouteServiceOnRIBUpdate(sessions.OnUpdate),
+			WithRouteServiceOnRIBSessionEnd(sessions.OnSessionEnd),
+		)
+		t.Cleanup(func() { require.NoError(t, svc.Close()) })
+
+		server := serveFeedRIB(t, network.Listen("route-operator"), svc)
+
+		adapter := birdadapter.NewAdapterService("passthrough:///route-operator",
+			birdadapter.WithRouteOperatorDialOptions(
+				grpc.WithContextDialer(network.Dial),
+				// The zstd codec pools its decoders process-wide, and a
+				// decoder made in one bubble must never run in another.
+				grpc.WithDefaultCallOptions(grpc.UseCompressor(encoding.Identity)),
+			),
+			birdadapter.WithBIRDDialer(network.Dial),
+		)
+		t.Cleanup(func() {
+			ctx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), 5*time.Second)
+			defer cancel()
+			require.NoError(t, adapter.Close(ctx))
+		})
+		sourceV4, err := commonpb.NewIPv4AddressFromAddr(netip.MustParseAddr("192.0.2.1"))
+		require.NoError(t, err)
+		sourceV6, err := commonpb.NewIPv6AddressFromAddr(netip.MustParseAddr("2001:db8::1"))
+		require.NoError(t, err)
+		_, err = adapter.SetupConfig(t.Context(), &adapterpb.SetupConfigRequest{
+			Name:     "route0",
+			Config:   &adapterpb.ImportConfig{Sockets: []string{"bird.sock"}, DumpThreshold: 1},
+			SourceV4: sourceV4,
+			SourceV6: sourceV6,
+		})
+		require.NoError(t, err)
+
+		birdSessionState := func() readinesspb.State {
+			return requireScope(t, tracker, "bird-session").GetState()
 		}
-		return []netip.Prefix{kept}
+		require.Eventually(t, func() bool {
+			return slices.Equal(ribPrefixes(store, "route0"), []netip.Prefix{kept, withdrawn})
+		}, 5*time.Second, 10*time.Millisecond)
+		require.Equal(t, readinesspb.State_STATE_READY, birdSessionState())
+
+		server.Stop()
+		synctest.Wait()
+		sessionEnded := time.Now()
+		require.NotEqual(t, readinesspb.State_STATE_READY, birdSessionState())
+		serveFeedRIB(t, network.Listen("route-operator"), svc)
+
+		require.Eventually(t, func() bool { return birdSessionState() == readinesspb.State_STATE_READY },
+			5*time.Second, 10*time.Millisecond,
+			"the idle import did not start a new session",
+		)
+		time.Sleep(time.Until(sessionEnded.Add(DefaultRIBTTL)) - time.Nanosecond)
+		synctest.Wait()
+		require.Equal(t, []netip.Prefix{kept, withdrawn}, ribPrefixes(store, "route0"),
+			"the withdrawn route must stay until the RIB TTL",
+		)
+		time.Sleep(time.Nanosecond)
+		synctest.Wait()
+		require.Equal(t, []netip.Prefix{kept}, ribPrefixes(store, "route0"),
+			"the RIB must hold the replayed route and lose the withdrawn one after the TTL",
+		)
 	})
-
-	store := newRIBStore()
-	tracker := readiness.NewTracker(specs("bird-session", "rib"))
-	sessions := newBirdRIBReadiness(ReadinessConfig{
-		RateThreshold:   1000,
-		StabilityWindow: 50 * time.Millisecond,
-		SampleInterval:  20 * time.Millisecond,
-		ReconnectGrace:  time.Minute,
-	}, store, "route0", tracker)
-	svc := NewRouteService(neigh.NewNeighTable(),
-		WithRouteServiceRIBStore(store),
-		WithRouteServiceRIBTTL(500*time.Millisecond),
-		WithRouteServiceOnRIBSessionStart(sessions.OnSessionStart),
-		WithRouteServiceOnRIBUpdate(sessions.OnUpdate),
-		WithRouteServiceOnRIBSessionEnd(sessions.OnSessionEnd),
-	)
-	t.Cleanup(func() { require.NoError(t, svc.Close()) })
-
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	server := serveFeedRIB(t, listener, svc)
-
-	adapter := birdadapter.NewAdapterService(listener.Addr().String())
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), 5*time.Second)
-		defer cancel()
-		require.NoError(t, adapter.Close(ctx))
-	})
-	sourceV4, err := commonpb.NewIPv4AddressFromAddr(netip.MustParseAddr("192.0.2.1"))
-	require.NoError(t, err)
-	sourceV6, err := commonpb.NewIPv6AddressFromAddr(netip.MustParseAddr("2001:db8::1"))
-	require.NoError(t, err)
-	_, err = adapter.SetupConfig(t.Context(), &adapterpb.SetupConfigRequest{
-		Name:     "route0",
-		Config:   &adapterpb.ImportConfig{Sockets: []string{socket}, DumpThreshold: 1},
-		SourceV4: sourceV4,
-		SourceV6: sourceV6,
-	})
-	require.NoError(t, err)
-
-	birdSessionState := func() readinesspb.State {
-		return requireScope(t, tracker, "bird-session").GetState()
-	}
-	require.Eventually(t, func() bool {
-		return slices.Equal(ribPrefixes(store, "route0"), []netip.Prefix{kept, withdrawn})
-	}, 5*time.Second, 10*time.Millisecond)
-	require.Equal(t, readinesspb.State_STATE_READY, birdSessionState())
-
-	server.Stop()
-	require.Eventually(t, func() bool { return birdSessionState() != readinesspb.State_STATE_READY },
-		5*time.Second, time.Millisecond,
-	)
-	listener, err = net.Listen("tcp", listener.Addr().String())
-	require.NoError(t, err)
-	serveFeedRIB(t, listener, svc)
-
-	require.Eventually(t, func() bool { return birdSessionState() == readinesspb.State_STATE_READY },
-		5*time.Second, 10*time.Millisecond,
-		"the idle import did not start a new session",
-	)
-	require.Eventually(t, func() bool {
-		return slices.Equal(ribPrefixes(store, "route0"), []netip.Prefix{kept})
-	}, 5*time.Second, 10*time.Millisecond,
-		"the RIB must hold the replayed route and lose the withdrawn one after the TTL",
-	)
 }
 
 // serveFeedRIB serves svc on listener until the test ends and returns the
@@ -942,19 +956,13 @@ func ribPrefixes(store *RIBStore, name string) []netip.Prefix {
 	return prefixes
 }
 
-// startBIRDExportSocket serves a BIRD export socket that announces the
-// prefixes routes gives for each accepted connection's ordinal via
-// 2001:db8::1, then stays quiet until the test ends.
+// serveBIRDExportSocket serves a BIRD export socket on listener that
+// announces the prefixes routes gives for each accepted connection's ordinal
+// via 2001:db8::1, then stays quiet until the test ends.
 //
 // Every prefix must be a /48 under 2001:db8::/32.
-func startBIRDExportSocket(t *testing.T, routes func(idx int) []netip.Prefix) string {
+func serveBIRDExportSocket(t *testing.T, listener net.Listener, routes func(idx int) []netip.Prefix) {
 	t.Helper()
-	// Use a short path because Unix socket names have a platform length limit.
-	directory, err := os.MkdirTemp("", "bird-export-")
-	require.NoError(t, err)
-	socket := filepath.Join(directory, "export.sock")
-	listener, err := net.Listen("unix", socket)
-	require.NoError(t, err)
 	var workers errgroup.Group
 	workers.Go(func() error {
 		for idx := 0; ; idx++ {
@@ -979,9 +987,43 @@ func startBIRDExportSocket(t *testing.T, routes func(idx int) []netip.Prefix) st
 	t.Cleanup(func() {
 		_ = listener.Close()
 		require.NoError(t, workers.Wait())
-		require.NoError(t, os.RemoveAll(directory))
 	})
-	return socket
+}
+
+// memoryNetwork connects dialers to the bufconn listeners bound on it by
+// address, whose connections block on condition variables: a goroutine
+// waiting on one counts as durably blocked inside a synctest bubble, which a
+// goroutine waiting on a socket never does.
+type memoryNetwork struct {
+	mu        sync.Mutex
+	listeners map[string]*bufconn.Listener
+}
+
+func newMemoryNetwork() *memoryNetwork {
+	return &memoryNetwork{listeners: map[string]*bufconn.Listener{}}
+}
+
+// Listen binds a new listener to address in place of the previous one.
+func (m *memoryNetwork) Listen(address string) *bufconn.Listener {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	listener := bufconn.Listen(64 * 1024)
+	m.listeners[address] = listener
+	return listener
+}
+
+// Dial connects to the listener bound to address, and fails as a refused
+// connection does when none is.
+func (m *memoryNetwork) Dial(ctx context.Context, address string) (net.Conn, error) {
+	m.mu.Lock()
+	listener := m.listeners[address]
+	m.mu.Unlock()
+
+	if listener == nil {
+		return nil, &net.OpError{Op: "dial", Net: "memory", Err: syscall.ECONNREFUSED}
+	}
+	return listener.DialContext(ctx)
 }
 
 // birdExportChunk returns a BIRD export chunk announcing the /48 prefix via

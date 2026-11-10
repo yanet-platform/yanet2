@@ -19,6 +19,9 @@ type Updater func(context.Context, []rib.Route) error
 // batch was dumped with.
 type Notifier func(context.Context) error
 
+// Dialer connects to the BIRD export socket at path.
+type Dialer func(ctx context.Context, path string) (net.Conn, error)
+
 type exportSocket struct {
 	Path    string
 	BufSize int
@@ -30,6 +33,7 @@ type Export struct {
 	updater  Updater
 	notifier Notifier
 	onIdle   func(context.Context)
+	dial     Dialer
 	log      *zap.Logger
 }
 
@@ -38,14 +42,22 @@ type ExportReaderOption func(*exportReaderOptions)
 
 type exportReaderOptions struct {
 	OnIdle func(context.Context)
+	Dial   Dialer
 	Log    *zap.Logger
 }
 
 func newExportReaderOptions() *exportReaderOptions {
 	return &exportReaderOptions{
 		OnIdle: func(context.Context) {},
+		Dial:   dialUnix,
 		Log:    zap.NewNop(),
 	}
+}
+
+// dialUnix connects to a Unix socket.
+func dialUnix(ctx context.Context, path string) (net.Conn, error) {
+	var dialer net.Dialer
+	return dialer.DialContext(ctx, "unix", path)
 }
 
 // WithExportReaderIdle sets the callback the reader runs on every dump tick
@@ -54,6 +66,16 @@ func newExportReaderOptions() *exportReaderOptions {
 func WithExportReaderIdle(onIdle func(context.Context)) ExportReaderOption {
 	return func(o *exportReaderOptions) {
 		o.OnIdle = onIdle
+	}
+}
+
+// WithExportReaderDialer sets the function that connects to every export
+// socket, a Unix socket dialer by default.
+//
+// Another dialer lets the reader run over an in-memory transport.
+func WithExportReaderDialer(dial Dialer) ExportReaderOption {
+	return func(o *exportReaderOptions) {
+		o.Dial = dial
 	}
 }
 
@@ -83,6 +105,7 @@ func NewExportReader(cfg *Config, onUpdate Updater, onFlush Notifier, options ..
 		updater:  onUpdate,
 		notifier: onFlush,
 		onIdle:   opts.OnIdle,
+		dial:     opts.Dial,
 		log:      opts.Log,
 	}
 }
@@ -108,8 +131,7 @@ func (m *Export) Run(ctx context.Context) error {
 			m.log.Info("starting bird export reader",
 				zap.String("path", socket.Path))
 
-			var dialer net.Dialer
-			c, err := dialer.DialContext(ctx, "unix", socket.Path)
+			c, err := m.dial(ctx, socket.Path)
 			if err != nil {
 				return fmt.Errorf("failed to dial bird export socket '%s': %w", socket.Path, err)
 			}

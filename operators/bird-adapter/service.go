@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"sync"
 	"time"
@@ -105,7 +106,13 @@ type AdapterService struct {
 
 	routeOperatorEndpoint    string                           // gRPC endpoint of the route operator's RouteService for RIB updates
 	routeOperatorCredentials credentials.TransportCredentials // Transport credentials for that endpoint
-	log                      *zap.Logger
+	// routeOperatorDialOptions follow the adapter's own options for that
+	// endpoint, so they override them.
+	routeOperatorDialOptions []grpc.DialOption
+	// birdDialer connects to the BIRD export sockets in place of the Unix
+	// socket dialer when set.
+	birdDialer bird.Dialer
+	log        *zap.Logger
 }
 
 // AdapterServiceOption configures the AdapterService constructor.
@@ -113,6 +120,8 @@ type AdapterServiceOption func(*adapterServiceOptions)
 
 type adapterServiceOptions struct {
 	RouteOperatorCredentials credentials.TransportCredentials
+	RouteOperatorDialOptions []grpc.DialOption
+	BIRDDialer               bird.Dialer
 	Log                      *zap.Logger
 }
 
@@ -138,6 +147,28 @@ func WithRouteOperatorCredentials(creds credentials.TransportCredentials) Adapte
 	}
 }
 
+// WithRouteOperatorDialOptions adds gRPC dial options to the route operator
+// connection, applied after the adapter's own ones so they override them.
+//
+// A context dialer lets the connection run over an in-memory transport;
+// the endpoint then needs a scheme that skips name resolution, such as
+// passthrough.
+func WithRouteOperatorDialOptions(options ...grpc.DialOption) AdapterServiceOption {
+	return func(o *adapterServiceOptions) {
+		o.RouteOperatorDialOptions = append(o.RouteOperatorDialOptions, options...)
+	}
+}
+
+// WithBIRDDialer sets the function that connects to the BIRD export sockets,
+// a Unix socket dialer by default.
+//
+// Another dialer lets the imports read BIRD over an in-memory transport.
+func WithBIRDDialer(dial func(ctx context.Context, path string) (net.Conn, error)) AdapterServiceOption {
+	return func(o *adapterServiceOptions) {
+		o.BIRDDialer = dial
+	}
+}
+
 func NewAdapterService(
 	routeOperatorEndpoint string,
 	options ...AdapterServiceOption,
@@ -156,6 +187,8 @@ func NewAdapterService(
 		stopped:                  make(chan struct{}),
 		routeOperatorEndpoint:    routeOperatorEndpoint,
 		routeOperatorCredentials: opts.RouteOperatorCredentials,
+		routeOperatorDialOptions: opts.RouteOperatorDialOptions,
+		birdDialer:               opts.BIRDDialer,
 		log:                      opts.Log,
 	}
 }
@@ -349,8 +382,7 @@ func (m *AdapterService) routeLog(params ImportParams) *zap.Logger {
 func (m *AdapterService) prepareImport(params ImportParams) (*importHolder, error) {
 	reconnect := grpcbackoff.DefaultConfig
 	reconnect.MaxDelay = importRetryMaxDelay
-	conn, err := grpc.NewClient(
-		m.routeOperatorEndpoint,
+	dialOptions := []grpc.DialOption{
 		grpc.WithTransportCredentials(m.routeOperatorCredentials),
 		grpc.WithDefaultCallOptions(grpc.UseCompressor(xgrpc.ZstdName)),
 		grpc.WithConnectParams(grpc.ConnectParams{
@@ -368,7 +400,9 @@ func (m *AdapterService) prepareImport(params ImportParams) (*importHolder, erro
 			Timeout:             routeOperatorKeepaliveTimeout,
 			PermitWithoutStream: false,
 		}),
-	)
+	}
+	dialOptions = append(dialOptions, m.routeOperatorDialOptions...)
+	conn, err := grpc.NewClient(m.routeOperatorEndpoint, dialOptions...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to the route operator endpoint: %w", err)
 	}
@@ -378,6 +412,7 @@ func (m *AdapterService) prepareImport(params ImportParams) (*importHolder, erro
 		conn,
 		params,
 		withImportHolderRouteLog(m.routeLog(params)),
+		withImportHolderBIRDDialer(m.birdDialer),
 		withImportHolderLog(m.log.With(zap.String("config", params.Name))),
 	)
 	if err := holder.Open(); err != nil {
@@ -435,6 +470,8 @@ type importHolder struct {
 	// done is closed once the import has exited and released its
 	// connection.
 	done chan struct{}
+	// birdDialer connects to the BIRD export sockets when set.
+	birdDialer bird.Dialer
 	// routeLog reports single routes at the level the import asks for, and
 	// log reports the import itself.
 	routeLog, log *zap.Logger
@@ -443,6 +480,7 @@ type importHolder struct {
 type importHolderOption func(*importHolderOptions)
 
 type importHolderOptions struct {
+	BIRDDialer    bird.Dialer
 	RouteLog, Log *zap.Logger
 }
 
@@ -457,6 +495,14 @@ func newImportHolderOptions() *importHolderOptions {
 func withImportHolderRouteLog(log *zap.Logger) importHolderOption {
 	return func(o *importHolderOptions) {
 		o.RouteLog = log
+	}
+}
+
+// withImportHolderBIRDDialer sets the function that connects to the BIRD
+// export sockets, the reader's own dialer when nil.
+func withImportHolderBIRDDialer(dial bird.Dialer) importHolderOption {
+	return func(o *importHolderOptions) {
+		o.BIRDDialer = dial
 	}
 }
 
@@ -501,9 +547,10 @@ func newImportHolder(
 			params.SourceV6,
 			mpls.WithLog(opts.Log),
 		),
-		done:     make(chan struct{}),
-		routeLog: opts.RouteLog,
-		log:      opts.Log,
+		done:       make(chan struct{}),
+		birdDialer: opts.BIRDDialer,
+		routeLog:   opts.RouteLog,
+		log:        opts.Log,
 	}
 }
 
@@ -767,13 +814,14 @@ func (m *importHolder) newExport(attempt *importAttempt) *bird.Export {
 		m.pushMPLS(ctx)
 	}
 
-	return bird.NewExportReader(
-		m.config,
-		onUpdate,
-		onFlush,
+	options := []bird.ExportReaderOption{
 		bird.WithExportReaderIdle(onIdle),
 		bird.WithExportReaderLog(m.routeLog),
-	)
+	}
+	if m.birdDialer != nil {
+		options = append(options, bird.WithExportReaderDialer(m.birdDialer))
+	}
+	return bird.NewExportReader(m.config, onUpdate, onFlush, options...)
 }
 
 // pushMPLS delivers the MPLS changes, only logging a failure so that it

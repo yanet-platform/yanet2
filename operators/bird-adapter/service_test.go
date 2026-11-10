@@ -11,7 +11,9 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -21,7 +23,9 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/status"
+	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
@@ -337,25 +341,121 @@ func Test_AdapterService_ServerClosedStreamRestarts(t *testing.T) {
 }
 
 // Test_AdapterService_Close_DuringRetryBackoff verifies that closing the
-// service stops an import that the route operator keeps rejecting, without
-// waiting out its retry delay.
+// service stops an import that the route operator keeps rejecting at once,
+// without waiting out its retry delay.
 func Test_AdapterService_Close_DuringRetryBackoff(t *testing.T) {
-	socket := startQuietBIRDExport(t)
-	recorder := &feedRIBRecorder{Handle: func(idx int, stream feedRIBServerStream) error {
-		return status.Error(codes.Unavailable, "route operator rejects the stream")
-	}}
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	serveRouteService(t, listener, recorder)
-	service := startImport(t, listener.Addr().String(), socket)
+	synctest.Test(t, func(t *testing.T) {
+		network := newMemoryNetwork()
+		serveBIRDExport(t, network.Listen("bird.sock"), quietBIRDExport)
+		opened := make(chan time.Time, 64)
+		serveRouteService(t, network.Listen(memoryRouteOperator), rejectingRecorder(opened))
+		service := startMemoryImport(t, network, newImportRequest(t, "bird.sock"))
 
-	// The retry delay before the fifth stream is at least 840 ms.
-	require.Eventually(t, func() bool { return len(recorder.Streams()) >= 4 },
-		10*time.Second, 10*time.Millisecond,
-	)
-	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
-	defer cancel()
-	require.NoError(t, service.Close(ctx))
+		// The delay before the sixteenth stream is at least 15 s.
+		for range 15 {
+			receiveEvent(t, opened)
+		}
+		synctest.Wait()
+
+		closing := time.Now()
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		require.NoError(t, service.Close(ctx))
+		require.Zero(t, time.Since(closing))
+	})
+}
+
+// Test_AdapterService_RetryDelay_CappedAfterJitter verifies that no wait
+// between attempts the route operator rejects at once exceeds 30 s, the
+// jitter included, and that the waits do reach that cap.
+func Test_AdapterService_RetryDelay_CappedAfterJitter(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		network := newMemoryNetwork()
+		serveBIRDExport(t, network.Listen("bird.sock"), quietBIRDExport)
+		opened := make(chan time.Time, 64)
+		serveRouteService(t, network.Listen(memoryRouteOperator), rejectingRecorder(opened))
+		startMemoryImport(t, network, newImportRequest(t, "bird.sock"))
+
+		// The delay grows past the cap after about ten attempts; half of
+		// the later ones would overshoot it without the cap.
+		previous := receiveEvent(t, opened)
+		capped := 0
+		for range 40 {
+			next := receiveEvent(t, opened)
+			delay := next.Sub(previous)
+			require.LessOrEqual(t, delay, 30*time.Second)
+			if delay == 30*time.Second {
+				capped++
+			}
+			previous = next
+		}
+		require.NotZero(t, capped, "no retry delay reached the cap")
+	})
+}
+
+// Test_AdapterService_RetryDelay_ResetAfterHealthyAttempt verifies that an
+// attempt that stayed up for ten minutes makes the next retry wait the
+// initial delay again, and that a shorter one keeps the grown delay.
+func Test_AdapterService_RetryDelay_ResetAfterHealthyAttempt(t *testing.T) {
+	cases := []struct {
+		name   string
+		uptime time.Duration
+		// check asserts the wait between the end of the long attempt and
+		// the next stream.
+		check func(t *testing.T, delay time.Duration)
+	}{
+		{
+			name:   "ten minutes up restarts from the initial delay",
+			uptime: 10 * time.Minute,
+			check: func(t *testing.T, delay time.Duration) {
+				// The initial 500 ms delay with its 50 % jitter.
+				require.LessOrEqual(t, delay, 750*time.Millisecond)
+			},
+		},
+		{
+			name:   "less than ten minutes up keeps the capped delay",
+			uptime: 10*time.Minute - time.Second,
+			check: func(t *testing.T, delay time.Duration) {
+				// The 30 s cap with its 50 % jitter.
+				require.GreaterOrEqual(t, delay, 15*time.Second)
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				// Twenty rejected streams grow the delay to its cap, then
+				// the route operator keeps one stream for the uptime.
+				const longAttempt = 20
+				network := newMemoryNetwork()
+				serveBIRDExport(t, network.Listen("bird.sock"), quietBIRDExport)
+				opened := make(chan time.Time, 64)
+				recorder := &feedRIBRecorder{Handle: func(idx int, stream feedRIBServerStream) error {
+					select {
+					case opened <- time.Now():
+					default:
+					}
+					if idx == longAttempt {
+						select {
+						case <-time.After(tc.uptime):
+						case <-stream.Context().Done():
+						}
+					}
+					return status.Error(codes.Unavailable, "route operator rejects the stream")
+				}}
+				serveRouteService(t, network.Listen(memoryRouteOperator), recorder)
+				startMemoryImport(t, network, newImportRequest(t, "bird.sock"))
+
+				var long time.Time
+				for range longAttempt + 1 {
+					long = receiveEvent(t, opened)
+				}
+				next := receiveEvent(t, opened)
+				tc.check(t, next.Sub(long.Add(tc.uptime)))
+			})
+		})
+	}
 }
 
 // Test_AdapterService_BIRDSocketFailureReleasesBlockedSend verifies that a
@@ -585,47 +685,48 @@ func Test_AdapterService_SetupConfig_NoSocketsStartsNoStream(t *testing.T) {
 }
 
 // Test_AdapterService_IdleImportSendsHeartbeats verifies that an import
-// whose BIRD stays quiet sends named heartbeats on its stream.
+// whose BIRD stays quiet after its table sends one named heartbeat per dump
+// timeout on its stream.
 func Test_AdapterService_IdleImportSendsHeartbeats(t *testing.T) {
-	socket := startQuietBIRDExport(t)
-	heartbeats := make(chan *routepb.Update, 16)
-	recorder := &feedRIBRecorder{Handle: func(idx int, stream feedRIBServerStream) error {
-		for {
-			update, err := stream.Recv()
-			if err != nil {
-				return err
-			}
-			if update.GetHeartbeat() {
-				select {
-				case heartbeats <- update:
-				default:
+	synctest.Test(t, func(t *testing.T) {
+		const dumpTimeout = 7 * time.Second
+		network := newMemoryNetwork()
+		serveBIRDExport(t, network.Listen("bird.sock"), quietBIRDExport)
+		committed := make(chan time.Time, 1)
+		heartbeats := make(chan receivedUpdate, 16)
+		recorder := &feedRIBRecorder{Handle: func(idx int, stream feedRIBServerStream) error {
+			for {
+				update, err := stream.Recv()
+				if err != nil {
+					return err
+				}
+				switch {
+				case update.GetHeartbeat():
+					select {
+					case heartbeats <- receivedUpdate{At: time.Now(), Update: update}:
+					default:
+					}
+				case update.GetRoute() == nil:
+					select {
+					case committed <- time.Now():
+					default:
+					}
 				}
 			}
-		}
-	}}
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	serveRouteService(t, listener, recorder)
-	request := newImportRequest(t, socket)
-	request.Config.DumpTimeout = int64(20 * time.Millisecond)
-	service := birdadapter.NewAdapterService(listener.Addr().String())
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), 5*time.Second)
-		defer cancel()
-		require.NoError(t, service.Close(ctx))
-	})
-	_, err = service.SetupConfig(t.Context(), request)
-	require.NoError(t, err)
+		}}
+		serveRouteService(t, network.Listen(memoryRouteOperator), recorder)
+		request := newImportRequest(t, "bird.sock")
+		request.Config.DumpTimeout = int64(dumpTimeout)
+		startMemoryImport(t, network, request)
 
-	for range 2 {
-		select {
-		case update := <-heartbeats:
-			require.Equal(t, "bird0", update.GetName())
-			require.Nil(t, update.GetRoute())
-		case <-time.After(5 * time.Second):
-			t.Fatal("the idle import sent no heartbeat")
+		start := receiveEvent(t, committed)
+		for idx := range 3 {
+			heartbeat := receiveEvent(t, heartbeats)
+			require.Equal(t, time.Duration(idx+1)*dumpTimeout, heartbeat.At.Sub(start))
+			require.Equal(t, "bird0", heartbeat.Update.GetName())
+			require.Nil(t, heartbeat.Update.GetRoute())
 		}
-	}
+	})
 }
 
 // Test_AdapterService_FailedHeartbeatReplaysOnNewStream verifies that a
@@ -679,124 +780,111 @@ func Test_AdapterService_FailedHeartbeatReplaysOnNewStream(t *testing.T) {
 // only after the import it replaced itself has exited.
 //
 // The first import is held in its shutdown by a blocking log write while a
-// second setup replaces it and a third one replaces the second.
+// second setup replaces it and a third one replaces the second; the third
+// import stays silent for an hour of fake time until the first one exits.
 func Test_AdapterService_SetupConfig_ChainedReplacementsNeverOverlap(t *testing.T) {
-	firstSocket := startQuietBIRDExport(t)
-	secondSocket := startQuietBIRDExport(t)
-	thirdPrefix := netip.MustParsePrefix("2001:db8:3::/48")
-	thirdSocket := startBIRDExport(t, func(idx int, connection net.Conn) error {
-		_, _ = connection.Write(birdRouteChunk(3))
-		_, _ = io.Copy(io.Discard, connection)
-		return nil
-	})
-	firstCommitted := make(chan struct{}, 1)
-	thirdSent := make(chan struct{}, 1)
-	recorder := &feedRIBRecorder{Handle: func(idx int, stream feedRIBServerStream) error {
-		for {
-			update, err := stream.Recv()
-			if err != nil {
-				return err
-			}
-			if update.GetHeartbeat() {
-				continue
-			}
-			if update.GetRoute() == nil {
-				select {
-				case firstCommitted <- struct{}{}:
-				default:
+	synctest.Test(t, func(t *testing.T) {
+		network := newMemoryNetwork()
+		serveBIRDExport(t, network.Listen("first.sock"), quietBIRDExport)
+		serveBIRDExport(t, network.Listen("second.sock"), quietBIRDExport)
+		thirdPrefix := netip.MustParsePrefix("2001:db8:3::/48")
+		serveBIRDExport(t, network.Listen("third.sock"), func(idx int, connection net.Conn) error {
+			_, _ = connection.Write(birdRouteChunk(3))
+			_, _ = io.Copy(io.Discard, connection)
+			return nil
+		})
+		firstCommitted := make(chan struct{}, 1)
+		thirdSent := make(chan struct{}, 1)
+		recorder := &feedRIBRecorder{Handle: func(idx int, stream feedRIBServerStream) error {
+			for {
+				update, err := stream.Recv()
+				if err != nil {
+					return err
 				}
-				continue
-			}
-			prefix, err := update.GetRoute().GetPrefix().ToPrefix()
-			if err == nil && prefix == thirdPrefix {
-				select {
-				case thirdSent <- struct{}{}:
-				default:
+				if update.GetHeartbeat() {
+					continue
+				}
+				if update.GetRoute() == nil {
+					select {
+					case firstCommitted <- struct{}{}:
+					default:
+					}
+					continue
+				}
+				prefix, err := update.GetRoute().GetPrefix().ToPrefix()
+				if err == nil && prefix == thirdPrefix {
+					select {
+					case thirdSent <- struct{}{}:
+					default:
+					}
 				}
 			}
+		}}
+		serveRouteService(t, network.Listen(memoryRouteOperator), recorder)
+
+		holdExit := &blockingLogCore{
+			Message: "stopped BIRD import",
+			Blocked: make(chan struct{}),
+			Release: make(chan struct{}),
 		}
-	}}
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	serveRouteService(t, listener, recorder)
+		service := startMemoryImport(t, network, newImportRequest(t, "first.sock"),
+			birdadapter.WithAdapterServiceLog(zap.New(holdExit)),
+		)
+		// Release the held import before the service closes.
+		t.Cleanup(holdExit.Unblock)
+		receiveEvent(t, firstCommitted)
 
-	holdExit := &blockingLogCore{
-		Message: "stopped BIRD import",
-		Blocked: make(chan struct{}),
-		Release: make(chan struct{}),
-	}
-	service := birdadapter.NewAdapterService(listener.Addr().String(),
-		birdadapter.WithAdapterServiceLog(zap.New(holdExit)),
-	)
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), 5*time.Second)
-		defer cancel()
-		require.NoError(t, service.Close(ctx))
+		var setups errgroup.Group
+		setups.Go(func() error {
+			_, err := service.SetupConfig(t.Context(), newImportRequest(t, "second.sock"))
+			return err
+		})
+		receiveEvent(t, holdExit.Blocked)
+		requireImportSockets(t, service, "second.sock")
+
+		setups.Go(func() error {
+			_, err := service.SetupConfig(t.Context(), newImportRequest(t, "third.sock"))
+			return err
+		})
+		requireImportSockets(t, service, "third.sock")
+
+		time.Sleep(time.Hour)
+		synctest.Wait()
+		select {
+		case <-thirdSent:
+			t.Fatal("the third import sent while the first one was still running")
+		default:
+		}
+
+		holdExit.Unblock()
+		require.NoError(t, setups.Wait())
+		receiveEvent(t, thirdSent)
 	})
-	t.Cleanup(holdExit.Unblock)
-
-	_, err = service.SetupConfig(t.Context(), newImportRequest(t, firstSocket))
-	require.NoError(t, err)
-	select {
-	case <-firstCommitted:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the first import sent nothing")
-	}
-
-	var setups errgroup.Group
-	setups.Go(func() error {
-		_, err := service.SetupConfig(t.Context(), newImportRequest(t, secondSocket))
-		return err
-	})
-	select {
-	case <-holdExit.Blocked:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the first import did not start its shutdown")
-	}
-	requireImportSockets(t, service, secondSocket)
-
-	setups.Go(func() error {
-		_, err := service.SetupConfig(t.Context(), newImportRequest(t, thirdSocket))
-		return err
-	})
-	requireImportSockets(t, service, thirdSocket)
-
-	select {
-	case <-thirdSent:
-		t.Fatal("the third import sent while the first one was still running")
-	case <-time.After(300 * time.Millisecond):
-	}
-
-	holdExit.Unblock()
-	require.NoError(t, setups.Wait())
-	select {
-	case <-thirdSent:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the third import sent nothing after the first one exited")
-	}
 }
 
-// requireImportSockets waits until the only import of the service reads
-// socket.
+// requireImportSockets waits until every goroutine of the bubble blocks and
+// requires the only import of the service to read socket then.
 func requireImportSockets(t *testing.T, service *birdadapter.AdapterService, socket string) {
 	t.Helper()
-	require.Eventually(t, func() bool {
-		sessions, err := service.ListSessions(t.Context(), &adapterpb.ListSessionsRequest{})
-		require.NoError(t, err)
-		return len(sessions.GetSessions()) == 1 &&
-			slices.Equal(sessions.GetSessions()[0].GetSockets(), []string{socket})
-	}, 5*time.Second, time.Millisecond)
+	synctest.Wait()
+	sessions, err := service.ListSessions(t.Context(), &adapterpb.ListSessionsRequest{})
+	require.NoError(t, err)
+	require.Len(t, sessions.GetSessions(), 1)
+	require.Equal(t, []string{socket}, sessions.GetSessions()[0].GetSockets())
 }
 
 // blockingLogCore discards every log entry except the first one with
 // Message, whose write blocks until Unblock is called.
+//
+// Only the held write blocks, and on a channel, so the later writes leave
+// a synctest bubble able to go idle.
 type blockingLogCore struct {
 	Message string
 	// Blocked is closed once the held write has started.
 	Blocked chan struct{}
 	Release chan struct{}
 
-	hold    sync.Once
+	held    atomic.Bool
 	release sync.Once
 }
 
@@ -812,10 +900,10 @@ func (m *blockingLogCore) Check(entry zapcore.Entry, checked *zapcore.CheckedEnt
 }
 
 func (m *blockingLogCore) Write(zapcore.Entry, []zapcore.Field) error {
-	m.hold.Do(func() {
+	if m.held.CompareAndSwap(false, true) {
 		close(m.Blocked)
 		<-m.Release
-	})
+	}
 	return nil
 }
 
@@ -956,9 +1044,18 @@ func startBIRDExport(t *testing.T, serve func(idx int, connection net.Conn) erro
 	// Use a short path because Unix socket names have a platform length limit.
 	directory, err := os.MkdirTemp("", "bird-export-")
 	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, os.RemoveAll(directory)) })
 	socket := filepath.Join(directory, "export.sock")
 	listener, err := net.Listen("unix", socket)
 	require.NoError(t, err)
+	serveBIRDExport(t, listener, serve)
+	return socket
+}
+
+// serveBIRDExport passes every connection listener accepts and its ordinal
+// to serve, and closes listener and the connections when the test ends.
+func serveBIRDExport(t *testing.T, listener net.Listener, serve func(idx int, connection net.Conn) error) {
+	t.Helper()
 	var workers errgroup.Group
 	workers.Go(func() error {
 		for idx := 0; ; idx++ {
@@ -977,21 +1074,22 @@ func startBIRDExport(t *testing.T, serve func(idx int, connection net.Conn) erro
 	t.Cleanup(func() {
 		_ = listener.Close()
 		require.NoError(t, workers.Wait())
-		require.NoError(t, os.RemoveAll(directory))
 	})
-	return socket
 }
 
-// startQuietBIRDExport serves a BIRD export socket that announces one route
-// to every connection and then stays quiet, whether or not the import
-// hangs up first.
+// startQuietBIRDExport serves a BIRD export socket that serves every
+// connection with quietBIRDExport.
 func startQuietBIRDExport(t *testing.T) string {
 	t.Helper()
-	return startBIRDExport(t, func(idx int, connection net.Conn) error {
-		_, _ = connection.Write(birdRouteChunk(1))
-		_, _ = io.Copy(io.Discard, connection)
-		return nil
-	})
+	return startBIRDExport(t, quietBIRDExport)
+}
+
+// quietBIRDExport announces one route to connection and then stays quiet,
+// whether or not the import hangs up first.
+func quietBIRDExport(idx int, connection net.Conn) error {
+	_, _ = connection.Write(birdRouteChunk(1))
+	_, _ = io.Copy(io.Discard, connection)
+	return nil
 }
 
 // floodBIRDExport writes routes until the reader stops taking them for a
@@ -1024,4 +1122,106 @@ func birdRouteChunk(group byte) []byte {
 	}
 	binary.LittleEndian.PutUint32(update[:4], uint32(len(update)-4))
 	return update
+}
+
+// receivedUpdate is an update a route operator received and when.
+type receivedUpdate struct {
+	At     time.Time
+	Update *routepb.Update
+}
+
+// memoryRouteOperator is the address the route operator listens on in a
+// memory network.
+const memoryRouteOperator = "route-operator"
+
+// startMemoryImport sets up the import request describes against the route
+// operator and the BIRD sockets bound on network, and closes the service
+// when the test ends, before the fixtures it reads from stop.
+func startMemoryImport(
+	t *testing.T,
+	network *memoryNetwork,
+	request *adapterpb.SetupConfigRequest,
+	options ...birdadapter.AdapterServiceOption,
+) *birdadapter.AdapterService {
+	t.Helper()
+	options = append(options,
+		birdadapter.WithRouteOperatorDialOptions(
+			grpc.WithContextDialer(network.Dial),
+			// The zstd codec pools its decoders process-wide, and a decoder
+			// made in one bubble must never run in another.
+			grpc.WithDefaultCallOptions(grpc.UseCompressor(encoding.Identity)),
+		),
+		birdadapter.WithBIRDDialer(network.Dial),
+	)
+	service := birdadapter.NewAdapterService("passthrough:///"+memoryRouteOperator, options...)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), 5*time.Second)
+		defer cancel()
+		require.NoError(t, service.Close(ctx))
+	})
+	_, err := service.SetupConfig(t.Context(), request)
+	require.NoError(t, err)
+	return service
+}
+
+// rejectingRecorder returns a route operator that fails every FeedRIB stream
+// at once, reporting the time each one opened on opened while it has room.
+func rejectingRecorder(opened chan<- time.Time) *feedRIBRecorder {
+	return &feedRIBRecorder{Handle: func(idx int, stream feedRIBServerStream) error {
+		select {
+		case opened <- time.Now():
+		default:
+		}
+		return status.Error(codes.Unavailable, "route operator rejects the stream")
+	}}
+}
+
+// receiveEvent waits for the next value on events for at most an hour,
+// of fake time inside a bubble.
+func receiveEvent[T any](t *testing.T, events <-chan T) T {
+	t.Helper()
+	select {
+	case event := <-events:
+		return event
+	case <-time.After(time.Hour):
+		t.Fatal("the awaited event did not happen within an hour")
+		var zero T
+		return zero
+	}
+}
+
+// memoryNetwork connects dialers to the bufconn listeners bound on it by
+// address, whose connections block on condition variables: a goroutine
+// waiting on one counts as durably blocked inside a synctest bubble, which a
+// goroutine waiting on a socket never does.
+type memoryNetwork struct {
+	mu        sync.Mutex
+	listeners map[string]*bufconn.Listener
+}
+
+func newMemoryNetwork() *memoryNetwork {
+	return &memoryNetwork{listeners: map[string]*bufconn.Listener{}}
+}
+
+// Listen binds a new listener to address.
+func (m *memoryNetwork) Listen(address string) *bufconn.Listener {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	listener := bufconn.Listen(64 * 1024)
+	m.listeners[address] = listener
+	return listener
+}
+
+// Dial connects to the listener bound to address, and fails as a refused
+// connection does when none is.
+func (m *memoryNetwork) Dial(ctx context.Context, address string) (net.Conn, error) {
+	m.mu.Lock()
+	listener := m.listeners[address]
+	m.mu.Unlock()
+
+	if listener == nil {
+		return nil, &net.OpError{Op: "dial", Net: "memory", Err: syscall.ECONNREFUSED}
+	}
+	return listener.DialContext(ctx)
 }
