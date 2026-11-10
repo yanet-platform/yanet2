@@ -123,32 +123,52 @@ func (m *ReconcilerMetrics) Collect() []*commonpb.Metric {
 	return metricList
 }
 
-// ApplyMetrics records the outcomes of applying state to one target.
-type ApplyMetrics struct {
+// MetricsConfig names the metrics an operator serves.
+type MetricsConfig struct {
+	// Name scopes the metrics service, see MetricsServiceName.
+	Name string
+	// Prefix starts the name of every reconcile and gateway apply family.
+	Prefix string
+	// Labels go on every reconcile and gateway apply series.
+	Labels []*commonpb.Label
+}
+
+// applyDurationBounds are the histogram bucket upper bounds, in seconds, of
+// the apply duration of one gateway.
+var applyDurationBounds = []float64{
+	0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10,
+}
+
+// applyMetrics records the outcomes of applying the desired state to one
+// gateway.
+type applyMetrics struct {
 	prefix string
 	labels []*commonpb.Label
 
-	total  metrics.Counter
-	errors metrics.Counter
+	total    metrics.Counter
+	errors   metrics.Counter
+	duration *metrics.Histogram
 }
 
-// NewApplyMetrics constructs a collector for apply outcomes.
-func NewApplyMetrics(prefix string, labels ...*commonpb.Label) *ApplyMetrics {
-	return &ApplyMetrics{
-		prefix: prefix,
-		labels: labels,
+// newApplyMetrics constructs a collector for apply outcomes.
+func newApplyMetrics(prefix string, labels ...*commonpb.Label) *applyMetrics {
+	return &applyMetrics{
+		prefix:   prefix,
+		labels:   labels,
+		duration: metrics.NewHistogram(applyDurationBounds),
 	}
 }
 
-// Observe records one apply attempt and whether it failed.
-func (m *ApplyMetrics) Observe(err error) {
+// Observe records one apply, how long it took and whether it failed.
+func (m *applyMetrics) Observe(duration time.Duration, err error) {
 	m.total.Inc()
 	if err != nil {
 		m.errors.Inc()
 	}
+	m.duration.Observe(duration.Seconds())
 }
 
-func (m *ApplyMetrics) Collect() []*commonpb.Metric {
+func (m *applyMetrics) Collect() []*commonpb.Metric {
 	// Load errors first because updates publish the attempt first. This keeps
 	// a concurrent snapshot from reporting more errors than attempts.
 	errors := m.errors.Load()
@@ -164,6 +184,11 @@ func (m *ApplyMetrics) Collect() []*commonpb.Metric {
 			errors,
 			m.labels...,
 		),
+		{
+			Name:   makeMetricName(m.prefix, "apply_duration_seconds"),
+			Labels: m.labels,
+			Value:  commonpb.MetricValueToProto(m.duration),
+		},
 	}
 }
 

@@ -12,9 +12,6 @@ import (
 	operatorpb "github.com/yanet-platform/yanet2/operators/pipeline/operatorpb/v1"
 )
 
-// Actuator applies a desired stage configuration.
-type Actuator = operator.Actuator[*StageConfig]
-
 // Operator is the pipeline operator's thin wrapper around the generic
 // operator framework.
 type Operator struct {
@@ -34,8 +31,7 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	for idx := range cfg.Gateways {
 		gatewayMetrics[idx] = NewGatewayMetrics(cfg.Gateways[idx].Name)
 	}
-	reconcilerMetrics := operator.NewReconcilerMetrics("pipeline_operator")
-	metrics := NewMetrics(reconcilerMetrics, gatewayMetrics)
+	metrics := NewMetrics(gatewayMetrics)
 
 	service := NewService(WithServiceLog(log))
 
@@ -54,7 +50,7 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		WithStageQueueLog(log),
 	)
 
-	actuators := make([]Actuator, 0, len(cfg.Gateways))
+	gateways := make([]operator.Target[*StageConfig], 0, len(cfg.Gateways))
 	for idx, gw := range cfg.Gateways {
 		actuator, err := NewGatewayActuator(
 			gw,
@@ -63,20 +59,18 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 			WithGatewayActuatorLog(log),
 		)
 		if err != nil {
-			for _, a := range actuators {
-				_ = a.Close()
+			for _, gateway := range gateways {
+				_ = gateway.Actuator.Close()
 			}
 			return nil, fmt.Errorf("failed to construct gateway actuator %q: %w", gw.Name, err)
 		}
 
-		observed := operator.NewObservedActuator(actuator, fmt.Sprintf("pipeline:%s", gw.Name), tracker.Observe)
-		actuators = append(actuators, observed)
+		gateways = append(gateways, operator.Target[*StageConfig]{
+			Name:     gw.Name,
+			Actuator: actuator,
+			Scope:    pipelineScope(gw.Name),
+		})
 	}
-
-	fanOut := operator.NewFanOutActuator(
-		actuators,
-		operator.WithFanOutLog(log),
-	)
 
 	stages := cfg.Stages
 	services := []operator.ServiceRegistrar{
@@ -84,14 +78,14 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 			operatorpb.RegisterPipelineOperatorServiceServer(s, service)
 			return operatorpb.PipelineOperatorService_ServiceDesc.ServiceName
 		},
-		operator.NewMetricsServiceRegistrar("pipeline", metrics),
 	}
 
 	app := operator.NewOperator(
-		fanOut,
+		gateways,
 		source.Latest(),
 		operator.WithGRPCServer(cfg.Server, services...),
 		operator.WithReadiness("pipeline", tracker),
+		operator.WithMetrics(operator.MetricsConfig{Name: "pipeline", Prefix: "pipeline_operator"}, metrics),
 		operator.WithReconcile(cfg.Reconcile),
 		operator.WithGateways(cfg.Register, cfg.Gateways...),
 		operator.WithPreRun(func(ctx context.Context) error {
@@ -107,7 +101,6 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 
 			return nil
 		}),
-		operator.WithMetrics(reconcilerMetrics),
 		operator.WithLog(log),
 	)
 
@@ -126,6 +119,11 @@ func (m *Operator) Run(ctx context.Context) error {
 	return m.app.Run(ctx)
 }
 
+// pipelineScope names the readiness scope of the stages on a gateway.
+func pipelineScope(gateway string) string {
+	return "pipeline:" + gateway
+}
+
 // readinessScopeSpecs uses the reconcile cadence for gateways with stages.
 // Gateways without stages have no freshness contract because they stay idle.
 func readinessScopeSpecs(cfg *Config) []readiness.ScopeSpec {
@@ -136,7 +134,7 @@ func readinessScopeSpecs(cfg *Config) []readiness.ScopeSpec {
 	specs := make([]readiness.ScopeSpec, len(cfg.Gateways))
 	for idx, gw := range cfg.Gateways {
 		specs[idx] = readiness.ScopeSpec{
-			Name:                        fmt.Sprintf("pipeline:%s", gw.Name),
+			Name:                        pipelineScope(gw.Name),
 			ExpectedObservationInterval: freshness,
 		}
 	}

@@ -17,7 +17,6 @@ import (
 // GatewayActuatorMetricsObserver receives semantic events from a
 // single gateway actuator and translates them into metrics.
 type GatewayActuatorMetricsObserver interface {
-	OnApplyCompleted(err error)
 	OnResourceUpdated(kind string, err error)
 	OnGC(deleted, failed int, err error)
 }
@@ -85,7 +84,6 @@ func (m *GatewayActuator) Close() error {
 func (m *GatewayActuator) Apply(ctx context.Context, stage *StageConfig) error {
 	m.stages.OnStageApplying(m.name, stage)
 	err := m.applyStage(ctx, stage)
-	m.metrics.OnApplyCompleted(err)
 	if err != nil {
 		m.stages.OnStageApplied(m.name, stage, err)
 		return fmt.Errorf("failed to apply stage to gateway %q: %w", m.name, err)

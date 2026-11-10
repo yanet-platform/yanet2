@@ -11,6 +11,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/readiness"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 )
@@ -47,6 +48,13 @@ type readinessOption struct {
 	Tracker *readiness.Tracker
 }
 
+type metricsOption struct {
+	// Config names the served families and their service.
+	Config MetricsConfig
+	// Collectors add the operator's own families.
+	Collectors []MetricsCollector
+}
+
 type options struct {
 	// Reconcile supplies timing defaults consumed by the reconcile loop.
 	Reconcile ReconcileConfig
@@ -58,8 +66,8 @@ type options struct {
 	Workers []Runner
 	// PreRun initializes state before concurrent work starts.
 	PreRun PreRun
-	// Metrics receives reconcile-loop lifecycle events.
-	Metrics ReconcilerMetricsObserver
+	// Metrics is nil when the operator serves no metrics.
+	Metrics *metricsOption
 	// GRPCServer is nil when the embedded server is disabled.
 	GRPCServer *grpcServerOption
 	// Readiness is nil when the operator reports no readiness.
@@ -75,9 +83,8 @@ func newOptions() *options {
 			InitialBackoff: xcfg.MustNonZero(DefaultReconcileInitialBackoff),
 			MaxBackoff:     xcfg.MustNonZero(DefaultReconcileMaxBackoff),
 		},
-		PreRun:  func(context.Context) error { return nil },
-		Metrics: NoopReconcilerMetricsObserver{},
-		Log:     zap.NewNop(),
+		PreRun: func(context.Context) error { return nil },
+		Log:    zap.NewNop(),
 	}
 }
 
@@ -170,10 +177,19 @@ func WithPreRun(fn PreRun) Option {
 	}
 }
 
-// WithMetrics attaches the metrics observer for the reconcile loop.
-func WithMetrics(observer ReconcilerMetricsObserver) Option {
+// WithMetrics serves the operator's metrics under the configured name: the
+// reconcile families, the apply families of every target, labelled with its
+// name as the gateway, then the families of every collector.
+//
+// The embedded server, when enabled, serves them in place of a metrics
+// service registered by hand: a second registration under that name stops
+// the process at startup.
+func WithMetrics(cfg MetricsConfig, collectors ...MetricsCollector) Option {
 	return func(o *options) {
-		o.Metrics = observer
+		o.Metrics = &metricsOption{
+			Config:     cfg,
+			Collectors: collectors,
+		}
 	}
 }
 
@@ -182,8 +198,9 @@ func WithMetrics(observer ReconcilerMetricsObserver) Option {
 // It always runs the optional PreRun hook, the reconciler, and any
 // configured workers.
 //
-// The embedded gRPC server, gateway-registration loop and readiness are
-// opt-in via WithGRPCServer, WithGateways and WithReadiness respectively.
+// The embedded gRPC server, gateway-registration loop, readiness and
+// metrics are opt-in via WithGRPCServer, WithGateways, WithReadiness and
+// WithMetrics respectively.
 type Operator[T any] struct {
 	server            *GRPCServer
 	endpoint          string
@@ -201,9 +218,9 @@ type Operator[T any] struct {
 }
 
 // NewOperator returns an operator that applies the published desired state
-// through the actuator.
+// to every target.
 func NewOperator[T any](
-	actuator Actuator[T],
+	targets []Target[T],
 	latest *Latest[T],
 	options ...Option,
 ) *Operator[T] {
@@ -226,14 +243,25 @@ func NewOperator[T any](
 		tracker = opts.Readiness.Tracker
 	}
 
+	recorded := newOperatorMetrics(opts.Metrics, targets)
+	appliers := make([]*targetApplier[T], len(targets))
+	for idx, target := range targets {
+		appliers[idx] = &targetApplier[T]{
+			target:  target,
+			metrics: recorded.Targets[idx],
+			tracker: tracker,
+		}
+	}
+	actuator := &fanOut[T]{appliers: appliers}
+
 	if opts.GRPCServer != nil {
-		services := opts.GRPCServer.Services
+		// Clipped, so the appends never write into the caller's slice.
+		services := slices.Clip(opts.GRPCServer.Services)
 		if opts.Readiness != nil {
-			// Clipped, so the append never writes into the caller's slice.
-			services = append(
-				slices.Clip(services),
-				NewReadinessServiceRegistrar(opts.Readiness.Name, tracker),
-			)
+			services = append(services, NewReadinessServiceRegistrar(opts.Readiness.Name, tracker))
+		}
+		if opts.Metrics != nil {
+			services = append(services, NewMetricsServiceRegistrar(opts.Metrics.Config.Name, recorded.Collectors...))
 		}
 
 		server, serviceNames = NewGRPCServer(
@@ -253,7 +281,7 @@ func NewOperator[T any](
 			opts.Reconcile.InitialBackoff.Unwrap(),
 			opts.Reconcile.MaxBackoff.Unwrap(),
 		),
-		WithReconcilerMetrics(opts.Metrics),
+		WithReconcilerMetrics(recorded.Reconciler),
 		WithReconcilerLog(log),
 	)
 
@@ -276,6 +304,43 @@ func NewOperator[T any](
 // Close releases resources owned by the Operator.
 func (m *Operator[T]) Close() error {
 	return m.actuator.Close()
+}
+
+// operatorMetrics are the families an operator records about its own work.
+type operatorMetrics struct {
+	// Reconciler observes the reconcile loop.
+	Reconciler ReconcilerMetricsObserver
+	// Targets record the apply outcomes of every target, in target order.
+	Targets []*applyMetrics
+	// Collectors serve all of the above, then the operator's own families.
+	Collectors []MetricsCollector
+}
+
+// newOperatorMetrics creates the families the option names, or unnamed
+// ones that nothing serves when there is no option.
+func newOperatorMetrics[T any](option *metricsOption, targets []Target[T]) operatorMetrics {
+	recorded := operatorMetrics{
+		Reconciler: NoopReconcilerMetricsObserver{},
+		Targets:    make([]*applyMetrics, len(targets)),
+	}
+
+	config := MetricsConfig{}
+	if option != nil {
+		config = option.Config
+		reconciler := NewReconcilerMetrics(config.Prefix, config.Labels...)
+		recorded.Reconciler = reconciler
+		recorded.Collectors = append(recorded.Collectors, reconciler)
+	}
+	for idx, target := range targets {
+		labels := append(slices.Clip(config.Labels), commonpb.NewLabel("gateway", target.Name))
+		recorded.Targets[idx] = newApplyMetrics(makeMetricName(config.Prefix, "gateway"), labels...)
+		recorded.Collectors = append(recorded.Collectors, recorded.Targets[idx])
+	}
+	if option != nil {
+		recorded.Collectors = append(recorded.Collectors, option.Collectors...)
+	}
+
+	return recorded
 }
 
 // Run runs the optional PreRun hook, then runs the reconciler and any

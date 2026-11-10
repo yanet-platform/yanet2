@@ -247,6 +247,48 @@ func requireFIBClassifications(
 	}
 }
 
+// Test_Operator_Metrics_ServesReconcileAndApplyFamilies verifies that the
+// route operator serves the framework's reconcile and gateway apply
+// families under their route_operator names.
+func Test_Operator_Metrics_ServesReconcileAndApplyFamilies(t *testing.T) {
+	_, gatewayEndpoint := startFakeGateway(t)
+	operatorEndpoint := reserveEndpoint(t)
+	cfg := op.DefaultConfig()
+	cfg.NetlinkMonitor.Disabled = true
+	cfg.Readiness.ExpectBird = false
+	cfg.Server.Endpoint = xcfg.MustNonEmptyString(operatorEndpoint)
+	cfg.Gateways = []operator.GatewayConfig{{
+		Name:     "gw0",
+		Endpoint: xcfg.MustNonEmptyString(gatewayEndpoint),
+	}}
+	cfg.Register.Interval = xcfg.MustNonZero(time.Hour)
+	runOperator(t, cfg)
+
+	connection, err := grpc.NewClient(operatorEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, connection.Close()) })
+	response, err := operatorpb.NewMetricsServiceClient(connection).GetMetrics(
+		requestContext(t), &commonpb.GetMetricsRequest{}, grpc.WaitForReady(true),
+	)
+	require.NoError(t, err)
+
+	served := map[string]bool{}
+	for _, metric := range response.GetMetrics() {
+		served[metric.GetName()] = true
+	}
+	for _, name := range []string{
+		"route_operator_reconcile_total",
+		"route_operator_reconcile_errors_total",
+		"route_operator_backoff_seconds",
+		"route_operator_state",
+		"route_operator_gateway_apply_total",
+		"route_operator_gateway_apply_errors_total",
+		"route_operator_gateway_apply_duration_seconds",
+	} {
+		require.True(t, served[name], "metric family %s is not served", name)
+	}
+}
+
 // Test_Operator_UnflushedRoute_ReachesGateway verifies that a route inserted
 // without a flush still reaches the gateway by the next reconcile interval.
 func Test_Operator_UnflushedRoute_ReachesGateway(t *testing.T) {
