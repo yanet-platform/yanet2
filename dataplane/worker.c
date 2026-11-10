@@ -156,7 +156,7 @@ worker_process_staged(
 			if (parse_packet(packet)) {
 				struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 				rte_pktmbuf_free(mbuf);
-				*(worker->dp_worker->drop_count) += 1;
+				*(worker->dp_worker->disposed_count) += 1;
 				continue;
 			}
 
@@ -166,7 +166,7 @@ worker_process_staged(
 				);
 			if (device_ectx == NULL) {
 				rte_pktmbuf_free(ctx->staged[idx]);
-				*(worker->dp_worker->drop_count) += 1;
+				*(worker->dp_worker->disposed_count) += 1;
 				continue;
 			}
 			device_entry_ectx_schedule(
@@ -191,7 +191,7 @@ worker_drop_staged(struct dataplane_worker *worker) {
 			rte_pktmbuf_free(ctx->staged[idx]);
 		}
 
-		*(worker->dp_worker->drop_count) += ctx->staged_count;
+		*(worker->dp_worker->disposed_count) += ctx->staged_count;
 		ctx->staged_count = 0;
 	}
 }
@@ -221,7 +221,7 @@ worker_tx_transmit_cb(struct rte_mbuf **mbufs, size_t count, void *data) {
 	size_t dropped = count - written;
 	if (dropped > 0) {
 		*(worker->dp_worker->local_tx_drops) += dropped;
-		*(worker->dp_worker->drop_count) += dropped;
+		*(worker->dp_worker->disposed_count) += dropped;
 	}
 
 	return written;
@@ -463,7 +463,7 @@ worker_loop_round(struct dataplane_worker *worker) {
 	 */
 	packet_front_drop_output(packet_front);
 
-	*(worker->dp_worker->drop_count) += packet_front->drop_count;
+	*(worker->dp_worker->disposed_count) += packet_front->drop_count;
 	dataplane_drop_packets(worker->dataplane, &packet_front->drop);
 	packet_front_recycle(packet_front);
 }

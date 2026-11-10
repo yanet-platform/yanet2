@@ -54,7 +54,7 @@ check_worker(struct dp_config *dp_config, uint64_t worker_idx) {
 		{"rx_bursts", 0, worker->rx_bursts},
 		{"local_tx_drops", 0, worker->local_tx_drops},
 		{"remote_tx_drops", 0, worker->remote_tx_drops},
-		{"drops", 0, worker->drop_count},
+		{"disposed", 0, worker->disposed_count},
 	};
 
 	for (size_t idx = 0; idx < sizeof(slots) / sizeof(slots[0]); ++idx) {
