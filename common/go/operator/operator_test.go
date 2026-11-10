@@ -17,21 +17,6 @@ import (
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 )
 
-// constantSource always offers the same state and never wakes the loop.
-type constantSource struct {
-	wake chan struct{}
-}
-
-func (m *constantSource) Snapshot() (int, bool) {
-	return 1, true
-}
-
-func (m *constantSource) Wake() <-chan struct{} {
-	return m.wake
-}
-
-func (m *constantSource) Advance(int) {}
-
 // probeResult is what an apply cut off by the shutdown read from the
 // operator's own readiness service.
 type probeResult struct {
@@ -131,9 +116,11 @@ func Test_Operator_Run_StopsInOrder(t *testing.T) {
 				results:  make(chan probeResult, 1),
 			}
 			worker := &releasedWorker{release: make(chan struct{}), err: errWorker}
+			desired := operator.NewLatest[int]()
+			desired.Publish(1)
 			op := operator.NewOperator(
 				actuator,
-				&constantSource{wake: make(chan struct{})},
+				desired,
 				operator.WithGRPCServer(operator.GRPCServerConfig{
 					Endpoint: xcfg.MustNonEmptyString(endpoint),
 				}),

@@ -136,9 +136,14 @@ func NewStaticModuleOperator(
 		actuators = append(actuators, observed)
 	}
 
+	// The targets never change, so they are published once and the interval
+	// alone paces the pushes.
+	desired := NewLatest[[]StaticTarget]()
+	desired.Publish(state)
+
 	return NewOperator(
 		NewFanOutActuator(actuators, WithFanOutLog(log)),
-		newStaticSource(state),
+		desired,
 		WithGRPCServer(
 			cfg.Server,
 			NewMetricsServiceRegistrar(name, metricsCollectors...),
@@ -280,30 +285,6 @@ func resolveMethod(method string, request proto.Message) (resolvedMethod, error)
 	full := "/" + string(descriptor.Parent().FullName()) + "/" + string(descriptor.Name())
 	return resolvedMethod{Full: full, Reply: reply}, nil
 }
-
-// staticSource holds the targets for the lifetime of the operator and never
-// wakes the reconcile loop, so the interval is the sole pacing.
-type staticSource struct {
-	targets []StaticTarget
-	wake    chan struct{}
-}
-
-func newStaticSource(targets []StaticTarget) *staticSource {
-	return &staticSource{
-		targets: targets,
-		wake:    make(chan struct{}),
-	}
-}
-
-func (m *staticSource) Snapshot() ([]StaticTarget, bool) {
-	return m.targets, true
-}
-
-func (m *staticSource) Wake() <-chan struct{} {
-	return m.wake
-}
-
-func (m *staticSource) Advance(_ []StaticTarget) {}
 
 // staticGatewayActuator pushes the targets to one gateway: every module
 // config first, then every function.

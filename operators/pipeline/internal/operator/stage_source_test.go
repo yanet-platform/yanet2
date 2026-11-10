@@ -11,99 +11,65 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 )
 
-// drainWake consumes a single buffered wake signal if present.
-func drainWake(wake <-chan struct{}) bool {
-	select {
-	case <-wake:
-		return true
-	default:
-		return false
-	}
+// headOf returns the stage the queue publishes as the desired state, nil
+// before the first one.
+func headOf(source *StageQueueSource) *StageConfig {
+	return source.Latest().Load().Value
 }
 
-func Test_StageQueueSource_SetStagesPublishesAndWakes(t *testing.T) {
-	src := NewStageQueueSource([]string{"gw0"})
+// Test_StageQueueSource_SetStages_PublishesHead verifies that nothing is
+// published before the first stages are set, and their head after.
+func Test_StageQueueSource_SetStages_PublishesHead(t *testing.T) {
+	source := NewStageQueueSource([]string{"gw0"})
+	require.Zero(t, source.Latest().Load().Number)
 
-	require.False(t, drainWake(src.Wake()), "wake should be empty initially")
+	first := &StageConfig{Name: "first"}
+	source.SetStages([]*StageConfig{first, {Name: "second"}})
 
-	target, ok := src.Snapshot()
-	require.False(t, ok)
-	require.Nil(t, target)
-
-	s1 := &StageConfig{Name: "s1"}
-	src.SetStages([]*StageConfig{s1})
-
-	require.True(t, drainWake(src.Wake()), "SetStages must signal wake")
-
-	target, ok = src.Snapshot()
-	require.True(t, ok)
-	require.Same(t, s1, target)
+	require.Same(t, first, headOf(source))
 }
 
-func Test_StageQueueSource_SwitchReplacesQueue(t *testing.T) {
-	src := NewStageQueueSource([]string{"gw0"})
-
-	s1 := &StageConfig{Name: "s1"}
-	s2 := &StageConfig{Name: "s2"}
-	src.SetStages([]*StageConfig{s1, s2})
-	_ = drainWake(src.Wake())
+// Test_StageQueueSource_Switch_PublishesStage verifies that a switch
+// publishes the new stage in place of the queue.
+func Test_StageQueueSource_Switch_PublishesStage(t *testing.T) {
+	source := NewStageQueueSource([]string{"gw0"})
+	source.SetStages([]*StageConfig{{Name: "first"}, {Name: "second"}})
 
 	other := &StageConfig{Name: "other"}
-	src.Switch(other)
+	source.Switch(other)
 
-	require.True(t, drainWake(src.Wake()))
-
-	target, ok := src.Snapshot()
-	require.True(t, ok)
-	require.Same(t, other, target)
+	require.Same(t, other, headOf(source))
 }
 
-// Snapshot drains a pre-existing wake under the lock.
-func Test_StageQueueSource_SnapshotDrainsWake(t *testing.T) {
-	src := NewStageQueueSource([]string{"gw0"})
-
-	s1 := &StageConfig{Name: "s1"}
-	src.SetStages([]*StageConfig{s1})
-
-	_, ok := src.Snapshot()
-	require.True(t, ok)
-	require.False(t, drainWake(src.Wake()),
-		"Snapshot must drain the wake announced alongside the target")
-}
-
-// Test_StageQueueSource_OnStageApplied_WaitsForEveryGateway verifies that a stage
-// applied by only some of the gateways stays the head, without a wake.
+// Test_StageQueueSource_OnStageApplied_WaitsForEveryGateway verifies that a
+// stage applied by only some of the gateways stays the head, and nothing new
+// is published.
 func Test_StageQueueSource_OnStageApplied_WaitsForEveryGateway(t *testing.T) {
 	source := NewStageQueueSource([]string{"gw0", "gw1"})
 	first := &StageConfig{Name: "first"}
 	source.SetStages([]*StageConfig{first, {Name: "second"}})
-	_ = drainWake(source.Wake())
+	before := source.Latest().Load()
 
 	source.OnStageApplied("gw0", first, nil)
 
-	require.False(t, drainWake(source.Wake()))
-	head, ok := source.Snapshot()
-	require.True(t, ok)
-	require.Same(t, first, head)
+	after := source.Latest().Load()
+	require.Equal(t, before.Number, after.Number)
+	require.Same(t, first, after.Value)
 }
 
-// Test_StageQueueSource_OnStageApplied_PopsHeadAppliedEverywhere verifies that the
-// queue exposes the next stage and wakes the reconcile loop once the last
-// gateway applied the head.
+// Test_StageQueueSource_OnStageApplied_PopsHeadAppliedEverywhere verifies
+// that the queue publishes the next stage once the last gateway applied the
+// head.
 func Test_StageQueueSource_OnStageApplied_PopsHeadAppliedEverywhere(t *testing.T) {
 	source := NewStageQueueSource([]string{"gw0", "gw1"})
 	first := &StageConfig{Name: "first"}
 	second := &StageConfig{Name: "second"}
 	source.SetStages([]*StageConfig{first, second})
-	_ = drainWake(source.Wake())
 
 	source.OnStageApplied("gw0", first, nil)
 	source.OnStageApplied("gw1", first, nil)
 
-	require.True(t, drainWake(source.Wake()))
-	head, ok := source.Snapshot()
-	require.True(t, ok)
-	require.Same(t, second, head)
+	require.Same(t, second, headOf(source))
 }
 
 // Test_StageQueueSource_OnStageApplied_NextHeadWaitsForEveryGateway verifies that
@@ -116,13 +82,10 @@ func Test_StageQueueSource_OnStageApplied_NextHeadWaitsForEveryGateway(t *testin
 	source.SetStages([]*StageConfig{first, second, {Name: "third"}})
 	source.OnStageApplied("gw0", first, nil)
 	source.OnStageApplied("gw1", first, nil)
-	_ = drainWake(source.Wake())
 
 	source.OnStageApplied("gw1", second, nil)
 
-	head, ok := source.Snapshot()
-	require.True(t, ok)
-	require.Same(t, second, head)
+	require.Same(t, second, headOf(source))
 }
 
 // Test_StageQueueSource_OnStageApplied_FailureHoldsHeadBack verifies that a gateway
@@ -137,9 +100,7 @@ func Test_StageQueueSource_OnStageApplied_FailureHoldsHeadBack(t *testing.T) {
 	source.OnStageApplied("gw0", first, errors.New("gateway unavailable"))
 	source.OnStageApplied("gw1", first, nil)
 
-	head, ok := source.Snapshot()
-	require.True(t, ok)
-	require.Same(t, first, head)
+	require.Same(t, first, headOf(source))
 }
 
 // Test_StageQueueSource_OnStageApplying_HoldsHeadBack verifies that a
@@ -154,9 +115,7 @@ func Test_StageQueueSource_OnStageApplying_HoldsHeadBack(t *testing.T) {
 	source.OnStageApplying("gw0", first)
 	source.OnStageApplied("gw1", first, nil)
 
-	head, ok := source.Snapshot()
-	require.True(t, ok)
-	require.Same(t, first, head)
+	require.Same(t, first, headOf(source))
 }
 
 // Test_StageQueueSource_OnStageApplied_RetainsTail verifies that the last stage
@@ -165,15 +124,14 @@ func Test_StageQueueSource_OnStageApplied_RetainsTail(t *testing.T) {
 	source := NewStageQueueSource([]string{"gw0", "gw1"})
 	last := &StageConfig{Name: "last"}
 	source.SetStages([]*StageConfig{last})
-	_ = drainWake(source.Wake())
+	before := source.Latest().Load()
 
 	source.OnStageApplied("gw0", last, nil)
 	source.OnStageApplied("gw1", last, nil)
 
-	require.False(t, drainWake(source.Wake()))
-	head, ok := source.Snapshot()
-	require.True(t, ok)
-	require.Same(t, last, head)
+	after := source.Latest().Load()
+	require.Equal(t, before.Number, after.Number)
+	require.Same(t, last, after.Value)
 }
 
 // Test_StageQueueSource_OnStageApplied_IgnoresReplacedHead verifies that a stage
@@ -187,9 +145,7 @@ func Test_StageQueueSource_OnStageApplied_IgnoresReplacedHead(t *testing.T) {
 
 	source.OnStageApplied("gw0", replaced, nil)
 
-	head, ok := source.Snapshot()
-	require.True(t, ok)
-	require.Same(t, current, head)
+	require.Same(t, current, headOf(source))
 }
 
 // Test_StageQueueSource_SetStages_ForgetsAppliedGateways verifies that a
@@ -205,24 +161,7 @@ func Test_StageQueueSource_SetStages_ForgetsAppliedGateways(t *testing.T) {
 	source.SetStages([]*StageConfig{first, second})
 	source.OnStageApplied("gw1", first, nil)
 
-	head, ok := source.Snapshot()
-	require.True(t, ok)
-	require.Same(t, first, head)
-}
-
-// Empty SetStages returns the source to idle.
-func Test_StageQueueSource_SetStagesEmptyIdles(t *testing.T) {
-	src := NewStageQueueSource([]string{"gw0"})
-
-	s1 := &StageConfig{Name: "s1"}
-	src.SetStages([]*StageConfig{s1})
-	_ = drainWake(src.Wake())
-
-	src.SetStages(nil)
-
-	target, ok := src.Snapshot()
-	require.False(t, ok)
-	require.Nil(t, target)
+	require.Same(t, first, headOf(source))
 }
 
 // verifies that stage activity selects the production freshness contract for

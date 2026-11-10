@@ -247,6 +247,64 @@ func requireFIBClassifications(
 	}
 }
 
+// Test_Operator_UnflushedRoute_ReachesGateway verifies that a route inserted
+// without a flush still reaches the gateway by the next reconcile interval.
+func Test_Operator_UnflushedRoute_ReachesGateway(t *testing.T) {
+	gateway, gatewayEndpoint := startFakeGateway(t)
+	operatorEndpoint := reserveEndpoint(t)
+	cfg := op.DefaultConfig()
+	cfg.NetlinkMonitor.Disabled = true
+	cfg.Readiness.ExpectBird = false
+	cfg.Server.Endpoint = xcfg.MustNonEmptyString(operatorEndpoint)
+	cfg.Gateways = []operator.GatewayConfig{{
+		Name:     "gw0",
+		Endpoint: xcfg.MustNonEmptyString(gatewayEndpoint),
+	}}
+	cfg.Reconcile.Interval = xcfg.MustNonZero(100 * time.Millisecond)
+	cfg.Register.Interval = xcfg.MustNonZero(time.Hour)
+	cfg.Static.Routes = []op.StaticRouteConfig{staticPath("10.10.0.0/24", "192.0.2.1")}
+	runOperator(t, cfg)
+
+	connection, err := grpc.NewClient(operatorEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, connection.Close()) })
+	_, err = operatorpb.NewNeighbourServiceClient(connection).SwapNeighbours(requestContext(t), &operatorpb.SwapNeighboursRequest{
+		Table:   "static",
+		Entries: entryRequest("192.0.2.1", [6]byte{2, 0, 0, 0, 0, 1}, "eth0").GetEntries(),
+	}, grpc.WaitForReady(true))
+	require.NoError(t, err)
+	paths := []neigh.HardwareRoute{{
+		SourceMAC:      [6]byte{0x00, 0x11, 0x22, 0x33, 0x44, 0x55},
+		DestinationMAC: [6]byte{2, 0, 0, 0, 0, 1},
+		Device:         "eth0",
+	}}
+	// The neighbour change is built and every build it still owes has run
+	// before the route is inserted, so no reported change can carry it.
+	require.EventuallyWithT(t, func(collector *assert.CollectT) {
+		requireFIB(collector, gateway.lastFIBRequest(), "route0", map[string][]neigh.HardwareRoute{
+			"10.10.0.0/24": paths,
+		})
+	}, 10*time.Second, 20*time.Millisecond)
+	time.Sleep(3 * operator.RebuildWindow)
+
+	prefix, err := commonpb.NewIPPrefixFromPrefix(netip.MustParsePrefix("10.20.0.0/24"))
+	require.NoError(t, err)
+	_, err = operatorpb.NewRouteServiceClient(connection).InsertRoute(requestContext(t), &operatorpb.InsertRouteRequest{
+		Name:         "route0",
+		Prefix:       prefix,
+		NexthopAddrs: []*commonpb.IPAddress{commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.0.2.1"))},
+		SourceId:     operatorpb.RouteSourceID_ROUTE_SOURCE_ID_STATIC,
+	})
+	require.NoError(t, err)
+
+	require.EventuallyWithT(t, func(collector *assert.CollectT) {
+		requireFIB(collector, gateway.lastFIBRequest(), "route0", map[string][]neigh.HardwareRoute{
+			"10.10.0.0/24": paths,
+			"10.20.0.0/24": paths,
+		})
+	}, 10*time.Second, 20*time.Millisecond)
+}
+
 // Test_Operator_StaticResolution_ReadinessLifecycle verifies that empty updates
 // retain last-good forwarding until current desired routes resolve again.
 func Test_Operator_StaticResolution_ReadinessLifecycle(t *testing.T) {

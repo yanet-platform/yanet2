@@ -79,8 +79,8 @@ func WithRouteServiceRIBTTL(ttl time.Duration) RouteServiceOption {
 	}
 }
 
-// WithRouteServiceOnChanged registers a callback fired whenever the
-// RIB state mutates so the reconcile loop can wake up.
+// WithRouteServiceOnChanged registers a callback fired after a flush or the
+// end of a feed session, so the change reaches the gateways at once.
 func WithRouteServiceOnChanged(fn func()) RouteServiceOption {
 	return func(o *routeServiceOptions) {
 		o.OnChanged = fn

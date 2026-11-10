@@ -89,7 +89,7 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 
 	app := operator.NewOperator(
 		fanOut,
-		source,
+		source.Latest(),
 		operator.WithGRPCServer(cfg.Server, services...),
 		operator.WithReadiness("pipeline", tracker),
 		operator.WithReconcile(cfg.Reconcile),

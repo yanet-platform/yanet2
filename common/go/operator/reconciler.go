@@ -10,32 +10,6 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xbackoff"
 )
 
-// StateSource produces the current desired state for the reconcile loop.
-type StateSource[T any] interface {
-	// Snapshot returns the current target along with an "ok" flag.
-	//
-	// When ok is false the source is idle: the reconcile loop transitions
-	// to the Idle state and blocks on Wake or context cancellation rather
-	// than invoking the Actuator.
-	//
-	// When ok is true the returned value is the state to apply on the next
-	// pass: the source must hold it stable until either Advance is called
-	// or a subsequent Snapshot replaces it.
-	Snapshot() (T, bool)
-	// Wake returns a buffered channel the source signals whenever new
-	// state is available or whenever an in-flight reconcile pass should be
-	// preempted.
-	//
-	// It is safe to call from any goroutine.
-	Wake() <-chan struct{}
-	// Advance is invoked by the reconcile loop after a successful Apply,
-	// passing the same value Snapshot returned.
-	//
-	// Queue-style sources use it to pop the head element. Sources that publish
-	// a single steady-state snapshot may treat it as a no-op.
-	Advance(applied T)
-}
-
 // Actuator applies a desired state of type T to a single downstream
 // target, typically a single gateway.
 type Actuator[T any] interface {
@@ -47,16 +21,16 @@ type Actuator[T any] interface {
 type ReconcilerState int
 
 const (
-	// ReconcilerStateIdle indicates the loop is blocked on Wake or
-	// context cancellation because the source reported no work.
+	// ReconcilerStateIdle indicates the loop is waiting for the first
+	// desired state to be published.
 	ReconcilerStateIdle ReconcilerState = iota
 	// ReconcilerStateApplying indicates the loop is invoking the
 	// Actuator (possibly retrying with backoff).
 	ReconcilerStateApplying
 	// ReconcilerStateSleeping indicates the loop is sleeping between
 	// passes — either the steady-state interval after success or the
-	// backoff delay after failure — preemptable by Wake or context
-	// cancellation.
+	// backoff delay after failure — cut short by a newer desired state or
+	// context cancellation.
 	ReconcilerStateSleeping
 )
 
@@ -143,32 +117,34 @@ func WithReconcilerMetrics(metrics ReconcilerMetricsObserver) ReconcilerOption {
 	}
 }
 
-// Reconciler drives an Actuator from a StateSource until its context
-// is cancelled.
+// Reconciler drives an Actuator from the latest desired state until its
+// context is cancelled.
 //
 // The loop has three states observable through ReconcilerMetricsObserver:
-//   - Idle (source returned ok=false: block on ctx and Wake).
+//   - Idle (nothing published yet: block on ctx and the first publication).
 //   - Applying (Apply runs to completion — retried with backoff on
-//     failure, preemptable by Wake between retries).
+//     failure, preempted by a newer desired state between retries).
 //   - Sleeping (interval after success, backoff delay after failure —
-//     preemptable by Wake or ctx).
+//     preempted by a newer desired state or ctx).
 //
-// Apply is never cancelled mid-flight by a concurrent Wake —
+// Apply is never cancelled mid-flight by a newer desired state —
 // preemption happens between applies, not within them.
 type Reconciler[T any] struct {
 	actuator Actuator[T]
-	source   StateSource[T]
+	latest   *Latest[T]
 	backoff  *xbackoff.Backoff
+	// sleeper waits between applies until the applied version is replaced.
+	sleeper  *reconcilerSleeper
 	interval time.Duration
 	metrics  ReconcilerMetricsObserver
 	log      *zap.Logger
 }
 
-// NewReconciler constructs a Reconciler bound to the supplied actuator
-// and state source.
+// NewReconciler constructs a Reconciler that applies the published desired
+// state through the supplied actuator.
 func NewReconciler[T any](
 	actuator Actuator[T],
-	source StateSource[T],
+	latest *Latest[T],
 	options ...ReconcilerOption,
 ) *Reconciler[T] {
 	opts := newReconcilerOptions()
@@ -176,10 +152,10 @@ func NewReconciler[T any](
 		o(opts)
 	}
 
-	wake := source.Wake()
+	sleeper := &reconcilerSleeper{}
 	backoff := xbackoff.New(opts.InitialBackoff,
 		xbackoff.WithMax(opts.MaxBackoff),
-		xbackoff.WithSleeper(reconcilerSleeper{wake: wake}),
+		xbackoff.WithSleeper(sleeper),
 		xbackoff.WithOnRetry(func(_ int, d time.Duration, err error) {
 			opts.Log.Warn("reconcile failed",
 				zap.Duration("backoff", d),
@@ -196,8 +172,9 @@ func NewReconciler[T any](
 
 	return &Reconciler[T]{
 		actuator: actuator,
-		source:   source,
+		latest:   latest,
 		backoff:  backoff,
+		sleeper:  sleeper,
 		interval: opts.Interval,
 		metrics:  opts.Metrics,
 		log:      opts.Log,
@@ -210,16 +187,15 @@ func (m *Reconciler[T]) Run(ctx context.Context) error {
 	m.log.Info("running reconciler loop")
 	defer m.log.Info("stopped reconciler loop")
 
-	wake := m.source.Wake()
-	sleeper := reconcilerSleeper{wake: wake}
 	for {
-		target, ok := m.source.Snapshot()
-		if !ok {
+		version := m.latest.Load()
+		m.sleeper.Wake = version.Replaced
+		if version.Number == 0 {
 			m.metrics.OnStateChanged(ReconcilerStateIdle)
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-wake:
+			case <-version.Replaced:
 			}
 
 			continue
@@ -227,15 +203,14 @@ func (m *Reconciler[T]) Run(ctx context.Context) error {
 
 		err := m.backoff.RunContext(ctx, func() error {
 			m.metrics.OnStateChanged(ReconcilerStateApplying)
-			return m.actuator.Apply(ctx, target)
+			return m.actuator.Apply(ctx, version.Value)
 		})
 		switch {
 		case err == nil:
 			m.metrics.OnReconcileCompleted(nil)
-			m.source.Advance(target)
 
 			m.metrics.OnStateChanged(ReconcilerStateSleeping)
-			if err := sleeper.Sleep(ctx, m.interval); err != nil {
+			if err := m.sleeper.Sleep(ctx, m.interval); err != nil {
 				if errors.Is(err, xbackoff.ErrInterrupted) {
 					continue
 				}
@@ -249,12 +224,14 @@ func (m *Reconciler[T]) Run(ctx context.Context) error {
 	}
 }
 
-// reconcilerSleeper interrupts the backoff sleep on a wake signal.
+// reconcilerSleeper interrupts a sleep once the applied version is
+// replaced.
 type reconcilerSleeper struct {
-	wake <-chan struct{}
+	// Wake is closed when the version being applied is replaced.
+	Wake <-chan struct{}
 }
 
-func (m reconcilerSleeper) Sleep(ctx context.Context, d time.Duration) error {
+func (m *reconcilerSleeper) Sleep(ctx context.Context, d time.Duration) error {
 	if d <= 0 {
 		return nil
 	}
@@ -264,7 +241,7 @@ func (m reconcilerSleeper) Sleep(ctx context.Context, d time.Duration) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-m.wake:
+	case <-m.Wake:
 		return xbackoff.ErrInterrupted
 	case <-t.C:
 		return nil

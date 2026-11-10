@@ -4,6 +4,8 @@ import (
 	"sync"
 
 	"go.uber.org/zap"
+
+	"github.com/yanet-platform/yanet2/common/go/operator"
 )
 
 // QueueMetricsObserver receives queue-level events from the StageQueueSource.
@@ -46,17 +48,12 @@ func WithStageQueueMetrics(metrics QueueMetricsObserver) StageQueueOption {
 	}
 }
 
-// StageQueueSource is the operator.StateSource[*StageConfig] used by
-// the pipeline operator.
+// StageQueueSource publishes the pipeline operator's desired state: the
+// head of an ordered queue of target stages.
 //
-// It wraps an ordered queue of target stages; the head is the active
-// reconcile target. The queue drops the head only once no gateway is
-// applying it and its latest apply succeeded on every gateway, so the
-// gateways move through the stages in lock-step. The last stage stays as
-// the steady-state target.
-//
-// SetStages and Switch atomically replace the queue and wake the reconcile
-// loop.
+// The queue drops the head only once no gateway is applying it and its
+// latest apply succeeded on every gateway, so the gateways move through the
+// stages in lock-step. The last stage stays as the steady-state target.
 type StageQueueSource struct {
 	mu     sync.Mutex
 	stages []*StageConfig
@@ -65,7 +62,8 @@ type StageQueueSource struct {
 	// pending holds the gateways that are applying the head or whose latest
 	// apply of it did not succeed.
 	pending map[string]struct{}
-	wakeCh  chan struct{}
+	// latest publishes the head whenever it changes.
+	latest *operator.Latest[*StageConfig]
 
 	metrics QueueMetricsObserver
 	log     *zap.Logger
@@ -81,24 +79,32 @@ func NewStageQueueSource(gateways []string, options ...StageQueueOption) *StageQ
 
 	return &StageQueueSource{
 		gateways: gateways,
-		wakeCh:   make(chan struct{}, 1),
+		latest:   operator.NewLatest[*StageConfig](),
 		metrics:  opts.Metrics,
 		log:      opts.Log,
 	}
 }
 
-// SetStages atomically replaces the queue of target stages and wakes
-// the reconcile loop.
+// Latest returns the desired state: the head of the queue, nothing until
+// the first stages are set.
+func (m *StageQueueSource) Latest() *operator.Latest[*StageConfig] {
+	return m.latest
+}
+
+// SetStages atomically replaces the queue of target stages and publishes
+// its head.
 //
-// An empty or nil slice returns the source to the idle state.
+// An empty queue is ignored: the head published last stays the target.
 func (m *StageQueueSource) SetStages(stages []*StageConfig) {
+	if len(stages) == 0 {
+		return
+	}
 	depth := m.replaceStages(stages)
 
 	m.metrics.OnQueueChanged(depth)
 }
 
-// replaceStages swaps the queue under the lock and signals the
-// reconcile loop.
+// replaceStages swaps the queue under the lock and publishes its head.
 //
 // The new head waits for every gateway, even one that applied the same
 // stage before the swap.
@@ -108,54 +114,15 @@ func (m *StageQueueSource) replaceStages(stages []*StageConfig) int {
 
 	m.stages = stages
 	m.awaitEveryGatewayLocked()
-
-	select {
-	case m.wakeCh <- struct{}{}:
-	default:
-	}
+	m.latest.Publish(stages[0])
 
 	return len(m.stages)
 }
 
-// Switch replaces the queue with a single target stage and wakes the
-// reconcile loop.
+// Switch replaces the queue with a single target stage and publishes it.
 func (m *StageQueueSource) Switch(stage *StageConfig) {
 	m.SetStages([]*StageConfig{stage})
 }
-
-// Snapshot returns the current queue head and drains any pending wake
-// signal.
-//
-// Draining under the same lock SetStages holds means a wake signal
-// that pre-dates the snapshot is consumed alongside the target it
-// announced, so the next sleep will not trip on it. A wake signal
-// arriving after this call is preserved by SetStages re-filling the
-// buffered slot.
-func (m *StageQueueSource) Snapshot() (*StageConfig, bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	select {
-	case <-m.wakeCh:
-	default:
-	}
-
-	if len(m.stages) == 0 {
-		return nil, false
-	}
-
-	return m.stages[0], true
-}
-
-// Wake returns the buffered channel signalled whenever the queue
-// changes.
-func (m *StageQueueSource) Wake() <-chan struct{} {
-	return m.wakeCh
-}
-
-// Advance does nothing: the queue moves on once every gateway applied the
-// head, see OnStageApplied.
-func (m *StageQueueSource) Advance(*StageConfig) {}
 
 // OnStageApplying makes the head wait for the gateway until its apply of
 // the head ends.
@@ -206,15 +173,11 @@ func (m *StageQueueSource) record(gateway string, stage *StageConfig, err error)
 	next := m.stages[1]
 	m.stages = m.stages[1:]
 	m.awaitEveryGatewayLocked()
+	m.latest.Publish(next)
 	m.log.Info("advanced to next stage",
 		zap.String("from", stage.Name),
 		zap.String("to", next.Name),
 	)
-
-	select {
-	case m.wakeCh <- struct{}{}:
-	default:
-	}
 
 	return true, len(m.stages)
 }

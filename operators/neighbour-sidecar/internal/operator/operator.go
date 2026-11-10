@@ -54,16 +54,18 @@ func NewOperator(cfg *Config, options ...Option) (*operator.Operator[neigh.Nexth
 	if err != nil {
 		return nil, err
 	}
-	source := NewNeighbourSource(table)
+	// Every committed discovery is published whole; nothing is published
+	// before the first one.
+	desired := operator.NewLatest[neigh.NexthopCacheView]()
 	monitor := neigh.NewNeighMonitor(table, kernel,
 		neigh.WithLog(opts.Log),
 		neigh.WithLinkMap(cfg.LinkMap),
 		neigh.WithUpdateInterval(cfg.UpdateInterval.Unwrap()),
-		neigh.WithOnHealthy(source.OnHealthy),
+		neigh.WithOnHealthy(func() { desired.Publish(table.View()) }),
 	)
 	return operator.NewOperator(
 		publisher,
-		source,
+		desired,
 		operator.WithLog(opts.Log),
 		operator.WithReconcile(cfg.Reconcile),
 		operator.WithGRPCServer(cfg.Server),
