@@ -1,8 +1,14 @@
 package operator
 
 import (
+	"context"
+	"encoding/binary"
 	"io"
+	"net"
 	"net/netip"
+	"os"
+	"path/filepath"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -15,6 +21,10 @@ import (
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/common/go/readiness"
+	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
+	birdadapter "github.com/yanet-platform/yanet2/operators/bird-adapter"
+	adapterpb "github.com/yanet-platform/yanet2/operators/bird-adapter/adapterpb/v1"
 	"github.com/yanet-platform/yanet2/operators/route/internal/rib"
 	"github.com/yanet-platform/yanet2/operators/route/neigh"
 	operatorpb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
@@ -238,6 +248,57 @@ func Test_RouteService_FeedRIB_FirstNameOwnsSession(t *testing.T) {
 	require.Len(t, response.GetRoutes(), 2)
 	_, ok := svc.ribs.Get("other")
 	require.False(t, ok, "a later update name must not create another session RIB")
+}
+
+// Test_RouteService_FeedRIB_HeartbeatOnlyStartsNoSession verifies that a
+// stream carrying only heartbeats starts no session, creates no RIB and
+// reports no change.
+func Test_RouteService_FeedRIB_HeartbeatOnlyStartsNoSession(t *testing.T) {
+	sessionStarts := 0
+	changes := 0
+	svc := NewRouteService(neigh.NewNeighTable(),
+		WithRouteServiceOnRIBSessionStart(func(string, uint64) { sessionStarts++ }),
+		WithRouteServiceOnChanged(func() { changes++ }),
+	)
+
+	stream := &feedRIBTestStream{updates: []*operatorpb.Update{
+		{Name: "route0", Heartbeat: true},
+		{Name: "route0", Heartbeat: true},
+	}}
+	require.NoError(t, svc.FeedRIB(stream))
+
+	require.Zero(t, sessionStarts)
+	require.Zero(t, changes)
+	_, ok := svc.ribs.Get("route0")
+	require.False(t, ok, "a heartbeat must not create a RIB")
+}
+
+// Test_RouteService_FeedRIB_HeartbeatChangesNoRoutes verifies that a
+// heartbeat inside a session leaves the RIB alone, even when it carries a
+// route withdrawal.
+func Test_RouteService_FeedRIB_HeartbeatChangesNoRoutes(t *testing.T) {
+	route := &operatorpb.Route{
+		Prefix:  mustNetwork(t, "10.0.0.0/24"),
+		NextHop: commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.0.2.1")),
+		Peer:    commonpb.NewIPAddressFromAddr(netip.MustParseAddr("198.51.100.1")),
+	}
+	updates := 0
+	svc := NewRouteService(neigh.NewNeighTable(),
+		WithRouteServiceOnRIBUpdate(func(n int) { updates += n }),
+	)
+
+	stream := &feedRIBTestStream{updates: []*operatorpb.Update{
+		{Name: "route0", Route: route},
+		{Name: "route0"},
+		{Name: "route0", Heartbeat: true, IsDelete: true, Route: route},
+		{Name: "route0", Heartbeat: true},
+	}}
+	require.NoError(t, svc.FeedRIB(stream))
+
+	require.Equal(t, 1, updates)
+	response, err := svc.ShowRoutes(t.Context(), &operatorpb.ShowRoutesRequest{Name: "route0"})
+	require.NoError(t, err)
+	require.Len(t, response.GetRoutes(), 1)
 }
 
 // Test_RouteService_FeedRIB_SupersededSessionUpdateRejected verifies that
@@ -762,4 +823,184 @@ func TestListConfigs_ConfiguredModule_ReportedOnceBeforeAndAfterRIB(t *testing.T
 	resp, err = svc.ListConfigs(t.Context(), &operatorpb.ListConfigsRequest{})
 	require.NoError(t, err)
 	require.Equal(t, []string{"route0", "route1", "route2"}, resp.GetConfigs())
+}
+
+// Test_RouteService_FeedRIB_IdleBirdImportReplaysAfterTransportRestart
+// verifies that an idle BIRD import replays its table into the RIB after the
+// route operator's gRPC server restarts: the replayed route stays, the route
+// withdrawn during the outage leaves after the RIB TTL and the bird-session
+// scope returns to READY.
+func Test_RouteService_FeedRIB_IdleBirdImportReplaysAfterTransportRestart(t *testing.T) {
+	kept := netip.MustParsePrefix("2001:db8:1::/48")
+	withdrawn := netip.MustParsePrefix("2001:db8:2::/48")
+	// BIRD exports both routes to the first connection; the second one
+	// was withdrawn by the time the import reconnects.
+	socket := startBIRDExportSocket(t, func(idx int) []netip.Prefix {
+		if idx == 0 {
+			return []netip.Prefix{kept, withdrawn}
+		}
+		return []netip.Prefix{kept}
+	})
+
+	store := newRIBStore()
+	tracker := readiness.NewTracker(specs("bird-session", "rib"))
+	sessions := newBirdRIBReadiness(ReadinessConfig{
+		RateThreshold:   1000,
+		StabilityWindow: 50 * time.Millisecond,
+		SampleInterval:  20 * time.Millisecond,
+		ReconnectGrace:  time.Minute,
+	}, store, "route0", tracker)
+	svc := NewRouteService(neigh.NewNeighTable(),
+		WithRouteServiceRIBStore(store),
+		WithRouteServiceRIBTTL(500*time.Millisecond),
+		WithRouteServiceOnRIBSessionStart(sessions.OnSessionStart),
+		WithRouteServiceOnRIBUpdate(sessions.OnUpdate),
+		WithRouteServiceOnRIBSessionEnd(sessions.OnSessionEnd),
+	)
+	t.Cleanup(func() { require.NoError(t, svc.Close()) })
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	server := serveFeedRIB(t, listener, svc)
+
+	adapter := birdadapter.NewAdapterService(listener.Addr().String())
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), 5*time.Second)
+		defer cancel()
+		require.NoError(t, adapter.Close(ctx))
+	})
+	sourceV4, err := commonpb.NewIPv4AddressFromAddr(netip.MustParseAddr("192.0.2.1"))
+	require.NoError(t, err)
+	sourceV6, err := commonpb.NewIPv6AddressFromAddr(netip.MustParseAddr("2001:db8::1"))
+	require.NoError(t, err)
+	_, err = adapter.SetupConfig(t.Context(), &adapterpb.SetupConfigRequest{
+		Name:     "route0",
+		Config:   &adapterpb.ImportConfig{Sockets: []string{socket}, DumpThreshold: 1},
+		SourceV4: sourceV4,
+		SourceV6: sourceV6,
+	})
+	require.NoError(t, err)
+
+	birdSessionState := func() readinesspb.State {
+		return requireScope(t, tracker, "bird-session").GetState()
+	}
+	require.Eventually(t, func() bool {
+		return slices.Equal(ribPrefixes(store, "route0"), []netip.Prefix{kept, withdrawn})
+	}, 5*time.Second, 10*time.Millisecond)
+	require.Equal(t, readinesspb.State_STATE_READY, birdSessionState())
+
+	server.Stop()
+	require.Eventually(t, func() bool { return birdSessionState() != readinesspb.State_STATE_READY },
+		5*time.Second, time.Millisecond,
+	)
+	listener, err = net.Listen("tcp", listener.Addr().String())
+	require.NoError(t, err)
+	serveFeedRIB(t, listener, svc)
+
+	require.Eventually(t, func() bool { return birdSessionState() == readinesspb.State_STATE_READY },
+		5*time.Second, 10*time.Millisecond,
+		"the idle import did not start a new session",
+	)
+	require.Eventually(t, func() bool {
+		return slices.Equal(ribPrefixes(store, "route0"), []netip.Prefix{kept})
+	}, 5*time.Second, 10*time.Millisecond,
+		"the RIB must hold the replayed route and lose the withdrawn one after the TTL",
+	)
+}
+
+// serveFeedRIB serves svc on listener until the test ends and returns the
+// gRPC server, so the test may stop it earlier.
+func serveFeedRIB(t *testing.T, listener net.Listener, svc *RouteService) *grpc.Server {
+	t.Helper()
+	server := grpc.NewServer()
+	operatorpb.RegisterRouteServiceServer(server, svc)
+	var workers errgroup.Group
+	workers.Go(func() error { return server.Serve(listener) })
+	t.Cleanup(func() {
+		server.Stop()
+		require.NoError(t, workers.Wait())
+	})
+	return server
+}
+
+// ribPrefixes returns the sorted prefixes the named RIB holds routes for.
+func ribPrefixes(store *RIBStore, name string) []netip.Prefix {
+	ribRef, ok := store.Get(name)
+	if !ok {
+		return nil
+	}
+	var prefixes []netip.Prefix
+	dump := ribRef.DumpRoutes()
+	for bits := range dump {
+		for prefix, routes := range dump[bits] {
+			if len(routes.Routes) > 0 {
+				prefixes = append(prefixes, prefix)
+			}
+		}
+	}
+	slices.SortFunc(prefixes, func(a, b netip.Prefix) int { return a.Addr().Compare(b.Addr()) })
+	return prefixes
+}
+
+// startBIRDExportSocket serves a BIRD export socket that announces the
+// prefixes routes gives for each accepted connection's ordinal via
+// 2001:db8::1, then stays quiet until the test ends.
+//
+// Every prefix must be a /48 under 2001:db8::/32.
+func startBIRDExportSocket(t *testing.T, routes func(idx int) []netip.Prefix) string {
+	t.Helper()
+	// Use a short path because Unix socket names have a platform length limit.
+	directory, err := os.MkdirTemp("", "bird-export-")
+	require.NoError(t, err)
+	socket := filepath.Join(directory, "export.sock")
+	listener, err := net.Listen("unix", socket)
+	require.NoError(t, err)
+	var workers errgroup.Group
+	workers.Go(func() error {
+		for idx := 0; ; idx++ {
+			connection, err := listener.Accept()
+			if err != nil {
+				return nil
+			}
+			workers.Go(func() error {
+				defer connection.Close()
+				stop := context.AfterFunc(t.Context(), func() { _ = connection.Close() })
+				defer stop()
+				for _, prefix := range routes(idx) {
+					if _, err := connection.Write(birdExportChunk(prefix)); err != nil {
+						return err
+					}
+				}
+				_, _ = io.Copy(io.Discard, connection)
+				return nil
+			})
+		}
+	})
+	t.Cleanup(func() {
+		_ = listener.Close()
+		require.NoError(t, workers.Wait())
+		require.NoError(t, os.RemoveAll(directory))
+	})
+	return socket
+}
+
+// birdExportChunk returns a BIRD export chunk announcing the /48 prefix via
+// 2001:db8::1.
+//
+// BIRD lays every 32-bit word of an address out in host byte order.
+func birdExportChunk(prefix netip.Prefix) []byte {
+	addr := prefix.Addr().As16()
+	update := []byte{
+		0: 92,
+		4: 2, 5: 48, 6: 20,
+		8: addr[3], 9: addr[2], 10: addr[1], 11: addr[0],
+		12: addr[7], 13: addr[6], 14: addr[5], 15: addr[4],
+		44: 1,
+		68: 24,
+		72: 3, 73: 4, 76: 16,
+		80: 0xb8, 81: 0x0d, 82: 1, 83: 0x20,
+		92: 1, 95: 0,
+	}
+	binary.LittleEndian.PutUint32(update[:4], uint32(len(update)-4))
+	return update
 }

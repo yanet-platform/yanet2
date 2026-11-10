@@ -114,7 +114,15 @@ route flush -c route0
 
 ## Fault Tolerance
 
-- **Automatic reconnection** on connection loss to BIRD or route service
-- **Exponential backoff** for retry attempts
+- **Automatic reconnection** on connection loss to BIRD or route service,
+  also while BIRD sends nothing: a new stream gets the whole BIRD table again
+- **Exponential backoff** for retry attempts, at most 30 s between them
+- **Heartbeats** on every idle dump tick while BIRD is quiet: gRPC sets the
+  TCP user timeout to the 20 s keepalive timeout, so a half-open connection
+  to the route service endpoint is dropped about 20 s after a heartbeat goes
+  unacknowledged, and the import reconnects and replays; keepalive pings
+  every 5.5 minutes are only the fallback. Both cover only the hop to that
+  endpoint and are no recovery guarantee. The route service must understand
+  heartbeats, so deploy the route operator before the adapter
 - **Session management** for stale route cleanup on restart
 - **Graceful shutdown** on termination signal

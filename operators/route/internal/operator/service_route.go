@@ -330,6 +330,10 @@ func (m *RouteService) FeedRIB(stream operatorpb.RouteService_FeedRIBServer) err
 		if err != nil {
 			break
 		}
+		// A heartbeat only proves the stream alive to its sender.
+		if update.GetHeartbeat() {
+			continue
+		}
 
 		if ribRef == nil {
 			name = update.GetName()

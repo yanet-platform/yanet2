@@ -14,7 +14,10 @@ import (
 )
 
 type Updater func(context.Context, []rib.Route) error
-type Notifier func() error
+
+// Notifier is called after each dumped batch, with the same context the
+// batch was dumped with.
+type Notifier func(context.Context) error
 
 type exportSocket struct {
 	Path    string
@@ -105,16 +108,29 @@ func (m *Export) Run(ctx context.Context) error {
 			m.log.Info("starting bird export reader",
 				zap.String("path", socket.Path))
 
-			c, err := net.Dial("unix", socket.Path)
+			var dialer net.Dialer
+			c, err := dialer.DialContext(ctx, "unix", socket.Path)
 			if err != nil {
 				return fmt.Errorf("failed to dial bird export socket '%s': %w", socket.Path, err)
 			}
+			// Closing the socket on cancellation unblocks the read below; the
+			// reader waits for that close, so it leaves no goroutine behind.
+			closed := make(chan struct{})
+			defer func() {
+				cancel(nil)
+				<-closed
+			}()
 			go func() {
+				defer close(closed)
 				<-ctx.Done()
 				if err := c.Close(); err != nil {
-					m.log.Warn("bird socket closed with an error", zap.Error(err), zap.Any("ctx_err", ctx.Err()))
+					m.log.Warn("bird socket closed with an error",
+						zap.Error(err),
+						zap.NamedError("cause", context.Cause(ctx)),
+					)
 				}
 			}()
+
 			reader := bufio.NewReader(c)
 			parser := NewParser(reader, socket.BufSize, WithParserLog(m.log))
 			for {
@@ -136,7 +152,7 @@ func (m *Export) Run(ctx context.Context) error {
 
 				select {
 				case <-ctx.Done():
-					return ctx.Err()
+					return context.Cause(ctx)
 				case updates <- route:
 				}
 			}
@@ -152,7 +168,7 @@ func (m *Export) Run(ctx context.Context) error {
 		for {
 			select {
 			case <-ctx.Done():
-				return ctx.Err()
+				return context.Cause(ctx)
 			case route := <-updates:
 				batch = append(batch, *route)
 				// A batch waits at most one timeout after its first route:
@@ -176,7 +192,7 @@ func (m *Export) Run(ctx context.Context) error {
 				}
 				batch = batch[:0]
 
-				if err := m.notifier(); err != nil {
+				if err := m.notifier(ctx); err != nil {
 					return fmt.Errorf("failed to call notifier: %w", err)
 				}
 			}

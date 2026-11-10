@@ -11,12 +11,15 @@ import (
 	"github.com/cenkalti/backoff/v5"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"golang.org/x/sync/errgroup"
 
 	"google.golang.org/grpc"
+	grpcbackoff "google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/common/go/xgrpc"
@@ -27,6 +30,38 @@ import (
 	"github.com/yanet-platform/yanet2/operators/bird-adapter/internal/rib"
 	routepb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
 )
+
+const (
+	// importRetryMaxDelay caps every wait before a new import attempt, after
+	// the jitter.
+	//
+	// It also caps the connection's own reconnect backoff, which gRPC then
+	// jitters by up to a fifth, so one reconnect may wait up to 36 s.
+	importRetryMaxDelay = 30 * time.Second
+	// importHealthyUptime is how long an attempt must stay up for the retry
+	// delay to start over from its initial value.
+	importHealthyUptime = 10 * time.Minute
+
+	// routeOperatorKeepaliveTime stays above the five minutes a gRPC server
+	// tolerates between pings by default, so the gateway never answers the
+	// pings with a too-many-pings shutdown.
+	//
+	// The pings are only a fallback. gRPC also applies the timeout as the TCP
+	// user timeout, so the kernel drops a half-open connection about that
+	// long after a heartbeat stays unacknowledged.
+	routeOperatorKeepaliveTime    = 5*time.Minute + 30*time.Second
+	routeOperatorKeepaliveTimeout = 20 * time.Second
+	// routeOperatorMinConnectTimeout is the gRPC default, which a custom
+	// reconnect backoff would otherwise reset to zero.
+	routeOperatorMinConnectTimeout = 20 * time.Second
+)
+
+// errServiceClosed rejects an import set up after the service was closed.
+var errServiceClosed = errors.New("adapter service is closed")
+
+// errFeedRIBClosedByServer ends an attempt whose stream the route operator
+// closed with a summary.
+var errFeedRIBClosedByServer = errors.New("route operator closed the FeedRIB stream")
 
 // levelFilterCore wraps a zapcore.Core and filters log entries by level.
 // It replaces the base core's level check with its own.
@@ -50,11 +85,26 @@ func (m *levelFilterCore) Check(ent zapcore.Entry, ce *zapcore.CheckedEntry) *za
 type AdapterService struct {
 	adapterpb.UnimplementedAdapterServiceServer
 
-	importsMu                sync.Mutex
-	imports                  map[string]*importHolder
+	// ctx parents every import and every setup in progress, and cancel
+	// stops them all on close.
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	importsMu sync.Mutex
+	imports   map[string]*importHolder
+	// closed refuses new setups once the service is closing.
+	closed bool
+	// inflight counts the setups in progress and the running imports.
+	//
+	// A setup joins it under the mutex before its first blocking call and
+	// only while the service is open, so nothing joins after the close
+	// started waiting.
+	inflight sync.WaitGroup
+	// stopped is closed once every setup and import has exited after close.
+	stopped chan struct{}
+
 	routeOperatorEndpoint    string                           // gRPC endpoint of the route operator's RouteService for RIB updates
 	routeOperatorCredentials credentials.TransportCredentials // Transport credentials for that endpoint
-	quitCh                   chan bool                        // Signals all background BIRD import loops to stop
 	log                      *zap.Logger
 }
 
@@ -64,24 +114,6 @@ type AdapterServiceOption func(*adapterServiceOptions)
 type adapterServiceOptions struct {
 	RouteOperatorCredentials credentials.TransportCredentials
 	Log                      *zap.Logger
-}
-
-type methodLogOption func(*methodLogOptions)
-
-type methodLogOptions struct {
-	Log *zap.Logger
-}
-
-func newMethodLogOptions() *methodLogOptions {
-	return &methodLogOptions{
-		Log: zap.NewNop(),
-	}
-}
-
-func withMethodLog(log *zap.Logger) methodLogOption {
-	return func(o *methodLogOptions) {
-		o.Log = log
-	}
 }
 
 func newAdapterServiceOptions() *adapterServiceOptions {
@@ -115,13 +147,49 @@ func NewAdapterService(
 		o(opts)
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+
 	return &AdapterService{
-		imports:                  make(map[string]*importHolder),
+		ctx:                      ctx,
+		cancel:                   cancel,
+		imports:                  map[string]*importHolder{},
+		stopped:                  make(chan struct{}),
 		routeOperatorEndpoint:    routeOperatorEndpoint,
 		routeOperatorCredentials: opts.RouteOperatorCredentials,
-		quitCh:                   make(chan bool),
 		log:                      opts.Log,
 	}
+}
+
+// Close stops accepting new imports, cancels every import and setup in
+// progress and waits for them to exit until ctx is done.
+//
+// A close that runs out of time reports it and leaves the service closed;
+// a later call waits for the same imports again.
+func (m *AdapterService) Close(ctx context.Context) error {
+	m.beginClose()
+
+	select {
+	case <-m.stopped:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("BIRD imports did not stop in time: %w", context.Cause(ctx))
+	}
+}
+
+// beginClose refuses new setups and cancels the running ones, once.
+func (m *AdapterService) beginClose() {
+	m.importsMu.Lock()
+	defer m.importsMu.Unlock()
+
+	if m.closed {
+		return
+	}
+	m.closed = true
+	m.cancel()
+	go func() {
+		m.inflight.Wait()
+		close(m.stopped)
+	}()
 }
 
 // ListSessions returns information about all active BIRD import sessions.
@@ -199,9 +267,11 @@ func validateImportParams(params ImportParams) error {
 // SetupImport configures and starts a BIRD import, bypassing SetupConfig's
 // protobuf decoding.
 //
-// It takes no context.Context: processBirdImport derives the import's
-// stream from context.Background() so it outlives whatever call started it,
-// and a caller context here would misleadingly suggest otherwise.
+// The import replaces the one of the same name only once it has its
+// connection and its first stream, so a failed setup leaves the running
+// import alone. The call returns after the replaced import has exited. It
+// takes no context.Context: the import outlives the call that started it,
+// and only a replacement or the service close stops it.
 func (m *AdapterService) SetupImport(params ImportParams) error {
 	if err := validateImportParams(params); err != nil {
 		return err
@@ -212,132 +282,265 @@ func (m *AdapterService) SetupImport(params ImportParams) error {
 		zap.String("log_level", params.LogLevel),
 	)
 
-	cfg := params.Config
-
-	// Create per-client logger based on requested log level
-	var clientLog *zap.Logger
-	if params.LogLevel != "" {
-		var level zapcore.Level
-		if err := level.UnmarshalText([]byte(params.LogLevel)); err != nil {
-			m.log.Warn("invalid log level, using nop logger",
-				zap.String("name", params.Name),
-				zap.String("log_level", params.LogLevel),
-				zap.Error(err),
-			)
-			clientLog = zap.NewNop()
-		} else {
-			// Create a new logger that wraps the existing core with a level filter
-			baseCore := m.log.Core()
-
-			// Wrap the base core with our level filter
-			filteredCore := &levelFilterCore{
-				Core:  baseCore,
-				level: level,
-			}
-
-			clientLog = zap.New(filteredCore).Named(params.Name)
-		}
-	} else {
-		// No log level specified, use nop logger
-		clientLog = zap.NewNop()
+	if err := m.admitSetup(); err != nil {
+		return err
 	}
+	defer m.inflight.Done()
 
-	conn, err := grpc.NewClient(
-		m.routeOperatorEndpoint,
-		grpc.WithTransportCredentials(m.routeOperatorCredentials),
-		grpc.WithDefaultCallOptions(grpc.UseCompressor(xgrpc.ZstdName)),
-	)
+	holder, err := m.prepareImport(params)
 	if err != nil {
-		return fmt.Errorf("failed to connect to the route operator endpoint: %w", err)
+		return err
 	}
 
-	// And then add dynamic routes, if any.
-	if err := m.processBirdImport(
-		conn,
-		cfg,
-		params.Name,
-		params.SourceV4,
-		params.SourceV6,
-		withMethodLog(clientLog),
-	); err != nil {
-		_ = conn.Close()
-		return fmt.Errorf("failed to setup bird import reader: %w ", err)
+	predecessor, err := m.publishImport(holder)
+	if err != nil {
+		holder.Release()
+		return err
+	}
+	if predecessor != nil {
+		<-predecessor.Done()
+		m.log.Info("replaced existing BIRD import",
+			zap.String("config", params.Name),
+		)
 	}
 
 	return nil
 }
 
-var errStreamClosed = fmt.Errorf("stream closed")
+// admitSetup counts a setup in progress unless the service is closed.
+func (m *AdapterService) admitSetup() error {
+	m.importsMu.Lock()
+	defer m.importsMu.Unlock()
 
-// importHolder bundles resources for one BIRD import: the BIRD data reader,
-// a cancellable context for its goroutines, the gRPC connection to the RIB service,
-// and the active gRPC stream for sending updates.
-type importHolder struct {
-	export        *bird.Export                                                       // Reads/parses routes from BIRD
-	cancel        context.CancelFunc                                                 // Stops this import's goroutines (runBirdImportLoop, RunExport)
-	conn          *grpc.ClientConn                                                   // gRPC connection to the route operator's RouteService
-	currentStream *grpc.ClientStreamingClient[routepb.Update, routepb.UpdateSummary] // Active gRPC stream for RIB updates, replaced on reconnect
-	sockets       []string                                                           // Unix socket paths being read from
-	createdAt     time.Time                                                          // Timestamp when the session was created
+	if m.closed {
+		return errServiceClosed
+	}
+	m.inflight.Add(1)
+	return nil
 }
 
-// newImportHolder builds a fully-populated importHolder for one BIRD import.
+// routeLog returns the logger for an import's routes, filtered by the
+// level the import asks for and silent when it asks for none.
+func (m *AdapterService) routeLog(params ImportParams) *zap.Logger {
+	if params.LogLevel == "" {
+		return zap.NewNop()
+	}
+
+	var level zapcore.Level
+	if err := level.UnmarshalText([]byte(params.LogLevel)); err != nil {
+		m.log.Warn("invalid log level, using nop logger",
+			zap.String("name", params.Name),
+			zap.String("log_level", params.LogLevel),
+			zap.Error(err),
+		)
+		return zap.NewNop()
+	}
+
+	// Wrap the base core with the requested level filter.
+	filteredCore := &levelFilterCore{
+		Core:  m.log.Core(),
+		level: level,
+	}
+	return zap.New(filteredCore).Named(params.Name)
+}
+
+// prepareImport connects to the route operator and opens the first stream
+// of an import, sending nothing on it.
+func (m *AdapterService) prepareImport(params ImportParams) (*importHolder, error) {
+	reconnect := grpcbackoff.DefaultConfig
+	reconnect.MaxDelay = importRetryMaxDelay
+	conn, err := grpc.NewClient(
+		m.routeOperatorEndpoint,
+		grpc.WithTransportCredentials(m.routeOperatorCredentials),
+		grpc.WithDefaultCallOptions(grpc.UseCompressor(xgrpc.ZstdName)),
+		grpc.WithConnectParams(grpc.ConnectParams{
+			Backoff:           reconnect,
+			MinConnectTimeout: routeOperatorMinConnectTimeout,
+		}),
+		// Pings and the TCP user timeout find a dead connection to the
+		// gateway; the heartbeats of a quiet import feed the latter.
+		//
+		// They cover only the hop to the gateway and only while a stream is
+		// open, so they shorten the detection of some failures but guarantee
+		// no recovery: the import restarts its attempts on its own.
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                routeOperatorKeepaliveTime,
+			Timeout:             routeOperatorKeepaliveTimeout,
+			PermitWithoutStream: false,
+		}),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to the route operator endpoint: %w", err)
+	}
+
+	holder := newImportHolder(
+		m.ctx,
+		conn,
+		params,
+		withImportHolderRouteLog(m.routeLog(params)),
+		withImportHolderLog(m.log.With(zap.String("config", params.Name))),
+	)
+	if err := holder.Open(); err != nil {
+		holder.Release()
+		return nil, fmt.Errorf("failed to setup initial BIRD import stream: %w", err)
+	}
+
+	return holder, nil
+}
+
+// publishImport makes holder the import of its name and starts it, and
+// returns the import it replaces, already cancelled.
 //
-// currentStream is a pointer to the stream variable shared with the
-// bird.Export callbacks so that a later reconnect, which replaces the
-// pointed-to value, is visible to them without re-wiring the callbacks.
-func newImportHolder(
-	export *bird.Export,
-	cancel context.CancelFunc,
-	conn *grpc.ClientConn,
-	currentStream *grpc.ClientStreamingClient[routepb.Update, routepb.UpdateSummary],
-	sockets []string,
-) *importHolder {
-	return &importHolder{
-		export:        export,
-		cancel:        cancel,
-		conn:          conn,
-		currentStream: currentStream,
-		sockets:       sockets,
-		createdAt:     time.Now(),
+// The new import sends nothing before the replaced one has exited, and an
+// import exits only after its own predecessor, so one adapter never feeds
+// the same RIB from two streams at once, however many setups race.
+func (m *AdapterService) publishImport(holder *importHolder) (*importHolder, error) {
+	m.importsMu.Lock()
+	defer m.importsMu.Unlock()
+
+	if m.closed {
+		return nil, errServiceClosed
+	}
+
+	predecessor := m.imports[holder.Name]
+	if predecessor != nil {
+		predecessor.Cancel()
+	}
+	m.imports[holder.Name] = holder
+
+	m.inflight.Go(func() {
+		holder.Run(predecessor)
+	})
+
+	return predecessor, nil
+}
+
+// importHolder owns one BIRD import: its connection to the route operator,
+// its MPLS sync and the attempts that feed the RIB one after another.
+type importHolder struct {
+	// Name is the RIB the import feeds.
+	Name      string
+	config    *bird.Config
+	createdAt time.Time // Timestamp when the session was created
+	// ctx lives as long as the import; cancel stops the import, its
+	// attempts and the wait between them.
+	ctx    context.Context
+	cancel context.CancelFunc
+	conn   *grpc.ClientConn // gRPC connection to the route operator's RouteService
+	// mplsSync is shared by the attempts, which never overlap.
+	mplsSync *mpls.Sync
+	// first is the attempt opened by the setup, nil until then and without
+	// sockets.
+	first *importAttempt
+	// done is closed once the import has exited and released its
+	// connection.
+	done chan struct{}
+	// routeLog reports single routes at the level the import asks for, and
+	// log reports the import itself.
+	routeLog, log *zap.Logger
+}
+
+type importHolderOption func(*importHolderOptions)
+
+type importHolderOptions struct {
+	RouteLog, Log *zap.Logger
+}
+
+func newImportHolderOptions() *importHolderOptions {
+	return &importHolderOptions{
+		RouteLog: zap.NewNop(),
+		Log:      zap.NewNop(),
 	}
 }
 
-// Close stops this import's goroutines and closes its gRPC connection.
+// withImportHolderRouteLog sets the logger for single routes.
+func withImportHolderRouteLog(log *zap.Logger) importHolderOption {
+	return func(o *importHolderOptions) {
+		o.RouteLog = log
+	}
+}
+
+// withImportHolderLog sets the logger for the import itself.
+func withImportHolderLog(log *zap.Logger) importHolderOption {
+	return func(o *importHolderOptions) {
+		o.Log = log
+	}
+}
+
+// newImportHolder builds an import that lives until ctx is done or it is
+// cancelled, and that owns conn from now on.
+func newImportHolder(
+	ctx context.Context,
+	conn *grpc.ClientConn,
+	params ImportParams,
+	options ...importHolderOption,
+) *importHolder {
+	opts := newImportHolderOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	return &importHolder{
+		Name:      params.Name,
+		config:    params.Config,
+		createdAt: time.Now(),
+		ctx:       ctx,
+		cancel:    cancel,
+		conn:      conn,
+		// The sync keeps the route-mpls config in step with the MPLS
+		// routes, across control-plane restarts and failed pushes.
+		//
+		// It logs to the import logger, so a lost route-mpls config or a
+		// route dropped for its label is reported whatever log level the
+		// import sets.
+		mplsSync: mpls.NewSync(
+			params.Name,
+			routemplspb.NewRouteMPLSServiceClient(conn),
+			params.SourceV4,
+			params.SourceV6,
+			mpls.WithLog(opts.Log),
+		),
+		done:     make(chan struct{}),
+		routeLog: opts.RouteLog,
+		log:      opts.Log,
+	}
+}
+
+// Open opens the stream of the first attempt, sending nothing on it, so
+// that a route operator out of reach fails the setup.
 //
-// cancel and conn are never nil: the sole caller passes cancel from
-// context.WithCancel, which never returns a nil CancelFunc, and conn from a
-// checked grpc.NewClient call, which never returns a nil connection
-// alongside a nil error.
-func (m *importHolder) Close() {
+// An import without sockets reads nothing and opens no stream.
+func (m *importHolder) Open() error {
+	if len(m.config.Sockets) == 0 {
+		return nil
+	}
+
+	first, err := m.openAttempt()
+	if err != nil {
+		return err
+	}
+	m.first = first
+	return nil
+}
+
+// Cancel stops the import without waiting for it.
+func (m *importHolder) Cancel() {
+	m.cancel()
+}
+
+// Done is closed once the import has exited and released its connection.
+func (m *importHolder) Done() <-chan struct{} {
+	return m.done
+}
+
+// Release cancels the import and closes its connection.
+//
+// It runs exactly once per import: when the import exits, or when its setup
+// fails before the import started.
+func (m *importHolder) Release() {
 	m.cancel()
 	_ = m.conn.Close()
-}
-
-// IsConnectionShutdown reports whether the gRPC connection to the route
-// operator has entered the shutdown state.
-func (m *importHolder) IsConnectionShutdown() bool {
-	return m.conn.GetState() == connectivity.Shutdown
-}
-
-// RunExport runs the BIRD data reader, blocking until ctx is cancelled or
-// the reader stops with an error.
-func (m *importHolder) RunExport(ctx context.Context) error {
-	return m.export.Run(ctx)
-}
-
-// CloseStream closes the active gRPC stream to the route operator.
-//
-// The summary the route operator returns on close is discarded — callers
-// only care whether the close itself failed.
-func (m *importHolder) CloseStream() error {
-	_, err := (*m.currentStream).CloseAndRecv()
-	return err
-}
-
-// SetStream replaces the active gRPC stream, e.g. after a reconnect.
-func (m *importHolder) SetStream(stream grpc.ClientStreamingClient[routepb.Update, routepb.UpdateSummary]) {
-	*m.currentStream = stream
 }
 
 // ToSessionInfo builds the public session summary for this import, keyed
@@ -359,89 +562,146 @@ func (m *importHolder) ToSessionInfo(name string) *adapterpb.SessionInfo {
 
 	return &adapterpb.SessionInfo{
 		Name:            name,
-		Sockets:         m.sockets,
+		Sockets:         m.config.Sockets,
 		CreatedAt:       m.createdAt.UnixNano(),
 		ConnectionState: connState,
 	}
 }
 
-// processBirdImport streams BIRD route updates to the control plane RIB.
-//
-// Handles automatic reconnection and graceful cleanup of existing imports.
-// It establishes the initial gRPC stream to the route operator's RouteService,
-// sets up callbacks for the bird.Export reader, and manages replacement of
-// existing imports.
-func (m *AdapterService) processBirdImport(
-	conn *grpc.ClientConn,
-	cfg *bird.Config,
-	name string,
-	mplsV4Src netip.Addr,
-	mplsV6Src netip.Addr,
-	options ...methodLogOption,
-) error {
-	opts := newMethodLogOptions()
-	for _, o := range options {
-		o(opts)
-	}
-	clientLog := opts.Log
-
-	// The streamCtx value governs this specific import's gRPC stream and BIRD
-	// reader. The holder's Close cancels it on replacement or service stop.
-	streamCtx, cancel := context.WithCancel(context.Background())
-	client := routepb.NewRouteServiceClient(conn)
-	stream, err := client.FeedRIB(streamCtx)
+// openAttempt opens the stream of a new attempt.
+func (m *importHolder) openAttempt() (*importAttempt, error) {
+	ctx, cancel := context.WithCancelCause(m.ctx)
+	// The stream is never half-closed: cancelling the attempt's context is
+	// the only way the adapter ends it.
+	stream, err := routepb.NewRouteServiceClient(m.conn).FeedRIB(ctx)
 	if err != nil {
-		cancel() // cleanup context if stream setup fails
-		return fmt.Errorf("failed to setup initial BIRD import stream: %w", err)
+		cancel(err)
+		return nil, err
 	}
-	currentStream := &stream
 
-	log := m.log.With(zap.String("config", name))
+	return &importAttempt{
+		ctx:    ctx,
+		cancel: cancel,
+		stream: stream,
+	}, nil
+}
 
-	// The sync keeps the route-mpls config in step with the MPLS routes,
-	// across control-plane restarts and failed pushes.
-	//
-	// It logs to the service logger, so a lost route-mpls config or a route
-	// dropped for its label is reported whatever log level the import sets.
-	mplsSync := mpls.NewSync(
-		name,
-		routemplspb.NewRouteMPLSServiceClient(conn),
-		mplsV4Src,
-		mplsV6Src,
-		mpls.WithLog(log),
-	)
+// Run feeds the RIB until the import is cancelled, starting a fresh
+// attempt after each one ends, and releases the import on return.
+//
+// Every attempt replays the whole BIRD table, since BIRD exports it in full
+// to each new connection. The import waits for predecessor to exit before
+// its first attempt, and before it exits itself even when cancelled first,
+// so that its own successor never overlaps the predecessor. The wait is
+// short: a replaced import has always been cancelled.
+func (m *importHolder) Run(predecessor *importHolder) {
+	defer close(m.done)
+	defer m.Release()
 
-	// A route-mpls failure must not hold back the IP routes, so it is only
-	// logged: the sync sends the whole table once route-mpls recovers.
-	pushMPLS := func(ctx context.Context) {
-		if err := mplsSync.Push(ctx); err != nil {
-			log.Warn("failed to push mpls routes",
-				zap.Error(err),
-			)
+	if predecessor != nil {
+		<-predecessor.Done()
+		if m.ctx.Err() != nil {
+			return
 		}
 	}
 
-	// The onUpdate callback sends route batches over the gRPC stream. The
-	// bird.Export function invokes it.
+	if len(m.config.Sockets) == 0 {
+		m.log.Info("bird import is disabled, no sockets configured")
+		return
+	}
+
+	retry := backoff.NewExponentialBackOff()
+	retry.MaxInterval = importRetryMaxDelay
+	retry.Reset()
+
+	attempt := m.first
+	m.first = nil
+	for {
+		if attempt == nil {
+			next, err := m.openAttempt()
+			if err != nil {
+				if m.ctx.Err() != nil {
+					return
+				}
+				m.log.Warn("failed to open the BIRD import stream",
+					zap.Error(err),
+				)
+				if !m.waitRetry(retry) {
+					return
+				}
+				continue
+			}
+			attempt = next
+		}
+
+		startedAt := time.Now()
+		err := attempt.Run(m.newExport(attempt))
+		attempt = nil
+		if m.ctx.Err() != nil {
+			m.log.Info("stopped BIRD import")
+			return
+		}
+
+		// The route operator closes the stream itself only when another
+		// writer of the same RIB has taken the session over, so that ending
+		// never counts as a healthy run.
+		if errors.Is(err, errFeedRIBClosedByServer) {
+			m.log.Warn("route operator closed the BIRD import stream, another writer of the same RIB likely superseded it",
+				zap.Error(err),
+			)
+		} else {
+			m.log.Warn("bird import attempt ended, restarting",
+				zap.Error(err),
+			)
+			if time.Since(startedAt) >= importHealthyUptime {
+				retry.Reset()
+			}
+		}
+
+		if !m.waitRetry(retry) {
+			return
+		}
+	}
+}
+
+// waitRetry waits out the next retry delay and reports whether the import
+// is still running.
+func (m *importHolder) waitRetry(retry backoff.BackOff) bool {
+	timer := time.NewTimer(min(retry.NextBackOff(), importRetryMaxDelay))
+	defer timer.Stop()
+
+	select {
+	case <-m.ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+// newExport builds the BIRD reader of one attempt, whose callbacks send on
+// that attempt's stream only.
+//
+// The reader cancels its callbacks' context when a BIRD socket fails, but a
+// send blocked by flow control waits on the attempt's context instead. Each
+// sending callback therefore passes the cancellation of its own context on
+// to the attempt for as long as it runs.
+func (m *importHolder) newExport(attempt *importAttempt) *bird.Export {
 	onUpdate := func(ctx context.Context, routes []rib.Route) error {
-		log.Debug("processing BIRD routes",
+		stop := attempt.CancelWith(ctx)
+		defer stop()
+
+		m.log.Debug("processing BIRD routes",
 			zap.Int("count", len(routes)),
 		)
 
 		for idx := range routes {
-			select {
-			case <-ctx.Done():
-				log.Warn("update stream send cancelled",
-					zap.Error(ctx.Err()),
-				)
-				_, closeErr := (*currentStream).CloseAndRecv()
-				return errors.Join(ctx.Err(), closeErr, errStreamClosed) // Signal runBirdImportLoop
-			default:
+			if ctx.Err() != nil {
+				return context.Cause(ctx)
 			}
 
 			// Log if NextHop is invalid before converting to protobuf
 			if !routes[idx].NextHop.IsValid() {
-				clientLog.Debug("route has invalid next_hop, skip",
+				m.routeLog.Debug("route has invalid next_hop, skip",
 					zap.String("prefix", routes[idx].Prefix.String()),
 					zap.String("next_hop", routes[idx].NextHop.String()),
 					zap.Binary("next_hop_bytes", routes[idx].NextHop.AsSlice()),
@@ -451,218 +711,135 @@ func (m *AdapterService) processBirdImport(
 
 			if routes[idx].RD != 0 {
 				// Assume it is a MPLS route
-				mplsSync.Apply(routes[idx])
+				m.mplsSync.Apply(routes[idx])
 				continue
 			}
 
 			route, err := rib.ToPBRoute(&routes[idx])
 			if err != nil {
-				clientLog.Debug("route cannot be converted to protobuf, skip",
+				m.routeLog.Debug("route cannot be converted to protobuf, skip",
 					zap.String("prefix", routes[idx].Prefix.String()),
 					zap.Error(err),
 				)
 				continue
 			}
 
-			err = (*currentStream).Send(&routepb.Update{
-				Name:     name,
+			err = attempt.Send(&routepb.Update{
+				Name:     m.Name,
 				IsDelete: routes[idx].ToRemove,
 				Route:    route,
 			})
 			if err != nil {
-				// This error stops bird.Export, triggering reconnection in runBirdImportLoop
 				return fmt.Errorf("send BIRD route update for %s failed: %w", routes[idx].Prefix, err)
 			}
 		}
 
-		pushMPLS(ctx)
+		m.pushMPLS(ctx)
 
 		return nil
 	}
 
-	// The onFlush callback commits updates to dataplane when bird.Export signals
-	// a flush.
-	onFlush := func() error {
-		// An update without a route indicates a flush event.
-		err := (*currentStream).Send(&routepb.Update{Name: name})
-		if err != nil {
+	// An update without a route asks the route operator to commit the
+	// routes sent so far.
+	onFlush := func(ctx context.Context) error {
+		stop := attempt.CancelWith(ctx)
+		defer stop()
+
+		if err := attempt.Send(&routepb.Update{Name: m.Name}); err != nil {
 			return fmt.Errorf("flush BIRD routes failed: %w", err)
 		}
 		return nil
 	}
 
-	// Idle ticks push too, so a failed push is retried even while BIRD
-	// sends nothing.
-	export := bird.NewExportReader(
-		cfg,
+	// An idle tick sends a heartbeat, whose unacknowledged bytes let the
+	// kernel find a half-open connection while BIRD is quiet.
+	//
+	// A failed heartbeat ends the attempt. Idle ticks push MPLS too, so a
+	// failed push is retried even while BIRD sends nothing.
+	onIdle := func(ctx context.Context) {
+		stop := attempt.CancelWith(ctx)
+		defer stop()
+
+		if err := attempt.Send(&routepb.Update{Name: m.Name, Heartbeat: true}); err != nil {
+			attempt.Cancel(fmt.Errorf("BIRD import heartbeat failed: %w", err))
+			return
+		}
+		m.pushMPLS(ctx)
+	}
+
+	return bird.NewExportReader(
+		m.config,
 		onUpdate,
 		onFlush,
-		bird.WithExportReaderIdle(pushMPLS),
-		bird.WithExportReaderLog(clientLog),
+		bird.WithExportReaderIdle(onIdle),
+		bird.WithExportReaderLog(m.routeLog),
 	)
-
-	holder := newImportHolder(export, cancel, conn, currentStream, cfg.Sockets)
-
-	// Lock to safely access and modify m.imports.
-	m.importsMu.Lock()
-	defer m.importsMu.Unlock()
-	// Ensure only one active import per target: stop and replace if one exists.
-	if oldHolder, ok := m.imports[name]; ok {
-		log.Info("replacing existing BIRD import")
-		oldHolder.Close()
-	}
-
-	m.imports[name] = holder
-
-	// Launch goroutine for BIRD reading and stream lifecycle management.
-	go m.runBirdImportLoop(streamCtx, holder, client, withMethodLog(log))
-
-	return nil
 }
 
-// runBirdImportLoop is the main goroutine for an active BIRD import.
-// It runs the BIRD data reader (holder.RunExport) and, if the reader or gRPC
-// stream fails, attempts to re-establish the stream via reconnectStream.
-// Terminates if its context (ctx) is cancelled or the service's quitCh is closed.
-func (m *AdapterService) runBirdImportLoop(
-	ctx context.Context,
-	holder *importHolder,
-	client routepb.RouteServiceClient,
-	options ...methodLogOption,
-) {
-	opts := newMethodLogOptions()
-	for _, o := range options {
-		o(opts)
-	}
-	log := opts.Log
-
-	defer func() { // Cleanup on exit
-		log.Info("BIRD import loop cleanup: closing connection and cancelling context")
-		holder.Close()
-	}()
-
-	runBackoff := backoff.ExponentialBackOff{
-		InitialInterval:     backoff.DefaultInitialInterval,
-		RandomizationFactor: backoff.DefaultRandomizationFactor,
-		Multiplier:          backoff.DefaultMultiplier,
-		MaxInterval:         time.Minute,
-	}
-	runBackoff.Reset()
-	backoffResetTimeout := 10 * time.Minute
-
-	streamActive := true
-
-	for {
-		select {
-		case <-ctx.Done():
-			log.Info("BIRD import loop cancelled via context", zap.Error(ctx.Err()))
-			return
-		case <-m.quitCh:
-			log.Info("BIRD import loop stopping due to service quit signal")
-			return
-		default:
-		}
-
-		if holder.IsConnectionShutdown() {
-			log.Error("gRPC connection for BIRD import is shutdown, terminating loop")
-			return
-		}
-
-		if !streamActive {
-			log.Info("attempting to re-establish BIRD route update stream")
-			if !m.reconnectStream(ctx, client, holder, withMethodLog(log)) {
-				log.Info("stream reconnection aborted, terminating BIRD import loop")
-				return // Reconnect failed due to ctx / quitCh
-			}
-			streamActive = true
-			log.Info("successfully re-established BIRD route update stream")
-		}
-
-		log.Info("starting BIRD export reader")
-		lastRunAttempt := time.Now()
-		err := holder.RunExport(ctx) // Blocking call
-		if err != nil {
-			log.Warn("BIRD export reader stopped with error", zap.Error(err))
-			streamActive = false // Stream needs re-establishment
-
-			// If context cancellation caused reader to stop, exit loop
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				log.Warn("BIRD export reader context cancelled, terminating loop")
-				return
-			}
-
-			// If stream wasn't closed by onUpdate's error path, try to close it here
-			if !errors.Is(err, errStreamClosed) {
-				log.Info("closing client stream after BIRD export reader error")
-				if closeErr := holder.CloseStream(); closeErr != nil {
-					log.Warn("error closing client stream post-reader failure", zap.Error(closeErr))
-				}
-			}
-
-			if time.Since(lastRunAttempt) > backoffResetTimeout {
-				runBackoff.Reset()
-			}
-			// Apply exponential backoff before retrying the export reader
-			select {
-			case <-ctx.Done():
-				log.Info("BIRD import loop cancelled via context", zap.Error(ctx.Err()))
-				return
-			case <-m.quitCh:
-				log.Info("BIRD import loop stopping due to service quit signal")
-				return
-			case <-time.After(runBackoff.NextBackOff()):
-			}
-			// Loop continues to attempt reconnection unless ctx/quitCh terminates it
-		} else {
-			log.Info("BIRD export reader stopped cleanly, terminating loop")
-			return
-		}
+// pushMPLS delivers the MPLS changes, only logging a failure so that it
+// does not hold back the IP routes: the sync sends the whole table once
+// route-mpls recovers.
+func (m *importHolder) pushMPLS(ctx context.Context) {
+	if err := m.mplsSync.Push(ctx); err != nil {
+		m.log.Warn("failed to push mpls routes",
+			zap.Error(err),
+		)
 	}
 }
 
-// reconnectStream attempts to re-establish the gRPC stream with exponential backoff.
-// Returns true if reconnection succeeds, false if aborted by context or quit signal.
-// Updates holder's active stream on success.
-func (m *AdapterService) reconnectStream(
-	ctx context.Context,
-	client routepb.RouteServiceClient,
-	holder *importHolder,
-	options ...methodLogOption,
-) bool {
-	opts := newMethodLogOptions()
-	for _, o := range options {
-		o(opts)
-	}
-	log := opts.Log
+// importAttempt is one restart unit of an import: a stream opened with the
+// attempt's own context, its receiver and one run of the BIRD reader.
+type importAttempt struct {
+	ctx    context.Context
+	cancel context.CancelCauseFunc
+	stream grpc.ClientStreamingClient[routepb.Update, routepb.UpdateSummary]
+}
 
-	log.Info("attempting to re-establish BIRD route update stream with exponential backoff")
+// Run runs export and the receiver of the stream until either ends, and
+// returns why the attempt ended.
+//
+// Whichever ends first cancels the attempt, which stops the other one, and
+// the call returns only after both have exited.
+func (m *importAttempt) Run(export *bird.Export) error {
+	defer m.cancel(nil)
 
-	ticker := backoff.NewTicker(&backoff.ExponentialBackOff{
-		InitialInterval:     backoff.DefaultInitialInterval,
-		RandomizationFactor: backoff.DefaultRandomizationFactor,
-		Multiplier:          backoff.DefaultMultiplier,
-		MaxInterval:         30 * time.Second,
+	var workers errgroup.Group
+	workers.Go(func() error {
+		// The receive returns once the call ends, without an error when the
+		// route operator closed it with a summary.
+		//
+		// It never half-closes the stream, so it may run beside the sender.
+		err := m.stream.RecvMsg(&routepb.UpdateSummary{})
+		if err == nil {
+			err = errFeedRIBClosedByServer
+		}
+		m.cancel(fmt.Errorf("BIRD import stream ended: %w", err))
+		return nil
 	})
-	defer ticker.Stop()
+	workers.Go(func() error {
+		err := export.Run(m.ctx)
+		m.cancel(fmt.Errorf("BIRD export reader stopped: %w", err))
+		return nil
+	})
+	_ = workers.Wait()
 
-	for {
-		select {
-		case <-m.quitCh:
-			log.Warn("stream reconnection aborted due to service quit signal")
-			return false
-		case <-ctx.Done():
-			log.Warn("stream reconnection aborted due to import context cancellation", zap.Error(ctx.Err()))
-			return false
-		case <-ticker.C:
-			log.Info("attempting FeedRIB call for new stream")
-			newStream, err := client.FeedRIB(ctx) // Use import's context
-			if err != nil {
-				log.Warn("failed to re-establish stream, retrying via ticker", zap.Error(err))
-				continue // Ticker schedules next attempt
-			}
+	return context.Cause(m.ctx)
+}
 
-			holder.SetStream(newStream) // Update to new stream
-			return true
-		}
-	}
+// Send sends one update on the attempt's stream.
+func (m *importAttempt) Send(update *routepb.Update) error {
+	return m.stream.Send(update)
+}
+
+// Cancel ends the attempt with cause.
+func (m *importAttempt) Cancel(cause error) {
+	m.cancel(cause)
+}
+
+// CancelWith cancels the attempt with the cause of ctx once ctx is done,
+// until the returned function is called.
+func (m *importAttempt) CancelWith(ctx context.Context) func() bool {
+	return context.AfterFunc(ctx, func() {
+		m.cancel(context.Cause(ctx))
+	})
 }
