@@ -7,7 +7,9 @@ covering every module config and function pushed to that gateway.
   is the operator's own name (`forward`, `decap`, ...). The service is the
   `controlplane.ynpb.v1.ReadinessService` contract registered under that name,
   so several operators can share one gateway.
-- Service implementation and scope logic: `static.go`.
+- Service implementation: the operator framework (`common/go/operator`)
+  serves the shared readiness contract under the operator's name.
+- Scope logic: `static.go` (the scopes and the observed actuator wiring).
 
 ## Scopes
 

@@ -3,6 +3,7 @@ package operator_test
 import (
 	"context"
 	"errors"
+	"net"
 	"testing"
 	"time"
 
@@ -16,6 +17,17 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 )
+
+// freeEndpoint reserves a loopback port and hands it back released, so the
+// operator's own server can bind it and the test can dial it.
+func freeEndpoint(t *testing.T) string {
+	t.Helper()
+	listener, err := net.Listen("tcp", "[::1]:0")
+	require.NoError(t, err)
+	endpoint := listener.Addr().String()
+	require.NoError(t, listener.Close())
+	return endpoint
+}
 
 // constantSource always offers the same state and never wakes the loop.
 type constantSource struct {

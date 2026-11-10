@@ -19,7 +19,7 @@ func NewOperator(cfg *Config, options ...Option) (operator.Runnable, error) {
 		o(opts)
 	}
 
-	targets := make([]operator.StaticTarget, 0, len(cfg.Configs)+len(cfg.Functions))
+	targets := make([]StaticTarget, 0, len(cfg.Configs)+len(cfg.Functions))
 	for idx, config := range cfg.Configs {
 		request, err := LoadRequest(config.Method.Unwrap(), config.File.Unwrap())
 		if err != nil {
@@ -28,7 +28,7 @@ func NewOperator(cfg *Config, options ...Option) (operator.Runnable, error) {
 		if err := bindRequestName(request, config); err != nil {
 			return nil, fmt.Errorf("configs[%d]: %w", idx, err)
 		}
-		targets = append(targets, operator.StaticTarget{
+		targets = append(targets, StaticTarget{
 			Name:    config.Name.Unwrap(),
 			Method:  config.Method.Unwrap(),
 			Request: request,
@@ -36,23 +36,23 @@ func NewOperator(cfg *Config, options ...Option) (operator.Runnable, error) {
 	}
 
 	for _, function := range cfg.Functions {
-		targets = append(targets, operator.StaticTarget{
+		targets = append(targets, StaticTarget{
 			Name:        function.Name.Unwrap(),
 			Function:    function.AsFunction(),
 			IgnorePdump: function.IgnorePdump,
 		})
 	}
 
-	return operator.NewStaticModuleOperator(
+	return NewStaticModuleOperator(
 		cfg.Name.Unwrap(),
-		operator.StaticConfig{
+		StaticConfig{
 			Server:    cfg.Server,
 			Gateways:  cfg.Gateways,
 			Register:  cfg.Register,
 			Reconcile: cfg.Reconcile,
 		},
 		targets,
-		operator.WithStaticLog(opts.Log),
+		WithStaticLog(opts.Log),
 	)
 }
 

@@ -13,9 +13,9 @@ import (
 	"google.golang.org/protobuf/reflect/protoregistry"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/common/go/readiness"
 	"github.com/yanet-platform/yanet2/common/go/xgrpc"
-	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
@@ -44,13 +44,13 @@ type StaticTarget struct {
 // operator consumes.
 type StaticConfig struct {
 	// Server is where the operator serves its readiness and metrics.
-	Server GRPCServerConfig
+	Server operator.GRPCServerConfig
 	// Gateways lists the gateways every target is pushed to.
-	Gateways []GatewayConfig
+	Gateways []operator.GatewayConfig
 	// Register paces the registration heartbeat to the gateways.
-	Register RegisterConfig
+	Register operator.RegisterConfig
 	// Reconcile paces the push and its retries.
-	Reconcile ReconcileConfig
+	Reconcile operator.ReconcileConfig
 }
 
 type staticOptions struct {
@@ -81,7 +81,7 @@ func NewStaticModuleOperator(
 	cfg StaticConfig,
 	targets []StaticTarget,
 	options ...StaticOption,
-) (Runnable, error) {
+) (operator.Runnable, error) {
 	opts := newStaticOptions()
 	for _, o := range options {
 		o(opts)
@@ -105,18 +105,18 @@ func NewStaticModuleOperator(
 		readiness.WithLog(log),
 	)
 	operatorLabel := commonpb.NewLabel("operator", name)
-	reconcilerMetrics := NewReconcilerMetrics("generic_operator", operatorLabel)
-	metricsCollectors := []MetricsCollector{reconcilerMetrics}
-	actuators := make([]Actuator[[]StaticTarget], 0, len(cfg.Gateways))
+	reconcilerMetrics := operator.NewReconcilerMetrics("generic_operator", operatorLabel)
+	metricsCollectors := []operator.MetricsCollector{reconcilerMetrics}
+	actuators := make([]operator.Actuator[[]StaticTarget], 0, len(cfg.Gateways))
 	for _, gw := range cfg.Gateways {
-		gatewayMetrics := NewApplyMetrics(
+		gatewayMetrics := operator.NewApplyMetrics(
 			"generic_operator_gateway",
 			operatorLabel,
 			commonpb.NewLabel("gateway", gw.Name),
 		)
 		metricsCollectors = append(metricsCollectors, gatewayMetrics)
 		gatewayLog := log.With(zap.String("gateway", gw.Name))
-		conn, err := DialGateway(gw, xgrpc.WithCertificateStoreLog(gatewayLog))
+		conn, err := operator.DialGateway(gw, xgrpc.WithCertificateStoreLog(gatewayLog))
 		if err != nil {
 			for _, a := range actuators {
 				_ = a.Close()
@@ -129,25 +129,25 @@ func NewStaticModuleOperator(
 			functions: ynpb.NewFunctionServiceClient(conn),
 			log:       gatewayLog,
 		}
-		observed := NewObservedActuator(actuator, "config:"+gw.Name, func(scope string, err error) {
+		observed := operator.NewObservedActuator(actuator, "config:"+gw.Name, func(scope string, err error) {
 			tracker.Observe(scope, err)
 			gatewayMetrics.Observe(err)
 		})
 		actuators = append(actuators, observed)
 	}
 
-	return NewOperator(
-		NewFanOutActuator(actuators, WithFanOutLog(log)),
+	return operator.NewOperator(
+		operator.NewFanOutActuator(actuators, operator.WithFanOutLog(log)),
 		newStaticSource(state),
-		WithGRPCServer(
+		operator.WithGRPCServer(
 			cfg.Server,
-			NewMetricsServiceRegistrar(name, metricsCollectors...),
+			operator.NewMetricsServiceRegistrar(name, metricsCollectors...),
 		),
-		WithReadiness(name, tracker),
-		WithGateways(cfg.Register, cfg.Gateways...),
-		WithLog(log),
-		WithMetrics(reconcilerMetrics),
-		WithReconcile(cfg.Reconcile),
+		operator.WithReadiness(name, tracker),
+		operator.WithGateways(cfg.Register, cfg.Gateways...),
+		operator.WithLog(log),
+		operator.WithMetrics(reconcilerMetrics),
+		operator.WithReconcile(cfg.Reconcile),
 	), nil
 }
 
@@ -339,11 +339,11 @@ func (m *staticGatewayActuator) Apply(ctx context.Context, targets []StaticTarge
 		if target.Function == nil {
 			continue
 		}
-		options := []FunctionActuatorOption{WithFunctionLog(m.log)}
+		options := []operator.FunctionActuatorOption{operator.WithFunctionLog(m.log)}
 		if target.IgnorePdump {
-			options = append(options, WithIgnorePDump())
+			options = append(options, operator.WithIgnorePDump())
 		}
-		if e := NewFunctionActuator(m.functions, options...).Apply(ctx, target.Function); e != nil {
+		if e := operator.NewFunctionActuator(m.functions, options...).Apply(ctx, target.Function); e != nil {
 			err = errors.Join(err, fmt.Errorf(
 				"failed to update function %q on gateway %q: %w", target.Function.GetId().GetName(), m.name, e,
 			))
@@ -355,42 +355,4 @@ func (m *staticGatewayActuator) Apply(ctx context.Context, targets []StaticTarge
 
 func (m *staticGatewayActuator) Close() error {
 	return m.conn.Close()
-}
-
-// readinessService is the gateway's readiness contract, served by an
-// operator under its own name.
-type readinessService struct {
-	ynpb.UnimplementedReadinessServiceServer
-
-	tracker *readiness.Tracker
-}
-
-func (m *readinessService) Ready(
-	ctx context.Context,
-	req *readinesspb.ReadyRequest,
-) (*readinesspb.ReadyResponse, error) {
-	return m.tracker.Ready(req), nil
-}
-
-func (m *readinessService) Watch(
-	req *readinesspb.ReadyRequest,
-	stream ynpb.ReadinessService_WatchServer,
-) error {
-	return m.tracker.Watch(stream.Context(), req, stream.Send)
-}
-
-// NewReadinessServiceRegistrar serves the shared readiness contract under
-// the operator's own name.
-func NewReadinessServiceRegistrar(name string, tracker *readiness.Tracker) ServiceRegistrar {
-	return func(server *grpc.Server) string {
-		desc := ynpb.ReadinessService_ServiceDesc
-		desc.ServiceName = ReadinessServiceName(name)
-		server.RegisterService(&desc, &readinessService{tracker: tracker})
-		return desc.ServiceName
-	}
-}
-
-// ReadinessServiceName identifies an operator's scoped readiness API.
-func ReadinessServiceName(name string) string {
-	return "operators." + name + ".operatorpb.v1.ReadinessService"
 }

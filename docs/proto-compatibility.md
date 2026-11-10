@@ -34,7 +34,7 @@ The following versioned package families are covered by the breaking gate.
 - `operators.route.operatorpb.v1`
 - `operators.forward.operatorpb.v1` and `operators.decap.operatorpb.v1` exist only as runtime
   `ReadinessService` and `MetricsService` names of the static module operator
-  (`common/go/operator`), not as proto packages
+  (`operators/generic/operator`), not as proto packages
 - `operators.bird_adapter.adapterpb.v1` (directory `bird-adapter`, package `bird_adapter` — see Exclusions)
 
 The unused pre-v1 `modules.balancer2.controlplane.balancerpb.v1` package and its CLI were intentionally removed. Its breaking-gate exclusion remains for comparisons against revisions that contain it. See [Upgrade notes](upgrade.md#balancer2-scaffold-and-cli-removed).

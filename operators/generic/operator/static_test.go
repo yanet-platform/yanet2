@@ -17,10 +17,11 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
-	"github.com/yanet-platform/yanet2/common/go/operator"
+	commonoperator "github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
+	"github.com/yanet-platform/yanet2/operators/generic/operator"
 )
 
 // fakeGateway accepts registrations, records pipeline updates as the module
@@ -132,10 +133,10 @@ func freeEndpoint(t *testing.T) string {
 // reconcile cadence.
 func staticConfig(gateway, server string) operator.StaticConfig {
 	return operator.StaticConfig{
-		Server:   operator.GRPCServerConfig{Endpoint: xcfg.MustNonEmptyString(server)},
-		Gateways: []operator.GatewayConfig{{Name: "gw0", Endpoint: xcfg.MustNonEmptyString(gateway)}},
-		Register: operator.RegisterConfig{Interval: xcfg.MustNonZero(time.Second)},
-		Reconcile: operator.ReconcileConfig{
+		Server:   commonoperator.GRPCServerConfig{Endpoint: xcfg.MustNonEmptyString(server)},
+		Gateways: []commonoperator.GatewayConfig{{Name: "gw0", Endpoint: xcfg.MustNonEmptyString(gateway)}},
+		Register: commonoperator.RegisterConfig{Interval: xcfg.MustNonZero(time.Second)},
+		Reconcile: commonoperator.ReconcileConfig{
 			Interval:       xcfg.MustNonZero(20 * time.Millisecond),
 			InitialBackoff: xcfg.MustNonZero(10 * time.Millisecond),
 			MaxBackoff:     xcfg.MustNonZero(50 * time.Millisecond),
@@ -278,7 +279,7 @@ func Test_NewStaticModuleOperator_DetachesMessages(t *testing.T) {
 // config and the function, then stops it and returns what was pushed.
 func runUntilPushed(
 	t *testing.T,
-	op operator.Runnable,
+	op commonoperator.Runnable,
 	gateway *fakeGateway,
 ) ([]*ynpb.UpdatePipelineRequest, map[string]*ynpb.Function) {
 	t.Helper()
@@ -338,7 +339,7 @@ func Test_StaticModuleOperator_ReadinessUnderInstanceName(t *testing.T) {
 	conn, err := grpc.NewClient(server, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
-	service := operator.ReadinessServiceName("forward")
+	service := commonoperator.ReadinessServiceName("forward")
 	require.Equal(t, "operators.forward.operatorpb.v1.ReadinessService", service)
 	response := &readinesspb.ReadyResponse{}
 	require.Eventually(t, func() bool {
@@ -374,10 +375,10 @@ func Test_NewStaticModuleOperator_AcceptsFunctionOnlyTarget(t *testing.T) {
 	op, err := operator.NewStaticModuleOperator(
 		"forward",
 		operator.StaticConfig{
-			Server:   operator.GRPCServerConfig{Endpoint: xcfg.MustNonEmptyString("[::1]:0")},
-			Gateways: []operator.GatewayConfig{{Name: "gw0", Endpoint: xcfg.MustNonEmptyString("[::1]:0")}},
-			Register: operator.RegisterConfig{Interval: xcfg.MustNonZero(time.Second)},
-			Reconcile: operator.ReconcileConfig{
+			Server:   commonoperator.GRPCServerConfig{Endpoint: xcfg.MustNonEmptyString("[::1]:0")},
+			Gateways: []commonoperator.GatewayConfig{{Name: "gw0", Endpoint: xcfg.MustNonEmptyString("[::1]:0")}},
+			Register: commonoperator.RegisterConfig{Interval: xcfg.MustNonZero(time.Second)},
+			Reconcile: commonoperator.ReconcileConfig{
 				Interval:       xcfg.MustNonZero(time.Second),
 				InitialBackoff: xcfg.MustNonZero(time.Millisecond),
 				MaxBackoff:     xcfg.MustNonZero(time.Second),
