@@ -159,13 +159,25 @@ range_index_lpm_cb(
 	return 0;
 }
 
+/*
+ * Builds the LPM of a range index partition with the caller values.
+ *
+ * The caller values are indexed like the stored ones and hold at least
+ * one entry per range of the index: every range receives the caller
+ * value at its index instead of the stored value. LPM_VALUE_INVALID is
+ * not a valid value: the walk marks the absence of a previous range
+ * with it, so a range carrying it is left out of the LPM.
+ */
 static inline int
-range_index_build_lpm(
-	const struct range_index *range_index, uint8_t key_size, struct lpm *lpm
+range_index_build_lpm_values(
+	const struct range_index *range_index,
+	uint8_t key_size,
+	const uint32_t *values,
+	struct lpm *lpm
 ) {
 	struct range_index_lpm_ctx ctx;
 	ctx.lpm = lpm;
-	ctx.values = ADDR_OF(&range_index->values);
+	ctx.values = values;
 	ctx.prev_value = LPM_VALUE_INVALID;
 
 	if (radix_walk(
@@ -185,4 +197,13 @@ range_index_build_lpm(
 	}
 
 	return 0;
+}
+
+static inline int
+range_index_build_lpm(
+	const struct range_index *range_index, uint8_t key_size, struct lpm *lpm
+) {
+	return range_index_build_lpm_values(
+		range_index, key_size, ADDR_OF(&range_index->values), lpm
+	);
 }
