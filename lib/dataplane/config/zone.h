@@ -113,8 +113,11 @@ struct dp_worker {
 	// Packets dropped because the inter-worker data pipe was full or
 	// absent.
 	uint64_t *remote_tx_drops;
-	// Total packets dropped by this worker for any reason.
-	uint64_t *drop_count;
+	// Total packets this worker itself freed rather than forwarding.
+	//
+	// Includes both transmit drops above; excludes packets lost below
+	// the worker, such as a receive-ring overflow.
+	uint64_t *disposed_count;
 
 	// Packet source pool of the worker's first assignment.
 	//

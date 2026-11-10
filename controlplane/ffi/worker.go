@@ -76,7 +76,7 @@ func (m *DPConfig) WorkerCounters() ([]WorkerCounter, error) {
 	remoteTx := counterSet.Lookup("remote_tx", 2).Require()
 	localTxDrops := counterSet.Lookup("local_tx_drops", 1).Require()
 	remoteTxDrops := counterSet.Lookup("remote_tx_drops", 1).Require()
-	drops := counterSet.Lookup("drops", 1).Require()
+	disposed := counterSet.Lookup("disposed", 1).Require()
 	rxMempoolCapacity := counterSet.Lookup("rx_mempool_capacity", 1).Require()
 	rxMempoolAvailable := counterSet.Lookup("rx_mempool_available", 1).Require()
 
@@ -124,7 +124,7 @@ func (m *DPConfig) WorkerCounters() ([]WorkerCounter, error) {
 			RemoteTxPackets: remoteTx.Value(idx, packetsIdx),
 			LocalTxDrops:    localTxDrops.Value(idx, singleValueIdx),
 			RemoteTxDrops:   remoteTxDrops.Value(idx, singleValueIdx),
-			Disposed:        drops.Value(idx, singleValueIdx),
+			Disposed:        disposed.Value(idx, singleValueIdx),
 			RxMempool:       pool,
 			Assignments:     assignments,
 		}

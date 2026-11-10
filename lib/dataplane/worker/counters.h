@@ -19,7 +19,7 @@ struct worker_counter_ids {
 	uint64_t rx_bursts;
 	uint64_t local_tx_drops;
 	uint64_t remote_tx_drops;
-	uint64_t drops;
+	uint64_t disposed;
 	uint64_t rx_mempool_capacity;
 	uint64_t rx_mempool_available;
 };
