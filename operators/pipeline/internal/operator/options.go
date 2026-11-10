@@ -49,7 +49,6 @@ func WithServiceLog(log *zap.Logger) ServiceOption {
 // when no metrics sink is attached.
 type noopGatewayActuatorMetricsObserver struct{}
 
-func (noopGatewayActuatorMetricsObserver) OnApplyCompleted(error)          {}
 func (noopGatewayActuatorMetricsObserver) OnResourceUpdated(string, error) {}
 func (noopGatewayActuatorMetricsObserver) OnGC(int, int, error)            {}
 

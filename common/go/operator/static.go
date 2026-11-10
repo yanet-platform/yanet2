@@ -104,36 +104,26 @@ func NewStaticModuleOperator(
 		readiness.WithDrainLatch(),
 		readiness.WithLog(log),
 	)
-	operatorLabel := commonpb.NewLabel("operator", name)
-	reconcilerMetrics := NewReconcilerMetrics("generic_operator", operatorLabel)
-	metricsCollectors := []MetricsCollector{reconcilerMetrics}
-	actuators := make([]Actuator[[]StaticTarget], 0, len(cfg.Gateways))
+	gateways := make([]Target[[]StaticTarget], 0, len(cfg.Gateways))
 	for _, gw := range cfg.Gateways {
-		gatewayMetrics := NewApplyMetrics(
-			"generic_operator_gateway",
-			operatorLabel,
-			commonpb.NewLabel("gateway", gw.Name),
-		)
-		metricsCollectors = append(metricsCollectors, gatewayMetrics)
 		gatewayLog := log.With(zap.String("gateway", gw.Name))
 		conn, err := DialGateway(gw, xgrpc.WithCertificateStoreLog(gatewayLog))
 		if err != nil {
-			for _, a := range actuators {
-				_ = a.Close()
+			for _, gateway := range gateways {
+				_ = gateway.Actuator.Close()
 			}
 			return nil, err
 		}
-		actuator := &staticGatewayActuator{
-			name:      gw.Name,
-			conn:      conn,
-			functions: ynpb.NewFunctionServiceClient(conn),
-			log:       gatewayLog,
-		}
-		observed := NewObservedActuator(actuator, "config:"+gw.Name, func(scope string, err error) {
-			tracker.Observe(scope, err)
-			gatewayMetrics.Observe(err)
+		gateways = append(gateways, Target[[]StaticTarget]{
+			Name: gw.Name,
+			Actuator: &staticGatewayActuator{
+				name:      gw.Name,
+				conn:      conn,
+				functions: ynpb.NewFunctionServiceClient(conn),
+				log:       gatewayLog,
+			},
+			Scope: staticScope(gw.Name),
 		})
-		actuators = append(actuators, observed)
 	}
 
 	// The targets never change, so they are published once and the interval
@@ -142,16 +132,17 @@ func NewStaticModuleOperator(
 	desired.Publish(state)
 
 	return NewOperator(
-		NewFanOutActuator(actuators, WithFanOutLog(log)),
+		gateways,
 		desired,
-		WithGRPCServer(
-			cfg.Server,
-			NewMetricsServiceRegistrar(name, metricsCollectors...),
-		),
+		WithGRPCServer(cfg.Server),
 		WithReadiness(name, tracker),
+		WithMetrics(MetricsConfig{
+			Name:   name,
+			Prefix: "generic_operator",
+			Labels: []*commonpb.Label{commonpb.NewLabel("operator", name)},
+		}),
 		WithGateways(cfg.Register, cfg.Gateways...),
 		WithLog(log),
-		WithMetrics(reconcilerMetrics),
 		WithReconcile(cfg.Reconcile),
 	), nil
 }
@@ -202,11 +193,17 @@ func staticScopes(cfg StaticConfig) []readiness.ScopeSpec {
 	specs := make([]readiness.ScopeSpec, len(cfg.Gateways))
 	for idx, gw := range cfg.Gateways {
 		specs[idx] = readiness.ScopeSpec{
-			Name:                        "config:" + gw.Name,
+			Name:                        staticScope(gw.Name),
 			ExpectedObservationInterval: cfg.Reconcile.Interval.Unwrap(),
 		}
 	}
 	return specs
+}
+
+// staticScope names the readiness scope of a gateway: whether every target
+// applies there.
+func staticScope(gateway string) string {
+	return "config:" + gateway
 }
 
 // resolvedMethod is a unary method ready to be invoked over a connection.

@@ -2,30 +2,19 @@ package operator
 
 import (
 	"sync"
-	"time"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
-	"github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/operators/route/neigh"
 )
 
-// applyDurationBounds are the histogram bucket upper bounds, in seconds,
-// used for per-gateway apply latency.
-var applyDurationBounds = []float64{
-	0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10,
-}
-
-// Metrics is the single observability sink for the route operator.
+// Metrics is the route operator's own observability sink; the reconcile
+// and gateway apply families come from the operator framework.
 //
-// It combines three collection styles: reconcile-loop and gateway-apply
-// counters are updated by tee-ing existing callbacks, RIB gauges are
-// pulled from thread-safe snapshots on every collection, and gateway sinks
-// are created on demand for each gateway. The reconcile-loop families come
-// from the operator framework, under this operator's prefix.
+// RIB gauges are pulled from thread-safe snapshots on every collection,
+// feed and neighbour events are counted from their callbacks, and the FIB
+// gauges of each gateway are created on its first build.
 type Metrics struct {
-	*operator.ReconcilerMetrics
-
 	ribs                  *RIBStore
 	neighTable            *neigh.NeighTable
 	netlinkMonitorEnabled bool
@@ -51,7 +40,6 @@ func NewMetrics(ribs *RIBStore, neighTable *neigh.NeighTable, options ...Metrics
 	}
 
 	return &Metrics{
-		ReconcilerMetrics:     operator.NewReconcilerMetrics("route_operator"),
 		ribs:                  ribs,
 		neighTable:            neighTable,
 		netlinkMonitorEnabled: opts.NetlinkMonitorEnabled,
@@ -165,7 +153,7 @@ func (m *Metrics) ribSessionCounter(sessions *metrics.MetricMap[*metrics.Counter
 // Collect renders the current state of every metric as a slice of
 // commonpb.Metric values.
 func (m *Metrics) Collect() []*commonpb.Metric {
-	out := m.ReconcilerMetrics.Collect()
+	out := []*commonpb.Metric{}
 
 	for name, ribRef := range m.ribs.Snapshot() {
 		stats := ribRef.Stats()
@@ -263,15 +251,9 @@ func (m *fibGauges) Store(stats FIBBuildStats) {
 	m.FilteredRoutes.Store(float64(stats.FilteredRoutes))
 }
 
-// GatewayMetrics is the per-gateway observability sink, fed by
-// meteredActuator (apply outcomes) and GatewayActuator (FIB build
-// stats).
+// GatewayMetrics holds the FIB build gauges of one gateway.
 type GatewayMetrics struct {
 	name string
-
-	apply         metrics.Counter
-	applyErrors   metrics.Counter
-	applyDuration *metrics.Histogram
 
 	fibMu sync.Mutex
 	fib   map[string]*fibGauges
@@ -280,19 +262,9 @@ type GatewayMetrics struct {
 // newGatewayMetrics constructs the metrics sink for a single gateway.
 func newGatewayMetrics(name string) *GatewayMetrics {
 	return &GatewayMetrics{
-		name:          name,
-		applyDuration: metrics.NewHistogram(applyDurationBounds),
-		fib:           map[string]*fibGauges{},
+		name: name,
+		fib:  map[string]*fibGauges{},
 	}
-}
-
-// ObserveApply records the outcome and duration of one Apply call.
-func (m *GatewayMetrics) ObserveApply(d time.Duration, err error) {
-	m.apply.Inc()
-	if err != nil {
-		m.applyErrors.Inc()
-	}
-	m.applyDuration.Observe(d.Seconds())
 }
 
 // OnFIBBuilt records the outcome of one FIB build for module.
@@ -314,12 +286,6 @@ func (m *GatewayMetrics) Collect() []*commonpb.Metric {
 	gateway := commonpb.NewLabel("gateway", m.name)
 	out := make([]*commonpb.Metric, 0)
 
-	out = append(out,
-		commonpb.NewMetricCounter("route_operator_gateway_apply_total", m.apply.Load(), gateway),
-		commonpb.NewMetricCounter("route_operator_gateway_apply_errors_total", m.applyErrors.Load(), gateway),
-		makeHistogram("route_operator_gateway_apply_duration_seconds", m.applyDuration, gateway),
-	)
-
 	m.fibMu.Lock()
 	defer m.fibMu.Unlock()
 
@@ -336,12 +302,4 @@ func (m *GatewayMetrics) Collect() []*commonpb.Metric {
 	}
 
 	return out
-}
-
-func makeHistogram(name string, h *metrics.Histogram, labels ...*commonpb.Label) *commonpb.Metric {
-	return &commonpb.Metric{
-		Name:   name,
-		Labels: labels,
-		Value:  commonpb.MetricValueToProto(h),
-	}
 }

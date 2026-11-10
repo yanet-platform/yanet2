@@ -33,10 +33,6 @@ const (
 	staticTablePriority = 10
 )
 
-// Actuator applies a desired set of FIBs to one or more downstream
-// targets (gateways).
-type Actuator = operator.Actuator[RouteSnapshot]
-
 // Operator is the route operator's thin wrapper around the generic
 // operator framework.
 type Operator struct {
@@ -157,10 +153,8 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	neighbourSvc := NewNeighbourService(neighTable, neighbourOptions...)
 	operatorSvc := NewRouteOperatorService()
 
-	actuators := make([]Actuator, 0, len(cfg.Gateways))
+	gateways := make([]operator.Target[RouteSnapshot], 0, len(cfg.Gateways))
 	for _, gw := range cfg.Gateways {
-		gatewayMetrics := metrics.Gateway(gw.Name)
-
 		actuator, err := NewGatewayActuator(
 			gw,
 			WithGatewayActuatorLog(log),
@@ -168,26 +162,21 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 			WithGatewayActuatorDevices(cfg.GatewayDevices[gw.Name]),
 			WithGatewayActuatorStaticRoutes(cfg.Static.Routes),
 			WithGatewayActuatorExpectBird(cfg.Readiness.ExpectBird),
-			WithGatewayActuatorOnFIBBuilt(gatewayMetrics.OnFIBBuilt),
+			WithGatewayActuatorOnFIBBuilt(metrics.Gateway(gw.Name).OnFIBBuilt),
 		)
 		if err != nil {
-			for _, a := range actuators {
-				_ = a.Close()
+			for _, gateway := range gateways {
+				_ = gateway.Actuator.Close()
 			}
 			return nil, fmt.Errorf("failed to construct gateway actuator %q: %w", gw.Name, err)
 		}
 
-		// Wrap each actuator so that apply outcomes drive the per-gateway apply
-		// metrics, then so that they drive the per-gateway fib readiness scope.
-		metered := newMeteredActuator(actuator, gatewayMetrics)
-		observed := operator.NewObservedActuator(metered, fmt.Sprintf("fib:%s:%s", gw.Name, moduleName), tracker.Observe)
-		actuators = append(actuators, observed)
+		gateways = append(gateways, operator.Target[RouteSnapshot]{
+			Name:     gw.Name,
+			Actuator: actuator,
+			Scope:    fibScope(gw.Name, moduleName),
+		})
 	}
-
-	fanOut := operator.NewFanOutActuator(
-		actuators,
-		operator.WithFanOutLog(log),
-	)
 
 	services := []operator.ServiceRegistrar{
 		func(s *grpc.Server) string {
@@ -198,7 +187,6 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 			operatorpb.RegisterNeighbourServiceServer(s, neighbourSvc)
 			return operatorpb.NeighbourService_ServiceDesc.ServiceName
 		},
-		operator.NewMetricsServiceRegistrar("route", metrics),
 		func(s *grpc.Server) string {
 			operatorpb.RegisterRouteOperatorServiceServer(s, operatorSvc)
 			return operatorpb.RouteOperatorService_ServiceDesc.ServiceName
@@ -215,14 +203,14 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	}
 
 	app := operator.NewOperator(
-		fanOut,
+		gateways,
 		desired.Latest(),
 		operator.WithGRPCServer(cfg.Server, services...),
 		operator.WithReadiness("route", tracker),
+		operator.WithMetrics(operator.MetricsConfig{Name: "route", Prefix: "route_operator"}, metrics),
 		operator.WithLog(log),
 		operator.WithReconcile(cfg.Reconcile),
 		operator.WithGateways(cfg.Register, cfg.Gateways...),
-		operator.WithMetrics(metrics),
 		operator.WithPreRun(func(ctx context.Context) error {
 			return applyStaticSeed(cfg, routeSvc, neighTable)
 		}),
@@ -401,6 +389,11 @@ func parseMAC(s string) ([6]byte, error) {
 	return [6]byte(hw), nil
 }
 
+// fibScope names the readiness scope of the module's FIB on a gateway.
+func fibScope(gateway, module string) string {
+	return fmt.Sprintf("fib:%s:%s", gateway, module)
+}
+
 // readinessScopeSpecs maps each readiness source to its nominal cadence.
 // External publishers have no configured observation cadence here.
 func readinessScopeSpecs(cfg *Config, moduleName string) []readiness.ScopeSpec {
@@ -408,7 +401,7 @@ func readinessScopeSpecs(cfg *Config, moduleName string) []readiness.ScopeSpec {
 	specs := make([]readiness.ScopeSpec, 0, len(cfg.Gateways)+3)
 	for _, gw := range cfg.Gateways {
 		specs = append(specs, readiness.ScopeSpec{
-			Name:                        fmt.Sprintf("fib:%s:%s", gw.Name, moduleName),
+			Name:                        fibScope(gw.Name, moduleName),
 			ExpectedObservationInterval: fibInterval,
 		})
 	}

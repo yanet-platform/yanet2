@@ -1,7 +1,6 @@
 package operator
 
 import (
-	"context"
 	"errors"
 	"net/netip"
 	"testing"
@@ -10,7 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
-	"github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/operators/route/internal/rib"
 	"github.com/yanet-platform/yanet2/operators/route/neigh"
 )
@@ -43,63 +41,6 @@ func findMetric(metricList []*commonpb.Metric, name string, labels map[string]st
 	}
 
 	return nil
-}
-
-// fakeActuator is a minimal Actuator used to drive meteredActuator in
-// isolation from the real gateway RPC client.
-type fakeActuator struct {
-	applyErr   error
-	applyCalls int
-	closeErr   error
-	closeCalls int
-}
-
-func (m *fakeActuator) Apply(ctx context.Context, snapshot RouteSnapshot) error {
-	m.applyCalls++
-	return m.applyErr
-}
-
-func (m *fakeActuator) Close() error {
-	m.closeCalls++
-	return m.closeErr
-}
-
-// TestMetrics_ReconcileEvents verifies that reconcile-loop observer methods
-// update the corresponding counters and gauges rendered by Collect.
-func TestMetrics_ReconcileEvents(t *testing.T) {
-	m := NewMetrics(newRIBStore(), neigh.NewNeighTable())
-
-	m.OnReconcileCompleted(nil)
-	m.OnReconcileCompleted(errors.New("boom"))
-	m.OnBackoffScheduled(2 * time.Second)
-	m.OnStateChanged(operator.ReconcilerStateApplying)
-
-	metricList := m.Collect()
-
-	total := findMetric(metricList, "route_operator_reconcile_total", map[string]string{})
-	require.NotNil(t, total)
-	require.Equal(t, uint64(2), total.GetCounter())
-
-	errs := findMetric(metricList, "route_operator_reconcile_errors_total", map[string]string{})
-	require.NotNil(t, errs)
-	require.Equal(t, uint64(1), errs.GetCounter())
-
-	backoff := findMetric(metricList, "route_operator_backoff_seconds", map[string]string{})
-	require.NotNil(t, backoff)
-	require.Equal(t, 2.0, backoff.GetGauge())
-
-	applying := findMetric(metricList, "route_operator_state", map[string]string{"state": "applying"})
-	require.NotNil(t, applying)
-	require.Equal(t, 1.0, applying.GetGauge())
-
-	idle := findMetric(metricList, "route_operator_state", map[string]string{"state": "idle"})
-	require.NotNil(t, idle)
-	require.Equal(t, 0.0, idle.GetGauge())
-
-	m.OnBackoffReset()
-	backoff = findMetric(m.Collect(), "route_operator_backoff_seconds", map[string]string{})
-	require.NotNil(t, backoff)
-	require.Equal(t, 0.0, backoff.GetGauge())
 }
 
 // TestMetrics_RIBFeedEvents verifies that RIB session and update callbacks
@@ -355,66 +296,4 @@ func Test_GatewayMetrics_FIBClassificationIsolationAndReset(t *testing.T) {
 			}
 		})
 	}
-}
-
-// TestGatewayMetrics_ObserveApply verifies that ObserveApply updates the
-// apply counters and renders a non-empty duration histogram.
-func TestGatewayMetrics_ObserveApply(t *testing.T) {
-	m := NewMetrics(newRIBStore(), neigh.NewNeighTable())
-	gateway := m.Gateway("gw0")
-
-	gateway.ObserveApply(10*time.Millisecond, nil)
-	gateway.ObserveApply(20*time.Millisecond, errors.New("failed"))
-
-	metricList := m.Collect()
-
-	apply := findMetric(metricList, "route_operator_gateway_apply_total", map[string]string{"gateway": "gw0"})
-	require.NotNil(t, apply)
-	require.Equal(t, uint64(2), apply.GetCounter())
-
-	applyErrors := findMetric(
-		metricList,
-		"route_operator_gateway_apply_errors_total",
-		map[string]string{"gateway": "gw0"},
-	)
-	require.NotNil(t, applyErrors)
-	require.Equal(t, uint64(1), applyErrors.GetCounter())
-
-	duration := findMetric(
-		metricList,
-		"route_operator_gateway_apply_duration_seconds",
-		map[string]string{"gateway": "gw0"},
-	)
-	require.NotNil(t, duration)
-	require.Equal(t, uint64(2), duration.GetHistogram().GetTotalCount())
-}
-
-// TestMeteredActuator verifies that meteredActuator times and reports every
-// Apply call, returns the inner error unchanged, and delegates Close.
-func TestMeteredActuator(t *testing.T) {
-	inner := &fakeActuator{applyErr: errors.New("gateway unreachable")}
-	m := NewMetrics(newRIBStore(), neigh.NewNeighTable())
-	gateway := m.Gateway("gw0")
-
-	actuator := newMeteredActuator(inner, gateway)
-
-	err := actuator.Apply(t.Context(), RouteSnapshot{})
-	require.ErrorIs(t, err, inner.applyErr)
-	require.Equal(t, 1, inner.applyCalls)
-
-	metricList := m.Collect()
-	apply := findMetric(metricList, "route_operator_gateway_apply_total", map[string]string{"gateway": "gw0"})
-	require.NotNil(t, apply)
-	require.Equal(t, uint64(1), apply.GetCounter())
-
-	applyErrors := findMetric(
-		metricList,
-		"route_operator_gateway_apply_errors_total",
-		map[string]string{"gateway": "gw0"},
-	)
-	require.NotNil(t, applyErrors)
-	require.Equal(t, uint64(1), applyErrors.GetCounter())
-
-	require.NoError(t, actuator.Close())
-	require.Equal(t, 1, inner.closeCalls)
 }

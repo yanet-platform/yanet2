@@ -25,8 +25,7 @@ One `fib` scope per gateway, named `fib:<gateway.name>:<function.module>`.
 
 ### `fib:<gateway>:<module>`
 
-Driven by the apply outcome recorded through `Observe` (via
-`NewObservedActuator`):
+Driven by the apply outcome the framework records for the gateway's target:
 
 - Apply succeeded: `STATE_READY`.
 - Apply failed, previously READY or DEGRADED: `STATE_DEGRADED` (`APPLY_FAILED`).
@@ -191,7 +190,8 @@ without changing state.
 
 ### `fib:<gateway>:<module>`
 
-Advances on every reconcile apply attempt via `Observe`, regardless of success.
+Advances on every reconcile apply attempt the framework records, regardless of
+success.
 
 Config parameters (under `reconcile:`):
 

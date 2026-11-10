@@ -63,8 +63,10 @@ func NewOperator(cfg *Config, options ...Option) (*operator.Operator[neigh.Nexth
 		neigh.WithUpdateInterval(cfg.UpdateInterval.Unwrap()),
 		neigh.WithOnHealthy(func() { desired.Publish(table.View()) }),
 	)
+	// The gateways are alternative transports to one receiver, so the
+	// publisher is the only target, and it reports its readiness itself.
 	return operator.NewOperator(
-		publisher,
+		[]operator.Target[neigh.NexthopCacheView]{{Name: "receiver", Actuator: publisher}},
 		desired,
 		operator.WithLog(opts.Log),
 		operator.WithReconcile(cfg.Reconcile),
