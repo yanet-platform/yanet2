@@ -13,10 +13,15 @@ import (
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/operator"
+	"github.com/yanet-platform/yanet2/common/go/readiness"
 	"github.com/yanet-platform/yanet2/common/go/xgrpc"
+	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 	"github.com/yanet-platform/yanet2/operators/route/neigh"
 	operatorpb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
 )
+
+// publicationScope is ready once the receiver acknowledged a publication.
+const publicationScope = "publication"
 
 type publisherTarget struct {
 	Name       string
@@ -30,6 +35,7 @@ type Publisher struct {
 	tableName       string
 	defaultPriority uint32
 	timeout         time.Duration
+	tracker         *readiness.Tracker
 }
 
 type publisherOptions struct {
@@ -51,8 +57,9 @@ func WithPublisherLog(log *zap.Logger) PublisherOption {
 	}
 }
 
-// NewPublisher opens lazy connections using the common gateway TLS settings.
-func NewPublisher(cfg *Config, options ...PublisherOption) (*Publisher, error) {
+// NewPublisher opens lazy connections using the common gateway TLS settings
+// and reports acknowledged publications to the tracker.
+func NewPublisher(cfg *Config, tracker *readiness.Tracker, options ...PublisherOption) (*Publisher, error) {
 	opts := newPublisherOptions()
 	for _, o := range options {
 		o(opts)
@@ -62,6 +69,7 @@ func NewPublisher(cfg *Config, options ...PublisherOption) (*Publisher, error) {
 		tableName:       cfg.TableName.Unwrap(),
 		defaultPriority: cfg.DefaultPriority,
 		timeout:         cfg.PublishTimeout.Unwrap(),
+		tracker:         tracker,
 	}
 	for _, gateway := range cfg.Gateways {
 		connection, err := operator.DialGateway(gateway,
@@ -82,6 +90,8 @@ func NewPublisher(cfg *Config, options ...PublisherOption) (*Publisher, error) {
 //
 // The reconciler serializes calls and retries failed publications. Repeating
 // the whole snapshot also recovers from a lost response or receiver restart.
+// The first acknowledged publication makes the sidecar ready, and later
+// failures leave it so.
 func (m *Publisher) Apply(ctx context.Context, snapshot neigh.NexthopCacheView) error {
 	request := &operatorpb.SwapNeighboursRequest{
 		Table:   m.tableName,
@@ -104,6 +114,7 @@ func (m *Publisher) Apply(ctx context.Context, snapshot neigh.NexthopCacheView) 
 		}
 		cancel()
 		if err == nil {
+			m.tracker.Set(publicationScope, readinesspb.State_STATE_READY)
 			return nil
 		}
 		failures = errors.Join(failures, fmt.Errorf("gateway %q: %w", target.Name, err))

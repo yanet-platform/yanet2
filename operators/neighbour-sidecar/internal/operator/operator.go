@@ -42,10 +42,6 @@ func NewOperator(cfg *Config, options ...Option) (*operator.Operator[neigh.Nexth
 	if err != nil {
 		return nil, fmt.Errorf("failed to create neighbour source: %w", err)
 	}
-	publisher, err := NewPublisher(cfg, WithPublisherLog(opts.Log))
-	if err != nil {
-		return nil, err
-	}
 	tracker := readiness.NewTracker(
 		[]readiness.ScopeSpec{{
 			Name:                        publicationScope,
@@ -54,7 +50,11 @@ func NewOperator(cfg *Config, options ...Option) (*operator.Operator[neigh.Nexth
 		readiness.WithDrainLatch(),
 		readiness.WithLog(opts.Log),
 	)
-	source := NewNeighbourSource(table, tracker)
+	publisher, err := NewPublisher(cfg, tracker, WithPublisherLog(opts.Log))
+	if err != nil {
+		return nil, err
+	}
+	source := NewNeighbourSource(table)
 	monitor := neigh.NewNeighMonitor(table, kernel,
 		neigh.WithLog(opts.Log),
 		neigh.WithLinkMap(cfg.LinkMap),
