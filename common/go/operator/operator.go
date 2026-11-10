@@ -24,7 +24,7 @@ type Runner func(ctx context.Context) error
 // starts its goroutines.
 //
 // Operators use it to seed in-memory state from static configuration so
-// the first reconcile pass observes a populated source.
+// the first reconcile pass observes it.
 type PreRun func(ctx context.Context) error
 
 // ServiceRegistrar registers a gRPC service on server and returns its
@@ -163,7 +163,7 @@ func WithWorkers(workers ...Runner) Option {
 
 // WithPreRun registers a hook executed once before any goroutine starts.
 //
-// Useful for seeding the source from static configuration.
+// Useful for seeding the desired state from static configuration.
 func WithPreRun(fn PreRun) Option {
 	return func(o *options) {
 		o.PreRun = fn
@@ -200,9 +200,11 @@ type Operator[T any] struct {
 	log *zap.Logger
 }
 
+// NewOperator returns an operator that applies the published desired state
+// through the actuator.
 func NewOperator[T any](
 	actuator Actuator[T],
-	source StateSource[T],
+	latest *Latest[T],
 	options ...Option,
 ) *Operator[T] {
 	opts := newOptions()
@@ -245,7 +247,7 @@ func NewOperator[T any](
 
 	reconciler := NewReconciler(
 		actuator,
-		source,
+		latest,
 		WithReconcileInterval(opts.Reconcile.Interval.Unwrap()),
 		WithReconcileBackoff(
 			opts.Reconcile.InitialBackoff.Unwrap(),

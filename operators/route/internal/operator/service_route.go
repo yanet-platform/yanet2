@@ -20,9 +20,10 @@ import (
 
 // RouteService implements the operator-owned RouteService surface.
 //
-// Mutation RPCs update the RIB held in this process and wake the
-// reconcile loop via onChanged. The reconcile loop snapshots state and
-// pushes the rebuilt FIB to the gateways through the actuator.
+// Mutation RPCs update the RIB held in this process, and a flush or the end
+// of a feed session reports the change. The desired state is rebuilt from
+// the RIB on such a report, and within a reconcile interval after an
+// unreported change; the gateways get FIBs built from it.
 type RouteService struct {
 	operatorpb.UnimplementedRouteServiceServer
 

@@ -65,7 +65,8 @@ gateway_devices: {}
 register:
   interval: 30s
 
-# Reconcile loop: snapshot RIB + neighbour-table -> build FIB ->
+# Reconcile loop: snapshot RIB + neighbour-table (on each flush or neighbour
+# change, and within an interval after any other RIB change) -> build FIB ->
 # fan-out per-gateway.
 #
 # Backoffs apply on preflight rejection, programming errors, and unresolved

@@ -11,62 +11,10 @@ import (
 	"github.com/yanet-platform/yanet2/operators/route/neigh"
 )
 
-func Test_RouteSource_WakeFuncCoalesces(t *testing.T) {
-	source := NewRouteSource(
-		neigh.NewNeighTable(),
-		newRIBStore(),
-	)
-
-	wake := source.WakeFunc()
-	wake()
-	wake()
-	wake()
-
-	select {
-	case <-source.Wake():
-	default:
-		t.Fatal("wake channel not signalled")
-	}
-
-	select {
-	case <-source.Wake():
-		t.Fatal("wake channel signalled more than once")
-	default:
-	}
-}
-
-// Test_RouteSource_SnapshotEmptyOK verifies that empty desired state remains
-// actionable for readiness failures and reconciliation retries.
-func Test_RouteSource_SnapshotEmptyOK(t *testing.T) {
-	source := NewRouteSource(
-		neigh.NewNeighTable(),
-		newRIBStore(),
-	)
-
-	snapshot, ok := source.Snapshot()
-	require.True(t, ok, "empty desired state must remain actionable for readiness and retries")
-	require.Empty(t, snapshot.RIBs)
-}
-
-func Test_RouteSource_SnapshotDrainsWake(t *testing.T) {
-	source := NewRouteSource(
-		neigh.NewNeighTable(),
-		newRIBStore(),
-	)
-
-	source.WakeFunc()()
-	_, _ = source.Snapshot()
-
-	select {
-	case <-source.Wake():
-		t.Fatal("wake channel not drained by Snapshot")
-	default:
-	}
-}
-
-// Test_RouteSource_SnapshotIncludesRIBs verifies that snapshots expose the
-// stored route paths together with their resolved neighbour entries.
-func Test_RouteSource_SnapshotIncludesRIBs(t *testing.T) {
+// Test_RouteSource_Build_IncludesRIBs verifies that the built desired state
+// exposes the stored route paths together with their resolved neighbour
+// entries.
+func Test_RouteSource_Build_IncludesRIBs(t *testing.T) {
 	neighbours := neigh.NewNeighTable()
 	_, err := neighbours.CreateSource(defaultStaticTable, 100, false)
 	require.NoError(t, err)
@@ -87,8 +35,7 @@ func Test_RouteSource_SnapshotIncludesRIBs(t *testing.T) {
 	prefix := netip.MustParsePrefix("10.0.0.0/24")
 	ribs.GetOrCreate("route0").AddUnicastRoute(prefix, entry.NextHop, rib.RouteSourceStatic)
 
-	snapshot, ok := source.Snapshot()
-	require.True(t, ok)
+	snapshot := source.Build()
 	require.Len(t, snapshot.RIBs, 1)
 	require.Contains(t, snapshot.RIBs, "route0")
 	paths := snapshot.RIBs["route0"][prefix.Bits()][prefix].Routes
@@ -98,4 +45,23 @@ func Test_RouteSource_SnapshotIncludesRIBs(t *testing.T) {
 	resolved, ok := snapshot.Neighbours.Lookup(entry.NextHop)
 	require.True(t, ok)
 	require.Equal(t, entry.HardwareRoute, resolved.HardwareRoute)
+}
+
+// Test_RouteSource_Changed_SeesUnreportedChange verifies that a RIB left as
+// the last build saw it is not a change, while a route added after it is.
+func Test_RouteSource_Changed_SeesUnreportedChange(t *testing.T) {
+	ribs := newRIBStore()
+	source := NewRouteSource(neigh.NewNeighTable(), ribs)
+	holder := ribs.GetOrCreate("route0")
+	source.Build()
+	require.False(t, source.Changed())
+
+	err := holder.AddUnicastRoute(
+		netip.MustParsePrefix("10.0.0.0/24"),
+		netip.MustParseAddr("10.0.0.1"),
+		rib.RouteSourceStatic,
+	)
+	require.NoError(t, err)
+
+	require.True(t, source.Changed())
 }
