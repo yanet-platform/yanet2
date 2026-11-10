@@ -30,6 +30,7 @@ import (
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/testutils/memnet"
 	"github.com/yanet-platform/yanet2/common/go/testutils/tlscert"
+	routemplspb "github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb/v1"
 	birdadapter "github.com/yanet-platform/yanet2/operators/bird-adapter"
 	adapterpb "github.com/yanet-platform/yanet2/operators/bird-adapter/adapterpb/v1"
 	routepb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
@@ -790,6 +791,113 @@ func Test_AdapterService_FailedHeartbeatReplaysOnNewStream(t *testing.T) {
 		require.NotNil(t, replayed[0].GetRoute())
 		require.Nil(t, replayed[1].GetRoute())
 	})
+}
+
+// Test_AdapterService_StalledMPLSRetryReleasesIPRoutes verifies that an
+// MPLS retry route-mpls never answers holds an IP route behind it for no
+// longer than the push timeout plus one dump timeout.
+//
+// The first push fails at once, so an idle tick retries it with the whole
+// table, and that retry stalls. The IP route arrives while it does and must
+// still reach the route operator with its flush once the push gives up.
+func Test_AdapterService_StalledMPLSRetryReleasesIPRoutes(t *testing.T) {
+	// pushTimeout mirrors how long the import waits for one route-mpls call.
+	const pushTimeout = 10 * time.Second
+	const dumpTimeout = time.Second
+
+	synctest.Test(t, func(t *testing.T) {
+		network := memnet.NewNetwork()
+		// The MPLS route is the IP one of group 1 turned into a VPN6 net
+		// with a type 1 route distinguisher.
+		mplsRoute := birdRouteChunk(1)
+		mplsRoute[4] = 4
+		mplsRoute[6] = 32
+		mplsRoute[34] = 1
+		sendIPRoute := make(chan struct{})
+		serveBIRDExport(t, network.Listen("bird.sock"), func(idx int, connection net.Conn) error {
+			if _, err := connection.Write(mplsRoute); err != nil {
+				return nil
+			}
+			select {
+			case <-sendIPRoute:
+			case <-t.Context().Done():
+				return nil
+			}
+			_, _ = connection.Write(birdRouteChunk(2))
+			_, _ = io.Copy(io.Discard, connection)
+			return nil
+		})
+
+		receiver := &recordingRIBReceiver{Committed: make(chan []*routepb.Update, 4)}
+		stalled := make(chan struct{}, 1)
+		routeMPLS := &stallingRouteMPLS{Stalled: stalled}
+		grpcServer := grpc.NewServer()
+		routepb.RegisterRouteServiceServer(grpcServer, receiver)
+		routemplspb.RegisterRouteMPLSServiceServer(grpcServer, routeMPLS)
+		var workers errgroup.Group
+		listener := network.Listen(memoryRouteOperator)
+		workers.Go(func() error { return grpcServer.Serve(listener) })
+		t.Cleanup(func() {
+			grpcServer.Stop()
+			require.NoError(t, workers.Wait())
+		})
+
+		request := newImportRequest(t, "bird.sock")
+		request.Config.DumpTimeout = int64(dumpTimeout)
+		startMemoryImport(t, network, request)
+
+		receiveEvent(t, stalled)
+		close(sendIPRoute)
+		deadline := time.After(pushTimeout + dumpTimeout)
+		for {
+			var updates []*routepb.Update
+			select {
+			case updates = <-receiver.Committed:
+			case <-deadline:
+				t.Fatal("a stalled MPLS retry held the IP route back past the push timeout")
+			}
+			if len(updates) == 1 && updates[0].GetRoute() == nil {
+				// The flush of the MPLS route alone.
+				continue
+			}
+			require.Len(t, updates, 2)
+			prefix, err := updates[0].GetRoute().GetPrefix().ToPrefix()
+			require.NoError(t, err)
+			require.Equal(t, netip.MustParsePrefix("2001:db8:2::/48"), prefix)
+			require.Nil(t, updates[1].GetRoute())
+			return
+		}
+	})
+}
+
+// stallingRouteMPLS is a route-mpls service that rejects every change
+// update and leaves the first whole-table update unanswered until its
+// caller gives up, reporting it on Stalled; later whole-table updates
+// succeed.
+type stallingRouteMPLS struct {
+	routemplspb.UnimplementedRouteMPLSServiceServer
+	Stalled chan<- struct{}
+
+	calls atomic.Int32
+}
+
+func (m *stallingRouteMPLS) UpdateConfig(
+	ctx context.Context,
+	request *routemplspb.UpdateConfigRequest,
+) (*routemplspb.UpdateConfigResponse, error) {
+	return nil, status.Error(codes.Unavailable, "route-mpls rejects the change")
+}
+
+func (m *stallingRouteMPLS) CreateConfig(
+	ctx context.Context,
+	request *routemplspb.CreateConfigRequest,
+) (*routemplspb.CreateConfigResponse, error) {
+	if m.calls.Add(1) > 1 {
+		return &routemplspb.CreateConfigResponse{}, nil
+	}
+	m.Stalled <- struct{}{}
+	<-ctx.Done()
+	return nil, ctx.Err()
 }
 
 // Test_AdapterService_SetupConfig_ChainedReplacementsNeverOverlap verifies

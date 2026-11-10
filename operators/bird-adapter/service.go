@@ -40,6 +40,14 @@ const (
 	// importIdleInterval is how often an import checks for a due heartbeat
 	// and retries its MPLS push, apart from the dump timeout.
 	importIdleInterval = time.Second
+	// importMPLSPushTimeout bounds each MPLS push, which shares its goroutine
+	// with the route dumps and the heartbeats.
+	//
+	// A route-mpls call that never answered would hold them back for good. A
+	// push that times out counts as failed: the sync sends the whole table on
+	// a later push and skips every push until its retry delay has passed, so
+	// a silent route-mpls holds the routes back at most this long per retry.
+	importMPLSPushTimeout = 10 * time.Second
 	// importHealthyUptime is how long an attempt must stay up for the retry
 	// delay to start over from its initial value.
 	importHealthyUptime = 10 * time.Minute
@@ -698,10 +706,13 @@ func (m *importHolder) newExport(attempt *importAttempt) *bird.Export {
 	return bird.NewExportReader(m.config, onUpdate, onFlush, options...)
 }
 
-// pushMPLS delivers the MPLS changes, only logging a failure so that it
-// does not hold back the IP routes: the sync sends the whole table once
-// route-mpls recovers.
+// pushMPLS delivers the MPLS changes in bounded time, only logging a
+// failure so that it does not hold back the IP routes: the sync sends the
+// whole table once route-mpls recovers.
 func (m *importHolder) pushMPLS(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, importMPLSPushTimeout)
+	defer cancel()
+
 	if err := m.mplsSync.Push(ctx); err != nil {
 		m.log.Warn("failed to push mpls routes",
 			zap.Error(err),
