@@ -2,7 +2,10 @@
 
 Each worker entry of a device can declare which traffic its port queue
 takes: whether the queue is in the port's RSS table, and which traffic
-classes the NIC steers to it through `rte_flow` rules. The `rss` field
+classes the NIC steers to it through `rte_flow` rules. The `rss` and
+`steer` keys also apply to an entry of a device's `queues:` list, which
+declares the queue a worker assignment later binds (see
+[queues and workers](queues-and-workers.md)). The `rss` field
 alone sets a queue's role:
 
 - **RSS queue** (`rss: true`, the default): receives hashed traffic, plus

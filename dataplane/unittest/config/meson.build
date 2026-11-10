@@ -3,6 +3,7 @@ dp_config_test = executable(
   'main.c',
   c_args: yanet_test_c_args + [
     '-DCONFIG_PATH="@0@"'.format(meson.current_source_dir() / 'dataplane.yaml'),
+    '-DEXAMPLE_CONFIG_PATH="@0@"'.format(meson.project_source_root() / 'dataplane.yaml'),
   ],
   include_directories: yanet_rootdir,
   dependencies: lib_dataplane_dep,

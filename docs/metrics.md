@@ -21,8 +21,10 @@ gateway, so no gateway identity belongs on them:
 ## Worker metrics
 
 One series per dataplane worker thread. Cumulative counters carry the
-labels `worker_idx`, `core_id`, `device_id`, `queue_id` and count
-monotonically since the counters were reset:
+labels `worker_idx` and `core_id`, plus `device_id` and `queue_id` for a
+worker polling one queue or an `assignments` label listing every polled
+`device/queue` pair for a worker polling several, and count monotonically
+since the counters were reset:
 
 - `worker_iterations` (counter) — worker loop polls.
 - `worker_rx_packets`, `worker_rx_bytes` — received from the NIC.
@@ -46,11 +48,17 @@ allocation fails against when exhausted:
 Semantics:
 
 - Labels: `instance_id`, `worker_idx`, `core_id`, `device_id`,
-  `queue_id`. A pool's canonical identity is `(instance_id,
-  worker_idx)`; device and queue describe the pool's ownership, the core
-  its placement. The `instance_id` label appears only on the pool
-  gauges: the cumulative worker counters above keep their historical
-  label set so existing time series continue.
+  `queue_id`, the last two replaced by the `assignments` label for a
+  worker polling several queues, as on the cumulative counters. A pool's
+  canonical identity is `(instance_id, worker_idx)`; device and queue
+  describe the pool's ownership, the core its placement. The
+  `instance_id` label appears only on the pool gauges: the cumulative
+  worker counters above keep their historical label set so existing time
+  series continue.
+- A worker polling several queues owns one pool per queue, and its gauges
+  report the sums across those pools. One queue's pool can therefore be
+  exhausted while the worker's aggregate still shows free objects: the
+  gauges are a worker-level occupancy, not a per-queue exhaustion signal.
 - Objects in use are `capacity - available`. That difference includes
   mbufs held in NIC RX/TX descriptors and packets in flight, so it is an
   allocator occupancy, not a packet backlog.

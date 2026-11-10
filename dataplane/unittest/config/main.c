@@ -941,6 +941,44 @@ test_objects_list(void) {
 	assert(config == NULL);
 }
 
+// The shipped example config parses and keeps its documented shape: both
+// queue declaration shapes and one weighted multi-assignment worker.
+static void
+test_shipped_example_config(void) {
+	FILE *f = fopen(EXAMPLE_CONFIG_PATH, "r");
+	assert(f != NULL);
+
+	struct dataplane_config *config = NULL;
+	int rc = dataplane_config_init(f, &config);
+	fclose(f);
+	assert(rc == 0);
+
+	assert(config->device_count == 2);
+	assert(config->devices[0].queue_declarations == dataplane_queue_count);
+	assert(config->devices[0].queue_count == 1);
+	assert(config->devices[1].queue_declarations == dataplane_queue_list);
+	assert(config->devices[1].queue_count == 1);
+
+	// Both shapes resolve to the same effective sizing: the device
+	// defaults for the rings and the built-in pool size.
+	for (uint64_t dev_idx = 0; dev_idx < config->device_count; ++dev_idx) {
+		const struct dataplane_queue_config *queue =
+			config->devices[dev_idx].queues;
+		assert(queue->rx_queue_len == 1024);
+		assert(queue->tx_queue_len == 1024);
+		assert(queue->num_mbufs == 16384);
+	}
+
+	assert(config->worker_count == 1);
+	assert(config->workers[0].assignment_count == 2);
+	assert(config->workers[0].assignments[0].device_id == 0);
+	assert(config->workers[0].assignments[0].weight == 2);
+	assert(config->workers[0].assignments[1].device_id == 1);
+	assert(config->workers[0].assignments[1].weight == 1);
+
+	dataplane_config_free(config);
+}
+
 static void
 test_valid_config(void) {
 	FILE *f = fopen(CONFIG_PATH, "r");
@@ -990,6 +1028,7 @@ main(int argc, char **argv) {
 	(void)argv;
 
 	test_valid_config();
+	test_shipped_example_config();
 	test_device_allocation_failure(1);
 	test_device_allocation_failure(2);
 	test_device_allocation_success();

@@ -11,25 +11,50 @@ dataplane:
       cp_memory: 2 GiB
       numa_id: 0
   devices:
+    # A device declares its queues through exactly one shape: queue_count,
+    # a queues list, or nested workers entries. queue_count declares that
+    # many queues at the device defaults; a queue's id is its position in
+    # the declaration, the index the port's RSS table spreads traffic over.
     - port_name: 01:00.0
       mtu: 7000
       max_lro_packet_size: 7200
       rss_hash: 0
-      workers:
-        - core_id: 1
-          instance_id: 0
-          rx_queue_len: 1024
-          tx_queue_len: 1024
+      default_queue:
+        rx_queue_len: 1024
+        tx_queue_len: 1024
+      queue_count: 1
+    # The queues list declares each queue on its own. A field a queue
+    # leaves unset takes the device's default_queue value, and one still
+    # unset takes the built-in default: 4096 descriptors per ring, 16384
+    # mbufs per receive pool. The rss and steer role keys live on queue
+    # declarations; see docs/queue-steering.md.
     - port_name: virtio_user_kni0
       mac_addr: 52:54:00:6b:ff:a5
       mtu: 7000
       max_lro_packet_size: 7200
       rss_hash: 0
-      workers:
-        - core_id: 2
-          instance_id: 0
-          rx_queue_len: 1024
-          tx_queue_len: 1024
+      default_queue:
+        rx_queue_len: 1024
+        tx_queue_len: 1024
+      queues:
+        - num_mbufs: 16384
+  # Every declared queue is assigned to exactly one worker, and a worker
+  # holds at least one assignment. Here one worker serves a queue of each
+  # device, so a lightly loaded system spends one core instead of two.
+  workers:
+    - core_id: 1
+      instance_id: 0
+      # An assignment's weight is its rx service: every round the worker
+      # serves each assignment with up to weight rx bursts of at most 32
+      # packets (1..16, default 1); a burst that comes back short ends
+      # that queue's service for the round. Weight 1 is the one burst per
+      # round the nested workers form has always served.
+      assignments:
+        - device: 01:00.0
+          queue: 0
+          weight: 2
+        - device: virtio_user_kni0
+          queue: 0
   connections:
     - src_device: 01:00.0
       dst_device: virtio_user_kni0
