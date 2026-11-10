@@ -2,23 +2,27 @@ package operator_test
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/netip"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/encoding/gzip"
+	"google.golang.org/grpc/experimental"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/operator"
+	"github.com/yanet-platform/yanet2/common/go/testutils/memnet"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
@@ -152,55 +156,103 @@ func (m *gatewayFunctionServer) Update(
 	return &ynpb.UpdateFunctionResponse{}, m.gateway.storeFunction(req.GetFunction())
 }
 
-// startFakeGateway serves the fake on a loopback port until the test ends
-// and returns it with its endpoint.
+// startFakeGateway serves a fake gateway on a loopback port until the test
+// ends and returns it with its endpoint.
 func startFakeGateway(t *testing.T) (*fakeGateway, string) {
 	t.Helper()
 
-	gateway := &fakeGateway{functions: map[string]*ynpb.Function{}}
 	listener, err := net.Listen("tcp", "[::1]:0")
 	require.NoError(t, err)
 
+	return serveFakeGateway(t, listener), listener.Addr().String()
+}
+
+// startMemoryGateway serves a fake gateway called name on network until the
+// test ends and returns it with the config that reaches it through network.
+func startMemoryGateway(t *testing.T, network *memnet.Network, name string) (*fakeGateway, operator.GatewayConfig) {
+	t.Helper()
+
+	gateway := serveFakeGateway(t, network.Listen(name))
+	return gateway, operator.GatewayConfig{
+		Name:     name,
+		Endpoint: xcfg.MustNonEmptyString("passthrough:///" + name),
+	}
+}
+
+// serveFakeGateway serves a new fake gateway on listener until the test ends.
+func serveFakeGateway(t *testing.T, listener net.Listener) *fakeGateway {
+	t.Helper()
+
+	gateway := &fakeGateway{functions: map[string]*ynpb.Function{}}
 	server := grpc.NewServer()
 	ynpb.RegisterGatewayServer(server, gateway)
 	ynpb.RegisterFunctionServiceServer(server, &gatewayFunctionServer{gateway: gateway})
 	routepb.RegisterRouteServiceServer(server, &gatewayRouteServer{gateway: gateway})
-	go func() { _ = server.Serve(listener) }()
-	t.Cleanup(server.Stop)
+	var workers errgroup.Group
+	workers.Go(func() error {
+		// A test that never reaches the gateway may stop it before it
+		// serves.
+		if err := server.Serve(listener); !errors.Is(err, grpc.ErrServerStopped) {
+			return err
+		}
+		return nil
+	})
+	t.Cleanup(func() {
+		server.Stop()
+		require.NoError(t, workers.Wait())
+	})
 
-	return gateway, listener.Addr().String()
+	return gateway
 }
 
-// reserveEndpoint reserves a loopback port and hands it back released, so
-// the operator binds it and the test can dial the same address.
-func reserveEndpoint(t *testing.T) string {
+// memoryOperator is the address the operator serves on in a memory network.
+const memoryOperator = "operator"
+
+// runMemoryOperator starts the operator cfg describes serving on network
+// and reaching its gateways through it, stops it when the test ends, and
+// returns a client connection to it.
+//
+// It points the server endpoint of cfg at the address it serves on.
+func runMemoryOperator(t *testing.T, network *memnet.Network, cfg *op.Config) *grpc.ClientConn {
 	t.Helper()
 
-	listener, err := net.Listen("tcp", "[::1]:0")
-	require.NoError(t, err)
-	endpoint := listener.Addr().String()
-	require.NoError(t, listener.Close())
-
-	return endpoint
-}
-
-// runOperator starts the operator and stops it when the test ends.
-func runOperator(t *testing.T, cfg *op.Config) {
-	t.Helper()
-
-	runnable, err := op.NewOperator(cfg)
+	cfg.Server.Endpoint = xcfg.MustNonEmptyString(memoryOperator)
+	runnable, err := op.NewOperator(cfg,
+		op.WithListener(network.Listen(memoryOperator)),
+		op.WithGatewayDialOptions(grpc.WithContextDialer(network.Dial)),
+	)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(t.Context())
-	var wg errgroup.Group
-	wg.Go(func() error {
+	var workers errgroup.Group
+	workers.Go(func() error {
 		return runnable.Run(ctx)
 	})
 	t.Cleanup(func() {
 		cancel()
-		_ = wg.Wait()
+		_ = workers.Wait()
 		require.NoError(t, runnable.Close())
 	})
+
+	connection, err := grpc.NewClient("passthrough:///"+memoryOperator,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithContextDialer(network.Dial),
+		// The operator answers in the best coding a client accepts, and the
+		// zstd codec pools its decoders process-wide: a decoder made in one
+		// bubble must never run in another.
+		grpc.WithDefaultCallOptions(experimental.AcceptCompressors(gzip.Name)),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, connection.Close()) })
+
+	return connection
+}
+
+// settle lets one rebuild window of fake time pass and waits until the
+// bubble is idle, so a change made before it has been built and applied.
+func settle() {
+	time.Sleep(operator.RebuildWindow)
+	synctest.Wait()
 }
 
 // requestContext gives each synchronous test RPC its own bounded lifetime.
@@ -251,302 +303,277 @@ func requireFIBClassifications(
 // route operator serves the framework's reconcile and gateway apply
 // families under their route_operator names.
 func Test_Operator_Metrics_ServesReconcileAndApplyFamilies(t *testing.T) {
-	_, gatewayEndpoint := startFakeGateway(t)
-	operatorEndpoint := reserveEndpoint(t)
-	cfg := op.DefaultConfig()
-	cfg.NetlinkMonitor.Disabled = true
-	cfg.Readiness.ExpectBird = false
-	cfg.Server.Endpoint = xcfg.MustNonEmptyString(operatorEndpoint)
-	cfg.Gateways = []operator.GatewayConfig{{
-		Name:     "gw0",
-		Endpoint: xcfg.MustNonEmptyString(gatewayEndpoint),
-	}}
-	cfg.Register.Interval = xcfg.MustNonZero(time.Hour)
-	runOperator(t, cfg)
+	synctest.Test(t, func(t *testing.T) {
+		network := memnet.NewNetwork()
+		_, gateway := startMemoryGateway(t, network, "gw0")
+		cfg := op.DefaultConfig()
+		cfg.NetlinkMonitor.Disabled = true
+		cfg.Readiness.ExpectBird = false
+		cfg.Gateways = []operator.GatewayConfig{gateway}
+		cfg.Register.Interval = xcfg.MustNonZero(time.Hour)
+		connection := runMemoryOperator(t, network, cfg)
 
-	connection, err := grpc.NewClient(operatorEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, connection.Close()) })
-	response, err := operatorpb.NewMetricsServiceClient(connection).GetMetrics(
-		requestContext(t), &commonpb.GetMetricsRequest{}, grpc.WaitForReady(true),
-	)
-	require.NoError(t, err)
+		response, err := operatorpb.NewMetricsServiceClient(connection).GetMetrics(
+			requestContext(t), &commonpb.GetMetricsRequest{}, grpc.WaitForReady(true),
+		)
+		require.NoError(t, err)
 
-	served := map[string]bool{}
-	for _, metric := range response.GetMetrics() {
-		served[metric.GetName()] = true
-	}
-	for _, name := range []string{
-		"route_operator_reconcile_total",
-		"route_operator_reconcile_errors_total",
-		"route_operator_backoff_seconds",
-		"route_operator_state",
-		"route_operator_gateway_apply_total",
-		"route_operator_gateway_apply_errors_total",
-		"route_operator_gateway_apply_duration_seconds",
-	} {
-		require.True(t, served[name], "metric family %s is not served", name)
-	}
+		served := map[string]bool{}
+		for _, metric := range response.GetMetrics() {
+			served[metric.GetName()] = true
+		}
+		for _, name := range []string{
+			"route_operator_reconcile_total",
+			"route_operator_reconcile_errors_total",
+			"route_operator_backoff_seconds",
+			"route_operator_state",
+			"route_operator_gateway_apply_total",
+			"route_operator_gateway_apply_errors_total",
+			"route_operator_gateway_apply_duration_seconds",
+		} {
+			require.True(t, served[name], "metric family %s is not served", name)
+		}
+	})
 }
 
 // Test_Operator_UnflushedRoute_ReachesGateway verifies that a route inserted
 // without a flush still reaches the gateway by the next reconcile interval.
 func Test_Operator_UnflushedRoute_ReachesGateway(t *testing.T) {
-	gateway, gatewayEndpoint := startFakeGateway(t)
-	operatorEndpoint := reserveEndpoint(t)
-	cfg := op.DefaultConfig()
-	cfg.NetlinkMonitor.Disabled = true
-	cfg.Readiness.ExpectBird = false
-	cfg.Server.Endpoint = xcfg.MustNonEmptyString(operatorEndpoint)
-	cfg.Gateways = []operator.GatewayConfig{{
-		Name:     "gw0",
-		Endpoint: xcfg.MustNonEmptyString(gatewayEndpoint),
-	}}
-	cfg.Reconcile.Interval = xcfg.MustNonZero(100 * time.Millisecond)
-	cfg.Register.Interval = xcfg.MustNonZero(time.Hour)
-	cfg.Static.Routes = []op.StaticRouteConfig{staticPath("10.10.0.0/24", "192.0.2.1")}
-	runOperator(t, cfg)
+	synctest.Test(t, func(t *testing.T) {
+		network := memnet.NewNetwork()
+		gateway, gatewayConfig := startMemoryGateway(t, network, "gw0")
+		cfg := op.DefaultConfig()
+		cfg.NetlinkMonitor.Disabled = true
+		cfg.Readiness.ExpectBird = false
+		cfg.Gateways = []operator.GatewayConfig{gatewayConfig}
+		cfg.Reconcile.Interval = xcfg.MustNonZero(100 * time.Millisecond)
+		cfg.Register.Interval = xcfg.MustNonZero(time.Hour)
+		cfg.Static.Routes = []op.StaticRouteConfig{staticPath("10.10.0.0/24", "192.0.2.1")}
+		connection := runMemoryOperator(t, network, cfg)
 
-	connection, err := grpc.NewClient(operatorEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, connection.Close()) })
-	_, err = operatorpb.NewNeighbourServiceClient(connection).SwapNeighbours(requestContext(t), &operatorpb.SwapNeighboursRequest{
-		Table:   "static",
-		Entries: entryRequest("192.0.2.1", [6]byte{2, 0, 0, 0, 0, 1}, "eth0").GetEntries(),
-	}, grpc.WaitForReady(true))
-	require.NoError(t, err)
-	paths := []neigh.HardwareRoute{{
-		SourceMAC:      [6]byte{0x00, 0x11, 0x22, 0x33, 0x44, 0x55},
-		DestinationMAC: [6]byte{2, 0, 0, 0, 0, 1},
-		Device:         "eth0",
-	}}
-	// The neighbour change is built and every build it still owes has run
-	// before the route is inserted, so no reported change can carry it.
-	require.EventuallyWithT(t, func(collector *assert.CollectT) {
-		requireFIB(collector, gateway.lastFIBRequest(), "route0", map[string][]neigh.HardwareRoute{
+		_, err := operatorpb.NewNeighbourServiceClient(connection).SwapNeighbours(requestContext(t), &operatorpb.SwapNeighboursRequest{
+			Table:   "static",
+			Entries: entryRequest("192.0.2.1", [6]byte{2, 0, 0, 0, 0, 1}, "eth0").GetEntries(),
+		}, grpc.WaitForReady(true))
+		require.NoError(t, err)
+		paths := []neigh.HardwareRoute{{
+			SourceMAC:      [6]byte{0x00, 0x11, 0x22, 0x33, 0x44, 0x55},
+			DestinationMAC: [6]byte{2, 0, 0, 0, 0, 1},
+			Device:         "eth0",
+		}}
+		// The neighbour change is built and every build it still owes has
+		// run before the route is inserted, so no reported change can carry
+		// it.
+		settle()
+		requireFIB(t, gateway.lastFIBRequest(), "route0", map[string][]neigh.HardwareRoute{
 			"10.10.0.0/24": paths,
 		})
-	}, 10*time.Second, 20*time.Millisecond)
-	time.Sleep(3 * operator.RebuildWindow)
+		time.Sleep(3 * operator.RebuildWindow)
 
-	prefix, err := commonpb.NewIPPrefixFromPrefix(netip.MustParsePrefix("10.20.0.0/24"))
-	require.NoError(t, err)
-	_, err = operatorpb.NewRouteServiceClient(connection).InsertRoute(requestContext(t), &operatorpb.InsertRouteRequest{
-		Name:         "route0",
-		Prefix:       prefix,
-		NexthopAddrs: []*commonpb.IPAddress{commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.0.2.1"))},
-		SourceId:     operatorpb.RouteSourceID_ROUTE_SOURCE_ID_STATIC,
-	})
-	require.NoError(t, err)
+		prefix, err := commonpb.NewIPPrefixFromPrefix(netip.MustParsePrefix("10.20.0.0/24"))
+		require.NoError(t, err)
+		_, err = operatorpb.NewRouteServiceClient(connection).InsertRoute(requestContext(t), &operatorpb.InsertRouteRequest{
+			Name:         "route0",
+			Prefix:       prefix,
+			NexthopAddrs: []*commonpb.IPAddress{commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.0.2.1"))},
+			SourceId:     operatorpb.RouteSourceID_ROUTE_SOURCE_ID_STATIC,
+		})
+		require.NoError(t, err)
 
-	require.EventuallyWithT(t, func(collector *assert.CollectT) {
-		requireFIB(collector, gateway.lastFIBRequest(), "route0", map[string][]neigh.HardwareRoute{
+		time.Sleep(cfg.Reconcile.Interval.Unwrap())
+		settle()
+		requireFIB(t, gateway.lastFIBRequest(), "route0", map[string][]neigh.HardwareRoute{
 			"10.10.0.0/24": paths,
 			"10.20.0.0/24": paths,
 		})
-	}, 10*time.Second, 20*time.Millisecond)
+	})
 }
 
 // Test_Operator_StaticResolution_ReadinessLifecycle verifies that empty updates
 // retain last-good forwarding until current desired routes resolve again.
+//
+// Every step is checked one rebuild window after its change.
 func Test_Operator_StaticResolution_ReadinessLifecycle(t *testing.T) {
-	gateway, gatewayEndpoint := startFakeGateway(t)
-	operatorEndpoint := reserveEndpoint(t)
+	synctest.Test(t, func(t *testing.T) {
+		network := memnet.NewNetwork()
+		gateway, gatewayConfig := startMemoryGateway(t, network, "gw0")
 
-	prefix := netip.MustParsePrefix("10.10.0.0/24")
-	nexthop := netip.MustParseAddr("10.0.0.1")
+		prefix := netip.MustParsePrefix("10.10.0.0/24")
+		nexthop := netip.MustParseAddr("10.0.0.1")
 
-	module := "route-custom"
+		module := "route-custom"
 
-	// The long steady-state interval makes withdrawal after a successful
-	// apply depend on change notifications rather than periodic retries.
-	cfg := op.DefaultConfig()
-	cfg.Function.Module = xcfg.MustNonEmptyString(module)
-	cfg.NetlinkMonitor.Disabled = true
-	cfg.Readiness.ExpectBird = false
-	cfg.Server.Endpoint = xcfg.MustNonEmptyString(operatorEndpoint)
-	cfg.Gateways = []operator.GatewayConfig{{
-		Name:     "gw0",
-		Endpoint: xcfg.MustNonEmptyString(gatewayEndpoint),
-	}}
-	cfg.Reconcile.Interval = xcfg.MustNonZero(time.Hour)
-	cfg.Register.Interval = xcfg.MustNonZero(time.Hour)
-	cfg.Static.Routes = []op.StaticRouteConfig{{
-		Prefix:      prefix.String(),
-		NexthopAddr: nexthop.String(),
-	}}
+		// The long steady-state interval makes withdrawal after a
+		// successful apply depend on change notifications rather than
+		// periodic retries.
+		cfg := op.DefaultConfig()
+		cfg.Function.Module = xcfg.MustNonEmptyString(module)
+		cfg.NetlinkMonitor.Disabled = true
+		cfg.Readiness.ExpectBird = false
+		cfg.Gateways = []operator.GatewayConfig{gatewayConfig}
+		cfg.Reconcile.Interval = xcfg.MustNonZero(time.Hour)
+		cfg.Register.Interval = xcfg.MustNonZero(time.Hour)
+		cfg.Static.Routes = []op.StaticRouteConfig{{
+			Prefix:      prefix.String(),
+			NexthopAddr: nexthop.String(),
+		}}
 
-	runOperator(t, cfg)
-
-	conn, err := grpc.NewClient(operatorEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	require.NoError(t, err)
-	defer func() {
-		require.NoError(t, conn.Close())
-	}()
-	readiness := operatorpb.NewReadinessServiceClient(conn)
-	expected := map[string][]neigh.HardwareRoute{
-		prefix.String(): {{
-			SourceMAC:      [6]byte{0x00, 0x11, 0x22, 0x33, 0x44, 0x55},
-			DestinationMAC: [6]byte{0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF}, Device: "eth0",
-		}},
-	}
-	waitForState := func(state readinesspb.State, paths map[string][]neigh.HardwareRoute) {
-		t.Helper()
-		require.EventuallyWithT(t, func(collector *assert.CollectT) {
-			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-			defer cancel()
-			response, err := readiness.Ready(ctx, &readinesspb.ReadyRequest{
+		conn := runMemoryOperator(t, network, cfg)
+		readiness := operatorpb.NewReadinessServiceClient(conn)
+		expected := map[string][]neigh.HardwareRoute{
+			prefix.String(): {{
+				SourceMAC:      [6]byte{0x00, 0x11, 0x22, 0x33, 0x44, 0x55},
+				DestinationMAC: [6]byte{0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF}, Device: "eth0",
+			}},
+		}
+		waitForState := func(state readinesspb.State, paths map[string][]neigh.HardwareRoute) {
+			t.Helper()
+			settle()
+			response, err := readiness.Ready(requestContext(t), &readinesspb.ReadyRequest{
 				Scopes: []string{"fib:gw0:" + module},
 			}, grpc.WaitForReady(true))
-			require.NoError(collector, err)
-			require.Len(collector, response.GetScopes(), 1)
+			require.NoError(t, err)
+			require.Len(t, response.GetScopes(), 1)
 			scope := response.GetScopes()[0]
-			require.Equal(collector, "fib:gw0:"+module, scope.GetName())
-			require.Equal(collector, state, scope.GetState())
+			require.Equal(t, "fib:gw0:"+module, scope.GetName())
+			require.Equal(t, state, scope.GetState())
 			if paths == nil {
 				writes, functionUpdates := gateway.receivedWrites()
-				require.Empty(collector, writes)
-				require.Zero(collector, functionUpdates)
+				require.Empty(t, writes)
+				require.Zero(t, functionUpdates)
 			} else {
-				requireFIB(collector, gateway.lastFIBRequest(), module, paths)
-				require.Equal(collector, []string{module}, gateway.functionModules(cfg.Function.Name.Unwrap()))
+				requireFIB(t, gateway.lastFIBRequest(), module, paths)
+				require.Equal(t, []string{module}, gateway.functionModules(cfg.Function.Name.Unwrap()))
 			}
-		}, 10*time.Second, 20*time.Millisecond)
-	}
-	waitForState(readinesspb.State_STATE_NOT_READY, nil)
-	response, err := readiness.Ready(requestContext(t), &readinesspb.ReadyRequest{Scopes: []string{"fib:gw0:" + module}})
-	require.NoError(t, err)
-	require.Len(t, response.GetScopes(), 1)
-	require.Len(t, response.GetScopes()[0].GetReasons(), 1)
-	reason := response.GetScopes()[0].GetReasons()[0]
-	require.Equal(t, "APPLY_FAILED", reason.GetCode())
-	require.Contains(t, reason.GetMessage(), "gw0")
-	require.Contains(t, reason.GetMessage(), module)
-	require.Contains(t, reason.GetMessage(), prefix.String())
+		}
+		waitForState(readinesspb.State_STATE_NOT_READY, nil)
+		response, err := readiness.Ready(requestContext(t), &readinesspb.ReadyRequest{Scopes: []string{"fib:gw0:" + module}})
+		require.NoError(t, err)
+		require.Len(t, response.GetScopes(), 1)
+		require.Len(t, response.GetScopes()[0].GetReasons(), 1)
+		reason := response.GetScopes()[0].GetReasons()[0]
+		require.Equal(t, "APPLY_FAILED", reason.GetCode())
+		require.Contains(t, reason.GetMessage(), "gw0")
+		require.Contains(t, reason.GetMessage(), module)
+		require.Contains(t, reason.GetMessage(), prefix.String())
 
-	neighbours := operatorpb.NewNeighbourServiceClient(conn)
-	publication := &operatorpb.SwapNeighboursRequest{
-		Table: "static",
-		Entries: []*operatorpb.NeighbourEntry{{
-			NextHop:      commonpb.NewIPAddressFromAddr(nexthop),
-			LinkAddr:     commonpb.NewMACAddressEUI48([6]byte{0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF}),
-			HardwareAddr: commonpb.NewMACAddressEUI48([6]byte{0x00, 0x11, 0x22, 0x33, 0x44, 0x55}),
-			Device:       "eth0",
-		}},
-	}
-	_, err = neighbours.UpdateNeighbours(requestContext(t), &operatorpb.UpdateNeighboursRequest{
-		Table: "static", Entries: publication.GetEntries(),
+		neighbours := operatorpb.NewNeighbourServiceClient(conn)
+		publication := &operatorpb.SwapNeighboursRequest{
+			Table: "static",
+			Entries: []*operatorpb.NeighbourEntry{{
+				NextHop:      commonpb.NewIPAddressFromAddr(nexthop),
+				LinkAddr:     commonpb.NewMACAddressEUI48([6]byte{0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF}),
+				HardwareAddr: commonpb.NewMACAddressEUI48([6]byte{0x00, 0x11, 0x22, 0x33, 0x44, 0x55}),
+				Device:       "eth0",
+			}},
+		}
+		_, err = neighbours.UpdateNeighbours(requestContext(t), &operatorpb.UpdateNeighboursRequest{
+			Table: "static", Entries: publication.GetEntries(),
+		})
+		require.NoError(t, err)
+		waitForState(readinesspb.State_STATE_READY, expected)
+
+		_, err = neighbours.SwapNeighbours(requestContext(t), &operatorpb.SwapNeighboursRequest{Table: "static"})
+		require.NoError(t, err)
+		waitForState(readinesspb.State_STATE_DEGRADED, expected)
+		_, err = neighbours.SwapNeighbours(requestContext(t), publication)
+		require.NoError(t, err)
+		waitForState(readinesspb.State_STATE_READY, expected)
+
+		wirePrefix, err := commonpb.NewIPPrefixFromPrefix(prefix)
+		require.NoError(t, err)
+		routes := operatorpb.NewRouteServiceClient(conn)
+		_, err = routes.DeleteRoute(requestContext(t), &operatorpb.DeleteRouteRequest{
+			Name: module, Prefix: wirePrefix,
+			NexthopAddrs: []*commonpb.IPAddress{commonpb.NewIPAddressFromAddr(nexthop)},
+			SourceId:     operatorpb.RouteSourceID_ROUTE_SOURCE_ID_STATIC, DoFlush: true,
+		})
+		require.NoError(t, err)
+		waitForState(readinesspb.State_STATE_DEGRADED, expected)
+		publication.Entries[0].LinkAddr = commonpb.NewMACAddressEUI48([6]byte{2, 0, 0, 0, 0, 42})
+		_, err = neighbours.SwapNeighbours(requestContext(t), publication)
+		require.NoError(t, err)
+
+		expected[prefix.String()][0].DestinationMAC = [6]byte{2, 0, 0, 0, 0, 42}
+		_, err = routes.InsertRoute(requestContext(t), &operatorpb.InsertRouteRequest{
+			Name: module, Prefix: wirePrefix,
+			NexthopAddrs: []*commonpb.IPAddress{commonpb.NewIPAddressFromAddr(nexthop)},
+			SourceId:     operatorpb.RouteSourceID_ROUTE_SOURCE_ID_STATIC, DoFlush: true,
+		})
+		require.NoError(t, err)
+		waitForState(readinesspb.State_STATE_READY, expected)
 	})
-	require.NoError(t, err)
-	waitForState(readinesspb.State_STATE_READY, expected)
-
-	_, err = neighbours.SwapNeighbours(requestContext(t), &operatorpb.SwapNeighboursRequest{Table: "static"})
-	require.NoError(t, err)
-	waitForState(readinesspb.State_STATE_DEGRADED, expected)
-	_, err = neighbours.SwapNeighbours(requestContext(t), publication)
-	require.NoError(t, err)
-	waitForState(readinesspb.State_STATE_READY, expected)
-
-	wirePrefix, err := commonpb.NewIPPrefixFromPrefix(prefix)
-	require.NoError(t, err)
-	routes := operatorpb.NewRouteServiceClient(conn)
-	_, err = routes.DeleteRoute(requestContext(t), &operatorpb.DeleteRouteRequest{
-		Name: module, Prefix: wirePrefix,
-		NexthopAddrs: []*commonpb.IPAddress{commonpb.NewIPAddressFromAddr(nexthop)},
-		SourceId:     operatorpb.RouteSourceID_ROUTE_SOURCE_ID_STATIC, DoFlush: true,
-	})
-	require.NoError(t, err)
-	waitForState(readinesspb.State_STATE_DEGRADED, expected)
-	publication.Entries[0].LinkAddr = commonpb.NewMACAddressEUI48([6]byte{2, 0, 0, 0, 0, 42})
-	_, err = neighbours.SwapNeighbours(requestContext(t), publication)
-	require.NoError(t, err)
-
-	expected[prefix.String()][0].DestinationMAC = [6]byte{2, 0, 0, 0, 0, 42}
-	_, err = routes.InsertRoute(requestContext(t), &operatorpb.InsertRouteRequest{
-		Name: module, Prefix: wirePrefix,
-		NexthopAddrs: []*commonpb.IPAddress{commonpb.NewIPAddressFromAddr(nexthop)},
-		SourceId:     operatorpb.RouteSourceID_ROUTE_SOURCE_ID_STATIC, DoFlush: true,
-	})
-	require.NoError(t, err)
-	waitForState(readinesspb.State_STATE_READY, expected)
 }
 
 // Test_Operator_StaticResolution_IndependentGateways verifies that local FIBs,
 // readiness, and route classifications stay independent through loss and recovery.
 func Test_Operator_StaticResolution_IndependentGateways(t *testing.T) {
-	firstGateway, firstEndpoint := startFakeGateway(t)
-	secondGateway, secondEndpoint := startFakeGateway(t)
-	config := op.DefaultConfig()
-	config.NetlinkMonitor.Disabled = true
-	config.Readiness.ExpectBird = false
-	endpoint := reserveEndpoint(t)
-	config.Server.Endpoint = xcfg.MustNonEmptyString(endpoint)
-	config.Gateways = []operator.GatewayConfig{
-		{Name: "gw0", Endpoint: xcfg.MustNonEmptyString(firstEndpoint)},
-		{Name: "gw1", Endpoint: xcfg.MustNonEmptyString(secondEndpoint)},
-	}
-	config.GatewayDevices = map[string][]string{"gw0": {"eth0"}, "gw1": {"eth1"}}
-	config.Static.Routes = []op.StaticRouteConfig{
-		staticPath("10.10.0.0/24", "192.0.2.1"),
-		staticPath("10.10.0.0/24", "192.0.2.2"),
-	}
-	config.Reconcile.Interval = xcfg.MustNonZero(time.Hour)
-	runOperator(t, config)
-	connection, err := grpc.NewClient(endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, connection.Close()) })
-	neighbours := operatorpb.NewNeighbourServiceClient(connection)
-	readiness := operatorpb.NewReadinessServiceClient(connection)
-	metrics := operatorpb.NewMetricsServiceClient(connection)
-	first := entryRequest("192.0.2.1", [6]byte{2, 0, 0, 0, 0, 1}, "eth0").GetEntries()
-	second := entryRequest("192.0.2.2", [6]byte{2, 0, 0, 0, 0, 2}, "eth1").GetEntries()
-	changedSecond := entryRequest("192.0.2.2", [6]byte{2, 0, 0, 0, 0, 22}, "eth1").GetEntries()
-	latestSecond := entryRequest("192.0.2.2", [6]byte{2, 0, 0, 0, 0, 33}, "eth1").GetEntries()
-	var firstRequest *routepb.UpdateFIBRequest
-	for idx, tc := range []struct {
-		name        string
-		entries     []*operatorpb.NeighbourEntry
-		state       readinesspb.State
-		firstReady  bool
-		destination [6]byte
-	}{
-		{
-			name: "only second gateway resolves", entries: second,
-			state: readinesspb.State_STATE_NOT_READY, destination: [6]byte{2, 0, 0, 0, 0, 2},
-		},
-		{
-			name: "healthy gateway updates its destination while first remains unresolved", entries: changedSecond,
-			state: readinesspb.State_STATE_NOT_READY, destination: [6]byte{2, 0, 0, 0, 0, 22},
-		},
-		{
-			name: "first gateway recovers", entries: append(first, changedSecond...),
-			state: readinesspb.State_STATE_READY, firstReady: true, destination: [6]byte{2, 0, 0, 0, 0, 22},
-		},
-		{
-			name: "first gateway loses its last local path", entries: changedSecond,
-			state: readinesspb.State_STATE_DEGRADED, destination: [6]byte{2, 0, 0, 0, 0, 22},
-		},
-		{
-			name: "healthy gateway updates its destination while first remains degraded", entries: latestSecond,
-			state: readinesspb.State_STATE_DEGRADED, destination: [6]byte{2, 0, 0, 0, 0, 33},
-		},
-	} {
-		t.Logf("step %d: %s", idx+1, tc.name)
-		_, err := neighbours.SwapNeighbours(requestContext(t), &operatorpb.SwapNeighboursRequest{
-			Table: "static", Entries: tc.entries,
-		}, grpc.WaitForReady(true))
-		require.NoError(t, err)
-		require.EventuallyWithT(t, func(collector *assert.CollectT) {
-			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-			defer cancel()
+	synctest.Test(t, func(t *testing.T) {
+		network := memnet.NewNetwork()
+		firstGateway, firstConfig := startMemoryGateway(t, network, "gw0")
+		secondGateway, secondConfig := startMemoryGateway(t, network, "gw1")
+		config := op.DefaultConfig()
+		config.NetlinkMonitor.Disabled = true
+		config.Readiness.ExpectBird = false
+		config.Gateways = []operator.GatewayConfig{firstConfig, secondConfig}
+		config.GatewayDevices = map[string][]string{"gw0": {"eth0"}, "gw1": {"eth1"}}
+		config.Static.Routes = []op.StaticRouteConfig{
+			staticPath("10.10.0.0/24", "192.0.2.1"),
+			staticPath("10.10.0.0/24", "192.0.2.2"),
+		}
+		config.Reconcile.Interval = xcfg.MustNonZero(time.Hour)
+		connection := runMemoryOperator(t, network, config)
+		neighbours := operatorpb.NewNeighbourServiceClient(connection)
+		readiness := operatorpb.NewReadinessServiceClient(connection)
+		metrics := operatorpb.NewMetricsServiceClient(connection)
+		first := entryRequest("192.0.2.1", [6]byte{2, 0, 0, 0, 0, 1}, "eth0").GetEntries()
+		second := entryRequest("192.0.2.2", [6]byte{2, 0, 0, 0, 0, 2}, "eth1").GetEntries()
+		changedSecond := entryRequest("192.0.2.2", [6]byte{2, 0, 0, 0, 0, 22}, "eth1").GetEntries()
+		latestSecond := entryRequest("192.0.2.2", [6]byte{2, 0, 0, 0, 0, 33}, "eth1").GetEntries()
+		var firstRequest *routepb.UpdateFIBRequest
+		for idx, tc := range []struct {
+			name        string
+			entries     []*operatorpb.NeighbourEntry
+			state       readinesspb.State
+			firstReady  bool
+			destination [6]byte
+		}{
+			{
+				name: "only second gateway resolves", entries: second,
+				state: readinesspb.State_STATE_NOT_READY, destination: [6]byte{2, 0, 0, 0, 0, 2},
+			},
+			{
+				name: "healthy gateway updates its destination while first remains unresolved", entries: changedSecond,
+				state: readinesspb.State_STATE_NOT_READY, destination: [6]byte{2, 0, 0, 0, 0, 22},
+			},
+			{
+				name: "first gateway recovers", entries: append(first, changedSecond...),
+				state: readinesspb.State_STATE_READY, firstReady: true, destination: [6]byte{2, 0, 0, 0, 0, 22},
+			},
+			{
+				name: "first gateway loses its last local path", entries: changedSecond,
+				state: readinesspb.State_STATE_DEGRADED, destination: [6]byte{2, 0, 0, 0, 0, 22},
+			},
+			{
+				name: "healthy gateway updates its destination while first remains degraded", entries: latestSecond,
+				state: readinesspb.State_STATE_DEGRADED, destination: [6]byte{2, 0, 0, 0, 0, 33},
+			},
+		} {
+			t.Logf("step %d: %s", idx+1, tc.name)
+			_, err := neighbours.SwapNeighbours(requestContext(t), &operatorpb.SwapNeighboursRequest{
+				Table: "static", Entries: tc.entries,
+			}, grpc.WaitForReady(true))
+			require.NoError(t, err)
+			settle()
+			ctx := requestContext(t)
 			response, err := readiness.Ready(ctx, &readinesspb.ReadyRequest{})
-			require.NoError(collector, err)
+			require.NoError(t, err)
 			states := map[string]readinesspb.State{}
 			for _, scope := range response.GetScopes() {
 				states[scope.GetName()] = scope.GetState()
 			}
-			require.Equal(collector, tc.state, states["fib:gw0:route0"])
-			require.Equal(collector, readinesspb.State_STATE_READY, states["fib:gw1:route0"])
+			require.Equal(t, tc.state, states["fib:gw0:route0"])
+			require.Equal(t, readinesspb.State_STATE_READY, states["fib:gw1:route0"])
 			firstPaths := map[string][]neigh.HardwareRoute{}
 			if tc.firstReady || firstRequest != nil {
 				firstPaths["10.10.0.0/24"] = []neigh.HardwareRoute{{
@@ -555,152 +582,149 @@ func Test_Operator_StaticResolution_IndependentGateways(t *testing.T) {
 				}}
 			}
 			if len(firstPaths) == 0 {
-				require.Nil(collector, firstGateway.lastFIBRequest())
+				require.Nil(t, firstGateway.lastFIBRequest())
 			} else {
-				requireFIB(collector, firstGateway.lastFIBRequest(), "route0", firstPaths)
+				requireFIB(t, firstGateway.lastFIBRequest(), "route0", firstPaths)
 			}
-			requireFIB(collector, secondGateway.lastFIBRequest(), "route0", map[string][]neigh.HardwareRoute{
+			requireFIB(t, secondGateway.lastFIBRequest(), "route0", map[string][]neigh.HardwareRoute{
 				"10.10.0.0/24": {{
 					SourceMAC:      [6]byte{0x00, 0x11, 0x22, 0x33, 0x44, 0x55},
 					DestinationMAC: tc.destination, Device: "eth1",
 				}},
 			})
 			metricResponse, err := metrics.GetMetrics(ctx, &commonpb.GetMetricsRequest{})
-			require.NoError(collector, err)
+			require.NoError(t, err)
 			if tc.firstReady {
-				requireFIBClassifications(collector, metricResponse.GetMetrics(), "gw0", "route0", 0, 1)
-				requireFIBClassifications(collector, metricResponse.GetMetrics(), "gw1", "route0", 0, 1)
+				requireFIBClassifications(t, metricResponse.GetMetrics(), "gw0", "route0", 0, 1)
+				requireFIBClassifications(t, metricResponse.GetMetrics(), "gw1", "route0", 0, 1)
 			} else {
-				requireFIBClassifications(collector, metricResponse.GetMetrics(), "gw0", "route0", 1, 1)
-				requireFIBClassifications(collector, metricResponse.GetMetrics(), "gw1", "route0", 1, 0)
+				requireFIBClassifications(t, metricResponse.GetMetrics(), "gw0", "route0", 1, 1)
+				requireFIBClassifications(t, metricResponse.GetMetrics(), "gw1", "route0", 1, 0)
 			}
-		}, 10*time.Second, 20*time.Millisecond)
-		if tc.firstReady {
-			firstRequest = firstGateway.lastFIBRequest()
+			if tc.firstReady {
+				firstRequest = firstGateway.lastFIBRequest()
+			}
 		}
-	}
 
-	secondRequest := secondGateway.lastFIBRequest()
-	routes := operatorpb.NewRouteServiceClient(connection)
-	prefix, err := commonpb.NewIPPrefixFromPrefix(netip.MustParsePrefix("10.10.0.0/24"))
-	require.NoError(t, err)
-	_, err = routes.DeleteRoute(requestContext(t), &operatorpb.DeleteRouteRequest{
-		Name: "route0", Prefix: prefix,
-		NexthopAddrs: []*commonpb.IPAddress{
-			commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.0.2.1")),
-			commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.0.2.2")),
-		},
-		SourceId: operatorpb.RouteSourceID_ROUTE_SOURCE_ID_STATIC, DoFlush: true,
-	})
-	require.NoError(t, err)
-	require.EventuallyWithT(t, func(collector *assert.CollectT) {
-		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-		defer cancel()
+		secondRequest := secondGateway.lastFIBRequest()
+		routes := operatorpb.NewRouteServiceClient(connection)
+		prefix, err := commonpb.NewIPPrefixFromPrefix(netip.MustParsePrefix("10.10.0.0/24"))
+		require.NoError(t, err)
+		_, err = routes.DeleteRoute(requestContext(t), &operatorpb.DeleteRouteRequest{
+			Name: "route0", Prefix: prefix,
+			NexthopAddrs: []*commonpb.IPAddress{
+				commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.0.2.1")),
+				commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.0.2.2")),
+			},
+			SourceId: operatorpb.RouteSourceID_ROUTE_SOURCE_ID_STATIC, DoFlush: true,
+		})
+		require.NoError(t, err)
+		settle()
+		ctx := requestContext(t)
 		response, err := metrics.GetMetrics(ctx, &commonpb.GetMetricsRequest{})
-		require.NoError(collector, err)
+		require.NoError(t, err)
 		for _, gateway := range []string{"gw0", "gw1"} {
-			requireFIBClassifications(collector, response.GetMetrics(), gateway, "route0", 0, 0)
+			requireFIBClassifications(t, response.GetMetrics(), gateway, "route0", 0, 0)
 		}
 		readinessResponse, err := readiness.Ready(ctx, &readinesspb.ReadyRequest{
 			Scopes: []string{"fib:gw0:route0", "fib:gw1:route0"},
 		})
-		require.NoError(collector, err)
-		require.Len(collector, readinessResponse.GetScopes(), 2)
+		require.NoError(t, err)
+		require.Len(t, readinessResponse.GetScopes(), 2)
 		for _, scope := range readinessResponse.GetScopes() {
-			require.Equal(collector, readinesspb.State_STATE_DEGRADED, scope.GetState())
-			require.Len(collector, scope.GetReasons(), 1)
-			require.Contains(collector, scope.GetReasons()[0].GetMessage(), "no route records")
+			require.Equal(t, readinesspb.State_STATE_DEGRADED, scope.GetState())
+			require.Len(t, scope.GetReasons(), 1)
+			require.Contains(t, scope.GetReasons()[0].GetMessage(), "no route records")
 		}
-		require.True(collector, proto.Equal(firstRequest, firstGateway.lastFIBRequest()))
-		require.True(collector, proto.Equal(secondRequest, secondGateway.lastFIBRequest()))
-	}, 10*time.Second, 20*time.Millisecond)
+		require.True(t, proto.Equal(firstRequest, firstGateway.lastFIBRequest()))
+		require.True(t, proto.Equal(secondRequest, secondGateway.lastFIBRequest()))
+	})
 }
 
 // Test_Operator_ExternalNeighbours_RefreshesAcceptedObservations verifies that
 // complete publications refresh readiness independently of forwarding changes,
 // while refused publications leave the last successful observation intact.
 func Test_Operator_ExternalNeighbours_RefreshesAcceptedObservations(t *testing.T) {
-	_, gatewayEndpoint := startFakeGateway(t)
-	operatorEndpoint := reserveEndpoint(t)
-	config := op.DefaultConfig()
-	config.NetlinkMonitor.Disabled = true
-	config.Readiness.ExpectBird = false
-	config.Server.Endpoint = xcfg.MustNonEmptyString(operatorEndpoint)
-	config.Gateways = []operator.GatewayConfig{{
-		Name: "gw0", Endpoint: xcfg.MustNonEmptyString(gatewayEndpoint),
-	}}
-	config.Reconcile.Interval = xcfg.MustNonZero(time.Hour)
-	runOperator(t, config)
+	synctest.Test(t, func(t *testing.T) {
+		network := memnet.NewNetwork()
+		_, gateway := startMemoryGateway(t, network, "gw0")
+		config := op.DefaultConfig()
+		config.NetlinkMonitor.Disabled = true
+		config.Readiness.ExpectBird = false
+		config.Gateways = []operator.GatewayConfig{gateway}
+		config.Reconcile.Interval = xcfg.MustNonZero(time.Hour)
+		connection := runMemoryOperator(t, network, config)
 
-	connection, err := grpc.NewClient(operatorEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, connection.Close()) })
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
-	neighbours := operatorpb.NewNeighbourServiceClient(connection)
-	readiness := operatorpb.NewReadinessServiceClient(connection)
-	readScope := func() *readinesspb.Scope {
-		response, err := readiness.Ready(ctx, &readinesspb.ReadyRequest{}, grpc.WaitForReady(true))
-		require.NoError(t, err)
-		for _, scope := range response.GetScopes() {
-			if scope.GetName() == "neighbours" {
-				return scope
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		defer cancel()
+		neighbours := operatorpb.NewNeighbourServiceClient(connection)
+		readiness := operatorpb.NewReadinessServiceClient(connection)
+		readScope := func() *readinesspb.Scope {
+			response, err := readiness.Ready(ctx, &readinesspb.ReadyRequest{}, grpc.WaitForReady(true))
+			require.NoError(t, err)
+			for _, scope := range response.GetScopes() {
+				if scope.GetName() == "neighbours" {
+					return scope
+				}
 			}
+			t.Fatal("neighbours readiness scope is missing")
+			return nil
 		}
-		t.Fatal("neighbours readiness scope is missing")
-		return nil
-	}
-	previous := readScope()
-	require.Equal(t, readinesspb.State_STATE_READY, previous.GetState())
-	_, err = neighbours.CreateTable(ctx, &operatorpb.CreateNeighbourTableRequest{Name: "publisher"})
-	require.NoError(t, err)
-	require.True(t, proto.Equal(previous, readScope()), "table metadata is not an observation")
+		previous := readScope()
+		require.Equal(t, readinesspb.State_STATE_READY, previous.GetState())
+		// Fake time stands still unless slept, so each call below comes a
+		// second after the previous observation.
+		time.Sleep(time.Second)
+		_, err := neighbours.CreateTable(ctx, &operatorpb.CreateNeighbourTableRequest{Name: "publisher"})
+		require.NoError(t, err)
+		require.True(t, proto.Equal(previous, readScope()), "table metadata is not an observation")
 
-	entries := entryRequest("192.0.2.1", [6]byte{2, 0, 0, 0, 0, 1}, "eth0").GetEntries()
-	for _, tc := range []struct {
-		name    string
-		entries []*operatorpb.NeighbourEntry
-	}{
-		{name: "first empty observation"},
-		{name: "first populated observation", entries: entries},
-		{name: "identical populated observation", entries: entries},
-		{name: "withdrawal observation"},
-		{name: "identical empty observation"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
+		entries := entryRequest("192.0.2.1", [6]byte{2, 0, 0, 0, 0, 1}, "eth0").GetEntries()
+		for _, tc := range []struct {
+			name    string
+			entries []*operatorpb.NeighbourEntry
+		}{
+			{name: "first empty observation"},
+			{name: "first populated observation", entries: entries},
+			{name: "identical populated observation", entries: entries},
+			{name: "withdrawal observation"},
+			{name: "identical empty observation"},
+		} {
+			time.Sleep(time.Second)
 			_, err := neighbours.SwapNeighbours(ctx, &operatorpb.SwapNeighboursRequest{
 				Table: "publisher", Entries: tc.entries,
 			})
-			require.NoError(t, err)
+			require.NoError(t, err, tc.name)
 			current := readScope()
-			require.Equal(t, readinesspb.State_STATE_READY, current.GetState())
+			require.Equal(t, readinesspb.State_STATE_READY, current.GetState(), tc.name)
 			require.True(t, current.GetObservedAt().AsTime().After(previous.GetObservedAt().AsTime()),
-				"accepted publication must advance its observation timestamp")
+				"%s: accepted publication must advance its observation timestamp", tc.name)
 			require.True(t, proto.Equal(previous.GetLastTransitionTime(), current.GetLastTransitionTime()),
-				"a fresh observation must not create a state transition")
+				"%s: a fresh observation must not create a state transition", tc.name)
 			previous = current
-		})
-	}
+		}
 
-	invalid := entryRequest("192.0.2.1", [6]byte{2, 0, 0, 0, 0, 1}, "eth0").GetEntries()
-	invalid[0].NextHop = &commonpb.IPAddress{Addr: []byte{1, 2, 3}}
-	for _, tc := range []struct {
-		name    string
-		request *operatorpb.SwapNeighboursRequest
-		code    codes.Code
-	}{
-		{name: "unknown table", request: &operatorpb.SwapNeighboursRequest{Table: "missing"}, code: codes.NotFound},
-		{name: "invalid snapshot", request: &operatorpb.SwapNeighboursRequest{Table: "publisher", Entries: invalid}, code: codes.InvalidArgument},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
+		invalid := entryRequest("192.0.2.1", [6]byte{2, 0, 0, 0, 0, 1}, "eth0").GetEntries()
+		invalid[0].NextHop = &commonpb.IPAddress{Addr: []byte{1, 2, 3}}
+		for _, tc := range []struct {
+			name    string
+			request *operatorpb.SwapNeighboursRequest
+			code    codes.Code
+		}{
+			{name: "unknown table", request: &operatorpb.SwapNeighboursRequest{Table: "missing"}, code: codes.NotFound},
+			{name: "invalid snapshot", request: &operatorpb.SwapNeighboursRequest{Table: "publisher", Entries: invalid}, code: codes.InvalidArgument},
+		} {
+			time.Sleep(time.Second)
 			_, err := neighbours.SwapNeighbours(ctx, tc.request)
-			require.Equal(t, tc.code, status.Code(err))
-			require.True(t, proto.Equal(previous, readScope()), "a rejected publication must not refresh readiness")
-		})
-	}
-	cancelled, stop := context.WithCancel(ctx)
-	stop()
-	_, err = neighbours.SwapNeighbours(cancelled, &operatorpb.SwapNeighboursRequest{Table: "publisher"})
-	require.Equal(t, codes.Canceled, status.Code(err))
-	require.True(t, proto.Equal(previous, readScope()), "a cancelled publication must not refresh readiness")
+			require.Equal(t, tc.code, status.Code(err), tc.name)
+			require.True(t, proto.Equal(previous, readScope()),
+				"%s: a rejected publication must not refresh readiness", tc.name)
+		}
+		time.Sleep(time.Second)
+		cancelled, stop := context.WithCancel(ctx)
+		stop()
+		_, err = neighbours.SwapNeighbours(cancelled, &operatorpb.SwapNeighboursRequest{Table: "publisher"})
+		require.Equal(t, codes.Canceled, status.Code(err))
+		require.True(t, proto.Equal(previous, readScope()), "a cancelled publication must not refresh readiness")
+	})
 }

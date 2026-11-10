@@ -9,7 +9,6 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -20,10 +19,10 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/status"
-	"google.golang.org/grpc/test/bufconn"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/readiness"
+	"github.com/yanet-platform/yanet2/common/go/testutils/memnet"
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 	birdadapter "github.com/yanet-platform/yanet2/operators/bird-adapter"
 	adapterpb "github.com/yanet-platform/yanet2/operators/bird-adapter/adapterpb/v1"
@@ -314,8 +313,6 @@ func Test_RouteService_FeedRIB_HeartbeatChangesNoRoutes(t *testing.T) {
 // cleanly instead of hanging or erroring. A cleanup pass targeting the
 // superseded session afterward still leaves the route in place.
 func Test_RouteService_FeedRIB_SupersededSessionUpdateRejected(t *testing.T) {
-	const syncTimeout = 5 * time.Second
-
 	cases := []struct {
 		name     string
 		isDelete bool
@@ -326,124 +323,110 @@ func Test_RouteService_FeedRIB_SupersededSessionUpdateRejected(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			sessionStarted := make(chan uint64, 2)
-			routeApplied := make(chan struct{}, 2)
-			var onUpdateCount atomic.Int64
-			svc := NewRouteService(
-				neigh.NewNeighTable(),
-				// A long TTL keeps the service's own scheduled cleanup
-				// pending instead of running during the test; Close cancels
-				// the pending cleanup once the assertions below are done.
-				WithRouteServiceRIBTTL(time.Hour),
-				WithRouteServiceOnRIBSessionStart(func(name string, sessionID uint64) {
-					sessionStarted <- sessionID
-				}),
-				WithRouteServiceOnRIBUpdate(func(int) {
-					onUpdateCount.Add(1)
-					routeApplied <- struct{}{}
-				}),
-			)
-			defer func() {
-				require.NoError(t, svc.Close())
-			}()
+			synctest.Test(t, func(t *testing.T) {
+				sessionStarted := make(chan uint64, 2)
+				routeApplied := make(chan struct{}, 2)
+				var onUpdateCount atomic.Int64
+				svc := NewRouteService(
+					neigh.NewNeighTable(),
+					// A long TTL keeps the service's own scheduled cleanup
+					// pending instead of running during the test; Close cancels
+					// the pending cleanup once the assertions below are done.
+					WithRouteServiceRIBTTL(time.Hour),
+					WithRouteServiceOnRIBSessionStart(func(name string, sessionID uint64) {
+						sessionStarted <- sessionID
+					}),
+					WithRouteServiceOnRIBUpdate(func(int) {
+						onUpdateCount.Add(1)
+						routeApplied <- struct{}{}
+					}),
+				)
+				defer func() {
+					require.NoError(t, svc.Close())
+				}()
 
-			peer := commonpb.NewIPAddressFromAddr(netip.MustParseAddr("198.51.100.1"))
-			fromA := &operatorpb.Route{
-				Prefix:  mustNetwork(t, "10.0.0.0/24"),
-				NextHop: commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.0.2.1")),
-				Peer:    peer,
-				Source:  operatorpb.RouteSourceID_ROUTE_SOURCE_ID_BIRD,
-			}
-			fromB := &operatorpb.Route{
-				Prefix:  mustNetwork(t, "10.0.0.0/24"),
-				NextHop: commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.0.2.2")),
-				Peer:    peer,
-				Source:  operatorpb.RouteSourceID_ROUTE_SOURCE_ID_BIRD,
-			}
+				peer := commonpb.NewIPAddressFromAddr(netip.MustParseAddr("198.51.100.1"))
+				fromA := &operatorpb.Route{
+					Prefix:  mustNetwork(t, "10.0.0.0/24"),
+					NextHop: commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.0.2.1")),
+					Peer:    peer,
+					Source:  operatorpb.RouteSourceID_ROUTE_SOURCE_ID_BIRD,
+				}
+				fromB := &operatorpb.Route{
+					Prefix:  mustNetwork(t, "10.0.0.0/24"),
+					NextHop: commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.0.2.2")),
+					Peer:    peer,
+					Source:  operatorpb.RouteSourceID_ROUTE_SOURCE_ID_BIRD,
+				}
 
-			// streamA is buffered so the update queued after the rejected
-			// one — which FeedRIB must never read — can be sent without
-			// blocking the test itself.
-			streamA := &channelFeedRIBStream{updates: make(chan *operatorpb.Update, 3)}
-			streamB := &channelFeedRIBStream{updates: make(chan *operatorpb.Update)}
+				// streamA is buffered so the update queued after the rejected
+				// one — which FeedRIB must never read — can be sent without
+				// blocking the test itself.
+				streamA := &channelFeedRIBStream{updates: make(chan *operatorpb.Update, 3)}
+				streamB := &channelFeedRIBStream{updates: make(chan *operatorpb.Update)}
 
-			// Closing is idempotent and also runs at cleanup, so a failed
-			// require partway through cannot leave either FeedRIB call
-			// blocked in Recv forever.
-			closeStreamA := sync.OnceFunc(func() { close(streamA.updates) })
-			closeStreamB := sync.OnceFunc(func() { close(streamB.updates) })
-			t.Cleanup(closeStreamA)
-			t.Cleanup(closeStreamB)
+				// Closing is idempotent and also runs at cleanup, so a failed
+				// require partway through cannot leave either FeedRIB call
+				// blocked in Recv forever.
+				closeStreamA := sync.OnceFunc(func() { close(streamA.updates) })
+				closeStreamB := sync.OnceFunc(func() { close(streamB.updates) })
+				t.Cleanup(closeStreamA)
+				t.Cleanup(closeStreamB)
 
-			// A and B are waited on independently, since B's stream must
-			// stay open past A's own end for the assertions below.
-			var groupA, groupB errgroup.Group
-			groupA.Go(func() error { return svc.FeedRIB(streamA) })
-			streamA.updates <- &operatorpb.Update{Name: "route0", Route: fromA}
+				// A and B are waited on independently, since B's stream must
+				// stay open past A's own end for the assertions below.
+				var groupA, groupB errgroup.Group
+				groupA.Go(func() error { return svc.FeedRIB(streamA) })
+				streamA.updates <- &operatorpb.Update{Name: "route0", Route: fromA}
 
-			var sessionA uint64
-			select {
-			case sessionA = <-sessionStarted:
-			case <-time.After(syncTimeout):
-				t.Fatal("timed out waiting for A's session to start")
-			}
-			require.Equal(t, uint64(1), sessionA, "setup: A's session must start first")
+				sessionA := receiveEvent(t, sessionStarted, "A's session to start")
+				require.Equal(t, uint64(1), sessionA, "setup: A's session must start first")
 
-			select {
-			case <-routeApplied: // A's route is committed before B can supersede it
-			case <-time.After(syncTimeout):
-				t.Fatal("timed out waiting for A's route to be applied")
-			}
+				// A's route is committed before B can supersede it.
+				receiveEvent(t, routeApplied, "A's route to be applied")
 
-			groupB.Go(func() error { return svc.FeedRIB(streamB) })
-			streamB.updates <- &operatorpb.Update{Name: "route0", Route: fromB}
+				groupB.Go(func() error { return svc.FeedRIB(streamB) })
+				streamB.updates <- &operatorpb.Update{Name: "route0", Route: fromB}
 
-			var sessionB uint64
-			select {
-			case sessionB = <-sessionStarted:
-			case <-time.After(syncTimeout):
-				t.Fatal("timed out waiting for B's session to start")
-			}
-			require.Equal(t, uint64(2), sessionB, "setup: B's session must supersede A's")
+				sessionB := receiveEvent(t, sessionStarted, "B's session to start")
+				require.Equal(t, uint64(2), sessionB, "setup: B's session must supersede A's")
 
-			select {
-			case <-routeApplied: // B's route is committed before the late send below
-			case <-time.After(syncTimeout):
-				t.Fatal("timed out waiting for B's route to be applied")
-			}
+				// B's route is committed before the late send below.
+				receiveEvent(t, routeApplied, "B's route to be applied")
 
-			// A's session is already superseded by the time this reaches the
-			// service, so this send is rejected by the RIB's own fence.
-			streamA.updates <- &operatorpb.Update{Name: "route0", Route: fromA, IsDelete: tc.isDelete}
-			// Queued after the rejected send; FeedRIB must never read it,
-			// since the rejection ends the stream immediately.
-			streamA.updates <- &operatorpb.Update{Name: "route0", Route: fromA}
-			closeStreamA()
-			require.NoError(t, groupA.Wait(), "A's FeedRIB call must end cleanly despite the rejection")
+				// A's session is already superseded by the time this reaches the
+				// service, so this send is rejected by the RIB's own fence.
+				streamA.updates <- &operatorpb.Update{Name: "route0", Route: fromA, IsDelete: tc.isDelete}
+				// Queued after the rejected send; FeedRIB must never read it,
+				// since the rejection ends the stream immediately.
+				streamA.updates <- &operatorpb.Update{Name: "route0", Route: fromA}
+				closeStreamA()
+				require.NoError(t, groupA.Wait(), "A's FeedRIB call must end cleanly despite the rejection")
 
-			require.Equal(t, 2, streamA.recvCount,
-				"A must stop reading once its write is rejected, never reaching the queued update after it")
+				require.Equal(t, 2, streamA.recvCount,
+					"A must stop reading once its write is rejected, never reaching the queued update after it")
 
-			ribRef, ribExists := svc.getRib("route0")
-			require.True(t, ribExists, "the RIB must already exist after FeedRIB created it")
-			// Run the superseded session's cleanup synchronously, standing
-			// in for the service's own long-TTL scheduled pass so the
-			// outcome below does not depend on winning a background race.
-			ribRef.CleanupTask(sessionA, make(chan bool), 0)
+				ribRef, ribExists := svc.getRib("route0")
+				require.True(t, ribExists, "the RIB must already exist after FeedRIB created it")
+				// Run the superseded session's cleanup synchronously, standing
+				// in for the service's own long-TTL scheduled pass so the
+				// outcome below does not depend on winning a background race.
+				ribRef.CleanupTask(sessionA, make(chan bool), 0)
 
-			_, routes, ok := ribRef.LongestMatch(netip.MustParseAddr("10.0.0.1"))
-			require.True(t, ok, "the prefix must still be present after A's rejected send and cleanup")
-			require.Len(t, routes.Routes, 1,
-				"A's rejected send must not change the route set, and cleanup of the superseded session must not remove B's route")
-			require.Equal(t, sessionB, routes.Routes[0].SessionID, "the surviving route must keep B's session id")
-			require.Equal(t, netip.MustParseAddr("192.0.2.2"), routes.Routes[0].NextHop,
-				"the surviving route must keep B's attributes")
+				_, routes, ok := ribRef.LongestMatch(netip.MustParseAddr("10.0.0.1"))
+				require.True(t, ok, "the prefix must still be present after A's rejected send and cleanup")
+				require.Len(t, routes.Routes, 1,
+					"A's rejected send must not change the route set, and cleanup of the superseded session must not remove B's route")
+				require.Equal(t, sessionB, routes.Routes[0].SessionID, "the surviving route must keep B's session id")
+				require.Equal(t, netip.MustParseAddr("192.0.2.2"), routes.Routes[0].NextHop,
+					"the surviving route must keep B's attributes")
 
-			closeStreamB()
-			require.NoError(t, groupB.Wait(), "B's FeedRIB call must end cleanly")
+				closeStreamB()
+				require.NoError(t, groupB.Wait(), "B's FeedRIB call must end cleanly")
 
-			require.Equal(t, int64(2), onUpdateCount.Load(),
-				"A's rejected write must not be counted by the update callback")
+				require.Equal(t, int64(2), onUpdateCount.Load(),
+					"A's rejected write must not be counted by the update callback")
+			})
 		})
 	}
 }
@@ -457,8 +440,6 @@ func Test_RouteService_FeedRIB_SupersededSessionUpdateRejected(t *testing.T) {
 // further queued update on that stream is never read, and the second
 // stream's own FeedRIB call still ends cleanly too.
 func Test_RouteService_FeedRIB_SupersededSessionNonWritingUpdateRejected(t *testing.T) {
-	const syncTimeout = 5 * time.Second
-
 	cases := []struct {
 		name          string
 		unconvertible bool
@@ -471,114 +452,98 @@ func Test_RouteService_FeedRIB_SupersededSessionNonWritingUpdateRejected(t *test
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			sessionStarted := make(chan uint64, 2)
-			routeApplied := make(chan struct{}, 2)
-			var onChangedCount atomic.Int64
-			svc := NewRouteService(
-				neigh.NewNeighTable(),
-				WithRouteServiceRIBTTL(time.Hour),
-				WithRouteServiceOnRIBSessionStart(func(name string, sessionID uint64) {
-					sessionStarted <- sessionID
-				}),
-				WithRouteServiceOnRIBUpdate(func(int) {
-					routeApplied <- struct{}{}
-				}),
-				WithRouteServiceOnChanged(func() { onChangedCount.Add(1) }),
-			)
-			defer func() {
-				require.NoError(t, svc.Close())
-			}()
+			synctest.Test(t, func(t *testing.T) {
+				sessionStarted := make(chan uint64, 2)
+				routeApplied := make(chan struct{}, 2)
+				var onChangedCount atomic.Int64
+				svc := NewRouteService(
+					neigh.NewNeighTable(),
+					WithRouteServiceRIBTTL(time.Hour),
+					WithRouteServiceOnRIBSessionStart(func(name string, sessionID uint64) {
+						sessionStarted <- sessionID
+					}),
+					WithRouteServiceOnRIBUpdate(func(int) {
+						routeApplied <- struct{}{}
+					}),
+					WithRouteServiceOnChanged(func() { onChangedCount.Add(1) }),
+				)
+				defer func() {
+					require.NoError(t, svc.Close())
+				}()
 
-			peer := commonpb.NewIPAddressFromAddr(netip.MustParseAddr("198.51.100.1"))
-			fromA := &operatorpb.Route{
-				Prefix:  mustNetwork(t, "10.0.0.0/24"),
-				NextHop: commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.0.2.1")),
-				Peer:    peer,
-				Source:  operatorpb.RouteSourceID_ROUTE_SOURCE_ID_BIRD,
-			}
-			fromB := &operatorpb.Route{
-				Prefix:  mustNetwork(t, "10.0.0.0/24"),
-				NextHop: commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.0.2.2")),
-				Peer:    peer,
-				Source:  operatorpb.RouteSourceID_ROUTE_SOURCE_ID_BIRD,
-			}
-
-			lateUpdate := &operatorpb.Update{Name: "route0", Heartbeat: tc.heartbeat}
-			if tc.unconvertible {
-				// NextHop is left unset, which ToRIBRoute rejects.
-				lateUpdate.Route = &operatorpb.Route{
-					Prefix: mustNetwork(t, "10.0.0.0/24"),
-					Peer:   peer,
-					Source: operatorpb.RouteSourceID_ROUTE_SOURCE_ID_BIRD,
+				peer := commonpb.NewIPAddressFromAddr(netip.MustParseAddr("198.51.100.1"))
+				fromA := &operatorpb.Route{
+					Prefix:  mustNetwork(t, "10.0.0.0/24"),
+					NextHop: commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.0.2.1")),
+					Peer:    peer,
+					Source:  operatorpb.RouteSourceID_ROUTE_SOURCE_ID_BIRD,
 				}
-			}
+				fromB := &operatorpb.Route{
+					Prefix:  mustNetwork(t, "10.0.0.0/24"),
+					NextHop: commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.0.2.2")),
+					Peer:    peer,
+					Source:  operatorpb.RouteSourceID_ROUTE_SOURCE_ID_BIRD,
+				}
 
-			// streamA is buffered so the update queued after the rejected
-			// one — which FeedRIB must never read — can be sent without
-			// blocking the test itself.
-			streamA := &channelFeedRIBStream{updates: make(chan *operatorpb.Update, 3)}
-			streamB := &channelFeedRIBStream{updates: make(chan *operatorpb.Update)}
+				lateUpdate := &operatorpb.Update{Name: "route0", Heartbeat: tc.heartbeat}
+				if tc.unconvertible {
+					// NextHop is left unset, which ToRIBRoute rejects.
+					lateUpdate.Route = &operatorpb.Route{
+						Prefix: mustNetwork(t, "10.0.0.0/24"),
+						Peer:   peer,
+						Source: operatorpb.RouteSourceID_ROUTE_SOURCE_ID_BIRD,
+					}
+				}
 
-			closeStreamA := sync.OnceFunc(func() { close(streamA.updates) })
-			closeStreamB := sync.OnceFunc(func() { close(streamB.updates) })
-			t.Cleanup(closeStreamA)
-			t.Cleanup(closeStreamB)
+				// streamA is buffered so the update queued after the rejected
+				// one — which FeedRIB must never read — can be sent without
+				// blocking the test itself.
+				streamA := &channelFeedRIBStream{updates: make(chan *operatorpb.Update, 3)}
+				streamB := &channelFeedRIBStream{updates: make(chan *operatorpb.Update)}
 
-			var groupA, groupB errgroup.Group
-			groupA.Go(func() error { return svc.FeedRIB(streamA) })
-			streamA.updates <- &operatorpb.Update{Name: "route0", Route: fromA}
+				closeStreamA := sync.OnceFunc(func() { close(streamA.updates) })
+				closeStreamB := sync.OnceFunc(func() { close(streamB.updates) })
+				t.Cleanup(closeStreamA)
+				t.Cleanup(closeStreamB)
 
-			var sessionA uint64
-			select {
-			case sessionA = <-sessionStarted:
-			case <-time.After(syncTimeout):
-				t.Fatal("timed out waiting for A's session to start")
-			}
-			require.Equal(t, uint64(1), sessionA, "setup: A's session must start first")
+				var groupA, groupB errgroup.Group
+				groupA.Go(func() error { return svc.FeedRIB(streamA) })
+				streamA.updates <- &operatorpb.Update{Name: "route0", Route: fromA}
 
-			select {
-			case <-routeApplied:
-			case <-time.After(syncTimeout):
-				t.Fatal("timed out waiting for A's route to be applied")
-			}
+				sessionA := receiveEvent(t, sessionStarted, "A's session to start")
+				require.Equal(t, uint64(1), sessionA, "setup: A's session must start first")
 
-			groupB.Go(func() error { return svc.FeedRIB(streamB) })
-			streamB.updates <- &operatorpb.Update{Name: "route0", Route: fromB}
+				receiveEvent(t, routeApplied, "A's route to be applied")
 
-			var sessionB uint64
-			select {
-			case sessionB = <-sessionStarted:
-			case <-time.After(syncTimeout):
-				t.Fatal("timed out waiting for B's session to start")
-			}
-			require.Equal(t, uint64(2), sessionB, "setup: B's session must supersede A's")
+				groupB.Go(func() error { return svc.FeedRIB(streamB) })
+				streamB.updates <- &operatorpb.Update{Name: "route0", Route: fromB}
 
-			select {
-			case <-routeApplied:
-			case <-time.After(syncTimeout):
-				t.Fatal("timed out waiting for B's route to be applied")
-			}
+				sessionB := receiveEvent(t, sessionStarted, "B's session to start")
+				require.Equal(t, uint64(2), sessionB, "setup: B's session must supersede A's")
 
-			// From here on, onChanged must increase by exactly one: A's own
-			// stream-end epilogue.
-			onChangedBefore := onChangedCount.Load()
+				receiveEvent(t, routeApplied, "B's route to be applied")
 
-			// A's session is already superseded by the time this reaches
-			// the service, so this send is the late non-writing message
-			// under test.
-			streamA.updates <- lateUpdate
-			// Queued after the rejected send; FeedRIB must never read it.
-			streamA.updates <- &operatorpb.Update{Name: "route0", Route: fromA}
-			closeStreamA()
-			require.NoError(t, groupA.Wait(), "A's FeedRIB call must end cleanly despite the rejected message")
+				// From here on, onChanged must increase by exactly one: A's own
+				// stream-end epilogue.
+				onChangedBefore := onChangedCount.Load()
 
-			require.Equal(t, 2, streamA.recvCount,
-				"A must stop reading once its message is rejected, never reaching the queued update after it")
-			require.Equal(t, onChangedBefore+1, onChangedCount.Load(),
-				"A's rejected message must not wake the reconcile loop itself, only its own stream-end epilogue may")
+				// A's session is already superseded by the time this reaches
+				// the service, so this send is the late non-writing message
+				// under test.
+				streamA.updates <- lateUpdate
+				// Queued after the rejected send; FeedRIB must never read it.
+				streamA.updates <- &operatorpb.Update{Name: "route0", Route: fromA}
+				closeStreamA()
+				require.NoError(t, groupA.Wait(), "A's FeedRIB call must end cleanly despite the rejected message")
 
-			closeStreamB()
-			require.NoError(t, groupB.Wait(), "B's FeedRIB call must end cleanly")
+				require.Equal(t, 2, streamA.recvCount,
+					"A must stop reading once its message is rejected, never reaching the queued update after it")
+				require.Equal(t, onChangedBefore+1, onChangedCount.Load(),
+					"A's rejected message must not wake the reconcile loop itself, only its own stream-end epilogue may")
+
+				closeStreamB()
+				require.NoError(t, groupB.Wait(), "B's FeedRIB call must end cleanly")
+			})
 		})
 	}
 }
@@ -841,7 +806,7 @@ func Test_RouteService_FeedRIB_IdleBirdImportReplaysAfterTransportRestart(t *tes
 	synctest.Test(t, func(t *testing.T) {
 		kept := netip.MustParsePrefix("2001:db8:1::/48")
 		withdrawn := netip.MustParsePrefix("2001:db8:2::/48")
-		network := newMemoryNetwork()
+		network := memnet.NewNetwork()
 		// BIRD exports both routes to the first connection; the second one
 		// was withdrawn by the time the import reconnects.
 		serveBIRDExportSocket(t, network.Listen("bird.sock"), func(idx int) []netip.Prefix {
@@ -899,9 +864,8 @@ func Test_RouteService_FeedRIB_IdleBirdImportReplaysAfterTransportRestart(t *tes
 		birdSessionState := func() readinesspb.State {
 			return requireScope(t, tracker, "bird-session").GetState()
 		}
-		require.Eventually(t, func() bool {
-			return slices.Equal(ribPrefixes(store, "route0"), []netip.Prefix{kept, withdrawn})
-		}, 5*time.Second, 10*time.Millisecond)
+		synctest.Wait()
+		require.Equal(t, []netip.Prefix{kept, withdrawn}, ribPrefixes(store, "route0"))
 		require.Equal(t, readinesspb.State_STATE_READY, birdSessionState())
 
 		server.Stop()
@@ -910,9 +874,10 @@ func Test_RouteService_FeedRIB_IdleBirdImportReplaysAfterTransportRestart(t *tes
 		require.NotEqual(t, readinesspb.State_STATE_READY, birdSessionState())
 		serveFeedRIB(t, network.Listen("route-operator"), svc)
 
-		require.Eventually(t, func() bool { return birdSessionState() == readinesspb.State_STATE_READY },
-			5*time.Second, 10*time.Millisecond,
-			"the idle import did not start a new session",
+		time.Sleep(5 * time.Second)
+		synctest.Wait()
+		require.Equal(t, readinesspb.State_STATE_READY, birdSessionState(),
+			"the idle import did not start a new session within five seconds",
 		)
 		time.Sleep(time.Until(sessionEnded.Add(DefaultRIBTTL)) - time.Nanosecond)
 		synctest.Wait()
@@ -925,6 +890,20 @@ func Test_RouteService_FeedRIB_IdleBirdImportReplaysAfterTransportRestart(t *tes
 			"the RIB must hold the replayed route and lose the withdrawn one after the TTL",
 		)
 	})
+}
+
+// receiveEvent waits for the next value on events for at most an hour of
+// fake time, failing with what it awaited.
+func receiveEvent[T any](t *testing.T, events <-chan T, awaited string) T {
+	t.Helper()
+	select {
+	case event := <-events:
+		return event
+	case <-time.After(time.Hour):
+		t.Fatalf("timed out waiting for %s", awaited)
+		var zero T
+		return zero
+	}
 }
 
 // serveFeedRIB serves svc on listener until the test ends and returns the
@@ -993,42 +972,6 @@ func serveBIRDExportSocket(t *testing.T, listener net.Listener, routes func(idx 
 		_ = listener.Close()
 		require.NoError(t, workers.Wait())
 	})
-}
-
-// memoryNetwork connects dialers to the bufconn listeners bound on it by
-// address, whose connections block on condition variables: a goroutine
-// waiting on one counts as durably blocked inside a synctest bubble, which a
-// goroutine waiting on a socket never does.
-type memoryNetwork struct {
-	mu        sync.Mutex
-	listeners map[string]*bufconn.Listener
-}
-
-func newMemoryNetwork() *memoryNetwork {
-	return &memoryNetwork{listeners: map[string]*bufconn.Listener{}}
-}
-
-// Listen binds a new listener to address in place of the previous one.
-func (m *memoryNetwork) Listen(address string) *bufconn.Listener {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	listener := bufconn.Listen(64 * 1024)
-	m.listeners[address] = listener
-	return listener
-}
-
-// Dial connects to the listener bound to address, and fails as a refused
-// connection does when none is.
-func (m *memoryNetwork) Dial(ctx context.Context, address string) (net.Conn, error) {
-	m.mu.Lock()
-	listener := m.listeners[address]
-	m.mu.Unlock()
-
-	if listener == nil {
-		return nil, &net.OpError{Op: "dial", Net: "memory", Err: syscall.ECONNREFUSED}
-	}
-	return listener.DialContext(ctx)
 }
 
 // birdExportChunk returns a BIRD export chunk announcing the /48 prefix via
