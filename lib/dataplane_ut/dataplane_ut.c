@@ -230,9 +230,7 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 	cp_config_unlock(ut->cp_config);
 
 	counter_registry_init(
-		&ut->dp_config->worker_counters,
-		&ut->dp_config->memory_context,
-		0
+		&ut->dp_config->worker_counters, &ut->dp_config->memory_context
 	);
 	struct worker_counter_ids counter_ids;
 	if (worker_counters_register(

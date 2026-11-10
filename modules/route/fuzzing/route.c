@@ -29,8 +29,7 @@ route_test_fib(yanet_error **err) {
 	);
 	if (counter_registry_init(
 		    &fuzz_fib.cp_object.link_counter_registry,
-		    &fuzz_fib.cp_object.entity.memory_context,
-		    0
+		    &fuzz_fib.cp_object.entity.memory_context
 	    )) {
 		return -1;
 	}
@@ -165,8 +164,7 @@ route_test_config(struct cp_module **cp_module, yanet_error **err) {
 	// Needed by route_module_config_register_counters.
 	if (counter_registry_init(
 		    &config->cp_module.counter_registry,
-		    &config->cp_module.entity.memory_context,
-		    0
+		    &config->cp_module.entity.memory_context
 	    )) {
 		goto error_config;
 	}

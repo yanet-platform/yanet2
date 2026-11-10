@@ -1030,7 +1030,7 @@ dataplane_init(
 				device->port_name,
 				sizeof(pc->port_name));
 			counter_registry_init(
-				&pc->registry, &dp_config->memory_context, 0
+				&pc->registry, &dp_config->memory_context
 			);
 
 			instance->device_xstat_map[device_idx] =
@@ -1091,8 +1091,7 @@ dataplane_init(
 
 		if (counter_registry_init(
 			    &dp_config->worker_counters,
-			    &dp_config->memory_context,
-			    0
+			    &dp_config->memory_context
 		    )) {
 			LOG(ERROR,
 			    "failed to initialize worker counter registry for "

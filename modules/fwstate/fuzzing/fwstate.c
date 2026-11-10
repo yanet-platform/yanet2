@@ -174,8 +174,7 @@ fwstate_test_config(struct cp_module **cp_module) {
 	// [packets].
 	if (counter_registry_init(
 		    &config->cp_module.counter_registry,
-		    &config->cp_module.entity.memory_context,
-		    0
+		    &config->cp_module.entity.memory_context
 	    )) {
 		goto error_config;
 	}

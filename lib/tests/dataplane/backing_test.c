@@ -94,7 +94,7 @@ backing_test_add_device(
 		&fixture->block_allocator
 	);
 	if (counter_registry_init(
-		    &cp_device->counter_registry, &cfg->memory_context, 1
+		    &cp_device->counter_registry, &cfg->memory_context
 	    )) {
 		return -1;
 	}

@@ -51,8 +51,7 @@ forward_test_config(struct cp_module **cp_module, yanet_error **err) {
 	// Needed by "forward_module_config_update".
 	if (counter_registry_init(
 		    &config->cp_module.counter_registry,
-		    &config->cp_module.entity.memory_context,
-		    0
+		    &config->cp_module.entity.memory_context
 	    )) {
 		goto fail;
 	}

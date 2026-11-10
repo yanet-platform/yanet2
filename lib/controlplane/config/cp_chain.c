@@ -53,7 +53,7 @@ cp_chain_init(
 
 	assert(self->length == cp_chain_config->length);
 
-	if (counter_registry_init(&self->counter_registry, mctx, 0)) {
+	if (counter_registry_init(&self->counter_registry, mctx)) {
 		yanet_error_add(
 			err,
 			"failed to initialize counter registry for chain '%s'",
