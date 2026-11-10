@@ -54,7 +54,7 @@ func WithGatewayRegInterval(d time.Duration) GatewayRegRunnerOption {
 }
 
 // WithGatewayRegDialOptions adds gRPC dial options to every gateway
-// connection of the runner, applied after the defaults so they override them.
+// connection of the runner; they cannot replace its transport credentials.
 func WithGatewayRegDialOptions(options ...grpc.DialOption) GatewayRegRunnerOption {
 	return func(o *gatewayRegRunnerOptions) {
 		o.DialOptions = append(o.DialOptions, options...)

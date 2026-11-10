@@ -56,8 +56,8 @@ func WithListener(listener net.Listener) Option {
 }
 
 // WithGatewayDialOptions adds gRPC dial options to every gateway connection,
-// of the actuators and of the registration alike, applied after the defaults
-// so they override them.
+// of the actuators and of the registration alike; they cannot replace the
+// transport credentials the gateway config selects.
 //
 // A context dialer among them lets the operator reach its gateways over an
 // in-memory transport; the gateway endpoints then need a scheme that skips
@@ -248,7 +248,8 @@ func WithGatewayActuatorExpectBird(expect bool) GatewayActuatorOption {
 }
 
 // WithGatewayActuatorDialOptions adds gRPC dial options to the gateway
-// connection, applied after the defaults so they override them.
+// connection; they cannot replace the transport credentials the gateway
+// config selects.
 func WithGatewayActuatorDialOptions(dialOptions ...grpc.DialOption) GatewayActuatorOption {
 	return func(o *gatewayActuatorOptions) {
 		o.DialOptions = append(o.DialOptions, dialOptions...)

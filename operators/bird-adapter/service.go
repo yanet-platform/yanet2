@@ -107,7 +107,7 @@ type AdapterService struct {
 	routeOperatorEndpoint    string                           // gRPC endpoint of the route operator's RouteService for RIB updates
 	routeOperatorCredentials credentials.TransportCredentials // Transport credentials for that endpoint
 	// routeOperatorDialOptions follow the adapter's own options for that
-	// endpoint, so they override them.
+	// endpoint, so they override them, and precede the credentials.
 	routeOperatorDialOptions []grpc.DialOption
 	// birdDialer connects to the BIRD export sockets in place of the Unix
 	// socket dialer when set.
@@ -148,7 +148,8 @@ func WithRouteOperatorCredentials(creds credentials.TransportCredentials) Adapte
 }
 
 // WithRouteOperatorDialOptions adds gRPC dial options to the route operator
-// connection, applied after the adapter's own ones so they override them.
+// connection, applied after the adapter's own ones so they override them,
+// except the transport credentials, which they cannot replace.
 //
 // A context dialer lets the connection run over an in-memory transport;
 // the endpoint then needs a scheme that skips name resolution, such as
@@ -385,7 +386,6 @@ func (m *AdapterService) prepareImport(params ImportParams) (*importHolder, erro
 	reconnect := grpcbackoff.DefaultConfig
 	reconnect.MaxDelay = time.Duration(float64(importRetryMaxDelay) / (1 + reconnect.Jitter))
 	dialOptions := []grpc.DialOption{
-		grpc.WithTransportCredentials(m.routeOperatorCredentials),
 		grpc.WithDefaultCallOptions(grpc.UseCompressor(xgrpc.ZstdName)),
 		grpc.WithConnectParams(grpc.ConnectParams{
 			Backoff:           reconnect,
@@ -404,6 +404,7 @@ func (m *AdapterService) prepareImport(params ImportParams) (*importHolder, erro
 		}),
 	}
 	dialOptions = append(dialOptions, m.routeOperatorDialOptions...)
+	dialOptions = append(dialOptions, grpc.WithTransportCredentials(m.routeOperatorCredentials))
 	conn, err := grpc.NewClient(m.routeOperatorEndpoint, dialOptions...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to the route operator endpoint: %w", err)

@@ -159,8 +159,8 @@ func WithListener(listener net.Listener) Option {
 }
 
 // WithGatewayDialOptions adds gRPC dial options to the connections that
-// register the operator in its gateways, applied after the defaults so they
-// override them.
+// register the operator in its gateways; they cannot replace the transport
+// credentials the gateway config selects.
 //
 // A context dialer among them lets the registration run over an in-memory
 // transport; the gateway endpoints then need a scheme that skips name

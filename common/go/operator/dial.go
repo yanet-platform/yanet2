@@ -2,6 +2,7 @@ package operator
 
 import (
 	"fmt"
+	"slices"
 
 	"google.golang.org/grpc"
 
@@ -18,9 +19,10 @@ func DialGateway(cfg GatewayConfig, options ...xgrpc.CertificateStoreOption) (*g
 	return DialGatewayWith(cfg, nil, options...)
 }
 
-// DialGatewayWith is DialGateway with extra gRPC dial options, applied after
-// the transport credentials so that they may override them.
+// DialGatewayWith is DialGateway with extra gRPC dial options.
 //
+// The transport credentials the tls block selects are applied after the
+// extra options, so that none of them can replace the credentials.
 // A context dialer among them lets the connection run over an in-memory
 // transport; the endpoint then needs a scheme that skips name resolution,
 // such as passthrough.
@@ -35,7 +37,7 @@ func DialGatewayWith(
 	}
 
 	endpoint := cfg.Endpoint.Unwrap()
-	dialOptions = append([]grpc.DialOption{grpc.WithTransportCredentials(creds)}, dialOptions...)
+	dialOptions = append(slices.Clip(dialOptions), grpc.WithTransportCredentials(creds))
 	conn, err := grpc.NewClient(endpoint, dialOptions...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to dial gateway %q at %q: %w", cfg.Name, endpoint, err)

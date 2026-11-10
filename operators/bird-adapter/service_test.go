@@ -2,6 +2,7 @@ package bird_adapter_test
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/binary"
 	"io"
 	"net"
@@ -20,6 +21,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/status"
@@ -27,6 +29,7 @@ import (
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/testutils/memnet"
+	"github.com/yanet-platform/yanet2/common/go/testutils/tlscert"
 	birdadapter "github.com/yanet-platform/yanet2/operators/bird-adapter"
 	adapterpb "github.com/yanet-platform/yanet2/operators/bird-adapter/adapterpb/v1"
 	routepb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
@@ -76,6 +79,40 @@ func Test_AdapterService_SetupConfig_Codes(t *testing.T) {
 			require.Equal(t, tc.code, status.Code(err))
 		})
 	}
+}
+
+// Test_AdapterService_SetupConfig_DialOptionsKeepCredentials verifies that
+// an extra dial option carrying plaintext credentials does not turn the TLS
+// the route operator connection is configured with into plaintext.
+func Test_AdapterService_SetupConfig_DialOptionsKeepCredentials(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		// Certificates are issued in the bubble, valid by its fake clock.
+		ca := tlscert.NewCA(t)
+		server := ca.IssueServer(t, memoryRouteOperator)
+		network := memnet.NewNetwork()
+		serveBIRDExport(t, network.Listen("bird.sock"), quietBIRDExport)
+		recorder := &feedRIBRecorder{Handle: func(idx int, stream feedRIBServerStream) error {
+			<-stream.Context().Done()
+			return stream.Context().Err()
+		}}
+		serveRouteService(t, network.Listen(memoryRouteOperator), recorder,
+			grpc.Creds(credentials.NewTLS(&tls.Config{
+				Certificates: []tls.Certificate{server.Certificate},
+				MinVersion:   tls.VersionTLS12,
+			})),
+		)
+
+		startMemoryImport(t, network, newImportRequest(t, "bird.sock"),
+			birdadapter.WithRouteOperatorCredentials(credentials.NewTLS(&tls.Config{
+				RootCAs:    ca.Pool(),
+				MinVersion: tls.VersionTLS12,
+			})),
+			birdadapter.WithRouteOperatorDialOptions(grpc.WithTransportCredentials(insecure.NewCredentials())),
+		)
+
+		synctest.Wait()
+		require.Len(t, recorder.Streams(), 1)
+	})
 }
 
 // Test_AdapterService_IdleImportReplaysAfterGatewayRestart verifies that a quiet
