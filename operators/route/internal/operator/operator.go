@@ -163,6 +163,7 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 			WithGatewayActuatorStaticRoutes(cfg.Static.Routes),
 			WithGatewayActuatorExpectBird(cfg.Readiness.ExpectBird),
 			WithGatewayActuatorOnFIBBuilt(metrics.Gateway(gw.Name).OnFIBBuilt),
+			WithGatewayActuatorDialOptions(opts.GatewayDialOptions...),
 		)
 		if err != nil {
 			for _, gateway := range gateways {
@@ -206,6 +207,8 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		gateways,
 		desired.Latest(),
 		operator.WithGRPCServer(cfg.Server, services...),
+		operator.WithListener(opts.Listener),
+		operator.WithGatewayDialOptions(opts.GatewayDialOptions...),
 		operator.WithReadiness("route", tracker),
 		operator.WithMetrics(operator.MetricsConfig{Name: "route", Prefix: "route_operator"}, metrics),
 		operator.WithLog(log),

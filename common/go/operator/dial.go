@@ -15,13 +15,28 @@ import (
 // connection dials lazily, so an unreachable gateway surfaces on the first
 // RPC rather than here.
 func DialGateway(cfg GatewayConfig, options ...xgrpc.CertificateStoreOption) (*grpc.ClientConn, error) {
+	return DialGatewayWith(cfg, nil, options...)
+}
+
+// DialGatewayWith is DialGateway with extra gRPC dial options, applied after
+// the transport credentials so that they may override them.
+//
+// A context dialer among them lets the connection run over an in-memory
+// transport; the endpoint then needs a scheme that skips name resolution,
+// such as passthrough.
+func DialGatewayWith(
+	cfg GatewayConfig,
+	dialOptions []grpc.DialOption,
+	options ...xgrpc.CertificateStoreOption,
+) (*grpc.ClientConn, error) {
 	creds, err := xgrpc.ClientCredentials(cfg.TLS, options...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build transport credentials for gateway %q: %w", cfg.Name, err)
 	}
 
 	endpoint := cfg.Endpoint.Unwrap()
-	conn, err := grpc.NewClient(endpoint, grpc.WithTransportCredentials(creds))
+	dialOptions = append([]grpc.DialOption{grpc.WithTransportCredentials(creds)}, dialOptions...)
+	conn, err := grpc.NewClient(endpoint, dialOptions...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to dial gateway %q at %q: %w", cfg.Name, endpoint, err)
 	}

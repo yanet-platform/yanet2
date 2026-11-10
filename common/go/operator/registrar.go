@@ -17,8 +17,9 @@ import (
 )
 
 type gatewayRegRunnerOptions struct {
-	Interval time.Duration
-	Log      *zap.Logger
+	Interval    time.Duration
+	DialOptions []grpc.DialOption
+	Log         *zap.Logger
 }
 
 func newGatewayRegRunnerOptions() *gatewayRegRunnerOptions {
@@ -35,7 +36,9 @@ type GatewayRegRunner struct {
 	services []string
 	interval time.Duration
 	endpoint string
-	log      *zap.Logger
+	// dialOptions follow the defaults of every gateway connection.
+	dialOptions []grpc.DialOption
+	log         *zap.Logger
 }
 
 // GatewayRegRunnerOption configures NewGatewayRegRunner.
@@ -47,6 +50,14 @@ type GatewayRegRunnerOption func(*gatewayRegRunnerOptions)
 func WithGatewayRegInterval(d time.Duration) GatewayRegRunnerOption {
 	return func(o *gatewayRegRunnerOptions) {
 		o.Interval = d
+	}
+}
+
+// WithGatewayRegDialOptions adds gRPC dial options to every gateway
+// connection of the runner, applied after the defaults so they override them.
+func WithGatewayRegDialOptions(options ...grpc.DialOption) GatewayRegRunnerOption {
+	return func(o *gatewayRegRunnerOptions) {
+		o.DialOptions = append(o.DialOptions, options...)
 	}
 }
 
@@ -79,11 +90,12 @@ func NewGatewayRegRunner(
 	}
 
 	return &GatewayRegRunner{
-		gateways: gateways,
-		services: services,
-		interval: opts.Interval,
-		endpoint: endpoint,
-		log:      opts.Log,
+		gateways:    gateways,
+		services:    services,
+		interval:    opts.Interval,
+		endpoint:    endpoint,
+		dialOptions: opts.DialOptions,
+		log:         opts.Log,
 	}
 }
 
@@ -103,7 +115,7 @@ func (m *GatewayRegRunner) Run(ctx context.Context) error {
 			zap.String("gateway_endpoint", cfg.Endpoint.Unwrap()),
 		)
 
-		conn, err := DialGateway(cfg, xgrpc.WithCertificateStoreLog(log))
+		conn, err := DialGatewayWith(cfg, m.dialOptions, xgrpc.WithCertificateStoreLog(log))
 		if err != nil {
 			return err
 		}

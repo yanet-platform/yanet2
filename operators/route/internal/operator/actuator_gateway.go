@@ -70,7 +70,7 @@ func NewGatewayActuator(
 	}
 
 	log := opts.Log.With(zap.String("gateway", cfg.Name))
-	conn, err := operator.DialGateway(cfg, xgrpc.WithCertificateStoreLog(log))
+	conn, err := operator.DialGatewayWith(cfg, opts.DialOptions, xgrpc.WithCertificateStoreLog(log))
 	if err != nil {
 		return nil, err
 	}
