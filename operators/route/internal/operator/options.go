@@ -4,8 +4,6 @@ import (
 	"time"
 
 	"go.uber.org/zap"
-
-	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 )
 
 type options struct {
@@ -140,36 +138,6 @@ func WithRouteServiceOnRIBSessionEnd(fn func(name string, sessionID uint64)) Rou
 func WithRouteServiceConfiguredModules(names ...string) RouteServiceOption {
 	return func(o *routeServiceOptions) {
 		o.ConfiguredModules = names
-	}
-}
-
-// noopMetricsCollector is the default MetricsCollector wired into
-// metrics-service options when the caller does not pass a real one.
-type noopMetricsCollector struct{}
-
-func (noopMetricsCollector) Collect() []*commonpb.Metric {
-	return nil
-}
-
-type metricsServiceOptions struct {
-	Metrics MetricsCollector
-}
-
-func newMetricsServiceOptions() *metricsServiceOptions {
-	return &metricsServiceOptions{
-		Metrics: noopMetricsCollector{},
-	}
-}
-
-// MetricsServiceOption configures NewMetricsService.
-type MetricsServiceOption func(*metricsServiceOptions)
-
-// WithMetricsServiceCollector attaches the metrics collector that
-// GetMetrics serves from. When unset, GetMetrics returns an empty
-// response.
-func WithMetricsServiceCollector(c MetricsCollector) MetricsServiceOption {
-	return func(o *metricsServiceOptions) {
-		o.Metrics = c
 	}
 }
 

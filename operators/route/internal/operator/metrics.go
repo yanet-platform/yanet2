@@ -16,27 +16,19 @@ var applyDurationBounds = []float64{
 	0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10,
 }
 
-var reconcilerStateNames = map[operator.ReconcilerState]string{
-	operator.ReconcilerStateIdle:     "idle",
-	operator.ReconcilerStateApplying: "applying",
-	operator.ReconcilerStateSleeping: "sleeping",
-}
-
 // Metrics is the single observability sink for the route operator.
 //
 // It combines three collection styles: reconcile-loop and gateway-apply
 // counters are updated by tee-ing existing callbacks, RIB gauges are
-// pulled from thread-safe snapshots at Collect time, and gateway sinks
-// are created on demand by Gateway.
+// pulled from thread-safe snapshots on every collection, and gateway sinks
+// are created on demand for each gateway. The reconcile-loop families come
+// from the operator framework, under this operator's prefix.
 type Metrics struct {
+	*operator.ReconcilerMetrics
+
 	ribs                  *RIBStore
 	neighTable            *neigh.NeighTable
 	netlinkMonitorEnabled bool
-
-	reconcileTotal  metrics.Counter
-	reconcileErrors metrics.Counter
-	states          map[operator.ReconcilerState]*metrics.Gauge
-	backoffSeconds  metrics.Gauge
 
 	ribSessionStarts *metrics.MetricMap[*metrics.Counter]
 	ribSessionEnds   *metrics.MetricMap[*metrics.Counter]
@@ -58,16 +50,11 @@ func NewMetrics(ribs *RIBStore, neighTable *neigh.NeighTable, options ...Metrics
 		o(opts)
 	}
 
-	states := make(map[operator.ReconcilerState]*metrics.Gauge, len(reconcilerStateNames))
-	for state := range reconcilerStateNames {
-		states[state] = &metrics.Gauge{}
-	}
-
 	return &Metrics{
+		ReconcilerMetrics:     operator.NewReconcilerMetrics("route_operator"),
 		ribs:                  ribs,
 		neighTable:            neighTable,
 		netlinkMonitorEnabled: opts.NetlinkMonitorEnabled,
-		states:                states,
 		ribSessionStarts:      metrics.NewMetricMap[*metrics.Counter](),
 		ribSessionEnds:        metrics.NewMetricMap[*metrics.Counter](),
 		gateways:              map[string]*GatewayMetrics{},
@@ -105,35 +92,6 @@ type MetricsOption func(*metricsOptions)
 func WithNetlinkMonitorMetrics() MetricsOption {
 	return func(o *metricsOptions) {
 		o.NetlinkMonitorEnabled = true
-	}
-}
-
-// OnReconcileCompleted records the outcome of one reconcile pass.
-func (m *Metrics) OnReconcileCompleted(err error) {
-	m.reconcileTotal.Inc()
-	if err != nil {
-		m.reconcileErrors.Inc()
-	}
-}
-
-// OnBackoffScheduled records the delay before the next retry.
-func (m *Metrics) OnBackoffScheduled(delay time.Duration) {
-	m.backoffSeconds.Store(delay.Seconds())
-}
-
-// OnBackoffReset clears the backoff gauge after a successful apply.
-func (m *Metrics) OnBackoffReset() {
-	m.backoffSeconds.Store(0)
-}
-
-// OnStateChanged records the reconcile loop's current state.
-func (m *Metrics) OnStateChanged(state operator.ReconcilerState) {
-	for k, g := range m.states {
-		if k == state {
-			g.Store(1)
-		} else {
-			g.Store(0)
-		}
 	}
 }
 
@@ -207,20 +165,7 @@ func (m *Metrics) ribSessionCounter(sessions *metrics.MetricMap[*metrics.Counter
 // Collect renders the current state of every metric as a slice of
 // commonpb.Metric values.
 func (m *Metrics) Collect() []*commonpb.Metric {
-	out := make([]*commonpb.Metric, 0)
-
-	out = append(out,
-		commonpb.NewMetricCounter("route_operator_reconcile_total", m.reconcileTotal.Load()),
-		commonpb.NewMetricCounter("route_operator_reconcile_errors_total", m.reconcileErrors.Load()),
-		commonpb.NewMetricGauge("route_operator_backoff_seconds", m.backoffSeconds.Load()),
-	)
-	for state, g := range m.states {
-		out = append(out, commonpb.NewMetricGauge(
-			"route_operator_state",
-			g.Load(),
-			commonpb.NewLabel("state", reconcilerStateNames[state]),
-		))
-	}
+	out := m.ReconcilerMetrics.Collect()
 
 	for name, ribRef := range m.ribs.Snapshot() {
 		stats := ribRef.Stats()

@@ -2,8 +2,6 @@ package operator
 
 import (
 	"go.uber.org/zap"
-
-	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 )
 
 type options struct {
@@ -26,26 +24,13 @@ func WithLog(log *zap.Logger) Option {
 	}
 }
 
-// noopMetricsCollector is the default MetricsCollector wired into
-// service options when the caller does not pass a real one.
-type noopMetricsCollector struct{}
-
-func (noopMetricsCollector) Collect() []*commonpb.Metric {
-	return nil
-}
-
 type serviceOptions struct {
-	// Metrics supplies snapshots for the metrics service.
-	//
-	// It defaults to an empty collector when no sink is configured.
-	Metrics MetricsCollector
-	Log     *zap.Logger
+	Log *zap.Logger
 }
 
 func newServiceOptions() *serviceOptions {
 	return &serviceOptions{
-		Metrics: noopMetricsCollector{},
-		Log:     zap.NewNop(),
+		Log: zap.NewNop(),
 	}
 }
 
@@ -56,14 +41,6 @@ type ServiceOption func(*serviceOptions)
 func WithServiceLog(log *zap.Logger) ServiceOption {
 	return func(o *serviceOptions) {
 		o.Log = log
-	}
-}
-
-// WithServiceMetrics attaches the metrics sink that GetMetrics serves
-// from. When unset, GetMetrics returns an empty response.
-func WithServiceMetrics(m MetricsCollector) ServiceOption {
-	return func(o *serviceOptions) {
-		o.Metrics = m
 	}
 }
 

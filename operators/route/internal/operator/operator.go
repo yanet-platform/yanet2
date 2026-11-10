@@ -155,9 +155,6 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		}))
 	}
 	neighbourSvc := NewNeighbourService(neighTable, neighbourOptions...)
-	metricsSvc := NewMetricsService(
-		WithMetricsServiceCollector(metrics),
-	)
 	operatorSvc := NewRouteOperatorService()
 
 	actuators := make([]Actuator, 0, len(cfg.Gateways))
@@ -201,10 +198,7 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 			operatorpb.RegisterNeighbourServiceServer(s, neighbourSvc)
 			return operatorpb.NeighbourService_ServiceDesc.ServiceName
 		},
-		func(s *grpc.Server) string {
-			operatorpb.RegisterMetricsServiceServer(s, metricsSvc)
-			return operatorpb.MetricsService_ServiceDesc.ServiceName
-		},
+		operator.NewMetricsServiceRegistrar("route", metrics),
 		func(s *grpc.Server) string {
 			operatorpb.RegisterRouteOperatorServiceServer(s, operatorSvc)
 			return operatorpb.RouteOperatorService_ServiceDesc.ServiceName

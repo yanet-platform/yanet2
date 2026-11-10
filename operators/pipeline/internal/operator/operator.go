@@ -37,10 +37,7 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	reconcilerMetrics := operator.NewReconcilerMetrics("pipeline_operator")
 	metrics := NewMetrics(reconcilerMetrics, gatewayMetrics)
 
-	service := NewService(
-		WithServiceMetrics(metrics),
-		WithServiceLog(log),
-	)
+	service := NewService(WithServiceLog(log))
 
 	tracker := readiness.NewTracker(readinessScopeSpecs(cfg),
 		readiness.WithDrainLatch(),
@@ -81,10 +78,7 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 			operatorpb.RegisterPipelineOperatorServiceServer(s, service)
 			return operatorpb.PipelineOperatorService_ServiceDesc.ServiceName
 		},
-		func(s *grpc.Server) string {
-			operatorpb.RegisterMetricsServiceServer(s, service)
-			return operatorpb.MetricsService_ServiceDesc.ServiceName
-		},
+		operator.NewMetricsServiceRegistrar("pipeline", metrics),
 	}
 
 	app := operator.NewOperator(
