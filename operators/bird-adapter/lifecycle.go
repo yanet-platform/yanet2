@@ -43,8 +43,9 @@ type lifecycleImport struct {
 	State importState
 	// Stopping is set once the import is replaced or the service closes.
 	//
-	// The end of its task then releases it; a waiting import is released
-	// once the import it replaces has exited instead.
+	// The end of its task then releases it. A waiting import has no task:
+	// it is released once the import it replaces has exited, or at once
+	// when the service closes.
 	Stopping bool
 	// Ran is set once the import has taken over its name.
 	Ran bool
@@ -407,9 +408,8 @@ func (m *AdapterService) onRetryDue(imp *lifecycleImport) {
 func (m *AdapterService) onReopened(imp *lifecycleImport, event importEvent) {
 	switch {
 	case imp.Stopping:
-		if event.Attempt != nil {
-			event.Attempt.Cancel(context.Canceled)
-		}
+		// Releasing cancels the import's context, which the new stream's
+		// context derives from.
 		m.release(imp)
 	case event.Err != nil:
 		imp.Log.Warn("failed to open the BIRD import stream",
@@ -422,7 +422,9 @@ func (m *AdapterService) onReopened(imp *lifecycleImport, event importEvent) {
 	}
 }
 
-// stop cancels the task of imp, whose end then releases it.
+// stop marks imp stopping and cancels its task, whose end then releases it;
+// a waiting import has no task and is released by its predecessor's exit or
+// by the close.
 func (m *AdapterService) stop(imp *lifecycleImport) {
 	imp.Stopping = true
 	imp.Cancel()

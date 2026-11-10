@@ -77,7 +77,10 @@ message SessionInfo {
   // Current state of the gRPC connection to the gateway.
   ConnectionState connection_state = 4;
   // The import that holds the name now, still feeding the RIB or stopping,
-  // while this one waits to replace it; absent otherwise and in itself.
+  // while this session waits to replace it.
+  //
+  // Absent when no replacement is pending; never set on the session it
+  // holds itself.
   SessionInfo replacing = 5;
 }
 

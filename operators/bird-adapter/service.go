@@ -226,7 +226,10 @@ func (m *AdapterService) Close(ctx context.Context) error {
 	}
 }
 
-// ListSessions returns information about all active BIRD import sessions.
+// ListSessions returns the newest import of every name, with the import
+// that still holds the name while it waits to replace it.
+//
+// It fails with Unavailable once the service has closed.
 func (m *AdapterService) ListSessions(
 	ctx context.Context,
 	req *adapterpb.ListSessionsRequest,
@@ -235,7 +238,7 @@ func (m *AdapterService) ListSessions(
 	select {
 	case m.lists <- request:
 	case <-m.stopped:
-		return nil, errServiceClosed
+		return nil, status.Error(codes.Unavailable, errServiceClosed.Error())
 	case <-ctx.Done():
 		return nil, status.FromContextError(ctx.Err()).Err()
 	}

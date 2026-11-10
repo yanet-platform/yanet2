@@ -490,7 +490,7 @@ func Test_AdapterService_BIRDSocketFailureReleasesBlockedSend(t *testing.T) {
 		synctest.Wait()
 		close(hangup)
 
-		require.Equal(t, 1, receiveEvent(t, opened),
+		require.Equal(t, 1, receiveOpened(t, opened),
 			"the import did not open a new stream after its BIRD socket failed",
 		)
 	})
@@ -876,6 +876,82 @@ func Test_AdapterService_SetupConfig_ChainedReplacementsNeverOverlap(t *testing.
 
 // requireImportSockets waits until every goroutine of the bubble blocks and
 // requires the only import of the service to read socket then.
+// Test_AdapterService_Close_DuringPendingReplacement verifies that closing
+// the service while a replacement waits for the import it replaces waits
+// for that import to exit, fails the waiting setup and never starts the
+// replacement.
+func Test_AdapterService_Close_DuringPendingReplacement(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		network := memnet.NewNetwork()
+		serveBIRDExport(t, network.Listen("first.sock"), quietBIRDExport)
+		secondDialed := make(chan struct{}, 1)
+		serveBIRDExport(t, network.Listen("second.sock"), func(idx int, connection net.Conn) error {
+			select {
+			case secondDialed <- struct{}{}:
+			default:
+			}
+			return quietBIRDExport(idx, connection)
+		})
+		firstCommitted := make(chan struct{}, 1)
+		recorder := &feedRIBRecorder{Handle: func(idx int, stream feedRIBServerStream) error {
+			for {
+				update, err := stream.Recv()
+				if err != nil {
+					return err
+				}
+				if !update.GetHeartbeat() && update.GetRoute() == nil {
+					select {
+					case firstCommitted <- struct{}{}:
+					default:
+					}
+				}
+			}
+		}}
+		serveRouteService(t, network.Listen(memoryRouteOperator), recorder)
+
+		holdExit := &blockingLogCore{
+			Message: "stopped BIRD import",
+			Blocked: make(chan struct{}),
+			Release: make(chan struct{}),
+		}
+		service := startMemoryImport(t, network, newImportRequest(t, "first.sock"),
+			birdadapter.WithAdapterServiceLog(zap.New(holdExit)),
+		)
+		// Release the held import before the service closes in cleanup.
+		t.Cleanup(holdExit.Unblock)
+		receiveEvent(t, firstCommitted)
+
+		setupDone := make(chan error, 1)
+		go func() {
+			_, err := service.SetupConfig(t.Context(), newImportRequest(t, "second.sock"))
+			setupDone <- err
+		}()
+		receiveEvent(t, holdExit.Blocked)
+
+		closeDone := make(chan error, 1)
+		go func() {
+			ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+			defer cancel()
+			closeDone <- service.Close(ctx)
+		}()
+		synctest.Wait()
+		select {
+		case err := <-closeDone:
+			t.Fatalf("close returned before the replaced import exited: %v", err)
+		default:
+		}
+
+		holdExit.Unblock()
+		require.NoError(t, receiveEvent(t, closeDone))
+		require.Error(t, receiveEvent(t, setupDone), "the waiting setup must fail once the service closes")
+		select {
+		case <-secondDialed:
+			t.Fatal("the replacement started although the service closed")
+		default:
+		}
+	})
+}
+
 func requireImportSockets(t *testing.T, service *birdadapter.AdapterService, socket string) {
 	t.Helper()
 	synctest.Wait()
