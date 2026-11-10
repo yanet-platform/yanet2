@@ -276,8 +276,8 @@ func Test_RouteService_FeedRIB_HeartbeatOnlyStartsNoSession(t *testing.T) {
 }
 
 // Test_RouteService_FeedRIB_HeartbeatChangesNoRoutes verifies that a
-// heartbeat inside a session leaves the RIB alone, even when it carries a
-// route withdrawal.
+// heartbeat inside an active session leaves the RIB alone, even when it
+// carries a route withdrawal, and that the stream keeps reading after it.
 func Test_RouteService_FeedRIB_HeartbeatChangesNoRoutes(t *testing.T) {
 	route := &operatorpb.Route{
 		Prefix:  mustNetwork(t, "10.0.0.0/24"),
@@ -297,6 +297,9 @@ func Test_RouteService_FeedRIB_HeartbeatChangesNoRoutes(t *testing.T) {
 	}}
 	require.NoError(t, svc.FeedRIB(stream))
 
+	require.Equal(t, len(stream.updates), stream.index,
+		"an active session must read on past its heartbeats",
+	)
 	require.Equal(t, 1, updates)
 	response, err := svc.ShowRoutes(t.Context(), &operatorpb.ShowRoutesRequest{Name: "route0"})
 	require.NoError(t, err)
@@ -446,8 +449,8 @@ func Test_RouteService_FeedRIB_SupersededSessionUpdateRejected(t *testing.T) {
 }
 
 // Test_RouteService_FeedRIB_SupersededSessionNonWritingUpdateRejected
-// verifies that a superseded stream's late non-writing message — a flush or
-// a route the converter rejects — is rejected.
+// verifies that a superseded stream's late non-writing message — a flush, a
+// heartbeat or a route the converter rejects — is rejected.
 //
 // The rejection mirrors how a route write is rejected by the fence in
 // Update: the stream ends cleanly without waking the reconcile loop, a
@@ -459,9 +462,11 @@ func Test_RouteService_FeedRIB_SupersededSessionNonWritingUpdateRejected(t *test
 	cases := []struct {
 		name          string
 		unconvertible bool
+		heartbeat     bool
 	}{
 		{name: "flush"},
 		{name: "unconvertible route", unconvertible: true},
+		{name: "heartbeat", heartbeat: true},
 	}
 
 	for _, tc := range cases {
@@ -498,7 +503,7 @@ func Test_RouteService_FeedRIB_SupersededSessionNonWritingUpdateRejected(t *test
 				Source:  operatorpb.RouteSourceID_ROUTE_SOURCE_ID_BIRD,
 			}
 
-			lateUpdate := &operatorpb.Update{Name: "route0"}
+			lateUpdate := &operatorpb.Update{Name: "route0", Heartbeat: tc.heartbeat}
 			if tc.unconvertible {
 				// NextHop is left unset, which ToRIBRoute rejects.
 				lateUpdate.Route = &operatorpb.Route{

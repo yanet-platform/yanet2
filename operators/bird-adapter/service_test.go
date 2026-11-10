@@ -685,94 +685,116 @@ func Test_AdapterService_SetupConfig_NoSocketsStartsNoStream(t *testing.T) {
 }
 
 // Test_AdapterService_IdleImportSendsHeartbeats verifies that an import
-// whose BIRD stays quiet after its table sends one named heartbeat per dump
-// timeout on its stream.
+// whose BIRD stays quiet after its table sends a named heartbeat on the first
+// dump tick after five silent seconds, so a short dump timeout cannot flood
+// the route operator.
 func Test_AdapterService_IdleImportSendsHeartbeats(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		const dumpTimeout = 7 * time.Second
-		network := newMemoryNetwork()
-		serveBIRDExport(t, network.Listen("bird.sock"), quietBIRDExport)
-		committed := make(chan time.Time, 1)
-		heartbeats := make(chan receivedUpdate, 16)
-		recorder := &feedRIBRecorder{Handle: func(idx int, stream feedRIBServerStream) error {
-			for {
-				update, err := stream.Recv()
-				if err != nil {
-					return err
+	cases := []struct {
+		name        string
+		dumpTimeout time.Duration
+		interval    time.Duration
+	}{
+		{
+			name:        "dump timeout above the heartbeat interval",
+			dumpTimeout: 7 * time.Second,
+			interval:    7 * time.Second,
+		},
+		{
+			name:        "dump timeout below the heartbeat interval",
+			dumpTimeout: time.Millisecond,
+			interval:    5 * time.Second,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				assertIdleHeartbeats(t, tc.dumpTimeout, tc.interval)
+			})
+		})
+	}
+}
+
+// assertIdleHeartbeats runs a quiet import with dumpTimeout in a bubble and
+// requires its first three heartbeats exactly interval apart, counted from
+// the commit of its table.
+func assertIdleHeartbeats(t *testing.T, dumpTimeout time.Duration, interval time.Duration) {
+	t.Helper()
+	network := newMemoryNetwork()
+	serveBIRDExport(t, network.Listen("bird.sock"), quietBIRDExport)
+	committed := make(chan time.Time, 1)
+	heartbeats := make(chan receivedUpdate, 16)
+	recorder := &feedRIBRecorder{Handle: func(idx int, stream feedRIBServerStream) error {
+		for {
+			update, err := stream.Recv()
+			if err != nil {
+				return err
+			}
+			switch {
+			case update.GetHeartbeat():
+				select {
+				case heartbeats <- receivedUpdate{At: time.Now(), Update: update}:
+				default:
 				}
-				switch {
-				case update.GetHeartbeat():
-					select {
-					case heartbeats <- receivedUpdate{At: time.Now(), Update: update}:
-					default:
-					}
-				case update.GetRoute() == nil:
-					select {
-					case committed <- time.Now():
-					default:
-					}
+			case update.GetRoute() == nil:
+				select {
+				case committed <- time.Now():
+				default:
 				}
 			}
-		}}
-		serveRouteService(t, network.Listen(memoryRouteOperator), recorder)
-		request := newImportRequest(t, "bird.sock")
-		request.Config.DumpTimeout = int64(dumpTimeout)
-		startMemoryImport(t, network, request)
-
-		start := receiveEvent(t, committed)
-		for idx := range 3 {
-			heartbeat := receiveEvent(t, heartbeats)
-			require.Equal(t, time.Duration(idx+1)*dumpTimeout, heartbeat.At.Sub(start))
-			require.Equal(t, "bird0", heartbeat.Update.GetName())
-			require.Nil(t, heartbeat.Update.GetRoute())
 		}
-	})
+	}}
+	serveRouteService(t, network.Listen(memoryRouteOperator), recorder)
+	request := newImportRequest(t, "bird.sock")
+	request.Config.DumpTimeout = int64(dumpTimeout)
+	startMemoryImport(t, network, request)
+
+	start := receiveEvent(t, committed)
+	for idx := range 3 {
+		heartbeat := receiveEvent(t, heartbeats)
+		require.Equal(t, time.Duration(idx+1)*interval, heartbeat.At.Sub(start))
+		require.Equal(t, "bird0", heartbeat.Update.GetName())
+		require.Nil(t, heartbeat.Update.GetRoute())
+	}
 }
 
 // Test_AdapterService_FailedHeartbeatReplaysOnNewStream verifies that a
 // stream failing on a heartbeat makes an idle import replay its table on a
 // new stream.
 func Test_AdapterService_FailedHeartbeatReplaysOnNewStream(t *testing.T) {
-	socket := startQuietBIRDExport(t)
-	commits := make(chan []*routepb.Update, 4)
-	recorder := &feedRIBRecorder{Handle: func(idx int, stream feedRIBServerStream) error {
-		var updates []*routepb.Update
-		for {
-			update, err := stream.Recv()
-			if err != nil {
-				return err
-			}
-			if update.GetHeartbeat() {
-				if idx == 0 {
-					return status.Error(codes.Unavailable, "the stream died")
+	synctest.Test(t, func(t *testing.T) {
+		network := newMemoryNetwork()
+		serveBIRDExport(t, network.Listen("bird.sock"), quietBIRDExport)
+		commits := make(chan []*routepb.Update, 4)
+		recorder := &feedRIBRecorder{Handle: func(idx int, stream feedRIBServerStream) error {
+			var updates []*routepb.Update
+			for {
+				update, err := stream.Recv()
+				if err != nil {
+					return err
 				}
-				continue
+				if update.GetHeartbeat() {
+					if idx == 0 {
+						return status.Error(codes.Unavailable, "the stream died")
+					}
+					continue
+				}
+				updates = append(updates, update)
+				if update.GetRoute() == nil && idx > 0 {
+					commits <- updates
+					updates = nil
+				}
 			}
-			updates = append(updates, update)
-			if update.GetRoute() == nil && idx > 0 {
-				commits <- updates
-				updates = nil
-			}
-		}
-	}}
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	serveRouteService(t, listener, recorder)
-	request := newImportRequest(t, socket)
-	request.Config.DumpTimeout = int64(20 * time.Millisecond)
-	service := birdadapter.NewAdapterService(listener.Addr().String())
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), 5*time.Second)
-		defer cancel()
-		require.NoError(t, service.Close(ctx))
-	})
-	_, err = service.SetupConfig(t.Context(), request)
-	require.NoError(t, err)
+		}}
+		serveRouteService(t, network.Listen(memoryRouteOperator), recorder)
+		request := newImportRequest(t, "bird.sock")
+		request.Config.DumpTimeout = int64(20 * time.Millisecond)
+		startMemoryImport(t, network, request)
 
-	replayed := receiveRIBCommit(t, commits)
-	require.Len(t, replayed, 2)
-	require.NotNil(t, replayed[0].GetRoute())
-	require.Nil(t, replayed[1].GetRoute())
+		replayed := receiveEvent(t, commits)
+		require.Len(t, replayed, 2)
+		require.NotNil(t, replayed[0].GetRoute())
+		require.Nil(t, replayed[1].GetRoute())
+	})
 }
 
 // Test_AdapterService_SetupConfig_ChainedReplacementsNeverOverlap verifies

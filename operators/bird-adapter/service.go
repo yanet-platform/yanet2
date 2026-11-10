@@ -33,12 +33,12 @@ import (
 )
 
 const (
-	// importRetryMaxDelay caps every wait before a new import attempt, after
-	// the jitter.
-	//
-	// It also caps the connection's own reconnect backoff, which gRPC then
-	// jitters by up to a fifth, so one reconnect may wait up to 36 s.
+	// importRetryMaxDelay caps every wait before a new import attempt and
+	// every reconnect of the connection, after the jitter.
 	importRetryMaxDelay = 30 * time.Second
+	// importHeartbeatInterval is how long a stream stays silent before an
+	// idle tick sends a heartbeat on it, whatever the dump timeout.
+	importHeartbeatInterval = 5 * time.Second
 	// importHealthyUptime is how long an attempt must stay up for the retry
 	// delay to start over from its initial value.
 	importHealthyUptime = 10 * time.Minute
@@ -380,8 +380,10 @@ func (m *AdapterService) routeLog(params ImportParams) *zap.Logger {
 // prepareImport connects to the route operator and opens the first stream
 // of an import, sending nothing on it.
 func (m *AdapterService) prepareImport(params ImportParams) (*importHolder, error) {
+	// gRPC jitters the reconnect delay after capping it, so the cap leaves
+	// room for the jitter.
 	reconnect := grpcbackoff.DefaultConfig
-	reconnect.MaxDelay = importRetryMaxDelay
+	reconnect.MaxDelay = time.Duration(float64(importRetryMaxDelay) / (1 + reconnect.Jitter))
 	dialOptions := []grpc.DialOption{
 		grpc.WithTransportCredentials(m.routeOperatorCredentials),
 		grpc.WithDefaultCallOptions(grpc.UseCompressor(xgrpc.ZstdName)),
@@ -798,8 +800,9 @@ func (m *importHolder) newExport(attempt *importAttempt) *bird.Export {
 		return nil
 	}
 
-	// An idle tick sends a heartbeat, whose unacknowledged bytes let the
-	// kernel find a half-open connection while BIRD is quiet.
+	// An idle tick sends a heartbeat once the stream has been silent for the
+	// heartbeat interval; its unacknowledged bytes let the kernel find a
+	// half-open connection while BIRD is quiet.
 	//
 	// A failed heartbeat ends the attempt. Idle ticks push MPLS too, so a
 	// failed push is retried even while BIRD sends nothing.
@@ -807,9 +810,11 @@ func (m *importHolder) newExport(attempt *importAttempt) *bird.Export {
 		stop := attempt.CancelWith(ctx)
 		defer stop()
 
-		if err := attempt.Send(&routepb.Update{Name: m.Name, Heartbeat: true}); err != nil {
-			attempt.Cancel(fmt.Errorf("BIRD import heartbeat failed: %w", err))
-			return
+		if attempt.SinceLastSend() >= importHeartbeatInterval {
+			if err := attempt.Send(&routepb.Update{Name: m.Name, Heartbeat: true}); err != nil {
+				attempt.Cancel(fmt.Errorf("BIRD import heartbeat failed: %w", err))
+				return
+			}
 		}
 		m.pushMPLS(ctx)
 	}
@@ -841,6 +846,9 @@ type importAttempt struct {
 	ctx    context.Context
 	cancel context.CancelCauseFunc
 	stream grpc.ClientStreamingClient[routepb.Update, routepb.UpdateSummary]
+	// lastSend is when the reader's goroutine, the only sender, last sent
+	// an update.
+	lastSend time.Time
 }
 
 // Run runs export and the receiver of the stream until either ends, and
@@ -876,7 +884,17 @@ func (m *importAttempt) Run(export *bird.Export) error {
 
 // Send sends one update on the attempt's stream.
 func (m *importAttempt) Send(update *routepb.Update) error {
-	return m.stream.Send(update)
+	if err := m.stream.Send(update); err != nil {
+		return err
+	}
+	m.lastSend = time.Now()
+	return nil
+}
+
+// SinceLastSend reports how long the attempt has sent nothing on its
+// stream; only the sending goroutine may call it.
+func (m *importAttempt) SinceLastSend() time.Duration {
+	return time.Since(m.lastSend)
 }
 
 // Cancel ends the attempt with cause.

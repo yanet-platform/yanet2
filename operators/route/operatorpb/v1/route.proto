@@ -118,7 +118,8 @@ message Update {
   // Marks a liveness probe that changes no routes and starts no session.
   //
   // The sender detects a dead stream through its failure; the receiver
-  // ignores every other field of the message.
+  // ignores every other field of the message and ends a stream whose
+  // session another stream has superseded.
   bool heartbeat = 4;
 }
 

@@ -330,8 +330,14 @@ func (m *RouteService) FeedRIB(stream operatorpb.RouteService_FeedRIBServer) err
 		if err != nil {
 			break
 		}
-		// A heartbeat only proves the stream alive to its sender.
+		// A heartbeat only proves the stream alive to its sender and starts
+		// no session, but a superseded stream ends on it like on a flush, so
+		// that its cleanup is scheduled even while it sends nothing else.
 		if update.GetHeartbeat() {
+			if ribRef != nil && !ribRef.IsActive(sessionID) {
+				err = m.terminateFeedRIBSession(stream, name, sessionID)
+				break
+			}
 			continue
 		}
 
