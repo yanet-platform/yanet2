@@ -2,7 +2,11 @@ use core::net::Ipv6Addr;
 
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, byteorder::network_endian::U16};
 
-use crate::{ParseError, checksum, split_header, split_header_mut};
+use crate::{
+    Adjusted, ParseError,
+    mutation::{self, Sealed},
+    split_header, split_header_mut,
+};
 
 /// ICMPv4 header: type, code, checksum and four bytes of message-specific
 /// data. The checksum has no pseudo header.
@@ -57,20 +61,55 @@ impl Icmpv4Header {
         self.rest
     }
 
-    /// Sets the message type and code and updates the checksum.
-    pub fn set_type_code(&mut self, icmp_type: u8, code: u8) {
-        let old = u16::from_be_bytes([self.icmp_type, self.code]);
-        self.icmp_type = icmp_type;
-        self.code = code;
-        let new = u16::from_be_bytes([icmp_type, code]);
-        self.checksum.set(checksum::update(self.checksum.get(), old, new));
+    /// Starts a mutation that keeps the checksum valid.
+    #[inline]
+    pub fn mutate(&mut self) -> Icmpv4Mutation<'_> {
+        Icmpv4Mutation {
+            header: self,
+            mode: mutation::adjusted(),
+        }
+    }
+}
+
+/// A change of ICMPv4 header fields that keeps the checksum valid.
+///
+/// Ends with [`Icmpv4Mutation::finish`], which adjusts the checksum once for
+/// every change. Each setter takes the mutation and returns it, so the
+/// changes chain; a chain left without its finish is an unused value the
+/// compiler warns about, though an early return between the start and the
+/// finish goes unseen.
+#[must_use = "a mutation ends with finish"]
+#[derive(Debug)]
+pub struct Icmpv4Mutation<'a> {
+    header: &'a mut Icmpv4Header,
+    mode: Adjusted,
+}
+
+impl<'a> Icmpv4Mutation<'a> {
+    /// Sets the message type and code.
+    #[inline]
+    pub fn set_type_code(mut self, icmp_type: u8, code: u8) -> Self {
+        let old = u16::from_ne_bytes([self.header.icmp_type, self.header.code]);
+        self.header.icmp_type = icmp_type;
+        self.header.code = code;
+        self.mode.add16(old, u16::from_ne_bytes([icmp_type, code]));
+        self
     }
 
-    /// Sets the message-specific bytes and updates the checksum.
-    pub fn set_rest(&mut self, rest: [u8; 4]) {
-        let old = core::mem::replace(&mut self.rest, rest);
-        self.checksum
-            .set(checksum::update_bytes(self.checksum.get(), &old, &rest));
+    /// Sets the message-specific bytes.
+    #[inline]
+    pub fn set_rest(mut self, rest: [u8; 4]) -> Self {
+        let old = core::mem::replace(&mut self.header.rest, rest);
+        self.mode.add_octets(old, rest);
+        self
+    }
+
+    /// Ends the mutation: adjusts the checksum once for every change.
+    #[inline]
+    pub fn finish(self) -> &'a mut Icmpv4Header {
+        let Self { header, mode } = self;
+        header.checksum = mutation::adjust(header.checksum, mode);
+        header
     }
 }
 
@@ -126,29 +165,63 @@ impl Icmpv6Header {
         self.rest
     }
 
-    /// Sets the message type and code and updates the checksum.
-    pub fn set_type_code(&mut self, icmp_type: u8, code: u8) {
-        let old = u16::from_be_bytes([self.icmp_type, self.code]);
-        self.icmp_type = icmp_type;
-        self.code = code;
-        let new = u16::from_be_bytes([icmp_type, code]);
-        self.checksum.set(checksum::update(self.checksum.get(), old, new));
+    /// Starts a mutation that keeps the checksum valid.
+    #[inline]
+    pub fn mutate(&mut self) -> Icmpv6Mutation<'_> {
+        Icmpv6Mutation {
+            header: self,
+            mode: mutation::adjusted(),
+        }
+    }
+}
+
+/// A change of ICMPv6 header fields that keeps the checksum valid.
+///
+/// Ends with [`Icmpv6Mutation::finish`], which adjusts the checksum once for
+/// every change. Each setter takes the mutation and returns it, so the
+/// changes chain; a chain left without its finish is an unused value the
+/// compiler warns about, though an early return between the start and the
+/// finish goes unseen.
+#[must_use = "a mutation ends with finish"]
+#[derive(Debug)]
+pub struct Icmpv6Mutation<'a> {
+    header: &'a mut Icmpv6Header,
+    mode: Adjusted,
+}
+
+impl<'a> Icmpv6Mutation<'a> {
+    /// Sets the message type and code.
+    #[inline]
+    pub fn set_type_code(mut self, icmp_type: u8, code: u8) -> Self {
+        let old = u16::from_ne_bytes([self.header.icmp_type, self.header.code]);
+        self.header.icmp_type = icmp_type;
+        self.header.code = code;
+        self.mode.add16(old, u16::from_ne_bytes([icmp_type, code]));
+        self
     }
 
-    /// Sets the message-specific bytes and updates the checksum.
-    pub fn set_rest(&mut self, rest: [u8; 4]) {
-        let old = core::mem::replace(&mut self.rest, rest);
-        self.checksum
-            .set(checksum::update_bytes(self.checksum.get(), &old, &rest));
+    /// Sets the message-specific bytes.
+    #[inline]
+    pub fn set_rest(mut self, rest: [u8; 4]) -> Self {
+        let old = core::mem::replace(&mut self.header.rest, rest);
+        self.mode.add_octets(old, rest);
+        self
     }
 
-    /// Fixes the checksum after the IPv6 source or destination changed.
-    pub fn replace_ipv6_addr(&mut self, old: Ipv6Addr, new: Ipv6Addr) {
-        self.checksum.set(checksum::update_bytes(
-            self.checksum.get(),
-            &old.octets(),
-            &new.octets(),
-        ));
+    /// Accounts a change of the IPv6 source or destination, which the
+    /// pseudo header carries.
+    #[inline]
+    pub fn replace_ipv6_addr(mut self, old: Ipv6Addr, new: Ipv6Addr) -> Self {
+        self.mode.add_octets(old.octets(), new.octets());
+        self
+    }
+
+    /// Ends the mutation: adjusts the checksum once for every change.
+    #[inline]
+    pub fn finish(self) -> &'a mut Icmpv6Header {
+        let Self { header, mode } = self;
+        header.checksum = mutation::adjust(header.checksum, mode);
+        header
     }
 }
 
@@ -158,7 +231,7 @@ mod tests {
     use proptest::{collection::vec, prelude::*};
 
     use super::*;
-    use crate::{IPPROTO_ICMPV6, testing};
+    use crate::{IPPROTO_ICMPV6, checksum, testing};
 
     /// An ICMPv4 echo request carrying the payload, and its length.
     fn echo(payload: &[u8]) -> ([u8; 32], usize) {
@@ -288,18 +361,56 @@ mod tests {
         ]
     }
 
-    /// Random sequences of ICMPv4 mutations.
-    fn icmpv4_ops() -> impl Strategy<Value = Vec<IcmpOp>> {
-        vec(icmp_op(), 0..=12)
+    /// Random mutations of an ICMPv4 header.
+    fn icmpv4_mutations() -> impl Strategy<Value = Vec<Vec<IcmpOp>>> {
+        testing::mutations(icmp_op())
     }
 
-    /// Random sequences of ICMPv6 mutations.
-    fn icmpv6_ops() -> impl Strategy<Value = Vec<Icmpv6Op>> {
-        let op = prop_oneof![
+    /// Random mutations of an ICMPv6 message.
+    fn icmpv6_mutations() -> impl Strategy<Value = Vec<Vec<Icmpv6Op>>> {
+        testing::mutations(prop_oneof![
             2 => icmp_op().prop_map(Icmpv6Op::Header),
             1 => any::<[u8; 16]>().prop_map(Icmpv6Op::Src),
-        ];
-        vec(op, 0..=12)
+        ])
+    }
+
+    /// Applies the change through the mutation and to the model of the
+    /// fields.
+    fn apply_v4<'a>(mutation: Icmpv4Mutation<'a>, op: &IcmpOp, model: &mut IcmpFields) -> Icmpv4Mutation<'a> {
+        match *op {
+            IcmpOp::TypeCode(icmp_type, code) => {
+                (model.icmp_type, model.code) = (icmp_type, code);
+                mutation.set_type_code(icmp_type, code)
+            }
+            IcmpOp::Rest(rest) => {
+                model.rest = rest;
+                mutation.set_rest(rest)
+            }
+        }
+    }
+
+    /// Applies the change through the mutation and to the model of the
+    /// fields, and tracks the pseudo-header source.
+    fn apply_v6<'a>(
+        mutation: Icmpv6Mutation<'a>,
+        op: &Icmpv6Op,
+        model: &mut IcmpFields,
+        src: &mut Ipv6Addr,
+    ) -> Icmpv6Mutation<'a> {
+        match *op {
+            Icmpv6Op::Header(IcmpOp::TypeCode(icmp_type, code)) => {
+                (model.icmp_type, model.code) = (icmp_type, code);
+                mutation.set_type_code(icmp_type, code)
+            }
+            Icmpv6Op::Header(IcmpOp::Rest(rest)) => {
+                model.rest = rest;
+                mutation.set_rest(rest)
+            }
+            Icmpv6Op::Src(new) => {
+                let old = core::mem::replace(src, Ipv6Addr::from(new));
+                mutation.replace_ipv6_addr(old, *src)
+            }
+        }
     }
 
     proptest! {
@@ -314,36 +425,28 @@ mod tests {
         }
 
         #[test]
-        fn test_icmpv4_setters_change_only_their_field(buf in checksummed_message(), ops in icmpv4_ops()) {
+        fn test_icmpv4_mutation_changes_only_its_fields(buf in checksummed_message(), mutations in icmpv4_mutations()) {
             let mut buf = buf;
             let (header, _) = Icmpv4Header::parse(&buf).unwrap();
             let mut model = read_v4(header);
-            for op in ops {
+            for ops in &mutations {
                 let (header, _) = Icmpv4Header::parse_mut(&mut buf).unwrap();
-                match op {
-                    IcmpOp::TypeCode(icmp_type, code) => {
-                        header.set_type_code(icmp_type, code);
-                        (model.icmp_type, model.code) = (icmp_type, code);
-                    }
-                    IcmpOp::Rest(rest) => {
-                        header.set_rest(rest);
-                        model.rest = rest;
-                    }
-                }
+                let mutation = ops.iter().fold(header.mutate(), |mutation, op| apply_v4(mutation, op, &mut model));
+                let header = mutation.finish();
                 model.checksum = header.checksum();
                 prop_assert_eq!(&model, &read_v4(header));
             }
         }
 
         #[test]
-        fn test_icmpv4_incremental_checksum_equals_full_sum(buf in checksummed_message(), ops in icmpv4_ops()) {
+        fn test_icmpv4_mutation_checksum_equals_full_sum(buf in checksummed_message(), mutations in icmpv4_mutations()) {
             let mut buf = buf;
-            for op in ops {
+            let (header, _) = Icmpv4Header::parse(&buf).unwrap();
+            let mut model = read_v4(header);
+            for ops in &mutations {
                 let (header, _) = Icmpv4Header::parse_mut(&mut buf).unwrap();
-                match op {
-                    IcmpOp::TypeCode(icmp_type, code) => header.set_type_code(icmp_type, code),
-                    IcmpOp::Rest(rest) => header.set_rest(rest),
-                }
+                let mutation = ops.iter().fold(header.mutate(), |mutation, op| apply_v4(mutation, op, &mut model));
+                mutation.finish();
             }
             prop_assert_eq!(0xffff, checksum::sum(&buf));
         }
@@ -357,54 +460,42 @@ mod tests {
         }
 
         #[test]
-        fn test_icmpv6_setters_change_only_their_field(buf in message(), ops in icmpv6_ops()) {
+        fn test_icmpv6_mutation_changes_only_its_fields(buf in message(), mutations in icmpv6_mutations()) {
             let mut buf = buf;
             let (header, _) = Icmpv6Header::parse(&buf).unwrap();
             let mut model = read_v6(header);
             let mut src = Ipv6Addr::UNSPECIFIED;
-            for op in ops {
+            for ops in &mutations {
                 let (header, _) = Icmpv6Header::parse_mut(&mut buf).unwrap();
-                match op {
-                    Icmpv6Op::Header(IcmpOp::TypeCode(icmp_type, code)) => {
-                        header.set_type_code(icmp_type, code);
-                        (model.icmp_type, model.code) = (icmp_type, code);
-                    }
-                    Icmpv6Op::Header(IcmpOp::Rest(rest)) => {
-                        header.set_rest(rest);
-                        model.rest = rest;
-                    }
-                    Icmpv6Op::Src(new) => {
-                        header.replace_ipv6_addr(src, Ipv6Addr::from(new));
-                        src = Ipv6Addr::from(new);
-                    }
-                }
+                let mutation = ops
+                    .iter()
+                    .fold(header.mutate(), |mutation, op| apply_v6(mutation, op, &mut model, &mut src));
+                let header = mutation.finish();
                 model.checksum = header.checksum();
                 prop_assert_eq!(&model, &read_v6(header));
             }
         }
 
         #[test]
-        fn test_icmpv6_incremental_checksum_verifies_over_pseudo_header(
+        fn test_icmpv6_mutation_checksum_verifies_over_pseudo_header(
             buf in message(),
             src in any::<[u8; 16]>(),
             dst in any::<[u8; 16]>(),
-            ops in icmpv6_ops(),
+            mutations in icmpv6_mutations(),
         ) {
             let mut buf = buf;
             buf[2..4].fill(0);
             let sum = checksum::l4_checksum_ipv6(Ipv6Addr::from(src), Ipv6Addr::from(dst), IPPROTO_ICMPV6, &buf);
             buf[2..4].copy_from_slice(&sum.to_be_bytes());
+            let (header, _) = Icmpv6Header::parse(&buf).unwrap();
+            let mut model = read_v6(header);
             let mut src = Ipv6Addr::from(src);
-            for op in ops {
+            for ops in &mutations {
                 let (header, _) = Icmpv6Header::parse_mut(&mut buf).unwrap();
-                match op {
-                    Icmpv6Op::Header(IcmpOp::TypeCode(icmp_type, code)) => header.set_type_code(icmp_type, code),
-                    Icmpv6Op::Header(IcmpOp::Rest(rest)) => header.set_rest(rest),
-                    Icmpv6Op::Src(new) => {
-                        header.replace_ipv6_addr(src, Ipv6Addr::from(new));
-                        src = Ipv6Addr::from(new);
-                    }
-                }
+                let mutation = ops
+                    .iter()
+                    .fold(header.mutate(), |mutation, op| apply_v6(mutation, op, &mut model, &mut src));
+                mutation.finish();
             }
             prop_assert!(checksum::l4_is_valid_ipv6(src, Ipv6Addr::from(dst), IPPROTO_ICMPV6, &buf));
         }

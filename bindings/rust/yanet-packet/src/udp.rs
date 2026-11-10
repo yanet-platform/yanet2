@@ -2,9 +2,17 @@ use core::net::{Ipv4Addr, Ipv6Addr};
 
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, byteorder::network_endian::U16};
 
-use crate::{ParseError, checksum, split_header, split_header_mut};
+use crate::{
+    Adjusted, ParseError,
+    mutation::{self, Sealed},
+    split_header, split_header_mut,
+};
 
-/// Updates never store a zero checksum, which would mean "no checksum".
+/// UDP header (8 bytes).
+///
+/// The ports change through a mutation that keeps the checksum valid; it
+/// never stores a zero checksum, which would mean "no checksum", and leaves
+/// a zero one alone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, FromBytes, IntoBytes, KnownLayout, Immutable, Unaligned)]
 #[repr(C)]
 pub struct UdpHeader {
@@ -85,54 +93,78 @@ impl UdpHeader {
         self.checksum.get() == 0
     }
 
-    /// Sets the source port and updates the checksum, if any.
-    pub fn set_src_port(&mut self, port: u16) {
-        let old = self.src_port.get();
-        self.src_port.set(port);
-        self.update_word(old, port);
+    /// Starts a mutation that keeps the checksum valid, if the datagram
+    /// carries one.
+    #[inline]
+    pub fn mutate(&mut self) -> UdpMutation<'_> {
+        UdpMutation {
+            header: self,
+            mode: mutation::adjusted(),
+        }
+    }
+}
+
+/// A change of UDP header fields that keeps the checksum valid.
+///
+/// Ends with [`UdpMutation::finish`], which adjusts the checksum once for
+/// every change. Each setter takes the mutation and returns it, so the
+/// changes chain; a chain left without its finish is an unused value the
+/// compiler warns about, though an early return between the start and the
+/// finish goes unseen.
+#[must_use = "a mutation ends with finish"]
+#[derive(Debug)]
+pub struct UdpMutation<'a> {
+    header: &'a mut UdpHeader,
+    mode: Adjusted,
+}
+
+impl<'a> UdpMutation<'a> {
+    /// Sets the source port.
+    #[inline]
+    pub fn set_src_port(mut self, port: u16) -> Self {
+        let old = mutation::word16(self.header.src_port);
+        self.header.src_port.set(port);
+        self.mode.add16(old, port.to_be());
+        self
     }
 
-    /// Sets the destination port and updates the checksum, if any.
-    pub fn set_dst_port(&mut self, port: u16) {
-        let old = self.dst_port.get();
-        self.dst_port.set(port);
-        self.update_word(old, port);
+    /// Sets the destination port.
+    #[inline]
+    pub fn set_dst_port(mut self, port: u16) -> Self {
+        let old = mutation::word16(self.header.dst_port);
+        self.header.dst_port.set(port);
+        self.mode.add16(old, port.to_be());
+        self
     }
 
-    /// Fixes the checksum after the IPv4 source or destination changed.
+    /// Accounts a change of the IPv4 source or destination, which the
+    /// pseudo header carries.
+    #[inline]
+    pub fn replace_ipv4_addr(mut self, old: Ipv4Addr, new: Ipv4Addr) -> Self {
+        self.mode.add_octets(old.octets(), new.octets());
+        self
+    }
+
+    /// Accounts a change of the IPv6 source or destination, which the
+    /// pseudo header carries.
+    #[inline]
+    pub fn replace_ipv6_addr(mut self, old: Ipv6Addr, new: Ipv6Addr) -> Self {
+        self.mode.add_octets(old.octets(), new.octets());
+        self
+    }
+
+    /// Ends the mutation: adjusts the checksum once for every change, never
+    /// storing it as zero.
     ///
-    /// A zero checksum over IPv4 means no checksum and is left alone.
-    pub fn replace_ipv4_addr(&mut self, old: Ipv4Addr, new: Ipv4Addr) {
-        if self.has_no_checksum() {
-            return;
+    /// A zero checksum, a datagram sent without one over IPv4 or a tunnel's
+    /// over IPv6 (RFC 6935), is left alone.
+    #[inline]
+    pub fn finish(self) -> &'a mut UdpHeader {
+        let Self { header, mode } = self;
+        if !header.has_no_checksum() {
+            header.checksum = mutation::adjust_no_zero(header.checksum, mode);
         }
-        self.checksum.set(checksum::update_bytes_no_zero(
-            self.checksum.get(),
-            &old.octets(),
-            &new.octets(),
-        ));
-    }
-
-    /// Fixes the checksum after the IPv6 source or destination changed.
-    ///
-    /// A zero checksum, a tunnel's no checksum, is left alone as on IPv4.
-    pub fn replace_ipv6_addr(&mut self, old: Ipv6Addr, new: Ipv6Addr) {
-        if self.has_no_checksum() {
-            return;
-        }
-        self.checksum.set(checksum::update_bytes_no_zero(
-            self.checksum.get(),
-            &old.octets(),
-            &new.octets(),
-        ));
-    }
-
-    fn update_word(&mut self, old: u16, new: u16) {
-        if self.has_no_checksum() {
-            return;
-        }
-        self.checksum
-            .set(checksum::update_no_zero(self.checksum.get(), old, new));
+        header
     }
 }
 
@@ -143,7 +175,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        IPPROTO_UDP,
+        IPPROTO_UDP, checksum,
         testing::{self, L4Op},
     };
 
@@ -227,8 +259,11 @@ mod tests {
     fn test_udp_zero_checksum_over_ipv4_is_preserved() {
         let (mut buf, total) = build([1, 1, 1, 1], [2, 2, 2, 2], &[1, 2], false);
         let (h, _) = UdpHeader::parse_mut(&mut buf[..total]).unwrap();
-        h.set_src_port(1);
-        h.replace_ipv4_addr(Ipv4Addr::new(1, 1, 1, 1), Ipv4Addr::new(9, 9, 9, 9));
+        let h = h
+            .mutate()
+            .set_src_port(1)
+            .replace_ipv4_addr(Ipv4Addr::new(1, 1, 1, 1), Ipv4Addr::new(9, 9, 9, 9))
+            .finish();
         assert_eq!(0, h.checksum());
     }
 
@@ -236,19 +271,26 @@ mod tests {
     fn test_udp_zero_checksum_over_ipv6_is_preserved() {
         let (mut buf, total) = build([1, 1, 1, 1], [2, 2, 2, 2], &[1, 2], false);
         let (h, _) = UdpHeader::parse_mut(&mut buf[..total]).unwrap();
-        h.set_src_port(1);
-        h.replace_ipv6_addr(Ipv6Addr::LOCALHOST, Ipv6Addr::UNSPECIFIED);
+        let h = h
+            .mutate()
+            .set_src_port(1)
+            .replace_ipv6_addr(Ipv6Addr::LOCALHOST, Ipv6Addr::UNSPECIFIED)
+            .finish();
         assert_eq!(0, h.checksum());
     }
 
     #[test]
-    fn test_udp_update_never_yields_zero_checksum() {
+    fn test_udp_mutation_never_yields_zero_checksum() {
         let mut h = UdpHeader::read_from_bytes(&[0; 8]).unwrap();
         // Inner sum all-ones would store zero; it must be stored as all-ones.
         h.checksum.set(0x0001);
-        h.replace_ipv4_addr(Ipv4Addr::new(0, 0, 0, 0), Ipv4Addr::new(0, 0, 0, 1));
+        h.mutate()
+            .replace_ipv4_addr(Ipv4Addr::new(0, 0, 0, 0), Ipv4Addr::new(0, 0, 0, 1))
+            .finish();
         assert_eq!(0xffff, h.checksum());
-        h.replace_ipv6_addr(Ipv6Addr::UNSPECIFIED, Ipv6Addr::UNSPECIFIED);
+        h.mutate()
+            .replace_ipv6_addr(Ipv6Addr::UNSPECIFIED, Ipv6Addr::UNSPECIFIED)
+            .finish();
         assert_eq!(0xffff, h.checksum());
     }
 
@@ -312,21 +354,21 @@ mod tests {
         Ok(vec![header.as_bytes(), &*payload])
     }
 
-    impl testing::L4Header for UdpHeader {
-        fn set_src_port(&mut self, port: u16) {
-            UdpHeader::set_src_port(self, port);
+    impl testing::L4Mutation for UdpMutation<'_> {
+        fn set_src_port(self, port: u16) -> Self {
+            UdpMutation::set_src_port(self, port)
         }
 
-        fn set_dst_port(&mut self, port: u16) {
-            UdpHeader::set_dst_port(self, port);
+        fn set_dst_port(self, port: u16) -> Self {
+            UdpMutation::set_dst_port(self, port)
         }
 
-        fn replace_ipv4_addr(&mut self, old: Ipv4Addr, new: Ipv4Addr) {
-            UdpHeader::replace_ipv4_addr(self, old, new);
+        fn replace_ipv4_addr(self, old: Ipv4Addr, new: Ipv4Addr) -> Self {
+            UdpMutation::replace_ipv4_addr(self, old, new)
         }
 
-        fn replace_ipv6_addr(&mut self, old: Ipv6Addr, new: Ipv6Addr) {
-            UdpHeader::replace_ipv6_addr(self, old, new);
+        fn replace_ipv6_addr(self, old: Ipv6Addr, new: Ipv6Addr) -> Self {
+            UdpMutation::replace_ipv6_addr(self, old, new)
         }
     }
 
@@ -389,24 +431,28 @@ mod tests {
         }
 
         #[test]
-        fn test_udp_setters_change_only_their_field(
+        fn test_udp_mutation_changes_only_its_fields(
             start in fields(),
             payload in vec(any::<u8>(), 0..=24),
             family in testing::family(),
             addrs in any::<([u8; 16], [u8; 16])>(),
-            ops in testing::l4_ops(),
+            mutations in testing::mutations(testing::l4_op()),
         ) {
             let mut buf = start.to_bytes(&payload);
             let mut model = start.clone();
             let mut addrs = addrs;
-            for op in &ops {
+            for ops in &mutations {
                 let (header, _) = UdpHeader::parse_mut(&mut buf).unwrap();
-                testing::apply(header, family, op, &mut addrs);
-                match *op {
-                    L4Op::SrcPort(port) => model.src_port = port,
-                    L4Op::DstPort(port) => model.dst_port = port,
-                    L4Op::Src(_) | L4Op::Dst(_) => {}
+                let mut mutation = header.mutate();
+                for op in ops {
+                    mutation = testing::apply(mutation, family, op, &mut addrs);
+                    match *op {
+                        L4Op::SrcPort(port) => model.src_port = port,
+                        L4Op::DstPort(port) => model.dst_port = port,
+                        L4Op::Src(_) | L4Op::Dst(_) => {}
+                    }
                 }
+                let header = mutation.finish();
                 model.checksum = header.checksum();
                 prop_assert_eq!(&model, &Fields::read(header));
             }
@@ -416,13 +462,13 @@ mod tests {
         }
 
         #[test]
-        fn test_udp_incremental_checksum_verifies_over_pseudo_header(
+        fn test_udp_mutation_checksum_verifies_over_pseudo_header(
             (src_port, dst_port) in any::<(u16, u16)>(),
             payload in vec(any::<u8>(), 0..=24),
             family in testing::family(),
             addrs in any::<([u8; 16], [u8; 16])>(),
             has_checksum in any::<bool>(),
-            ops in testing::l4_ops(),
+            mutations in testing::mutations(testing::l4_op()),
         ) {
             let start = Fields { src_port, dst_port, checksum: 0 };
             let mut buf = start.to_bytes(&payload);
@@ -431,10 +477,12 @@ mod tests {
                 buf[6..8].copy_from_slice(&if sum == 0 { 0xffff } else { sum }.to_be_bytes());
             }
             let mut addrs = addrs;
-            for op in &ops {
+            for ops in &mutations {
                 let (header, _) = UdpHeader::parse_mut(&mut buf).unwrap();
-                testing::apply(header, family, op, &mut addrs);
-                prop_assert_eq!(has_checksum, !header.has_no_checksum());
+                let mutation = ops
+                    .iter()
+                    .fold(header.mutate(), |mutation, op| testing::apply(mutation, family, op, &mut addrs));
+                prop_assert_eq!(has_checksum, !mutation.finish().has_no_checksum());
             }
             if has_checksum {
                 prop_assert!(family.l4_is_valid(addrs.0, addrs.1, IPPROTO_UDP, &buf));

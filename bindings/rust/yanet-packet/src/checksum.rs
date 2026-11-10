@@ -3,8 +3,12 @@
 //! The incremental helpers port the C checksum helpers bit for bit. All values
 //! are numeric 16-bit words read in network byte order; the C code keeps the
 //! same values in host order, which is a byte swap of the same arithmetic.
+//! They update a checksum for covered bytes no header type names, such as TCP
+//! options or a payload; a header's own fields change through its mutation.
 
 use core::net::{Ipv4Addr, Ipv6Addr};
+
+use crate::{fold, no_zero};
 
 /// Unfolded one's-complement sum of the bytes as native-order 16-bit words.
 ///
@@ -25,14 +29,6 @@ fn partial_sum(data: &[u8]) -> u64 {
         [b0, b1, hi, ..] => acc += u64::from(u16::from_ne_bytes([b0, b1])) + u64::from(u16::from_ne_bytes([hi, 0])),
     }
     acc
-}
-
-/// Folds a wide accumulator into 16 bits by end-around carry.
-fn fold(mut acc: u64) -> u16 {
-    while acc >> 16 != 0 {
-        acc = (acc >> 16) + (acc & 0xffff);
-    }
-    acc as u16
 }
 
 /// Folded one's-complement sum of the bytes, not complemented.
@@ -124,10 +120,6 @@ pub fn update_bytes_no_zero(cksum: u16, old: &[u8], new: &[u8]) -> u16 {
     no_zero(replace_words(cksum, old, new))
 }
 
-fn no_zero(inverted: u16) -> u16 {
-    if inverted == 0xffff { inverted } else { !inverted }
-}
-
 /// Unfolded sum of the IPv4 pseudo header as native-order words; only its
 /// [`fold`] is meaningful.
 ///
@@ -145,6 +137,7 @@ fn pseudo_sum_ipv6(src: [u8; 16], dst: [u8; 16], next_header: u8, l4_len: u32) -
     partial_sum(&src) + partial_sum(&dst) + u64::from(l4_len.to_be()) + u64::from(u32::from(next_header).to_be())
 }
 
+#[inline]
 fn l4_checksum(pseudo: u64, segment: &[u8]) -> u16 {
     !u16::from_be(fold(pseudo + partial_sum(segment)))
 }
@@ -161,6 +154,7 @@ fn l4_is_valid(pseudo: u64, segment: u64) -> bool {
 /// segment longer than 65535 bytes cannot be an IPv4 one. A UDP checksum that
 /// computes to zero is sent as `0xffff`: zero in the UDP field means no
 /// checksum (RFC 768); the caller maps it.
+#[inline]
 pub fn l4_checksum_ipv4(src: Ipv4Addr, dst: Ipv4Addr, protocol: u8, segment: &[u8]) -> u16 {
     l4_checksum(
         pseudo_sum_ipv4(src.octets(), dst.octets(), protocol, segment.len() as u16),
@@ -172,6 +166,7 @@ pub fn l4_checksum_ipv4(src: Ipv4Addr, dst: Ipv4Addr, protocol: u8, segment: &[u
 ///
 /// The protocol number is the upper-layer one, which follows any extension
 /// headers, not the next header field of the fixed header.
+#[inline]
 pub fn l4_checksum_ipv6(src: Ipv6Addr, dst: Ipv6Addr, next_header: u8, segment: &[u8]) -> u16 {
     l4_checksum(
         pseudo_sum_ipv6(src.octets(), dst.octets(), next_header, segment.len() as u32),
