@@ -130,15 +130,19 @@ pub enum L4Op {
     Dst([u8; 16]),
 }
 
-/// Random sequences of L4 mutations.
-pub fn l4_ops() -> impl Strategy<Value = Vec<L4Op>> {
-    let op = prop_oneof![
+/// A random L4 mutation.
+pub fn l4_op() -> impl Strategy<Value = L4Op> {
+    prop_oneof![
         any::<u16>().prop_map(L4Op::SrcPort),
         any::<u16>().prop_map(L4Op::DstPort),
         any::<[u8; 16]>().prop_map(L4Op::Src),
         any::<[u8; 16]>().prop_map(L4Op::Dst),
-    ];
-    vec(op, 0..=16)
+    ]
+}
+
+/// Random sequences of L4 mutations.
+pub fn l4_ops() -> impl Strategy<Value = Vec<L4Op>> {
+    vec(l4_op(), 0..=16)
 }
 
 /// The setters TCP and UDP headers share, for the common mutation driver.
