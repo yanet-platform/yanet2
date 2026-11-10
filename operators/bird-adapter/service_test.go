@@ -874,8 +874,6 @@ func Test_AdapterService_SetupConfig_ChainedReplacementsNeverOverlap(t *testing.
 	})
 }
 
-// requireImportSockets waits until every goroutine of the bubble blocks and
-// requires the only import of the service to read socket then.
 // Test_AdapterService_Close_DuringPendingReplacement verifies that closing
 // the service while a replacement waits for the import it replaces waits
 // for that import to exit, fails the waiting setup and never starts the
@@ -944,6 +942,7 @@ func Test_AdapterService_Close_DuringPendingReplacement(t *testing.T) {
 		holdExit.Unblock()
 		require.NoError(t, receiveEvent(t, closeDone))
 		require.Error(t, receiveEvent(t, setupDone), "the waiting setup must fail once the service closes")
+		synctest.Wait()
 		select {
 		case <-secondDialed:
 			t.Fatal("the replacement started although the service closed")
@@ -952,6 +951,8 @@ func Test_AdapterService_Close_DuringPendingReplacement(t *testing.T) {
 	})
 }
 
+// requireImportSockets waits until every goroutine of the bubble blocks and
+// requires the only import of the service to read socket then.
 func requireImportSockets(t *testing.T, service *birdadapter.AdapterService, socket string) {
 	t.Helper()
 	synctest.Wait()

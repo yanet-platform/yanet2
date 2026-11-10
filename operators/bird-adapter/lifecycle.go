@@ -422,9 +422,11 @@ func (m *AdapterService) onReopened(imp *lifecycleImport, event importEvent) {
 	}
 }
 
-// stop marks imp stopping and cancels its task, whose end then releases it;
-// a waiting import has no task and is released by its predecessor's exit or
-// by the close.
+// stop marks the import stopping and cancels its task, whose end then
+// releases it.
+//
+// A waiting import has no task: the exit of the import it replaces, or the
+// close, releases it.
 func (m *AdapterService) stop(imp *lifecycleImport) {
 	imp.Stopping = true
 	imp.Cancel()

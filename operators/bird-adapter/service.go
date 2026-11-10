@@ -274,6 +274,8 @@ func (m *AdapterService) SetupConfig(
 		case status.Code(err) == codes.Unavailable:
 			// The route operator is not reachable yet, so the client may retry.
 			code = codes.Unavailable
+		case errors.Is(err, errServiceClosed):
+			code = codes.Unavailable
 		case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
 			code = status.FromContextError(err).Code()
 		}

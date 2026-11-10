@@ -79,8 +79,8 @@ message SessionInfo {
   // The import that holds the name now, still feeding the RIB or stopping,
   // while this session waits to replace it.
   //
-  // Absent when no replacement is pending; never set on the session it
-  // holds itself.
+  // Absent when no replacement is pending, and always absent in the nested
+  // session.
   SessionInfo replacing = 5;
 }
 
