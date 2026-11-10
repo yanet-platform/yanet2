@@ -2,6 +2,7 @@ package operator
 
 import (
 	"errors"
+	"fmt"
 
 	"go.uber.org/zap/zapcore"
 
@@ -41,6 +42,16 @@ func (m *Config) DebugConfig() *debugserver.Config {
 func (m *Config) Validate() error {
 	if len(m.Gateways) == 0 {
 		return errors.New("at least one gateway must be configured")
+	}
+
+	// Stages move on once every gateway applied them, telling the gateways
+	// apart by name.
+	gatewayNames := map[string]struct{}{}
+	for idx, gw := range m.Gateways {
+		if _, dup := gatewayNames[gw.Name]; dup {
+			return fmt.Errorf("duplicate gateway name %q at index %d", gw.Name, idx)
+		}
+		gatewayNames[gw.Name] = struct{}{}
 	}
 
 	return nil
