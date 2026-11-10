@@ -140,3 +140,11 @@ counter_storage_test = executable(
   include_directories: yanet_rootdir,
 )
 test('counter_storage_oom', counter_storage_test, suite: ['lib'])
+
+counter_registry_test = executable(
+  'counter_registry_test',
+  'registry_test.c',
+  dependencies: [lib_counters_dep, lib_common_dep, lib_logging_dep, lib_errors_dep],
+  include_directories: yanet_rootdir,
+)
+test('counter_registry_lifecycle', counter_registry_test, suite: ['lib'])

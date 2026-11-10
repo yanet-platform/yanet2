@@ -1923,7 +1923,7 @@ setup_counters(void) {
 	);
 
 	if (counter_registry_init(
-		    &config.cp_module.counter_registry, &test_mctx, 0
+		    &config.cp_module.counter_registry, &test_mctx
 	    )) {
 		return -1;
 	}

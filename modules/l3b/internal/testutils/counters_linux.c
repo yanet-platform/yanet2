@@ -184,7 +184,7 @@ read_registry(
 	struct counter *names = ADDR_OF(&registry->names);
 	for (uint64_t idx = 0; idx < registry->count; ++idx) {
 		struct counter *counter = names + idx;
-		if (counter->gen != registry->gen) {
+		if (counter->age != 0) {
 			continue;
 		}
 		if (out->count == L3B_TEST_COUNTER_CAPACITY ||

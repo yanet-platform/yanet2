@@ -156,7 +156,7 @@ unrdup_test_config(struct cp_module **cp_module, yanet_error **err) {
 	}
 
 	if (counter_registry_init(
-		    &config->cp_module.counter_registry, &fuzz_params.mctx, 0
+		    &config->cp_module.counter_registry, &fuzz_params.mctx
 	    )) {
 		goto free_services;
 	}

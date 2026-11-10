@@ -210,8 +210,7 @@ pdump_test_fixture_build(
 	TEST_ASSERT_SUCCESS(
 		counter_registry_init(
 			&fx->config.cp_module.counter_registry,
-			&fx->agent->memory_context,
-			0
+			&fx->agent->memory_context
 		),
 		"failed to initialize counters"
 	);

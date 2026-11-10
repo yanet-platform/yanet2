@@ -191,7 +191,7 @@ insert_worker1_extra_storage(struct cp_config *cp_config) {
 	);
 	memset(registry, 0, sizeof(*registry));
 	TEST_ASSERT_SUCCESS(
-		counter_registry_init(registry, memory_context, 0),
+		counter_registry_init(registry, memory_context),
 		"failed to init the extra counter registry"
 	);
 
@@ -705,7 +705,7 @@ test_registry_exact_lookup(struct cp_config *cp_config) {
 	);
 	memset(extra_registry, 0, sizeof(*extra_registry));
 	TEST_ASSERT_SUCCESS(
-		counter_registry_init(extra_registry, memory_context, 0),
+		counter_registry_init(extra_registry, memory_context),
 		"failed to init the growth counter registry"
 	);
 	TEST_ASSERT_SUCCESS(

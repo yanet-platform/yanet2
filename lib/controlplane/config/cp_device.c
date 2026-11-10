@@ -182,7 +182,7 @@ cp_device_init(
 	}
 	SET_OFFSET_OF(&self->output_pipelines, output);
 
-	if (counter_registry_init(&self->counter_registry, memory_context, 0)) {
+	if (counter_registry_init(&self->counter_registry, memory_context)) {
 		yanet_error_add(
 			err,
 			"failed to initialize counter registry for device '%s'",

@@ -58,7 +58,7 @@ cp_function_init(
 
 	registry_item_init(&self->config_item);
 
-	if (counter_registry_init(&self->counter_registry, mctx, 0)) {
+	if (counter_registry_init(&self->counter_registry, mctx)) {
 		yanet_error_add(
 			err,
 			"failed to initialize counter registry for function "

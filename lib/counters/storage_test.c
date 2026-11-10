@@ -62,7 +62,7 @@ registry_fixture_init(struct registry_fixture *fixture, size_t counter_count) {
 	);
 	TEST_ASSERT_SUCCESS(
 		counter_registry_init(
-			&fixture->registry, &fixture->memory_context, 1
+			&fixture->registry, &fixture->memory_context
 		),
 		"failed to initialize counter registry"
 	);

@@ -41,8 +41,7 @@ cp_module_init(
 
 	if (counter_registry_init(
 		    &cp_module->counter_registry,
-		    &cp_module->entity.memory_context,
-		    0
+		    &cp_module->entity.memory_context
 	    )) {
 		yanet_error_add(
 			err,
@@ -230,7 +229,7 @@ cp_module_counter_registry(
 	}
 	strtcpy(slot->tag, tag, sizeof(slot->tag));
 	if (counter_registry_init(
-		    &slot->registry, &cp_module->entity.memory_context, 0
+		    &slot->registry, &cp_module->entity.memory_context
 	    )) {
 		memory_bfree(
 			&cp_module->entity.memory_context, slot, sizeof(*slot)
