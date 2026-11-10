@@ -43,10 +43,10 @@ const (
 	// importMPLSPushTimeout bounds each MPLS push, which shares its goroutine
 	// with the route dumps and the heartbeats.
 	//
-	// A route-mpls call that never answered would hold them back for good. A
-	// push that times out counts as failed: the sync sends the whole table on
-	// a later push and skips every push until its retry delay has passed, so
-	// a silent route-mpls holds the routes back at most this long per retry.
+	// A push that times out counts as failed: the sync sends the whole table
+	// on a later push and skips every push until its retry delay has passed,
+	// so a silent route-mpls holds the routes back at most this long per
+	// retry.
 	importMPLSPushTimeout = 10 * time.Second
 	// importHealthyUptime is how long an attempt must stay up for the retry
 	// delay to start over from its initial value.

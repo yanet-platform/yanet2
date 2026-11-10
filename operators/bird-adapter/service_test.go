@@ -795,7 +795,7 @@ func Test_AdapterService_FailedHeartbeatReplaysOnNewStream(t *testing.T) {
 
 // Test_AdapterService_StalledMPLSRetryReleasesIPRoutes verifies that an
 // MPLS retry route-mpls never answers holds an IP route behind it for no
-// longer than the push timeout plus one dump timeout.
+// longer than the push timeout.
 //
 // The first push fails at once, so an idle tick retries it with the whole
 // table, and that retry stalls. The IP route arrives while it does and must
@@ -872,8 +872,8 @@ func Test_AdapterService_StalledMPLSRetryReleasesIPRoutes(t *testing.T) {
 
 // stallingRouteMPLS is a route-mpls service that rejects every change
 // update and leaves the first whole-table update unanswered until its
-// caller gives up, reporting it on Stalled; later whole-table updates
-// succeed.
+// caller gives up, reporting the stall on a channel; later whole-table
+// updates succeed.
 type stallingRouteMPLS struct {
 	routemplspb.UnimplementedRouteMPLSServiceServer
 	Stalled chan<- struct{}
