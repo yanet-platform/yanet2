@@ -642,89 +642,144 @@ func Test_Operator_StaticResolution_IndependentGateways(t *testing.T) {
 }
 
 // Test_Operator_ExternalNeighbours_RefreshesAcceptedObservations verifies that
-// complete publications refresh readiness independently of forwarding changes,
-// while refused publications leave the last successful observation intact.
+// complete publications refresh readiness independently of forwarding changes.
 func Test_Operator_ExternalNeighbours_RefreshesAcceptedObservations(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		network := memnet.NewNetwork()
-		_, gateway := startMemoryGateway(t, network, "gw0")
-		config := op.DefaultConfig()
-		config.NetlinkMonitor.Disabled = true
-		config.Readiness.ExpectBird = false
-		config.Gateways = []operator.GatewayConfig{gateway}
-		config.Reconcile.Interval = xcfg.MustNonZero(time.Hour)
-		connection := runMemoryOperator(t, network, config)
-
-		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-		defer cancel()
-		neighbours := operatorpb.NewNeighbourServiceClient(connection)
-		readiness := operatorpb.NewReadinessServiceClient(connection)
-		readScope := func() *readinesspb.Scope {
-			response, err := readiness.Ready(ctx, &readinesspb.ReadyRequest{}, grpc.WaitForReady(true))
-			require.NoError(t, err)
-			for _, scope := range response.GetScopes() {
-				if scope.GetName() == "neighbours" {
-					return scope
+	entries := entryRequest("192.0.2.1", [6]byte{2, 0, 0, 0, 0, 1}, "eth0").GetEntries()
+	cases := []struct {
+		name string
+		// before are the publications accepted ahead of the one under test.
+		before  [][]*operatorpb.NeighbourEntry
+		entries []*operatorpb.NeighbourEntry
+	}{
+		{name: "first empty observation"},
+		{name: "first populated observation", entries: entries},
+		{name: "identical populated observation", before: [][]*operatorpb.NeighbourEntry{entries}, entries: entries},
+		{name: "withdrawal observation", before: [][]*operatorpb.NeighbourEntry{entries}},
+		{name: "identical empty observation", before: [][]*operatorpb.NeighbourEntry{nil}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				publisher := startNeighbourPublisher(t)
+				for _, before := range tc.before {
+					publisher.Publish(t, before)
 				}
-			}
-			t.Fatal("neighbours readiness scope is missing")
-			return nil
-		}
-		previous := readScope()
-		require.Equal(t, readinesspb.State_STATE_READY, previous.GetState())
-		// Fake time stands still unless slept, so each call below comes a
-		// second after the previous observation.
-		time.Sleep(time.Second)
-		_, err := neighbours.CreateTable(ctx, &operatorpb.CreateNeighbourTableRequest{Name: "publisher"})
-		require.NoError(t, err)
-		require.True(t, proto.Equal(previous, readScope()), "table metadata is not an observation")
+				previous := publisher.ReadScope(t)
 
-		entries := entryRequest("192.0.2.1", [6]byte{2, 0, 0, 0, 0, 1}, "eth0").GetEntries()
-		for _, tc := range []struct {
-			name    string
-			entries []*operatorpb.NeighbourEntry
-		}{
-			{name: "first empty observation"},
-			{name: "first populated observation", entries: entries},
-			{name: "identical populated observation", entries: entries},
-			{name: "withdrawal observation"},
-			{name: "identical empty observation"},
-		} {
-			time.Sleep(time.Second)
-			_, err := neighbours.SwapNeighbours(ctx, &operatorpb.SwapNeighboursRequest{
-				Table: "publisher", Entries: tc.entries,
+				time.Sleep(time.Second)
+				publisher.Publish(t, tc.entries)
+				current := publisher.ReadScope(t)
+				require.Equal(t, readinesspb.State_STATE_READY, current.GetState())
+				require.True(t, current.GetObservedAt().AsTime().After(previous.GetObservedAt().AsTime()),
+					"accepted publication must advance its observation timestamp")
+				require.True(t, proto.Equal(previous.GetLastTransitionTime(), current.GetLastTransitionTime()),
+					"a fresh observation must not create a state transition")
 			})
-			require.NoError(t, err, tc.name)
-			current := readScope()
-			require.Equal(t, readinesspb.State_STATE_READY, current.GetState(), tc.name)
-			require.True(t, current.GetObservedAt().AsTime().After(previous.GetObservedAt().AsTime()),
-				"%s: accepted publication must advance its observation timestamp", tc.name)
-			require.True(t, proto.Equal(previous.GetLastTransitionTime(), current.GetLastTransitionTime()),
-				"%s: a fresh observation must not create a state transition", tc.name)
-			previous = current
-		}
+		})
+	}
+}
 
-		invalid := entryRequest("192.0.2.1", [6]byte{2, 0, 0, 0, 0, 1}, "eth0").GetEntries()
-		invalid[0].NextHop = &commonpb.IPAddress{Addr: []byte{1, 2, 3}}
-		for _, tc := range []struct {
-			name    string
-			request *operatorpb.SwapNeighboursRequest
-			code    codes.Code
-		}{
-			{name: "unknown table", request: &operatorpb.SwapNeighboursRequest{Table: "missing"}, code: codes.NotFound},
-			{name: "invalid snapshot", request: &operatorpb.SwapNeighboursRequest{Table: "publisher", Entries: invalid}, code: codes.InvalidArgument},
-		} {
-			time.Sleep(time.Second)
-			_, err := neighbours.SwapNeighbours(ctx, tc.request)
-			require.Equal(t, tc.code, status.Code(err), tc.name)
-			require.True(t, proto.Equal(previous, readScope()),
-				"%s: a rejected publication must not refresh readiness", tc.name)
-		}
-		time.Sleep(time.Second)
-		cancelled, stop := context.WithCancel(ctx)
-		stop()
-		_, err = neighbours.SwapNeighbours(cancelled, &operatorpb.SwapNeighboursRequest{Table: "publisher"})
-		require.Equal(t, codes.Canceled, status.Code(err))
-		require.True(t, proto.Equal(previous, readScope()), "a cancelled publication must not refresh readiness")
+// Test_Operator_ExternalNeighbours_RefusedPublicationKeepsObservation
+// verifies that a refused or cancelled publication leaves the last
+// successful observation intact.
+func Test_Operator_ExternalNeighbours_RefusedPublicationKeepsObservation(t *testing.T) {
+	invalid := entryRequest("192.0.2.1", [6]byte{2, 0, 0, 0, 0, 1}, "eth0").GetEntries()
+	invalid[0].NextHop = &commonpb.IPAddress{Addr: []byte{1, 2, 3}}
+	cases := []struct {
+		name    string
+		request *operatorpb.SwapNeighboursRequest
+		// cancelled sends the request on a context cancelled beforehand.
+		cancelled bool
+		code      codes.Code
+	}{
+		{name: "unknown table", request: &operatorpb.SwapNeighboursRequest{Table: "missing"}, code: codes.NotFound},
+		{name: "invalid snapshot", request: &operatorpb.SwapNeighboursRequest{Table: "publisher", Entries: invalid}, code: codes.InvalidArgument},
+		{name: "cancelled publication", request: &operatorpb.SwapNeighboursRequest{Table: "publisher"}, cancelled: true, code: codes.Canceled},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				publisher := startNeighbourPublisher(t)
+				publisher.Publish(t, entryRequest("192.0.2.1", [6]byte{2, 0, 0, 0, 0, 1}, "eth0").GetEntries())
+				previous := publisher.ReadScope(t)
+
+				time.Sleep(time.Second)
+				ctx, cancel := context.WithCancel(requestContext(t))
+				if tc.cancelled {
+					cancel()
+				}
+				defer cancel()
+				_, err := publisher.Neighbours.SwapNeighbours(ctx, tc.request)
+				require.Equal(t, tc.code, status.Code(err))
+				require.True(t, proto.Equal(previous, publisher.ReadScope(t)),
+					"a refused publication must not refresh readiness")
+			})
+		})
+	}
+}
+
+// neighbourPublisher is an operator without a netlink monitor and the
+// neighbour table publisher an external publisher owns on it.
+type neighbourPublisher struct {
+	Neighbours operatorpb.NeighbourServiceClient
+	readiness  operatorpb.ReadinessServiceClient
+}
+
+// startNeighbourPublisher runs an operator in the bubble and creates the
+// table publisher on it, requiring that creating the table, metadata only,
+// observes nothing.
+//
+// Fake time stands still unless slept, so the table is created a second
+// after the first observation.
+func startNeighbourPublisher(t *testing.T) *neighbourPublisher {
+	t.Helper()
+
+	network := memnet.NewNetwork()
+	_, gateway := startMemoryGateway(t, network, "gw0")
+	config := op.DefaultConfig()
+	config.NetlinkMonitor.Disabled = true
+	config.Readiness.ExpectBird = false
+	config.Gateways = []operator.GatewayConfig{gateway}
+	config.Reconcile.Interval = xcfg.MustNonZero(time.Hour)
+	connection := runMemoryOperator(t, network, config)
+	publisher := &neighbourPublisher{
+		Neighbours: operatorpb.NewNeighbourServiceClient(connection),
+		readiness:  operatorpb.NewReadinessServiceClient(connection),
+	}
+
+	previous := publisher.ReadScope(t)
+	require.Equal(t, readinesspb.State_STATE_READY, previous.GetState())
+	time.Sleep(time.Second)
+	_, err := publisher.Neighbours.CreateTable(requestContext(t), &operatorpb.CreateNeighbourTableRequest{Name: "publisher"})
+	require.NoError(t, err)
+	require.True(t, proto.Equal(previous, publisher.ReadScope(t)), "table metadata is not an observation")
+
+	return publisher
+}
+
+// Publish replaces the whole publisher table with entries a second of fake
+// time after the previous call.
+func (m *neighbourPublisher) Publish(t *testing.T, entries []*operatorpb.NeighbourEntry) {
+	t.Helper()
+
+	time.Sleep(time.Second)
+	_, err := m.Neighbours.SwapNeighbours(requestContext(t), &operatorpb.SwapNeighboursRequest{
+		Table: "publisher", Entries: entries,
 	})
+	require.NoError(t, err)
+}
+
+// ReadScope returns the neighbours readiness scope.
+func (m *neighbourPublisher) ReadScope(t *testing.T) *readinesspb.Scope {
+	t.Helper()
+
+	response, err := m.readiness.Ready(requestContext(t), &readinesspb.ReadyRequest{}, grpc.WaitForReady(true))
+	require.NoError(t, err)
+	for _, scope := range response.GetScopes() {
+		if scope.GetName() == "neighbours" {
+			return scope
+		}
+	}
+	t.Fatal("neighbours readiness scope is missing")
+	return nil
 }
