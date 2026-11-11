@@ -4,7 +4,7 @@ Keep under 8 KB: code, build/environment facts and repository review rules. Proc
 
 ## Project
 
-YANET is a high-performance software router on DPDK: C + DPDK dataplane (`dataplane/`, `modules/*/dataplane/`), Go control plane (`controlplane/`, `modules/*/controlplane/`, `operators/`), Rust CLIs (`cli/`, `modules/*/cli/`), TypeScript/React web UI (`web/` shell + co-located `modules|operators|devices/<name>/web/`).
+YANET is a DPDK router: C dataplane (`dataplane/`, `modules/*/dataplane/`), Go control plane (`controlplane/`, `modules/*/controlplane/`, `operators/`), Rust CLIs (`cli/`, `modules/*/cli/`), TypeScript/React UI (`web/` shell + `modules|operators|devices/<name>/web/`).
 
 Data flow: CLI (Rust) → gRPC → gateway (Go) → gRPC → module control plane (Go) → shared memory → dataplane (C). The dataplane keeps the last valid config if upper layers fail; updates apply atomically.
 
@@ -54,15 +54,15 @@ modules/<name>/
 
 Active modules: `route, acl, l3b, blackhole, forward, decap, nat64, fwstate, dscp, pdump, route-mpls, mirror, unrdup`. Legacy shape: `pdump` (CGO in `controlplane/ffi.go`, no `bindings/`); `fwstate` partially migrated. The `l3b` module links virtual-service and session-table objects under `objects/l3b/`. Dataplane symbols are exported via meson `--require-defined=new_module_<name>`.
 
-Shared-memory pattern: `ffi.SharedMemory` → `shm.AgentAttach(name, instanceIdx, size)` → write the C config through FFI (`<name>_module_config_update()`) with Go memory pinned by `runtime.Pinner` → the dataplane reads it atomically. Exported Go APIs whose arguments index C arrays (device IDs, queue/worker indices) validate the range on the Go side.
+Shared memory: `ffi.SharedMemory` → `shm.AgentAttach(name, instanceIdx, size)` → pinned FFI config write (`runtime.Pinner`, `<name>_module_config_update()`) → atomic dataplane read. Go APIs indexing C arrays validate device, queue and worker ranges first.
 
-Rust CLI (`code-cli` skill has the rest): a CLI is registered in THREE places that move together — root `Cargo.toml` members, root `Makefile` (`CLI_CORE_MODULES` / `CLI_MODULES`), `debian/yanet2-cli.install`; a miss in the last two builds green and is never installed. Private CLIs are standalone workspaces.
+Rust CLI registration: update root `Cargo.toml` members, root `Makefile` (`CLI_CORE_MODULES` / `CLI_MODULES`) and `debian/yanet2-cli.install` together; missing the last two builds but never installs. See `code-cli`; private CLIs are standalone workspaces.
 
 ## Conventions
 
-Language rules: `.agents/conventions/{go,rust,c,ts}.md` — read the one for the language you touch (Claude Code loads them by path via `.claude/rules/`). Comments (all languages): `.agents/conventions/comments.md`. Tests (all languages): `.agents/conventions/tests.md`.
+Language: read `.agents/conventions/{go,rust,c,ts}.md` for edited code (Claude loads by path via `.claude/rules/`). All languages: `.agents/conventions/{comments,tests}.md`.
 
-- New deployable components must support env overrides of file config. In Go, reuse `common/go/xcfg` with `xcfg.WithEnv()` (`YANET_` prefix): env > file > defaults, with the same decoding/validation. Document names; test precedence, absent overrides and invalid values.
+- New deployable components support file-config env overrides. Go uses `xcfg.WithEnv()` (`YANET_`): env > file > defaults, with identical decoding/validation. Document names; test precedence, absent overrides and invalid values.
 - After native changes run `meson compile -C build` before direct Go commands; `go test` needs the cache-line and sanitizer CGO flags that `make test`/`make test-asan` supply. Shm layout or `YANET_MODULE_ABI_VERSION` changes need rebuilt standalone CGO binaries and coordinated restarts; stop attached processes before removing stale `/dev/hugepages/yanet*`.
 - Skills live in `.agents/skills/<name>/` (symlinked from `.claude/skills/`). Hooks in `.agents/hooks/` (`.claude/settings.json`, `.codex/hooks.json`; Codex needs `/hooks` trust) format edited files and refuse writes on `main`, whole-tree `git add`, `--no-verify`, `git stash` and git commands that discard changes.
 - Test invariants, not CLI prose (ASCII-only paths and canonical MAC/hex are contracts). Dataplane-module behavior must use and extend `dataplane_ut`; see `.agents/conventions/tests.md`.
