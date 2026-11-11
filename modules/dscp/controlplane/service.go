@@ -30,14 +30,14 @@ type DscpService struct {
 }
 
 type config struct {
-	// Prefixes4 is the sorted IPv4 destination prefix set.
-	Prefixes4 []netip.Prefix
-	// Prefixes6 is the sorted IPv6 destination prefix set.
-	Prefixes6 []netip.Prefix
 	// SourcePrefixes4 is the sorted IPv4 source prefix set.
 	SourcePrefixes4 []netip.Prefix
 	// SourcePrefixes6 is the sorted IPv6 source prefix set.
 	SourcePrefixes6 []netip.Prefix
+	// DestinationPrefixes4 is the sorted IPv4 destination prefix set.
+	DestinationPrefixes4 []netip.Prefix
+	// DestinationPrefixes6 is the sorted IPv6 destination prefix set.
+	DestinationPrefixes6 []netip.Prefix
 	// Config is the DSCP marking configuration.
 	Config dscpConfig
 }
@@ -72,14 +72,6 @@ func (m *DscpService) ShowConfig(
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
-	prefixes4, err := commonpb.NewIPv4PrefixesFromPrefixes(published.Prefixes4)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to convert prefixes: %v", err)
-	}
-	prefixes6, err := commonpb.NewIPv6PrefixesFromPrefixes(published.Prefixes6)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to convert prefixes: %v", err)
-	}
 	sourcePrefixes4, err := commonpb.NewIPv4PrefixesFromPrefixes(published.SourcePrefixes4)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to convert source prefixes: %v", err)
@@ -88,12 +80,20 @@ func (m *DscpService) ShowConfig(
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to convert source prefixes: %v", err)
 	}
+	destinationPrefixes4, err := commonpb.NewIPv4PrefixesFromPrefixes(published.DestinationPrefixes4)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to convert destination prefixes: %v", err)
+	}
+	destinationPrefixes6, err := commonpb.NewIPv6PrefixesFromPrefixes(published.DestinationPrefixes6)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to convert destination prefixes: %v", err)
+	}
 
 	response.Config = &dscppb.Config{
-		Prefixes4:       prefixes4,
-		Prefixes6:       prefixes6,
-		SourcePrefixes4: sourcePrefixes4,
-		SourcePrefixes6: sourcePrefixes6,
+		SourcePrefixes4:      sourcePrefixes4,
+		SourcePrefixes6:      sourcePrefixes6,
+		DestinationPrefixes4: destinationPrefixes4,
+		DestinationPrefixes6: destinationPrefixes6,
 		DscpConfig: &dscppb.DscpConfig{
 			Flag: uint32(published.Config.Flag),
 			Mark: uint32(published.Config.Mark),
@@ -114,14 +114,6 @@ func (m *DscpService) UpdateConfig(
 ) (*dscppb.UpdateConfigResponse, error) {
 	name := request.GetName()
 	desired := request.GetConfig()
-	prefixes4, err := commonpb.PrefixesFromNetworks("prefixes4", desired.GetPrefixes4())
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "failed to convert prefixes: %v", err)
-	}
-	prefixes6, err := commonpb.PrefixesFromNetworks("prefixes6", desired.GetPrefixes6())
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "failed to convert prefixes: %v", err)
-	}
 	sourcePrefixes4, err := commonpb.PrefixesFromNetworks("source_prefixes4", desired.GetSourcePrefixes4())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "failed to convert source prefixes: %v", err)
@@ -130,12 +122,20 @@ func (m *DscpService) UpdateConfig(
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "failed to convert source prefixes: %v", err)
 	}
+	destinationPrefixes4, err := commonpb.PrefixesFromNetworks("destination_prefixes4", desired.GetDestinationPrefixes4())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "failed to convert destination prefixes: %v", err)
+	}
+	destinationPrefixes6, err := commonpb.PrefixesFromNetworks("destination_prefixes6", desired.GetDestinationPrefixes6())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "failed to convert destination prefixes: %v", err)
+	}
 
 	payload := &config{
-		Prefixes4:       sortedPrefixes(prefixes4),
-		Prefixes6:       sortedPrefixes(prefixes6),
-		SourcePrefixes4: sortedPrefixes(sourcePrefixes4),
-		SourcePrefixes6: sortedPrefixes(sourcePrefixes6),
+		SourcePrefixes4:      sortedPrefixes(sourcePrefixes4),
+		SourcePrefixes6:      sortedPrefixes(sourcePrefixes6),
+		DestinationPrefixes4: sortedPrefixes(destinationPrefixes4),
+		DestinationPrefixes6: sortedPrefixes(destinationPrefixes6),
 		Config: dscpConfig{
 			Flag: uint8(desired.GetDscpConfig().GetFlag()),
 			Mark: uint8(desired.GetDscpConfig().GetMark()),

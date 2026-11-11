@@ -107,11 +107,11 @@ func Test_DscpService_UpdateConfig_ReplacesWholeConfig(t *testing.T) {
 	t.Parallel()
 
 	previous := &dscppb.Config{
-		Prefixes4:       mustPrefixes4(t, "10.0.0.0/24", "10.0.1.0/24"),
-		Prefixes6:       mustPrefixes6(t, "2001:db8::/32"),
-		DscpConfig:      &dscppb.DscpConfig{Flag: 2, Mark: 8},
-		SourcePrefixes4: mustPrefixes4(t, "198.51.100.0/24"),
-		SourcePrefixes6: mustPrefixes6(t, "2001:db8:3::/48"),
+		SourcePrefixes4:      mustPrefixes4(t, "198.51.100.0/24"),
+		SourcePrefixes6:      mustPrefixes6(t, "2001:db8:3::/48"),
+		DestinationPrefixes4: mustPrefixes4(t, "10.0.0.0/24", "10.0.1.0/24"),
+		DestinationPrefixes6: mustPrefixes6(t, "2001:db8::/32"),
+		DscpConfig:           &dscppb.DscpConfig{Flag: 2, Mark: 8},
 	}
 
 	cases := []struct {
@@ -122,18 +122,18 @@ func Test_DscpService_UpdateConfig_ReplacesWholeConfig(t *testing.T) {
 		{
 			name: "explicit value in every field, prefixes unsorted and repeated",
 			config: &dscppb.Config{
-				Prefixes4:       mustPrefixes4(t, "192.168.0.0/16", "10.0.1.0/24", "192.168.0.0/16"),
-				Prefixes6:       mustPrefixes6(t, "2001:db8:2::/48", "2001:db8:1::/48"),
-				DscpConfig:      &dscppb.DscpConfig{Flag: 1, Mark: 46},
-				SourcePrefixes4: mustPrefixes4(t, "192.0.2.0/24", "10.1.0.0/16", "192.0.2.0/24"),
-				SourcePrefixes6: mustPrefixes6(t, "2001:db8:4::/48", "2001:db8:3::/48", "2001:db8:4::/48"),
+				SourcePrefixes4:      mustPrefixes4(t, "192.0.2.0/24", "10.1.0.0/16", "192.0.2.0/24"),
+				SourcePrefixes6:      mustPrefixes6(t, "2001:db8:4::/48", "2001:db8:3::/48", "2001:db8:4::/48"),
+				DestinationPrefixes4: mustPrefixes4(t, "192.168.0.0/16", "10.0.1.0/24", "192.168.0.0/16"),
+				DestinationPrefixes6: mustPrefixes6(t, "2001:db8:2::/48", "2001:db8:1::/48"),
+				DscpConfig:           &dscppb.DscpConfig{Flag: 1, Mark: 46},
 			},
 			want: &dscppb.Config{
-				Prefixes4:       mustPrefixes4(t, "10.0.1.0/24", "192.168.0.0/16"),
-				Prefixes6:       mustPrefixes6(t, "2001:db8:1::/48", "2001:db8:2::/48"),
-				DscpConfig:      &dscppb.DscpConfig{Flag: 1, Mark: 46},
-				SourcePrefixes4: mustPrefixes4(t, "10.1.0.0/16", "192.0.2.0/24"),
-				SourcePrefixes6: mustPrefixes6(t, "2001:db8:3::/48", "2001:db8:4::/48"),
+				SourcePrefixes4:      mustPrefixes4(t, "10.1.0.0/16", "192.0.2.0/24"),
+				SourcePrefixes6:      mustPrefixes6(t, "2001:db8:3::/48", "2001:db8:4::/48"),
+				DestinationPrefixes4: mustPrefixes4(t, "10.0.1.0/24", "192.168.0.0/16"),
+				DestinationPrefixes6: mustPrefixes6(t, "2001:db8:1::/48", "2001:db8:2::/48"),
+				DscpConfig:           &dscppb.DscpConfig{Flag: 1, Mark: 46},
 			},
 		},
 		{
@@ -152,11 +152,11 @@ func Test_DscpService_UpdateConfig_ReplacesWholeConfig(t *testing.T) {
 		{
 			name: "fields left out reset to defaults",
 			config: &dscppb.Config{
-				Prefixes4: mustPrefixes4(t, "10.0.1.0/24", "192.168.0.0/16"),
+				DestinationPrefixes4: mustPrefixes4(t, "10.0.1.0/24", "192.168.0.0/16"),
 			},
 			want: &dscppb.Config{
-				Prefixes4:  mustPrefixes4(t, "10.0.1.0/24", "192.168.0.0/16"),
-				DscpConfig: &dscppb.DscpConfig{},
+				DestinationPrefixes4: mustPrefixes4(t, "10.0.1.0/24", "192.168.0.0/16"),
+				DscpConfig:           &dscppb.DscpConfig{},
 			},
 		},
 	}
@@ -201,14 +201,14 @@ func Test_DscpService_UpdateConfig_InvalidKeepsPreviousConfig(t *testing.T) {
 		{
 			name: "IPv4 prefix without an address",
 			config: &dscppb.Config{
-				Prefixes4: []*commonpb.IPv4Prefix{{PrefixLen: 24}},
+				DestinationPrefixes4: []*commonpb.IPv4Prefix{{PrefixLen: 24}},
 			},
 		},
 		{
 			name: "IPv6 prefix longer than its address beside a valid IPv4 prefix",
 			config: &dscppb.Config{
-				Prefixes4: mustPrefixes4(t, "192.168.0.0/16"),
-				Prefixes6: []*commonpb.IPv6Prefix{{Addr: &commonpb.IPv6Address{}, PrefixLen: 129}},
+				DestinationPrefixes4: mustPrefixes4(t, "192.168.0.0/16"),
+				DestinationPrefixes6: []*commonpb.IPv6Prefix{{Addr: &commonpb.IPv6Address{}, PrefixLen: 129}},
 			},
 		},
 		{
@@ -232,8 +232,8 @@ func Test_DscpService_UpdateConfig_InvalidKeepsPreviousConfig(t *testing.T) {
 		{
 			name: "IPv6 source prefix longer than its address beside a valid destination",
 			config: &dscppb.Config{
-				Prefixes4:       mustPrefixes4(t, "192.168.0.0/16"),
-				SourcePrefixes6: []*commonpb.IPv6Prefix{{Addr: &commonpb.IPv6Address{}, PrefixLen: 129}},
+				SourcePrefixes6:      []*commonpb.IPv6Prefix{{Addr: &commonpb.IPv6Address{}, PrefixLen: 129}},
+				DestinationPrefixes4: mustPrefixes4(t, "192.168.0.0/16"),
 			},
 		},
 	}
@@ -247,8 +247,8 @@ func Test_DscpService_UpdateConfig_InvalidKeepsPreviousConfig(t *testing.T) {
 			require.NoError(t, updateConfig(t, service, &dscppb.UpdateConfigRequest{
 				Name: "dscp0",
 				Config: &dscppb.Config{
-					Prefixes4:  mustPrefixes4(t, "10.0.0.0/24"),
-					DscpConfig: &dscppb.DscpConfig{Flag: 2, Mark: 8},
+					DestinationPrefixes4: mustPrefixes4(t, "10.0.0.0/24"),
+					DscpConfig:           &dscppb.DscpConfig{Flag: 2, Mark: 8},
 				},
 			}))
 			before, err := service.ShowConfig(t.Context(), &dscppb.ShowConfigRequest{Name: "dscp0"})

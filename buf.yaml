@@ -24,6 +24,14 @@ lint:
 breaking:
   use:
     - PACKAGE
+  ignore_only:
+    # The DSCP destination fields gain explicit direction names while their
+    # numbers and types stay fixed. Legacy YAML keys remain decoding aliases.
+    # Remove these name-only exceptions once the rename reaches the base.
+    FIELD_SAME_NAME:
+      - modules/dscp/controlplane/dscppb/v1/dscp.proto
+    FIELD_SAME_JSON_NAME:
+      - modules/dscp/controlplane/dscppb/v1/dscp.proto
   ignore:
     # TODO: drop once the fossil removal reaches main; the deprecated
     # acl SyncConfig is deleted with its field slots reserved by number

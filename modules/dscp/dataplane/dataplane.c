@@ -22,14 +22,15 @@ dscp_handle_v4(struct dscp_module_config *config, struct packet *packet) {
 		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
 	);
 
-	if (config->has_destination_prefixes &&
-	    lpm_lookup(&config->lpm_v4, 4, (uint8_t *)&header->dst_addr) ==
-		    LPM_VALUE_INVALID) {
-		return -1;
-	}
 	if (config->has_source_prefixes &&
 	    lpm_lookup(
 		    &config->source_lpm_v4, 4, (uint8_t *)&header->src_addr
+	    ) == LPM_VALUE_INVALID) {
+		return -1;
+	}
+	if (config->has_destination_prefixes &&
+	    lpm_lookup(
+		    &config->destination_lpm_v4, 4, (uint8_t *)&header->dst_addr
 	    ) == LPM_VALUE_INVALID) {
 		return -1;
 	}
@@ -44,14 +45,17 @@ dscp_handle_v6(struct dscp_module_config *config, struct packet *packet) {
 		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
 	);
 
-	if (config->has_destination_prefixes &&
-	    lpm_lookup(&config->lpm_v6, 16, (uint8_t *)&header->dst_addr) ==
-		    LPM_VALUE_INVALID) {
-		return -1;
-	}
 	if (config->has_source_prefixes &&
 	    lpm_lookup(
 		    &config->source_lpm_v6, 16, (uint8_t *)&header->src_addr
+	    ) == LPM_VALUE_INVALID) {
+		return -1;
+	}
+	if (config->has_destination_prefixes &&
+	    lpm_lookup(
+		    &config->destination_lpm_v6,
+		    16,
+		    (uint8_t *)&header->dst_addr
 	    ) == LPM_VALUE_INVALID) {
 		return -1;
 	}
@@ -82,8 +86,8 @@ dscp_handle_packets(
 	);
 
 	if (dscp_config->dscp.flag != DSCP_MARK_NEVER &&
-	    (dscp_config->has_destination_prefixes ||
-	     dscp_config->has_source_prefixes)) {
+	    (dscp_config->has_source_prefixes ||
+	     dscp_config->has_destination_prefixes)) {
 		struct packet *packet;
 		while ((packet = packet_list_pop(&packet_front->input)) != NULL
 		) {

@@ -31,14 +31,14 @@ func (m *backend) Update(name string, payload *config) (crud.Handle, error) {
 	}
 
 	build := func(module *cdscp.ModuleConfig) error {
-		for _, prefix := range slices.Concat(payload.Prefixes4, payload.Prefixes6) {
-			if err := module.PrefixAdd(prefix); err != nil {
-				return fmt.Errorf("failed to add prefix: %w", err)
-			}
-		}
 		for _, prefix := range slices.Concat(payload.SourcePrefixes4, payload.SourcePrefixes6) {
 			if err := module.SourcePrefixAdd(prefix); err != nil {
 				return fmt.Errorf("failed to add source prefix: %w", err)
+			}
+		}
+		for _, prefix := range slices.Concat(payload.DestinationPrefixes4, payload.DestinationPrefixes6) {
+			if err := module.DestinationPrefixAdd(prefix); err != nil {
+				return fmt.Errorf("failed to add destination prefix: %w", err)
 			}
 		}
 		if err := module.SetDscpMarking(payload.Config.Flag, payload.Config.Mark); err != nil {

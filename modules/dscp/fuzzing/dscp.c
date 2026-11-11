@@ -40,28 +40,7 @@ dscp_test_config(struct cp_module **cp_module) {
 		goto error_config;
 	}
 
-	// 127.0.0.0/24
-	int rc = dscp_module_config_add_prefix_v4(
-		&config->cp_module,
-		(uint8_t[4]){127, 0, 0, 0},
-		(uint8_t[4]){127, 0, 0, 0xff}
-	);
-	if (rc != 0) {
-		goto error_data;
-	}
-	// fe80::0/96
-	rc = dscp_module_config_add_prefix_v6(
-		&config->cp_module,
-		(uint8_t[16]){0xfe, 0x80, [15] = 0},
-		(uint8_t[16]
-		){0xfe, 0x80, [12] = 0xff, [13] = 0xff, [14] = 0xff, [15] = 0xff
-		}
-	);
-	if (rc != 0) {
-		goto error_data;
-	}
-
-	rc = dscp_module_config_add_source_prefix_v4(
+	int rc = dscp_module_config_add_source_prefix_v4(
 		&config->cp_module,
 		(uint8_t[4]){0},
 		(uint8_t[4]){0x7f, 0xff, 0xff, 0xff}
@@ -73,6 +52,27 @@ dscp_test_config(struct cp_module **cp_module) {
 		&config->cp_module,
 		(uint8_t[16]){0},
 		(uint8_t[16]){0x7f, [1 ... 15] = 0xff}
+	);
+	if (rc != 0) {
+		goto error_data;
+	}
+
+	// 127.0.0.0/24
+	rc = dscp_module_config_add_destination_prefix_v4(
+		&config->cp_module,
+		(uint8_t[4]){127, 0, 0, 0},
+		(uint8_t[4]){127, 0, 0, 0xff}
+	);
+	if (rc != 0) {
+		goto error_data;
+	}
+	// fe80::0/96
+	rc = dscp_module_config_add_destination_prefix_v6(
+		&config->cp_module,
+		(uint8_t[16]){0xfe, 0x80, [15] = 0},
+		(uint8_t[16]
+		){0xfe, 0x80, [12] = 0xff, [13] = 0xff, [14] = 0xff, [15] = 0xff
+		}
 	);
 	if (rc != 0) {
 		goto error_data;

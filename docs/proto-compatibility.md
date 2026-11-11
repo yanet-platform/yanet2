@@ -111,6 +111,9 @@ The following entries in `buf.yaml` intentionally deviate from the defaults. Eac
 - `controlplane/ynpb/v1/module.proto` — removed intentionally because no gateway ever registered or exposed its service, so no runtime route existed.
 - `operators/forward/operatorpb` and `operators/decap/operatorpb` — the readiness packages of the forward and decap operators were deleted on purpose. The static module operator preserves `/operators.<name>.operatorpb.v1.ReadinessService/Ready` and also registers `/operators.<name>.operatorpb.v1.MetricsService/GetMetrics` as runtime routes using the shared readiness and metrics messages. These runtime names do not recreate proto packages, and no generated client of the deleted packages existed outside the operators themselves.
 
+**`breaking.ignore_only`**
+- `FIELD_SAME_NAME` and `FIELD_SAME_JSON_NAME` for `modules/dscp/controlplane/dscppb/v1/dscp.proto` allow the destination fields to become `destination_prefixes4` and `destination_prefixes6`. Their field numbers and types stay unchanged, and the generic operator accepts the old YAML names as aliases. Regenerate API clients for the renamed fields. Other compatibility checks still apply; remove these name exceptions once the rename reaches the comparison base.
+
 **`lint.except`** — six identifier-naming rules are disabled globally because enforcing them would require renaming existing wire identifiers, which would itself be a breaking change:
 - `ENUM_VALUE_PREFIX`
 - `ENUM_ZERO_VALUE_SUFFIX`

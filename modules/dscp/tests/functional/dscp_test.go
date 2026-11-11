@@ -56,8 +56,8 @@ func setupDSCPHarness(t *testing.T, flag, mark uint8) *dataplaneut.Harness {
 }
 
 type dscpSelection struct {
-	destinations []netip.Prefix
 	sources      []netip.Prefix
+	destinations []netip.Prefix
 }
 
 // setupDSCPSelectionHarness publishes both prefix sets with unchanged egress.
@@ -86,11 +86,11 @@ func setupDSCPSelectionHarness(
 	module, err := cdscp.NewModuleConfig(agent, "mark")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = module.Free() })
-	for _, prefix := range selection.destinations {
-		require.NoError(t, module.PrefixAdd(prefix))
-	}
 	for _, prefix := range selection.sources {
 		require.NoError(t, module.SourcePrefixAdd(prefix))
+	}
+	for _, prefix := range selection.destinations {
+		require.NoError(t, module.DestinationPrefixAdd(prefix))
 	}
 	require.NoError(t, module.SetDscpMarking(flag, mark))
 
@@ -399,20 +399,20 @@ func setupDSCPYAMLHarness(t *testing.T, document string) *dataplaneut.Harness {
 	request := message.(*dscppb.UpdateConfigRequest)
 	require.NoError(t, request.Validate())
 	config := request.GetConfig()
-	prefixes4, err := commonpb.PrefixesFromNetworks("prefixes4", config.GetPrefixes4())
-	require.NoError(t, err)
-	prefixes6, err := commonpb.PrefixesFromNetworks("prefixes6", config.GetPrefixes6())
-	require.NoError(t, err)
 	sources4, err := commonpb.PrefixesFromNetworks("source_prefixes4", config.GetSourcePrefixes4())
 	require.NoError(t, err)
 	sources6, err := commonpb.PrefixesFromNetworks("source_prefixes6", config.GetSourcePrefixes6())
+	require.NoError(t, err)
+	destinations4, err := commonpb.PrefixesFromNetworks("destination_prefixes4", config.GetDestinationPrefixes4())
+	require.NoError(t, err)
+	destinations6, err := commonpb.PrefixesFromNetworks("destination_prefixes6", config.GetDestinationPrefixes6())
 	require.NoError(t, err)
 	return setupDSCPSelectionHarness(t,
 		uint8(config.GetDscpConfig().GetFlag()),
 		uint8(config.GetDscpConfig().GetMark()),
 		dscpSelection{
-			destinations: slices.Concat(prefixes4, prefixes6),
 			sources:      slices.Concat(sources4, sources6),
+			destinations: slices.Concat(destinations4, destinations6),
 		},
 	)
 }
@@ -548,18 +548,18 @@ func Test_DSCP_SourceSelection(t *testing.T) {
 		},
 		{
 			name: "both directions and families",
-			prefixes: `  prefixes4: [198.51.100.0/24]
-  prefixes6: ["2001:db8:2::/48"]
-  source_prefixes4: [192.0.2.0/24]
+			prefixes: `  source_prefixes4: [192.0.2.0/24]
   source_prefixes6: ["2001:db8:1::/48"]
+  destination_prefixes4: [198.51.100.0/24]
+  destination_prefixes6: ["2001:db8:2::/48"]
 `,
 			marks4: [4]bool{false, false, false, true},
 			marks6: [4]bool{false, false, false, true},
 		},
 		{
 			name: "directions with different address families",
-			prefixes: `  prefixes6: ["2001:db8:2::/48"]
-  source_prefixes4: [192.0.2.0/24]
+			prefixes: `  source_prefixes4: [192.0.2.0/24]
+  destination_prefixes6: ["2001:db8:2::/48"]
 `,
 		},
 	}
