@@ -5,9 +5,15 @@
 //! arrays and the owned edges, and a struct gets it from
 //! `#[derive(ShmLayout)]`, so every implementor is valid for every bit pattern
 //! C may write, needs no drop and is aligned to at most 64. Padding may be
-//! uninitialized and is never accessed as data.
+//! uninitialized and is never accessed as data. An IPv4 or IPv6 address of
+//! `core::net` is a leaf too: the standard library documents no layout for
+//! it, so the build checks the one this crate relies on.
 
-use core::sync::atomic::{AtomicI8, AtomicI16, AtomicI32, AtomicI64, AtomicU8, AtomicU16, AtomicU32, AtomicU64};
+use core::{
+    mem::{align_of, transmute},
+    net::{Ipv4Addr, Ipv6Addr},
+    sync::atomic::{AtomicI8, AtomicI16, AtomicI32, AtomicI64, AtomicU8, AtomicU16, AtomicU32, AtomicU64},
+};
 
 use crate::rel::{ShmBox, ShmSlice};
 
@@ -50,6 +56,39 @@ plain_leaf! {
     AtomicI8, AtomicI16, AtomicI32, AtomicI64,
     (),
 }
+
+// The build proves the layout of an address that the leaves below rely on.
+//
+// The standard library documents no layout for its addresses. An address
+// must be its octets in network order and nothing else, and a standard
+// library that lays one out in another way stops the build here.
+const _: () = {
+    const V4: [u8; 4] = [0x0a, 0x1b, 0x2c, 0x3d];
+    const V6: [u8; 16] = [
+        0x20, 0x01, 0x0d, 0xb8, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+    ];
+    // SAFETY: every pattern of four bytes is an address.
+    //
+    // The standard library makes an address of any four octets and gives
+    // the same octets back, so the type has a value for every such pattern.
+    // A transmute compiles only between types of one size, and a type of
+    // four bytes with that many values has no invalid pattern and no
+    // padding.
+    let v4 = unsafe { transmute::<[u8; 4], Ipv4Addr>(V4) };
+    // SAFETY: as above, over sixteen octets.
+    let v6 = unsafe { transmute::<[u8; 16], Ipv6Addr>(V6) };
+    // Arrays do not compare in a constant, the numbers of their bytes do.
+    assert!(u32::from_be_bytes(v4.octets()) == u32::from_be_bytes(V4));
+    assert!(u128::from_be_bytes(v6.octets()) == u128::from_be_bytes(V6));
+    assert!(align_of::<Ipv4Addr>() == 1 && align_of::<Ipv6Addr>() == 1);
+};
+
+// SAFETY: an address is its octets alone, as the build proved above: every
+// bit pattern is a value, with no padding, no drop and an alignment of 1.
+unsafe impl ShmLayout for Ipv4Addr {}
+
+// SAFETY: as for the IPv4 address.
+unsafe impl ShmLayout for Ipv6Addr {}
 
 // SAFETY: an array of layout elements has no padding between elements and
 // no invalid pattern.

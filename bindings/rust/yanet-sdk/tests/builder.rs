@@ -9,6 +9,8 @@
 
 use core::{
     marker::PhantomData,
+    mem::offset_of,
+    net::{Ipv4Addr, Ipv6Addr},
     sync::atomic::{AtomicU32, Ordering},
 };
 
@@ -46,6 +48,17 @@ struct Policy {
     default: ShmBox<Rule>,
     flags: [u8; 4],
     mask: AtomicU32,
+}
+
+/// Addresses of the standard library, after a byte that leaves them at odd
+/// offsets.
+#[derive(ShmLayout)]
+#[repr(C)]
+struct Addresses {
+    tag: u8,
+    v4: Ipv4Addr,
+    v6: Ipv6Addr,
+    hosts: ShmSlice<Ipv6Addr>,
 }
 
 /// Fields named like the names the derive's expansion uses itself.
@@ -476,6 +489,34 @@ fn test_build_padded_root_mutex_and_slice_use_only_typed_fields() {
     assert_eq!(16, size_of::<Padded>());
     assert_eq!(24, size_of::<yanet_sdk::Mutex<Padded>>());
     release::<Fixture<PaddedRoot>>(&owner, built);
+    owner.assert_released();
+}
+
+/// verifies that a configuration holds the addresses of the standard library
+/// as their octets in network order, in a field and in a slice.
+#[test]
+fn test_build_holds_standard_addresses_as_their_octets() {
+    let v4 = Ipv4Addr::new(10, 27, 44, 61);
+    let v6 = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
+    let hosts = [Ipv6Addr::LOCALHOST, Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0xa1b, 0x2c3d)];
+
+    let owner = owner();
+    let built = build::<Fixture<Addresses>>(&owner, |b| {
+        Ok(AddressesParts {
+            tag: 7,
+            v4,
+            v6,
+            hosts: b.slice(hosts.len(), |idx| Ok(hosts[idx]))?,
+        })
+    })
+    .expect("built");
+    let (config, view) = body::<Fixture<Addresses>>(&owner, &built);
+    assert_eq!((7, v4, v6), (config.tag, config.v4, config.v6));
+    assert_eq!(hosts, config.hosts.as_slice(&view));
+    // No byte pads an address: the first lies right after the tag and the
+    // second right after the first.
+    assert_eq!((1, 5), (offset_of!(Addresses, v4), offset_of!(Addresses, v6)));
+    release::<Fixture<Addresses>>(&owner, built);
     owner.assert_released();
 }
 
