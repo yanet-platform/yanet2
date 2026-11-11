@@ -30,6 +30,9 @@ pub use ethernet::{ETHERTYPE_IPV4, ETHERTYPE_IPV6, ETHERTYPE_QINQ, ETHERTYPE_VLA
 pub use icmp::{Icmpv4Header, Icmpv4Mutation, Icmpv6Header, Icmpv6Mutation};
 pub use ipv4::{Ipv4Header, Ipv4Mutation, Ipv4Packet, Ipv4PacketMut};
 pub use ipv6::Ipv6Header;
+/// The header bookkeeping of the SDK's packet insert and remove.
+#[doc(hidden)]
+pub use mutation::resize;
 pub use mutation::{Adjusted, Mode, Unadjusted};
 pub use tcp::{TcpHeader, TcpMutation, TcpPacket, TcpPacketMut};
 pub use udp::{UdpHeader, UdpMutation};

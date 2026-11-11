@@ -5,7 +5,10 @@ use alloc::{
     vec,
     vec::Vec,
 };
-use core::alloc::Layout;
+use core::{
+    alloc::Layout,
+    net::{Ipv4Addr, Ipv6Addr},
+};
 
 use super::*;
 
@@ -608,6 +611,640 @@ fn test_trim_of_unparsed_packet_up_to_the_frame_length() {
     assert_eq!(Err(ResizeError), past.packet().trim(43));
 
     assert_eq!((0, 42), (whole.frame().len(), past.frame().len()));
+}
+
+/// A numbered frame of `len` bytes whose parsed headers carry no length: a
+/// non-IP network header at 14 and an unavailable UDP header at 34.
+fn numbered(headroom: u16, len: usize, tailroom: u16) -> Frame {
+    numbered_as(0x0806, headroom, len, tailroom)
+}
+
+/// [`numbered`] with a network header of the ether type, host order.
+fn numbered_as(network_type: u16, headroom: u16, len: usize, tailroom: u16) -> Frame {
+    let frame: Vec<u8> = (0..len).map(|idx| idx as u8).collect();
+    Frame::new(headers(network_type, 0x100 | 17, 34), headroom, &frame, tailroom)
+}
+
+/// verifies that an insert moves the shorter side, or the other when its
+/// room is short, puts the new bytes at the offset with the bytes around
+/// them in order, and moves the parsed headers at or after it.
+#[test]
+fn test_insert_moves_the_shorter_side_and_the_headers_after_it() {
+    for (case, headroom, tailroom, at, len, front, offsets) in [
+        ("front, before both headers", 16, 16, 4, 4, true, (18, 38)),
+        ("tail, at the end", 16, 16, 42, 4, false, (14, 34)),
+        ("tail, between the headers", 16, 16, 34, 8, false, (14, 42)),
+        ("tail, the headroom short", 0, 8, 4, 4, false, (18, 38)),
+        ("front, the tailroom short", 8, 0, 42, 4, true, (14, 34)),
+        ("front, filling the headroom exactly", 4, 0, 4, 4, true, (18, 38)),
+    ] {
+        let mut frame = numbered(headroom, 42, tailroom);
+        let (before, data_off) = (frame.frame().to_vec(), frame.mbuf.data_off);
+
+        frame.packet().insert(at, len, |gap| gap.fill(0xaa)).expect(case);
+
+        let expected = [&before[..at], &vec![0xaa; len], &before[at..]].concat();
+        let moved = if front { len as u16 } else { 0 };
+        assert_eq!(expected, frame.frame(), "{case}");
+        assert_eq!(offsets, frame.offsets(), "{case}");
+        assert_eq!(
+            (data_off - moved, expected.len() as u32, expected.len() as u16),
+            (frame.mbuf.data_off, frame.mbuf.pkt_len, frame.descriptor().data_len),
+            "{case}"
+        );
+    }
+}
+
+/// verifies that a remove moves the shorter side, closes the gap with the
+/// bytes around it in order, and moves the parsed headers after it.
+#[test]
+fn test_remove_moves_the_shorter_side_and_the_headers_after_it() {
+    for (case, network, at, len, front, offsets) in [
+        ("front, a vlan tag", 18, 12, 4, true, (14, 30)),
+        ("tail, behind the headers", 14, 44, 4, false, (14, 34)),
+        ("tail, up to the end", 14, 42, 8, false, (14, 34)),
+    ] {
+        let numbered: Vec<u8> = (0..50).map(|idx| idx as u8).collect();
+        let descriptor = bindings::packet {
+            network_header: bindings::network_header {
+                type_: 0x0806u16.to_be(),
+                offset: network,
+            },
+            ..headers(0x0806, 0x100 | 17, 34)
+        };
+        let mut frame = Frame::new(descriptor, 0, &numbered, 0);
+        let (before, data_off) = (frame.frame().to_vec(), frame.mbuf.data_off);
+
+        assert_eq!(Ok(()), frame.packet().remove(at, len), "{case}");
+
+        let expected = [&before[..at], &before[at + len..]].concat();
+        let moved = if front { len as u16 } else { 0 };
+        assert_eq!(expected, frame.frame(), "{case}");
+        assert_eq!(offsets, frame.offsets(), "{case}");
+        assert_eq!(
+            (data_off + moved, expected.len() as u32, expected.len() as u16),
+            (frame.mbuf.data_off, frame.mbuf.pkt_len, frame.descriptor().data_len),
+            "{case}"
+        );
+    }
+}
+
+/// A resize of a packet, refused or not.
+type Resize = fn(&mut Packet<'_>) -> Result<(), ResizeError>;
+
+/// verifies that a resize memory safety rules out is refused and leaves the
+/// packet as it was: a remove pulling the network header into the Ethernet
+/// header, where the tunnel operations write before it, or starting at a
+/// header that vouches for no bytes, and an insert one byte past the
+/// headroom with no tailroom.
+#[test]
+fn test_resize_refuses_what_memory_safety_rules_out() {
+    // Each case: the network header's ether type, the headroom and the
+    // resize.
+    let cases: [(&str, u16, u16, Resize); 5] = [
+        ("the network header into the ethernet header", 0x0806, 16, |packet| {
+            packet.remove(0, 13)
+        }),
+        ("a network header of ether type zero into it", 0, 16, |packet| {
+            packet.remove(0, 13)
+        }),
+        ("a cut of the ethernet header", 0x0806, 16, |packet| packet.remove(2, 4)),
+        (
+            "a range starting at an unavailable transport header",
+            0x0806,
+            16,
+            |packet| packet.remove(34, 4),
+        ),
+        ("one byte past the headroom", 0x0806, 4, |packet| {
+            packet.insert(4, 5, |gap| gap.fill(0))
+        }),
+    ];
+    for (case, network_type, headroom, resize) in cases {
+        let mut frame = numbered_as(network_type, headroom, 42, 0);
+        let (before, offsets) = (frame.frame().to_vec(), frame.offsets());
+
+        assert_eq!(Err(ResizeError), resize(&mut frame.packet()), "{case}");
+        assert_eq!((before, offsets), (frame.frame().to_vec(), frame.offsets()), "{case}");
+    }
+}
+
+/// Sets the header checksum of the IPv4 header at the offset.
+fn seal_ipv4(frame: &mut [u8], network: usize) {
+    let header = (usize::from(frame[network] & 0xf)) * 4;
+    frame[network + 10..network + 12].fill(0);
+    let sum = yanet_packet::checksum::sum(&frame[network..network + header]);
+    frame[network + 10..network + 12].copy_from_slice(&(!sum).to_be_bytes());
+}
+
+/// The upper-layer protocol of the IPv6 header at the offset and the offset
+/// of its header, stepping over one Hop-by-Hop header.
+fn ipv6_upper(frame: &[u8], network: usize) -> (u8, usize) {
+    match frame[network + 6] {
+        0 => (
+            frame[network + 40],
+            network + 40 + (usize::from(frame[network + 41]) + 1) * 8,
+        ),
+        protocol => (protocol, network + 40),
+    }
+}
+
+/// Sets the TCP or UDP checksum of a segment from the offset to the end of
+/// the frame, behind the IPv4 or IPv6 header at 14.
+fn seal_transport(frame: &mut [u8], transport: usize) {
+    let (ipv4, protocol) = match frame[12..14] {
+        [0x08, 0x00] => (true, frame[14 + 9]),
+        _ => (false, ipv6_upper(frame, 14).0),
+    };
+    let field = transport + if protocol == 6 { 16 } else { 6 };
+    frame[field..field + 2].fill(0);
+    let segment = &frame[transport..];
+    let checksum = if ipv4 {
+        let address = |at: usize| Ipv4Addr::from(<[u8; 4]>::try_from(&frame[at..at + 4]).expect("an address"));
+        yanet_packet::checksum::l4_checksum_ipv4(address(26), address(30), protocol, segment)
+    } else {
+        let address = |at: usize| Ipv6Addr::from(<[u8; 16]>::try_from(&frame[at..at + 16]).expect("an address"));
+        yanet_packet::checksum::l4_checksum_ipv6(address(22), address(38), protocol, segment)
+    };
+    let checksum = if checksum == 0 && protocol == 17 {
+        0xffff
+    } else {
+        checksum
+    };
+    frame[field..field + 2].copy_from_slice(&checksum.to_be_bytes());
+}
+
+/// A TCP header with the options, padded to whole words by the caller,
+/// before the payload.
+fn tcp_with(options: &[u8], payload: &[u8]) -> Vec<u8> {
+    let mut header = tcp(1000, 80);
+    header[12] = (((20 + options.len()) / 4) << 4) as u8;
+    header.extend_from_slice(options);
+    header.extend_from_slice(payload);
+    header
+}
+
+/// A UDP header before the payload, whose length counts it.
+fn udp_with(payload: &[u8]) -> Vec<u8> {
+    let mut header = udp(1000, 53);
+    header[4..6].copy_from_slice(&(8 + payload.len() as u16).to_be_bytes());
+    header.extend_from_slice(payload);
+    header
+}
+
+/// A sealed Ethernet frame of an IPv4 datagram with the header options
+/// around the transport segment, and trailer bytes after the datagram.
+fn sealed_ipv4(options: &[u8], protocol: u8, fragment: u16, segment: &[u8], trailer: usize) -> Vec<u8> {
+    let mut datagram = ipv4(protocol, fragment, segment);
+    datagram[0] = 0x40 | ((20 + options.len()) / 4) as u8;
+    let total = (20 + options.len() + segment.len()) as u16;
+    datagram[2..4].copy_from_slice(&total.to_be_bytes());
+    datagram.splice(20..20, options.iter().copied());
+    let mut frame = ether(0x0800, &datagram);
+    seal_ipv4(&mut frame, 14);
+    if fragment == 0 {
+        let transport = 14 + 20 + options.len();
+        let end = frame.len();
+        let mut sealed = frame[..end].to_vec();
+        seal_transport(&mut sealed, transport);
+        frame = sealed;
+    }
+    frame.extend(core::iter::repeat_n(0x77, trailer));
+    frame
+}
+
+/// A sealed Ethernet frame of an IPv6 datagram of the transport segment.
+fn sealed_ipv6(protocol: u8, segment: &[u8]) -> Vec<u8> {
+    let mut frame = ether(0x86dd, &ipv6(protocol, segment));
+    let transport = ipv6_upper(&frame, 14).1;
+    seal_transport(&mut frame, transport);
+    frame
+}
+
+/// Reports what of the frame's headers, at the parsed offsets, disagrees
+/// with its bytes: the IPv4 header checksum, the IP length against the frame
+/// without its trailer, the UDP length against the IP one less the surplus
+/// area behind it, or the TCP or UDP checksum, over the UDP length for UDP,
+/// unless told the transport checksum was not kept.
+fn inconsistency(
+    frame: &[u8],
+    (network, transport): (u16, u16),
+    trailer: usize,
+    surplus: usize,
+    transport_kept: bool,
+) -> Option<&'static str> {
+    let (network, transport) = (usize::from(network), usize::from(transport));
+    let word = |at: usize| usize::from(u16::from_be_bytes([frame[at], frame[at + 1]]));
+    let (ipv4, network_end, protocol) = match frame[network] >> 4 {
+        4 => {
+            let header = usize::from(frame[network] & 0xf) * 4;
+            if yanet_packet::checksum::sum(&frame[network..network + header]) != 0xffff {
+                return Some("ipv4 header checksum");
+            }
+            (true, network + word(network + 2), frame[network + 9])
+        }
+        _ => (false, network + 40 + word(network + 4), ipv6_upper(frame, network).0),
+    };
+    if network_end + trailer != frame.len() {
+        return Some("ip length");
+    }
+    if protocol == 17 && word(transport + 4) + surplus != network_end - transport {
+        return Some("udp length");
+    }
+    let covered_end = if protocol == 17 {
+        network_end - surplus
+    } else {
+        network_end
+    };
+    let segment = &frame[transport..covered_end];
+    let valid = if ipv4 {
+        let address = |at: usize| Ipv4Addr::from(<[u8; 4]>::try_from(&frame[at..at + 4]).expect("an address"));
+        yanet_packet::checksum::l4_is_valid_ipv4(address(network + 12), address(network + 16), protocol, segment)
+    } else {
+        let address = |at: usize| Ipv6Addr::from(<[u8; 16]>::try_from(&frame[at..at + 16]).expect("an address"));
+        yanet_packet::checksum::l4_is_valid_ipv6(address(network + 8), address(network + 24), protocol, segment)
+    };
+    (transport_kept && !valid).then_some("transport checksum")
+}
+
+/// An edit of a frame: an insert of payload or TCP options, filled with
+/// bytes counting up from one, or a remove.
+#[derive(Clone, Copy, Debug)]
+enum Op {
+    Insert(usize, usize),
+    InsertOptions(usize, usize),
+    Remove(usize, usize),
+}
+
+/// The descriptor the parser would write for an IPv4 or IPv6 frame built by
+/// the sealing helpers, built here so that Miri, which runs no C, runs the
+/// edits: the network header at 14, the transport header behind it, and
+/// the fragment flag of an IPv4 fragment.
+fn described(frame: &[u8]) -> bindings::packet {
+    let (network_type, transport_offset, protocol, fragment) = match frame[12..14] {
+        [0x08, 0x00] => {
+            let fragment = u16::from_be_bytes([frame[20], frame[21]]) & 0x3fff != 0;
+            (0x0800, 14 + usize::from(frame[14] & 0xf) * 4, frame[23], fragment)
+        }
+        _ => {
+            let (protocol, transport) = ipv6_upper(frame, 14);
+            (0x86dd, transport, protocol, false)
+        }
+    };
+    let flags = if fragment {
+        1 << bindings::packet_flag_PACKET_FLAG_FRAGMENTED
+    } else {
+        0
+    };
+    bindings::packet {
+        flags,
+        ..headers(network_type, u16::from(protocol), transport_offset as u16)
+    }
+}
+
+/// Fills bytes counting up from one.
+fn count_up(gap: &mut [u8]) {
+    for (idx, byte) in gap.iter_mut().enumerate() {
+        *byte = idx as u8 + 1;
+    }
+}
+
+/// Applies the edit to a described copy of the frame between 16 bytes of
+/// headroom and of tailroom, and returns the frame and its parsed network
+/// and transport offsets.
+fn edited(bytes: &[u8], op: Op) -> (Vec<u8>, (u16, u16)) {
+    let mut frame = Frame::new(described(bytes), 16, bytes, 16);
+    let mut packet = frame.packet();
+    let result = match op {
+        Op::Insert(at, len) => packet.insert(at, len, count_up),
+        Op::InsertOptions(at, len) => packet.insert_tcp_options(at, len, count_up),
+        Op::Remove(at, len) => packet.remove(at, len),
+    };
+    result.unwrap_or_else(|_| panic!("{op:?} refused"));
+    (frame.frame().to_vec(), frame.offsets())
+}
+
+/// verifies that an edit inside a parsed datagram leaves every length and
+/// checksum its headers carry agreeing with its bytes, after even and odd
+/// shifts alike, and grows or shrinks the header lengths with the options
+/// it edits.
+#[test]
+fn test_edit_keeps_lengths_and_checksums_consistent() {
+    let payload: Vec<u8> = (0..24).map(|idx| (idx * 7) as u8).collect();
+    let udp4 = sealed_ipv4(&[], 17, 0, &udp_with(&payload), 0);
+    let udp4_trailer = sealed_ipv4(&[], 17, 0, &udp_with(&payload), 6);
+    let options = [2, 4, 0x05, 0xb4, 1, 1, 4, 2];
+    let tcp4 = sealed_ipv4(&[], 6, 0, &tcp_with(&options, &payload), 0);
+    let ip_options = sealed_ipv4(&[1, 1, 1, 0], 6, 0, &tcp_with(&[], &payload), 0);
+    let tcp6 = sealed_ipv6(6, &tcp_with(&options, &payload));
+    // A Hop-by-Hop header of eight bytes, PadN filling it, before TCP.
+    let hop_by_hop = [[6, 0, 1, 4, 0, 0, 0, 0].as_slice(), &tcp_with(&[], &payload)].concat();
+    let tcp6_extended = sealed_ipv6(0, &hop_by_hop);
+    // Each case: the frame, the edit, the trailer bytes left after it, and
+    // the TCP data offset or IPv4 header length byte expected after it at
+    // its new offset.
+    for (case, bytes, op, trailer, header_byte) in [
+        ("udp payload, even at even", &udp4, Op::Insert(46, 4), 0, None),
+        ("udp payload, even at odd", &udp4, Op::Insert(47, 6), 0, None),
+        ("udp payload, odd", &udp4, Op::Insert(46, 3), 0, None),
+        ("udp payload at the end", &udp4, Op::Insert(66, 2), 0, None),
+        ("before the network header", &udp4, Op::Insert(12, 4), 0, None),
+        ("between the ip and udp headers", &udp4, Op::Insert(34, 4), 0, None),
+        ("udp payload removed, even", &udp4, Op::Remove(44, 4), 0, None),
+        ("udp payload removed, odd at odd", &udp4, Op::Remove(45, 3), 0, None),
+        (
+            "trailer removed, datagram kept",
+            &udp4_trailer,
+            Op::Remove(68, 4),
+            2,
+            None,
+        ),
+        (
+            "datagram end and trailer removed",
+            &udp4_trailer,
+            Op::Remove(64, 4),
+            4,
+            None,
+        ),
+        (
+            "tcp options at their start",
+            &tcp4,
+            Op::InsertOptions(54, 4),
+            0,
+            Some((46, 0x80)),
+        ),
+        (
+            "tcp options at their end",
+            &tcp4,
+            Op::InsertOptions(62, 8),
+            0,
+            Some((46, 0x90)),
+        ),
+        (
+            "tcp payload at the options' end",
+            &tcp4,
+            Op::Insert(62, 6),
+            0,
+            Some((46, 0x70)),
+        ),
+        ("tcp options removed", &tcp4, Op::Remove(54, 4), 0, Some((46, 0x60))),
+        (
+            "ipv4 options removed",
+            &ip_options,
+            Op::Remove(34, 4),
+            0,
+            Some((14, 0x45)),
+        ),
+        ("ipv6 tcp payload", &tcp6, Op::Insert(90, 5), 0, Some((66, 0x70))),
+        (
+            "ipv6 tcp payload removed",
+            &tcp6,
+            Op::Remove(83, 7),
+            0,
+            Some((66, 0x70)),
+        ),
+        ("ipv6 tcp options", &tcp6, Op::InsertOptions(82, 4), 0, Some((66, 0x80))),
+        (
+            "ipv6 hop-by-hop, tcp payload, odd",
+            &tcp6_extended,
+            Op::Insert(85, 3),
+            0,
+            None,
+        ),
+        (
+            "ipv6 hop-by-hop, tcp payload removed",
+            &tcp6_extended,
+            Op::Remove(84, 4),
+            0,
+            None,
+        ),
+        (
+            "ipv6 hop-by-hop, a header linked before tcp",
+            &tcp6_extended,
+            Op::Insert(62, 8),
+            0,
+            None,
+        ),
+    ] {
+        let (frame, offsets) = edited(bytes, op);
+
+        assert_eq!(None, inconsistency(&frame, offsets, trailer, 0, true), "{case}");
+        if let Some((at, byte)) = header_byte {
+            assert_eq!(byte, frame[at], "{case}");
+        }
+    }
+}
+
+/// verifies that a fragment or a UDP datagram without a checksum has its
+/// lengths kept by an edit and its transport checksum left as it was.
+#[test]
+fn test_edit_leaves_a_transport_checksum_it_cannot_keep() {
+    let payload = [0x11; 16];
+    let mut unchecked = sealed_ipv4(&[], 17, 0, &udp_with(&payload), 0);
+    unchecked[40..42].fill(0);
+    let fragment = sealed_ipv4(&[], 6, 0x2000, &tcp_with(&[], &payload), 0);
+    for (case, bytes, checksum_at) in [
+        ("udp without a checksum", &unchecked, 40),
+        ("first fragment", &fragment, 50),
+    ] {
+        let (frame, offsets) = edited(bytes, Op::Insert(bytes.len() - 4, 4));
+
+        assert_eq!(None, inconsistency(&frame, offsets, 0, 0, false), "{case}");
+        assert_eq!(
+            bytes[checksum_at..checksum_at + 2],
+            frame[checksum_at..checksum_at + 2],
+            "{case}"
+        );
+    }
+}
+
+/// verifies that an edit keeps a damaged transport checksum damaged, after
+/// odd shifts too.
+#[test]
+fn test_edit_keeps_a_damaged_transport_checksum_damaged() {
+    let payload: Vec<u8> = (0..24).map(|idx| (idx * 5) as u8).collect();
+    let mut damaged = sealed_ipv4(&[], 17, 0, &udp_with(&payload), 0);
+    // A payload byte changed after the checksum was sealed.
+    damaged[60] ^= 0x10;
+    for (case, op) in [
+        ("odd insert", Op::Insert(46, 3)),
+        ("even insert", Op::Insert(46, 4)),
+        ("odd remove", Op::Remove(45, 3)),
+    ] {
+        let (frame, offsets) = edited(&damaged, op);
+
+        assert_eq!(
+            Some("transport checksum"),
+            inconsistency(&frame, offsets, 0, 0, true),
+            "{case}"
+        );
+    }
+}
+
+/// A sealed Ethernet frame of an IPv4 UDP datagram whose IP payload runs
+/// `surplus` bytes past the UDP length, the checksum over the UDP length.
+fn sealed_udp4_with_surplus(payload: &[u8], surplus: usize) -> Vec<u8> {
+    let mut segment = udp_with(payload);
+    segment.extend(core::iter::repeat_n(0x44, surplus));
+    let mut frame = ether(0x0800, &ipv4(17, 0, &segment));
+    seal_ipv4(&mut frame, 14);
+    let mut covered = frame[..34 + 8 + payload.len()].to_vec();
+    seal_transport(&mut covered, 34);
+    frame[40..42].copy_from_slice(&covered[40..42]);
+    frame
+}
+
+/// verifies that an edit of a UDP datagram with a surplus area behind its
+/// UDP length keeps the UDP checksum over the UDP length, and that an edit
+/// of the surplus area changes the IP length alone.
+#[test]
+fn test_edit_keeps_a_udp_checksum_up_to_the_udp_length() {
+    let payload: Vec<u8> = (0..24).map(|idx| (idx * 11) as u8).collect();
+    let bytes = sealed_udp4_with_surplus(&payload, 6);
+    // Each case: the edit and the surplus bytes left after it.
+    for (case, op, surplus) in [
+        ("udp payload insert, even", Op::Insert(46, 4), 6),
+        ("udp payload insert, odd", Op::Insert(47, 3), 6),
+        ("udp payload remove, odd", Op::Remove(45, 5), 6),
+        ("surplus insert", Op::Insert(68, 4), 10),
+        ("surplus remove", Op::Remove(67, 3), 3),
+    ] {
+        let (frame, offsets) = edited(&bytes, op);
+
+        assert_eq!(None, inconsistency(&frame, offsets, 0, surplus, true), "{case}");
+    }
+}
+
+/// verifies that an edit whose transport sum comes out all ones stores the
+/// checksum as all ones, for TCP as the header mutations do and for UDP,
+/// where zero would mean no checksum.
+#[test]
+fn test_edit_stores_an_all_ones_checksum_as_all_ones() {
+    let payload = [0x21; 16];
+    // Each case: the frame, the payload offset, the checksum offset, and how
+    // much the edit adds to the lengths the checksum covers: the pseudo
+    // header's, and for UDP the UDP length too.
+    let cases = [
+        ("tcp", sealed_ipv4(&[], 6, 0, &tcp_with(&[], &payload), 0), 54, 50, 2),
+        ("udp", sealed_ipv4(&[], 17, 0, &udp_with(&payload), 0), 42, 40, 4),
+    ];
+    for (case, bytes, at, checksum, grown) in cases {
+        // The old sum, the lengths' growth, and the inserted word that makes
+        // the whole all ones.
+        let mut sum = u32::from(!u16::from_be_bytes([bytes[checksum], bytes[checksum + 1]])) + grown;
+        while sum >> 16 != 0 {
+            sum = (sum & 0xffff) + (sum >> 16);
+        }
+        let word = !(sum as u16);
+        let mut frame = Frame::new(described(&bytes), 16, &bytes, 16);
+
+        let inserted = frame
+            .packet()
+            .insert(at, 2, |gap| gap.copy_from_slice(&word.to_be_bytes()));
+
+        assert_eq!(Ok(()), inserted, "{case}");
+        assert_eq!([0xff, 0xff], frame.frame()[checksum..checksum + 2], "{case}");
+        assert_eq!(
+            None,
+            inconsistency(frame.frame(), frame.offsets(), 0, 0, true),
+            "{case}"
+        );
+    }
+}
+
+/// verifies that an edit a header would not count, or one past the frame,
+/// a parsed header or a length field, is refused and leaves the packet as
+/// it was.
+#[test]
+fn test_resize_refusal_leaves_the_packet_unchanged() {
+    let payload = [0x22; 16];
+    let udp4 = sealed_ipv4(&[], 17, 0, &udp_with(&payload), 0);
+    let tcp6 = sealed_ipv6(6, &tcp_with(&[], &payload));
+    let tcp4 = sealed_ipv4(&[], 6, 0, &tcp_with(&[1, 1, 1, 1, 1, 1, 1, 1], &payload), 0);
+    let ip_options = sealed_ipv4(&[1, 1, 1, 0], 6, 0, &tcp_with(&[], &payload), 0);
+    let mut too_long = udp4.clone();
+    too_long[16..18].copy_from_slice(&65530u16.to_be_bytes());
+    seal_ipv4(&mut too_long, 14);
+    let full_options = sealed_ipv4(&[], 6, 0, &tcp_with(&[1; 40], &payload), 0);
+    // A data offset of 48 bytes over a 20-byte segment.
+    let mut overlong_header = sealed_ipv4(&[], 6, 0, &tcp_with(&[], &[]), 0);
+    overlong_header[46] = 0xc0;
+    // A data offset of zero words over a 20-byte header.
+    let mut underlong_header = sealed_ipv4(&[], 6, 0, &tcp_with(&[], &payload), 0);
+    underlong_header[46] = 0x00;
+    for (case, bytes, op) in [
+        ("an insert past the frame", &udp4, Op::Insert(udp4.len() + 1, 1)),
+        ("an insert inside the ipv4 header", &udp4, Op::Insert(20, 4)),
+        ("an insert inside the udp header", &udp4, Op::Insert(38, 2)),
+        ("an insert inside the ipv6 header", &tcp6, Op::Insert(30, 4)),
+        ("an insert beyond both rooms", &udp4, Op::Insert(40, 40)),
+        ("payload inside the tcp options", &tcp4, Op::Insert(58, 4)),
+        ("payload inside the ipv4 options", &ip_options, Op::Insert(36, 4)),
+        ("tcp options not of whole words", &tcp4, Op::InsertOptions(54, 2)),
+        ("tcp options in the payload", &tcp4, Op::InsertOptions(66, 4)),
+        ("tcp options beyond 60 bytes", &full_options, Op::InsertOptions(54, 4)),
+        (
+            "tcp options of a header past its datagram",
+            &overlong_header,
+            Op::InsertOptions(54, 4),
+        ),
+        (
+            "tcp options of a header under five words",
+            &underlong_header,
+            Op::InsertOptions(54, 4),
+        ),
+        ("tcp options into udp", &udp4, Op::InsertOptions(42, 4)),
+        ("an ip length overflowing", &too_long, Op::Insert(50, 8)),
+        ("a remove past the frame", &udp4, Op::Remove(udp4.len() - 2, 3)),
+        ("a remove of an ipv4 header byte", &udp4, Op::Remove(20, 2)),
+        ("a remove of a udp header byte", &udp4, Op::Remove(40, 2)),
+        ("a remove of options and payload", &tcp4, Op::Remove(58, 8)),
+        ("a remove of options not of whole words", &tcp4, Op::Remove(54, 2)),
+        (
+            "a remove of ipv4 options not of whole words",
+            &ip_options,
+            Op::Remove(34, 2),
+        ),
+    ] {
+        let mut frame = Frame::new(described(bytes), 16, bytes, 16);
+        let offsets = frame.offsets();
+        let mut packet = frame.packet();
+
+        let refused = match op {
+            Op::Insert(at, len) => packet.insert(at, len, count_up),
+            Op::InsertOptions(at, len) => packet.insert_tcp_options(at, len, count_up),
+            Op::Remove(at, len) => packet.remove(at, len),
+        };
+
+        assert_eq!(Err(ResizeError), refused, "{case}");
+        assert_eq!((bytes.as_slice(), offsets), (frame.frame(), frame.offsets()), "{case}");
+    }
+}
+
+/// verifies that a chained packet is refused an insert and a remove, as
+/// the bytes after the offset may lie in another segment.
+#[test]
+fn test_insert_and_remove_refuse_a_chained_packet() {
+    let (mut head_buffer, mut tail_buffer) = ([0u8; 512], [0u8; 512]);
+    let mut tail = mbuf(&mut tail_buffer, 256, 60);
+    let mut head = bindings::rte_mbuf {
+        next: &raw mut tail,
+        ..mbuf(&mut head_buffer, 256, 60)
+    };
+    let mut descriptor = bindings::packet {
+        mbuf: &raw mut head,
+        ..Default::default()
+    };
+    let mut packet = Packet {
+        raw: NonNull::from(&mut descriptor),
+        _brand: PhantomData,
+        _local: PhantomData,
+    };
+
+    assert_eq!(
+        (Some(ResizeError), Err(ResizeError)),
+        (packet.insert(10, 4, |_| ()).err(), packet.remove(10, 4))
+    );
+    assert_eq!((256, 60), (head.data_off, head.data_len));
 }
 
 #[test]
