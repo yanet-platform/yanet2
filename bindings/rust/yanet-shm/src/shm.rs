@@ -5,12 +5,9 @@
 //! arrays and the owned edges, and a struct gets it from
 //! `#[derive(ShmLayout)]`, so every implementor is valid for every bit pattern
 //! C may write, needs no drop and is aligned to at most 64. Padding may be
-//! uninitialized and is never accessed as data.
-//!
-//! An IPv4 or IPv6 address of `core::net` is a leaf, so a configuration holds
-//! the address a packet header view returns as it is. The standard library
-//! documents no layout for an address: the build checks the one this crate
-//! relies on, the octets in network order and nothing else.
+//! uninitialized and is never accessed as data. An IPv4 or IPv6 address of
+//! `core::net` is a leaf too: the standard library documents no layout for
+//! it, so the build checks the one this crate relies on.
 
 use core::{
     mem::{align_of, transmute},
@@ -60,20 +57,23 @@ plain_leaf! {
     (),
 }
 
-// The standard library documents no layout for its addresses, so the build
-// proves the one the leaves below rely on: an address is its octets in
-// network order and nothing else. A standard library that lays an address
-// out in another way stops the build here.
+// The build proves the layout of an address that the leaves below rely on.
+//
+// The standard library documents no layout for its addresses. An address
+// must be its octets in network order and nothing else, and a standard
+// library that lays one out in another way stops the build here.
 const _: () = {
     const V4: [u8; 4] = [0x0a, 0x1b, 0x2c, 0x3d];
     const V6: [u8; 16] = [
         0x20, 0x01, 0x0d, 0xb8, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
     ];
-    // SAFETY: the standard library makes an address of any four octets and
-    // gives the same octets back, so the type has a value for every pattern
-    // of four bytes. A transmute compiles only between types of one size,
-    // and a type of four bytes with that many values has no invalid pattern
-    // and no padding.
+    // SAFETY: every pattern of four bytes is an address.
+    //
+    // The standard library makes an address of any four octets and gives
+    // the same octets back, so the type has a value for every such pattern.
+    // A transmute compiles only between types of one size, and a type of
+    // four bytes with that many values has no invalid pattern and no
+    // padding.
     let v4 = unsafe { transmute::<[u8; 4], Ipv4Addr>(V4) };
     // SAFETY: as above, over sixteen octets.
     let v6 = unsafe { transmute::<[u8; 16], Ipv6Addr>(V6) };
@@ -83,9 +83,8 @@ const _: () = {
     assert!(align_of::<Ipv4Addr>() == 1 && align_of::<Ipv6Addr>() == 1);
 };
 
-// SAFETY: an address is its octets and nothing else (proved above), so it
-// accepts every bit pattern, has no padding, needs no drop and is aligned
-// to 1.
+// SAFETY: an address is its octets alone, as the build proved above: every
+// bit pattern is a value, with no padding, no drop and an alignment of 1.
 unsafe impl ShmLayout for Ipv4Addr {}
 
 // SAFETY: as for the IPv4 address.
