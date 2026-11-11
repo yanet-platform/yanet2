@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stddef.h>
+
 #include "common/lpm.h"
 #include "lib/controlplane/config/cp_module.h"
 #include "lib/dataplane/packet/dscp.h"
@@ -10,4 +12,13 @@ struct dscp_module_config {
 	struct lpm lpm_v4;
 	struct lpm lpm_v6;
 	struct dscp_config dscp;
+	struct lpm source_lpm_v4;
+	struct lpm source_lpm_v6;
+	uint8_t has_destination_prefixes;
+	uint8_t has_source_prefixes;
 };
+
+_Static_assert(
+	offsetof(struct dscp_module_config, cp_module) == 0,
+	"module configuration must start with the common header"
+);

@@ -41,9 +41,15 @@ service DscpService {
 }
 
 message Config {
+  // Destination prefixes. An empty destination set imposes no restriction
+  // when a source set is present; two empty sets select no packets.
   repeated common.commonpb.v1.IPv4Prefix prefixes4 = 1;
   repeated common.commonpb.v1.IPv6Prefix prefixes6 = 2;
   DscpConfig dscp_config = 3;
+  // Source prefixes. A packet must match every nonempty direction's set;
+  // a set without prefixes of the packet's address family never matches.
+  repeated common.commonpb.v1.IPv4Prefix source_prefixes4 = 4;
+  repeated common.commonpb.v1.IPv6Prefix source_prefixes6 = 5;
 }
 
 message ListConfigsRequest {}

@@ -30,15 +30,27 @@ dscp_module_config_data_init(
 void
 dscp_module_config_data_fini(struct dscp_module_config *config);
 
-// Add IPv4 prefix to the DSCP module configuration
+// Add an IPv4 destination prefix to the marking selection.
 int
 dscp_module_config_add_prefix_v4(
 	struct cp_module *module, uint8_t *addr_start, uint8_t *addr_end
 );
 
-// Add IPv6 prefix to the DSCP module configuration
+// Add an IPv6 destination prefix to the marking selection.
 int
 dscp_module_config_add_prefix_v6(
+	struct cp_module *module, uint8_t *addr_start, uint8_t *addr_end
+);
+
+// Add an IPv4 source prefix to the marking selection.
+int
+dscp_module_config_add_source_prefix_v4(
+	struct cp_module *module, uint8_t *addr_start, uint8_t *addr_end
+);
+
+// Add an IPv6 source prefix to the marking selection.
+int
+dscp_module_config_add_source_prefix_v6(
 	struct cp_module *module, uint8_t *addr_start, uint8_t *addr_end
 );
 

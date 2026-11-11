@@ -36,6 +36,11 @@ func (m *backend) Update(name string, payload *config) (crud.Handle, error) {
 				return fmt.Errorf("failed to add prefix: %w", err)
 			}
 		}
+		for _, prefix := range slices.Concat(payload.SourcePrefixes4, payload.SourcePrefixes6) {
+			if err := module.SourcePrefixAdd(prefix); err != nil {
+				return fmt.Errorf("failed to add source prefix: %w", err)
+			}
+		}
 		if err := module.SetDscpMarking(payload.Config.Flag, payload.Config.Mark); err != nil {
 			return fmt.Errorf("failed to set DSCP marking: %w", err)
 		}

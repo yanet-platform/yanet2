@@ -74,8 +74,11 @@ pub struct UpdateConfigCmd {
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
     /// Destination prefixes to mark, replacing the current set entirely.
-    #[arg(long = "prefix", short = 'p', required = true, num_args = 0..)]
+    #[arg(long = "prefix", short = 'p', required_unless_present = "source_prefixes", num_args = 0..)]
     pub prefixes: Vec<Contiguous<IpNetwork>>,
+    /// Source prefixes to mark, intersected with any destination prefixes.
+    #[arg(long = "source-prefix", required_unless_present = "prefixes", num_args = 0..)]
+    pub source_prefixes: Vec<Contiguous<IpNetwork>>,
     /// When the DSCP field is rewritten.
     #[arg(long, value_enum)]
     pub flag: MarkingFlag,
@@ -101,6 +104,26 @@ impl From<MarkingFlag> for u32 {
             MarkingFlag::Never => 0,
             MarkingFlag::Default => 1,
             MarkingFlag::Always => 2,
+        }
+    }
+}
+
+impl From<UpdateConfigCmd> for UpdateConfigRequest {
+    fn from(cmd: UpdateConfigCmd) -> Self {
+        let (prefixes4, prefixes6) = partition_prefixes(cmd.prefixes);
+        let (source_prefixes4, source_prefixes6) = partition_prefixes(cmd.source_prefixes);
+        Self {
+            name: cmd.config_name,
+            config: Some(Config {
+                prefixes4,
+                prefixes6,
+                dscp_config: Some(DscpConfig {
+                    flag: cmd.flag.into(),
+                    mark: cmd.mark,
+                }),
+                source_prefixes4,
+                source_prefixes6,
+            }),
         }
     }
 }
@@ -188,25 +211,15 @@ async fn show_config(service: &mut DscpService, cmd: ShowConfigCmd) -> Result<()
 }
 
 async fn update_config(service: &mut DscpService, cmd: UpdateConfigCmd) -> Result<(), Error> {
-    let (prefixes4, prefixes6) = partition_prefixes(cmd.prefixes);
-    let request = UpdateConfigRequest {
-        name: cmd.config_name.clone(),
-        config: Some(Config {
-            prefixes4,
-            prefixes6,
-            dscp_config: Some(DscpConfig {
-                flag: cmd.flag.into(),
-                mark: cmd.mark,
-            }),
-        }),
-    };
+    let name = cmd.config_name.clone();
+    let request = UpdateConfigRequest::from(cmd);
     service
         .unary("update", request, async |client, request| {
             client.update_config(request).await
         })
         .await?;
 
-    output::success("update", format_args!("Updated config '{}'.", cmd.config_name));
+    output::success("update", format_args!("Updated config '{name}'."));
 
     Ok(())
 }
@@ -242,7 +255,15 @@ fn config_block(config: &Config) -> display::KeyValue {
         .map(ToString::to_string)
         .chain(config.prefixes6.iter().map(ToString::to_string));
 
-    block.rows("prefixes", prefixes)
+    let source_prefixes = config
+        .source_prefixes4
+        .iter()
+        .map(ToString::to_string)
+        .chain(config.source_prefixes6.iter().map(ToString::to_string));
+
+    block
+        .rows("prefixes", prefixes)
+        .rows("source prefixes", source_prefixes)
 }
 
 fn flag_to_string(flag: u32) -> String {
@@ -258,4 +279,50 @@ fn config_candidates() -> Vec<CompletionCandidate> {
     completion::candidates(Cmd::command, client, async move |mut client| {
         Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs)
     })
+}
+
+#[cfg(test)]
+mod test {
+    use commonpb::pb::{IPv4Prefix, IPv6Prefix};
+
+    use super::*;
+
+    #[test]
+    fn test_update_config_partitions_directions_and_families() {
+        let request = UpdateConfigRequest::from(UpdateConfigCmd {
+            config_name: "mark".into(),
+            prefixes: vec!["198.51.100.0/24".parse().unwrap(), "2001:db8:2::/48".parse().unwrap()],
+            source_prefixes: vec!["2001:db8:1::/48".parse().unwrap(), "192.0.2.0/24".parse().unwrap()],
+            flag: MarkingFlag::Always,
+            mark: 46,
+        });
+        let config = request.config.unwrap();
+        assert_eq!("mark", request.name);
+        assert_eq!(vec!["198.51.100.0/24".parse::<IPv4Prefix>().unwrap()], config.prefixes4);
+        assert_eq!(vec!["2001:db8:2::/48".parse::<IPv6Prefix>().unwrap()], config.prefixes6);
+        assert_eq!(
+            vec!["192.0.2.0/24".parse::<IPv4Prefix>().unwrap()],
+            config.source_prefixes4
+        );
+        assert_eq!(
+            vec!["2001:db8:1::/48".parse::<IPv6Prefix>().unwrap()],
+            config.source_prefixes6
+        );
+        assert_eq!(Some(DscpConfig { flag: 2, mark: 46 }), config.dscp_config);
+    }
+
+    #[test]
+    fn test_update_config_sources_are_optional() {
+        let request = UpdateConfigRequest::from(UpdateConfigCmd {
+            config_name: "mark".into(),
+            prefixes: vec!["198.51.100.0/24".parse().unwrap()],
+            source_prefixes: vec![],
+            flag: MarkingFlag::Default,
+            mark: 46,
+        });
+        let config = request.config.unwrap();
+        assert_eq!(vec!["198.51.100.0/24".parse::<IPv4Prefix>().unwrap()], config.prefixes4);
+        assert!(config.source_prefixes4.is_empty());
+        assert!(config.source_prefixes6.is_empty());
+    }
 }

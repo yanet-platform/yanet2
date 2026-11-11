@@ -9,6 +9,7 @@ import "C"
 
 import (
 	"fmt"
+	"runtime"
 	"unsafe"
 
 	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
@@ -79,6 +80,36 @@ func (m *ModuleConfig) prefixAdd6(addrStart [16]byte, addrEnd [16]byte) error {
 		return fmt.Errorf("failed to add v6 prefix: unknown error code=%d", rc)
 	}
 
+	return nil
+}
+
+func (m *ModuleConfig) sourcePrefixAdd4(addrStart [4]byte, addrEnd [4]byte) error {
+	var pinner runtime.Pinner
+	pinner.Pin(&addrStart[0])
+	pinner.Pin(&addrEnd[0])
+	defer pinner.Unpin()
+	if rc := C.dscp_module_config_add_source_prefix_v4(
+		m.asRawPtr(),
+		(*C.uint8_t)(&addrStart[0]),
+		(*C.uint8_t)(&addrEnd[0]),
+	); rc != 0 {
+		return fmt.Errorf("failed to add v4 source prefix: unknown error code=%d", rc)
+	}
+	return nil
+}
+
+func (m *ModuleConfig) sourcePrefixAdd6(addrStart [16]byte, addrEnd [16]byte) error {
+	var pinner runtime.Pinner
+	pinner.Pin(&addrStart[0])
+	pinner.Pin(&addrEnd[0])
+	defer pinner.Unpin()
+	if rc := C.dscp_module_config_add_source_prefix_v6(
+		m.asRawPtr(),
+		(*C.uint8_t)(&addrStart[0]),
+		(*C.uint8_t)(&addrEnd[0]),
+	); rc != 0 {
+		return fmt.Errorf("failed to add v6 source prefix: unknown error code=%d", rc)
+	}
 	return nil
 }
 

@@ -103,10 +103,23 @@ dscp_module_config_data_init(
 		lpm_free(&config->lpm_v4);
 		return -1;
 	}
+	if (lpm_init(&config->source_lpm_v4, memory_context, "source_lpm_v4")) {
+		lpm_free(&config->lpm_v6);
+		lpm_free(&config->lpm_v4);
+		return -1;
+	}
+	if (lpm_init(&config->source_lpm_v6, memory_context, "source_lpm_v6")) {
+		lpm_free(&config->source_lpm_v4);
+		lpm_free(&config->lpm_v6);
+		lpm_free(&config->lpm_v4);
+		return -1;
+	}
 
 	// Initialize default DSCP config
 	config->dscp.flag = DSCP_MARK_NEVER;
 	config->dscp.mark = 0;
+	config->has_destination_prefixes = 0;
+	config->has_source_prefixes = 0;
 
 	return 0;
 }
@@ -115,6 +128,8 @@ void
 dscp_module_config_data_fini(struct dscp_module_config *config) {
 	lpm_free(&config->lpm_v4);
 	lpm_free(&config->lpm_v6);
+	lpm_free(&config->source_lpm_v4);
+	lpm_free(&config->source_lpm_v6);
 }
 
 int
@@ -124,7 +139,11 @@ dscp_module_config_add_prefix_v4(
 	struct dscp_module_config *config =
 		container_of(module, struct dscp_module_config, cp_module);
 
-	return lpm_insert(&config->lpm_v4, 4, addr_start, addr_end, 1);
+	int result = lpm_insert(&config->lpm_v4, 4, addr_start, addr_end, 1);
+	if (result == 0) {
+		config->has_destination_prefixes = 1;
+	}
+	return result;
 }
 
 int
@@ -134,7 +153,41 @@ dscp_module_config_add_prefix_v6(
 	struct dscp_module_config *config =
 		container_of(module, struct dscp_module_config, cp_module);
 
-	return lpm_insert(&config->lpm_v6, 16, addr_start, addr_end, 1);
+	int result = lpm_insert(&config->lpm_v6, 16, addr_start, addr_end, 1);
+	if (result == 0) {
+		config->has_destination_prefixes = 1;
+	}
+	return result;
+}
+
+int
+dscp_module_config_add_source_prefix_v4(
+	struct cp_module *module, uint8_t *addr_start, uint8_t *addr_end
+) {
+	struct dscp_module_config *config =
+		container_of(module, struct dscp_module_config, cp_module);
+
+	int result =
+		lpm_insert(&config->source_lpm_v4, 4, addr_start, addr_end, 1);
+	if (result == 0) {
+		config->has_source_prefixes = 1;
+	}
+	return result;
+}
+
+int
+dscp_module_config_add_source_prefix_v6(
+	struct cp_module *module, uint8_t *addr_start, uint8_t *addr_end
+) {
+	struct dscp_module_config *config =
+		container_of(module, struct dscp_module_config, cp_module);
+
+	int result =
+		lpm_insert(&config->source_lpm_v6, 16, addr_start, addr_end, 1);
+	if (result == 0) {
+		config->has_source_prefixes = 1;
+	}
+	return result;
 }
 
 int
