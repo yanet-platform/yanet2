@@ -3,6 +3,121 @@
 Manual steps required when upgrading an existing deployment. The packaging
 does not perform these automatically.
 
+## FWState synchronization splits emission from reception
+
+`SyncConfig` replaces its flat source, destination MAC and multicast/unicast
+endpoint fields with two independent lists: a repeated `endpoints` list,
+each entry carrying its own source and destination IPv6 address and a
+destination port, drives emission, and a repeated `listeners` list, each
+entry carrying a destination address and port, is the receive contract. An
+carried update replaces both lists whole, an empty list clearing it, so
+an update that keeps them carries them. Reception no longer derives from emission and
+no longer requires a multicast Ethernet destination: a unicast listener
+names the router's own address and receives point-to-point sync. A config
+without listeners claims nothing. The shared-memory config layout changes,
+so the dataplane and the control plane must be upgraded together.
+
+The `dst_ether` field is gone: emitted sync packets leave their Ethernet
+header zeroed, and the route module downstream of fwstate resolves and stamps
+both MAC addresses. A fwstate config must sit in front of route in the
+pipeline, and a multicast sync group needs a covering route whose next-hop
+MAC is the derived multicast MAC (for example `33:33:00:00:00:01` for
+`ff02::1`). The UDP source port of every emitted packet equals its
+destination port, as before.
+
+The CLI replaces `--src-addr`, `--dst-ether`, `--multicast` and `--unicast`
+with a repeatable `--sync-endpoint SRC@DST:PORT` (for example
+`fd00::1@ff02::1:9999`, the destination also accepts brackets) and a
+repeatable `--listen-endpoint DST:PORT`; every update replaces both lists
+whole, so one that names no endpoint or listener clears them. Where a
+deployment previously relied on the multicast endpoint receiving, it must now
+name the listener explicitly.
+Mixed versions fail silently, not safely: protobuf keeps the unknown list
+fields on each side, so a new client's endpoints and listeners are ignored by
+an old service - a freshly created config then starts with synchronization
+disabled - and an old client's flat slots are skipped by the new service,
+whose empty-list update semantics then clear its lists. Upgrade `yanet2-cli`,
+the control plane and the web UI together, with no mixed-version updates in
+between.
+## NAT64 configs are replaced as a whole
+
+The NAT64 service now answers Unimplemented to `AddPrefix`, `RemovePrefix`,
+`AddMapping`, `RemoveMapping`, `SetMTU` and `SetDropUnknown`; `UpdateConfig`
+replaces the whole config instead. Those calls started from an empty config
+for a name the control plane did not hold, so after a control-plane restart
+the first of them replaced the full config the dataplane still ran with an
+almost empty one. They also followed their own rules: a repeated prefix was
+ignored, a repeated IPv4 address replaced its mapping, and removing a prefix
+shifted the prefix indexes the mappings refer to.
+
+- `yanet-cli-nat64 prefix`, `mapping`, `mtu` and `drop` are replaced by
+  `yanet-cli-nat64 update --name <name> <file>`, whose file is the update
+  request in YAML. A redirected `yanet-cli-nat64 show --name <name>` prints
+  one to start from; keep it, since after a control-plane restart `show`
+  knows nothing of the config the dataplane still runs:
+
+  ```yaml
+  config:
+    prefixes:
+      - 64:ff9b::/96
+    mappings:
+      - ipv4: 192.0.2.1
+        ipv6: 2001:db8::1
+        prefix_index: 0
+    mtu:
+      ipv4_mtu: 1450
+      ipv6_mtu: 1280
+    drop_unknown_prefix: false
+    drop_unknown_mapping: true
+  ```
+
+  The file replaces the whole config: prefixes and mappings it leaves out
+  are removed, an absent `mtu` takes the defaults shown, a value left out
+  of a present `mtu` is 0, which turns that clamp off, and an absent flag
+  is false. A prefix or an IPv4 address listed twice is rejected.
+- Upgrade `yanet2-cli` together with the control plane: the old commands
+  fail against the new control plane, and `update` against an older one.
+- Scripts and clients of the retired calls send the whole config through
+  `UpdateConfig`.
+
+## dscp configs change only through a whole-config update
+
+The dscp control plane now answers `AddPrefixes`, `RemovePrefixes` and
+`SetDscpMarking` with Unimplemented; clients send the whole config with
+`UpdateConfig` instead. Each of those calls started from an empty config
+when the control plane did not hold the name, so after a control-plane
+restart the first one replaced the full config the dataplane still ran.
+
+`yanet-cli-dscp` replaces `prefix-add`, `prefix-remove` and `set-marking`
+with `update`, which takes every prefix and the marking at once:
+
+```bash
+yanet-cli-dscp update --name dscp0 --prefix 10.0.0.0/24 --prefix 2001:db8::/32 --flag always --mark 46
+```
+
+- Upgrade `yanet2-cli` together with the control plane: an older CLI can
+  no longer change a dscp config, and an older control plane does not
+  serve `update`.
+- Scripts that changed part of a config must keep the whole desired
+  config and pass it to `update`: after a control-plane restart `show`
+  knows nothing of the config the dataplane still runs.
+
+
+## MPLS tunnels take the address family of their next hop
+
+bird-adapter now picks the tunnel family and source address by the next
+hop instead of the prefix: an IPv6 route with an IPv4 next hop (6VPE) gets
+an IPv4 tunnel instead of an IPv6 one to the IPv4-mapped address, and an
+IPv4 route with an IPv6 next hop gets the IPv6 source address. route-mpls
+rejects a next hop whose source and destination belong to different
+families.
+
+- Restart the control plane after upgrading `yanet2-bird-adapter`. A
+  running one keeps the tunnels the earlier adapter sent next to the new
+  ones until then.
+- `yanet-cli-route-mpls update` with `--src` and `--dst` of different
+  families now fails.
+
 ## route-mpls updates no longer create a config
 
 route-mpls `UpdateConfig` now changes an existing config only and answers

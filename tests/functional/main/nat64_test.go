@@ -15,20 +15,37 @@ import (
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
 )
 
+// nat64Config renders the whole nat64_0 config as an update file: the test
+// prefix, two mappings into it and the given drop flags.
+func nat64Config(dropUnknownPrefix, dropUnknownMapping bool) string {
+	return fmt.Sprintf(`config:
+  prefixes:
+    - 2001:db8::/96
+  mappings:
+    - ipv4: 198.51.100.1
+      ipv6: 2001:db8::4
+      prefix_index: 0
+    - ipv4: 198.51.100.2
+      ipv6: 2001:db8::3
+      prefix_index: 0
+  drop_unknown_prefix: %t
+  drop_unknown_mapping: %t
+`, dropUnknownPrefix, dropUnknownMapping)
+}
+
+// updateNAT64Config replaces the whole nat64_0 config with the test prefix
+// and mappings and the given drop flags.
+func updateNAT64Config(fw *framework.TestFramework, dropUnknownPrefix, dropUnknownMapping bool) error {
+	if err := fw.CreateConfigFile("nat64_0.yaml", nat64Config(dropUnknownPrefix, dropUnknownMapping)); err != nil {
+		return err
+	}
+	_, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-nat64 update --name nat64_0 /mnt/config/nat64_0.yaml")
+	return err
+}
+
 // setAndWaitForNAT64DropFlags sets NAT64 drop flags and waits for them to be applied
 func setAndWaitForNAT64DropFlags(fw *framework.TestFramework, dropUnknownPrefix, dropUnknownMapping bool, timeout time.Duration) error {
-	// Build the drop command
-	cmd := "/mnt/target/release/yanet-cli-nat64 drop --name nat64_0"
-	if dropUnknownPrefix {
-		cmd += " --drop-unknown-prefix"
-	}
-	if dropUnknownMapping {
-		cmd += " --drop-unknown-mapping"
-	}
-
-	// Execute the drop command
-	_, err := fw.ExecuteCommand(cmd)
-	if err != nil {
+	if err := updateNAT64Config(fw, dropUnknownPrefix, dropUnknownMapping); err != nil {
 		return fmt.Errorf("failed to set NAT64 drop flags: %w", err)
 	}
 
@@ -96,14 +113,10 @@ func TestNAT64(t *testing.T) {
 func testNAT64(t *testing.T, fw *framework.TestFramework) {
 
 	fw.Run("Configure_NAT64_Module", func(fw *framework.TestFramework, t *testing.T) {
+		// Configure NAT64 mappings (using addresses from unit tests)
+		require.NoError(t, updateNAT64Config(fw, false, false), "Failed to configure NAT64 module")
 
-		// NAT64-specific configuration
 		commands := []string{
-			// Configure NAT64 mappings (using addresses from unit tests)
-			"/mnt/target/release/yanet-cli-nat64 prefix add --name nat64_0 --prefix 2001:db8::/96",
-			"/mnt/target/release/yanet-cli-nat64 mapping add --name nat64_0 --ipv4 198.51.100.1 --ipv6 2001:db8::4 --prefix-index 0",
-			"/mnt/target/release/yanet-cli-nat64 mapping add --name nat64_0 --ipv4 198.51.100.2 --ipv6 2001:db8::3 --prefix-index 0",
-
 			"/mnt/target/release/yanet-cli-function update --name=test --chains chain0:1=forward:forward0,nat64:nat64_0,route:route0",
 			// Configure pipeline
 			"/mnt/target/release/yanet-cli-pipeline update --name=test --functions test",

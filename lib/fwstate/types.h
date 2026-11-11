@@ -5,13 +5,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "config.h"
+// Max TTL (ns) storable in fw_state_value::last_ttl.
+#define FWSTATE_TTL48_MAX ((uint64_t)((1ULL << 48) - 1))
 
 #define FW_STATE_ADDR_TYPE_IP4 4
 #define FW_STATE_ADDR_TYPE_IP6 6
 
 #define FW_STATE_SYNC_THRESHOLD (uint64_t)8e9 // nanoseconds
-#define FW_STATE_DEFAULT_TIMEOUT (uint64_t)120e9
 
 /**
  * Common header shared by all fw_state key types.
@@ -151,32 +151,4 @@ fwstate_value_is_expired(const struct fw_state_value *value, uint64_t now) {
 		return true;
 	}
 	return fwstate_value_expires_at(value) <= now;
-}
-
-/// Select TTL for a frame from protocol and TCP flags.
-/// Ported from yanet/dataplane/slow_worker.cpp:496.
-static inline uint64_t
-fwstate_entry_ttl(
-	uint16_t proto, uint8_t raw_flags, const struct fwstate_timeouts *t
-) {
-	union fw_state_flags_u flags = {.raw = raw_flags};
-
-	uint64_t ttl = t->default_;
-	if (proto == IPPROTO_UDP) {
-		ttl = t->udp;
-	} else if (proto == IPPROTO_TCP) {
-		ttl = t->tcp;
-
-		uint8_t tcp_flags = flags.tcp.src | flags.tcp.dst;
-		if (tcp_flags & FWSTATE_ACK) {
-			ttl = t->tcp_syn_ack;
-		} else if (tcp_flags & FWSTATE_SYN) {
-			ttl = t->tcp_syn;
-		}
-		if (tcp_flags & FWSTATE_FIN) {
-			ttl = t->tcp_fin;
-		}
-	}
-
-	return ttl;
 }

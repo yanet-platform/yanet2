@@ -58,7 +58,6 @@ maplit:controlplane/ffi/shm.go:DPConfig.AllModulePositions:map[string][]Chain:1 
 maplit:controlplane/ffi/shm.go:DPConfig.AllModulePositions:map[string][]string:1  # legacy: use T{} instead of make(map...)
 maplit:modules/acl/controlplane/metrics.go:ACLService.collectDataplaneMetrics:map[string]struct{}:1  # legacy: use T{} instead of make(map...)
 maplit:operators/bird-adapter/internal/mpls/routes.go:Rib.Apply:map[mplsRouteKey][]rib.Route:1  # legacy: use T{} instead of make(map...)
-maplit:operators/bird-adapter/service.go:NewAdapterService:map[string]*importHolder:1  # legacy: use T{} instead of make(map...)
 maplit:operators/route/neigh/neigh.go:newOptions:map[string]string:1  # legacy: use T{} instead of make(map...)
 private:operators/route/internal/operator/operator.go:applyStaticSeed:routeSvc.getOrCreateRib:1  # legacy: encapsulate behind an exported method or field
 receiver:common/go/dataplane/packet.go:Packet.Data:1  # legacy: rename the receiver to m
@@ -149,14 +148,6 @@ zapkey:operators/route/internal/rib/rib.go:RIB.CleanupTask:sessionID:1  # legacy
 zapkey:operators/route/internal/rib/rib.go:RIB.CleanupTask:sessionID:2  # legacy: rename the zap field key to snake_case
 zapkey:operators/route/internal/rib/rib.go:RIB.CleanupTask:sessionID:3  # legacy: rename the zap field key to snake_case
 zapkey:operators/route/internal/rib/rib.go:RIB.CleanupTask:sessionID:4  # legacy: rename the zap field key to snake_case
-zapmsg:operators/bird-adapter/service.go:AdapterService.runBirdImportLoop:Info:BIRD export reader stopped cleanly, terminating loop:1  # legacy: lowercase the first letter of the log message
-zapmsg:operators/bird-adapter/service.go:AdapterService.runBirdImportLoop:Info:BIRD import loop cancelled via context:1  # legacy: lowercase the first letter of the log message
-zapmsg:operators/bird-adapter/service.go:AdapterService.runBirdImportLoop:Info:BIRD import loop cancelled via context:2  # legacy: lowercase the first letter of the log message
-zapmsg:operators/bird-adapter/service.go:AdapterService.runBirdImportLoop:Info:BIRD import loop cleanup: closing connection and cancelling context:1  # legacy: lowercase the first letter of the log message
-zapmsg:operators/bird-adapter/service.go:AdapterService.runBirdImportLoop:Info:BIRD import loop stopping due to service quit signal:1  # legacy: lowercase the first letter of the log message
-zapmsg:operators/bird-adapter/service.go:AdapterService.runBirdImportLoop:Info:BIRD import loop stopping due to service quit signal:2  # legacy: lowercase the first letter of the log message
-zapmsg:operators/bird-adapter/service.go:AdapterService.runBirdImportLoop:Warn:BIRD export reader context cancelled, terminating loop:1  # legacy: lowercase the first letter of the log message
-zapmsg:operators/bird-adapter/service.go:AdapterService.runBirdImportLoop:Warn:BIRD export reader stopped with error:1  # legacy: lowercase the first letter of the log message
 zapmsg:operators/route/internal/operator/service_route.go:RouteService.FeedRIB:Info:FeedRIB session ended; scheduling cleanup:1  # legacy: lowercase the first letter of the log message
 zapmsg:operators/route/internal/rib/rib.go:RIB.AddUnicastRoute:Info:RIB: added unicast route:1  # legacy: lowercase the first letter of the log message
 zapmsg:operators/route/internal/rib/rib.go:RIB.CleanupTask:Info:RIB: cleanup task cancelled before timeout:1  # legacy: lowercase the first letter of the log message

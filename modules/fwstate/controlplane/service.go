@@ -11,7 +11,6 @@ import (
 
 	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
-	"github.com/yanet-platform/yanet2/controlplane/configstore"
 	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
@@ -265,10 +264,15 @@ func (m *FWStateService) prepareUpdate(
 	// and declares the map-name links: the names resolve against
 	// published objects when the new generation installs, so an unknown
 	// name surfaces from the publish, not from here.
+	nativeSyncConfig, err := SyncConfigToC(syncConfig)
+	if err != nil {
+		m.log.Error("invalid sync config", zap.String("config", name), zap.Error(err))
+		return nil, status.Errorf(codes.InvalidArgument, "invalid sync config: %v", err)
+	}
 	newConfig, err := newFWStateModuleConfig(
 		m.agent,
 		name,
-		SyncConfigToC(syncConfig),
+		nativeSyncConfig,
 		mapNameV4,
 		mapNameV6,
 	)
@@ -317,17 +321,8 @@ func (m *FWStateService) DeleteConfig(
 ) (*fwstatepb.DeleteConfigResponse, error) {
 	name := req.GetName()
 
-	err := m.core.Delete(name)
-	if errors.Is(err, configstore.ErrNotFound) {
-		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
-	}
-	if err != nil {
-		code := codes.Internal
-		if errors.Is(err, ffi.ErrFailedPrecondition) {
-			// A chain still references the config.
-			code = codes.FailedPrecondition
-		}
-		return nil, status.Errorf(code, "could not delete fwstate module config '%s': %v", name, err)
+	if err := m.core.Delete(name); err != nil {
+		return nil, crud.DeleteError(name, err)
 	}
 
 	m.log.Info("successfully deleted FWState module config", zap.String("name", name))

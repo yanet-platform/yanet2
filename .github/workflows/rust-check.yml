@@ -23,7 +23,7 @@ on:
       # the CLI builds; its own workflows check it.
       #
       # A negation applies only to the patterns above it, so it stays last.
-      - "!lib/rust/**"
+      - "!bindings/rust/**"
   pull_request:
     # A stacked pull request has a non-main base, so a main-only filter would skip it.
     branches: ["**"]
@@ -40,7 +40,7 @@ on:
       # the CLI builds; its own workflows check it.
       #
       # A negation applies only to the patterns above it, so it stays last.
-      - "!lib/rust/**"
+      - "!bindings/rust/**"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
@@ -109,4 +109,9 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: ./.github/actions/protoc
         timeout-minutes: 5
-      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # With CARGO_BUILD_WARNINGS=deny a crate that only warns still builds, so
+      # --keep-going checks its dependents too and the run lists every warning
+      # before it fails.
+      - run: cargo clippy --workspace --all-targets --locked --keep-going
+        env:
+          CARGO_BUILD_WARNINGS: deny

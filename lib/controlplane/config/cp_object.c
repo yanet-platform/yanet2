@@ -39,7 +39,7 @@ cp_object_init(
 	cp_entity_init(&self->entity, agent, name);
 
 	if (counter_registry_init(
-		    &self->counter_registry, &self->entity.memory_context, 0
+		    &self->counter_registry, &self->entity.memory_context
 	    )) {
 		yanet_error_add(
 			err,
@@ -50,9 +50,7 @@ cp_object_init(
 	}
 
 	if (counter_registry_init(
-		    &self->link_counter_registry,
-		    &self->entity.memory_context,
-		    0
+		    &self->link_counter_registry, &self->entity.memory_context
 	    )) {
 		yanet_error_add(
 			err,

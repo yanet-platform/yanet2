@@ -413,7 +413,7 @@ worker_counter_group_list_build(
 				strtcpy(dst->name, src->name, sizeof(dst->name)
 				);
 				dst->size = src->size;
-				dst->gen = src->gen;
+				dst->gen = src->age;
 				counter_handle_fill_values(
 					dst, &cursor, storage, idx
 				);
@@ -617,7 +617,7 @@ counter_handle_list_build(
 		struct counter_handle *dst = &handlers[idx];
 		strtcpy(dst->name, counters[idx].name, sizeof(dst->name));
 		dst->size = counters[idx].size;
-		dst->gen = counters[idx].gen;
+		dst->gen = counters[idx].age;
 		counter_handle_fill_values(dst, &cursor, storage, idx);
 	}
 
@@ -711,6 +711,7 @@ yanet_get_worker_assignments(
 		assignments[idx] = (struct worker_assignment_metadata){
 			.device_id = source[idx].device_id,
 			.queue_id = source[idx].queue_id,
+			.weight = source[idx].weight,
 		};
 	}
 

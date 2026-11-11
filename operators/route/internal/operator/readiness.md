@@ -5,7 +5,8 @@ FIB apply and configured static-path resolution per gateway, neighbour
 observations, the RIB content, and (optionally) the BIRD FeedRIB transport session.
 
 - gRPC FQN: `operators.route.operatorpb.v1.ReadinessService`
-- Service implementation: `readiness_service.go` (`ReadinessService`).
+- Service implementation: the operator framework (`common/go/operator`)
+  serves the shared readiness contract under the operator's name.
 - Scope logic: `operator.go` (tracker construction and the FIB/neighbour
   wiring), `rib_readiness.go` (the RIB/BIRD helper).
 
@@ -24,8 +25,7 @@ One `fib` scope per gateway, named `fib:<gateway.name>:<function.module>`.
 
 ### `fib:<gateway>:<module>`
 
-Driven by the apply outcome recorded through `Observe` (via
-`NewObservedActuator`):
+Driven by the apply outcome the framework records for the gateway's target:
 
 - Apply succeeded: `STATE_READY`.
 - Apply failed, previously READY or DEGRADED: `STATE_DEGRADED` (`APPLY_FAILED`).
@@ -134,11 +134,16 @@ publications refresh `observed_at` without changing state, reason, or
 Reflects route-content readiness. Two modes depending on `readiness.expect_bird`:
 
 BIRD mode (`expect_bird` true, the default): gates READY on both a settled
-update rate and a non-empty RIB. The bulk-settle gate clears once the update
-rate stays below `readiness.rate_threshold` for `readiness.stability_window`.
-States depend on whether a FeedRIB session is active:
+update rate and a non-empty RIB. The bulk-settle gate clears once the session
+has applied at least one route update and the update rate then stays below
+`readiness.rate_threshold` for `readiness.stability_window`. Any first message
+starts a session, including the heartbeat an adapter sends about a second
+after its stream opens, so a session can be active before its table arrives;
+routes left by an older session never settle it on their own. States depend on
+whether a FeedRIB session is active:
 
-- No session active (cold start before BIRD connects, or after a session ended):
+- No session active (cold start before an adapter connects, or after a session
+  ended):
   `STATE_NOT_READY` reason `NO_ROUTES` when the RIB is empty, or
   `STATE_DEGRADED` reason `SESSION_ENDED` when routes remain. The scope is seeded
   `STATE_NOT_READY` reason `SYNCING` at construction, but the first tick moves it
@@ -148,7 +153,13 @@ States depend on whether a FeedRIB session is active:
   `STATE_NOT_READY` when empty (the value tracks route presence, not prior
   readiness).
 - Session active and settled: `STATE_READY` when non-empty, otherwise
-  `STATE_NOT_READY` reason `NO_ROUTES`.
+  `STATE_NOT_READY` reason `NO_ROUTES` (the session delivered updates that left
+  the RIB empty).
+
+A session whose BIRD table is empty delivers no update, so it never settles: it
+reports reason `SYNCING` for its whole life — `STATE_DEGRADED` while an older
+session's routes remain, `STATE_NOT_READY` once the RIB TTL has swept them.
+Without an end-of-feed marker this cannot be told from a table still on its way.
 
 Static mode (`expect_bird` false): `STATE_READY` when routes are present,
 otherwise `STATE_NOT_READY` (`NO_ROUTES`). Session events are ignored.
@@ -170,10 +181,10 @@ During normal operation it never reaches `STATE_NOT_READY`; only the shutdown
 drain forces it there.
 
 On shutdown `Drain` flips every route scope to `STATE_NOT_READY` with reason
-`SHUTTING_DOWN`, including `fib`, `neighbours`, `rib`, and `bird-session`.
-This is best-effort: the operator tracker is not drain-latched, so an apply in
-flight when shutdown begins can overwrite the `SHUTTING_DOWN` value before the
-reconciler stops.
+`SHUTTING_DOWN`, including `fib`, `neighbours`, `rib`, and `bird-session`,
+before the reconciler and the readiness workers stop, while the service still
+answers. The tracker is drain-latched, so neither an apply cut off by the
+shutdown nor a late neighbour or RIB update moves a scope off `SHUTTING_DOWN`.
 
 ## `observed_at` freshness
 
@@ -190,7 +201,8 @@ without changing state.
 
 ### `fib:<gateway>:<module>`
 
-Advances on every reconcile apply attempt via `Observe`, regardless of success.
+Advances on every reconcile apply attempt the framework records, regardless of
+success.
 
 Config parameters (under `reconcile:`):
 

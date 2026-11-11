@@ -187,7 +187,7 @@ gate_rust() {
 	local toolchain
 	toolchain=$(sed -n 's/^ *toolchain: *\(nightly-[0-9-]*\).*/\1/p' .github/workflows/rust-check.yml | head -n 1)
 	step cargo-fmt cargo "+$toolchain" fmt --all -- --check || return 1
-	step clippy cargo clippy --workspace --all-targets --locked -- -D warnings || return 1
+	step clippy env CARGO_BUILD_WARNINGS=deny cargo clippy --workspace --all-targets --locked --keep-going || return 1
 	step cargo-test cargo test --workspace --locked
 }
 

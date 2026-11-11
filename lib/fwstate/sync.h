@@ -1,6 +1,5 @@
 #pragma once
 
-#include "config.h"
 #include "stash.h"
 #include "types.h"
 #include <stdbool.h>
@@ -17,16 +16,6 @@ enum sync_packet_direction {
 	SYNC_EGRESS,
 	// NOLINTEND(readability-identifier-naming)
 };
-
-static inline bool
-fwstate_sync_multicast_enabled(const struct fwstate_sync_config *config) {
-	return config->port_multicast != 0;
-}
-
-static inline bool
-fwstate_sync_unicast_enabled(const struct fwstate_sync_config *config) {
-	return config->port_unicast != 0;
-}
 
 // Wire overhead of one sync packet on top of its frames: the IPv6 and UDP
 // headers counted by the sync MTU.
@@ -90,11 +79,24 @@ fwstate_build_sync_packet(
 	struct packet *sync_pkt
 );
 
-// Outer wire addressing is assigned only after local state accepts the event.
+/**
+ * Stamp one emitted sync packet with an endpoint's addressing.
+ *
+ * Fills the IPv6 source and destination and the UDP ports; the Ethernet
+ * header stays zeroed for the route module downstream to resolve. The same
+ * port names both ends of the session, as ipfwsync did; the receiving side
+ * matches the destination address and port of a configured listener.
+ *
+ * @param packet Built sync packet to stamp
+ * @param src_addr IPv6 source of the endpoint
+ * @param dst_addr IPv6 destination of the endpoint
+ * @param dst_port Port of the endpoint, network byte order, used as both
+ * the UDP source and destination
+ */
 void
 fwstate_sync_set_destination(
 	struct packet *packet,
-	const struct ether_addr *dst_ether,
+	const uint8_t src_addr[16],
 	const uint8_t dst_addr[16],
 	uint16_t dst_port
 );

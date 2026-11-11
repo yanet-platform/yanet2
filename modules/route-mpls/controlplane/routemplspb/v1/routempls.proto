@@ -60,7 +60,8 @@ message NextHop {
   ActionKind kind = 1;
   // Accepted range: 0..1048575 (20 bits).
   uint32 label = 2;
-  common.commonpb.v1.IPAddress source_ip = 3;      // host address
+  // Host address of the destination_ip family.
+  common.commonpb.v1.IPAddress source_ip = 3;
   common.commonpb.v1.IPAddress destination_ip = 4; // host address
   uint64 weight = 5;
   string counter = 6;

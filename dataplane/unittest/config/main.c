@@ -83,6 +83,17 @@ test_device_allocation_success(void) {
 	assert(config->devices[1].workers == NULL);
 	assert(config->worker_count == 1);
 	assert(config->workers[0].assignments[0].device_id == 0);
+
+	// The nested entry declares eth0's single queue; the entry sets no
+	// sizing, so the queue materializes at the built-in defaults.
+	assert(config->devices[0].queue_count == 1);
+	assert(config->devices[0].queues != NULL);
+	assert(config->devices[0].queues[0].rx_queue_len == 4096);
+	assert(config->devices[0].queues[0].tx_queue_len == 4096);
+	assert(config->devices[0].queues[0].num_mbufs == 16384);
+	assert(config->devices[0].queues[0].role.rss);
+	assert(config->devices[1].queue_count == 0);
+	assert(config->devices[1].queues == NULL);
 	dataplane_config_free(config);
 }
 
@@ -157,6 +168,18 @@ test_numeric_field_maximum_values(void) {
 	assert(config->devices[0].workers[0].tx_queue_len == UINT16_MAX);
 	assert(config->devices[0].workers[0].num_mbufs == UINT32_MAX);
 
+	// The nested entry's values become the materialized queue's.
+	assert(config->devices[0].queue_count == 1);
+	assert(config->devices[0].queues[0].rx_queue_len == UINT16_MAX);
+	assert(config->devices[0].queues[0].tx_queue_len == UINT16_MAX);
+	assert(config->devices[0].queues[0].num_mbufs == UINT32_MAX);
+	assert(config->devices[0].queues[0].role.rss);
+	assert(config->worker_count == 1);
+	assert(config->workers[0].core_id == UINT16_MAX);
+	assert(config->workers[0].assignment_count == 1);
+	assert(config->workers[0].assignments[0].device_id == 0);
+	assert(config->workers[0].assignments[0].queue_id == 0);
+
 	dataplane_config_free(config);
 }
 
@@ -223,6 +246,30 @@ test_numeric_field_ranges(void) {
 		{"dataplane:\n  devices:\n    - workers:\n        - num_mbufs: "
 		 "%s\n",
 		 "4294967296"},
+		{"dataplane:\n  devices:\n    - queue_count: %s\n", "65536"},
+		{"dataplane:\n  devices:\n    - queues:\n        - "
+		 "rx_queue_len: %s\n",
+		 "65536"},
+		{"dataplane:\n  devices:\n    - queues:\n        - "
+		 "tx_queue_len: %s\n",
+		 "65536"},
+		{"dataplane:\n  devices:\n    - queues:\n        - num_mbufs: "
+		 "%s\n",
+		 "4294967296"},
+		{"dataplane:\n  devices:\n    - default_queue:\n        "
+		 "num_mbufs: %s\n",
+		 "4294967296"},
+		{"dataplane:\n  devices:\n    - queues:\n        - steer: "
+		 "{dscp: %s}\n",
+		 "64"},
+		{"dataplane:\n  workers:\n    - core_id: %s\n", "65536"},
+		{"dataplane:\n  workers:\n    - instance_id: %s\n", "65536"},
+		{"dataplane:\n  workers:\n    - assignments:\n        - queue: "
+		 "%s\n",
+		 "4294967296"},
+		{"dataplane:\n  workers:\n    - assignments:\n        - "
+		 "weight: %s\n",
+		 "17"},
 	};
 
 	for (size_t field_idx = 0;
@@ -329,6 +376,14 @@ test_queue_roles_parsed(void) {
 	assert(dataplane_device_config_has_roles(port));
 	assert(!dataplane_device_config_has_roles(config->devices + 1));
 
+	// The nested entries' roles become their queues' roles.
+	assert(port->queue_count == 2);
+	assert(port->queues[0].role.rss);
+	assert(port->queues[1].role.dscp ==
+	       ((UINT64_C(1) << 48) | (UINT64_C(1) << 56)));
+	assert(port->queues[1].role.arp);
+	assert(port->queues[1].role.l2_control);
+
 	dataplane_config_free(config);
 }
 
@@ -375,6 +430,458 @@ test_queue_roles_rejected(void) {
 		 "        - core_id: 5\n"
 		 "          rss: false\n"
 		 "          steer: {dscp: 48}\n"},
+	};
+
+	for (size_t idx = 0; idx < sizeof(cases) / sizeof(cases[0]); ++idx) {
+		fprintf(stderr, "rejects %s:\n", cases[idx].name);
+		struct dataplane_config *config = NULL;
+		assert(parse_yaml(cases[idx].yaml, &config) == -1);
+		assert(config == NULL);
+	}
+}
+
+// The queue_count form declares N queues of the device defaults, bound by
+// the top-level workers section.
+static void
+test_queue_count_form(void) {
+	const char yaml[] = "dataplane:\n"
+			    "  devices:\n"
+			    "    - port_name: eth0\n"
+			    "      queue_count: 2\n"
+			    "  workers:\n"
+			    "    - core_id: 3\n"
+			    "      instance_id: 1\n"
+			    "      assignments:\n"
+			    "        - {device: eth0, queue: 0}\n"
+			    "        - {device: eth0, queue: 1}\n";
+
+	struct dataplane_config *config = NULL;
+	assert(parse_yaml(yaml, &config) == 0);
+
+	const struct dataplane_device_config *device = config->devices;
+	assert(device->queue_count == 2);
+	assert(device->queue_declarations == dataplane_queue_count);
+	assert(device->worker_count == 0);
+	for (uint32_t idx = 0; idx < device->queue_count; ++idx) {
+		assert(device->queues[idx].rx_queue_len == 4096);
+		assert(device->queues[idx].tx_queue_len == 4096);
+		assert(device->queues[idx].num_mbufs == 16384);
+		assert(device->queues[idx].role.rss);
+	}
+
+	// A single worker holds both queues.
+	assert(config->worker_count == 1);
+	assert(config->workers[0].core_id == 3);
+	assert(config->workers[0].instance_id == 1);
+	assert(config->workers[0].assignment_count == 2);
+	assert(config->workers[0].assignments[0].device_id == 0);
+	assert(config->workers[0].assignments[0].queue_id == 0);
+	assert(config->workers[0].assignments[1].device_id == 0);
+	assert(config->workers[0].assignments[1].queue_id == 1);
+
+	dataplane_config_free(config);
+}
+
+// The queues list declares each queue: a field left unset takes the
+// device's default_queue, and one still unset takes the built-in number.
+// Roles are queue declarations here, a steering queue keeps a dedicated
+// worker, and one worker may hold assignments of several devices.
+static void
+test_queues_list_form(void) {
+	const char yaml[] = "dataplane:\n"
+			    "  devices:\n"
+			    "    - port_name: eth0\n"
+			    "      default_queue:\n"
+			    "        rx_queue_len: 8192\n"
+			    "        num_mbufs: 32768\n"
+			    "      queues:\n"
+			    "        - {}\n"
+			    "        - rx_queue_len: 1024\n"
+			    "        - rss: false\n"
+			    "          steer: {dscp: [48], nd: true}\n"
+			    "    - port_name: eth1\n"
+			    "      queues:\n"
+			    "        - rx_queue_len: 0\n"
+			    "  workers:\n"
+			    "    - core_id: 3\n"
+			    "      assignments:\n"
+			    "        - {device: eth0, queue: 2}\n"
+			    "    - core_id: 4\n"
+			    "      assignments:\n"
+			    "        - {device: eth0, queue: 0}\n"
+			    "        - {device: eth0, queue: 1}\n"
+			    "        - {device: eth1, queue: 0}\n";
+
+	struct dataplane_config *config = NULL;
+	assert(parse_yaml(yaml, &config) == 0);
+
+	const struct dataplane_device_config *eth0 = config->devices;
+	const struct dataplane_device_config *eth1 = config->devices + 1;
+	assert(eth0->queue_count == 3);
+	assert(eth0->queue_declarations == dataplane_queue_list);
+
+	// An empty entry takes the device defaults, with the built-ins
+	// filling what the device default leaves unset.
+	assert(eth0->queues[0].rx_queue_len == 8192);
+	assert(eth0->queues[0].tx_queue_len == 4096);
+	assert(eth0->queues[0].num_mbufs == 32768);
+
+	// The entry's own value beats the device default.
+	assert(eth0->queues[1].rx_queue_len == 1024);
+	assert(eth0->queues[1].tx_queue_len == 4096);
+	assert(eth0->queues[1].num_mbufs == 32768);
+
+	// The steering queue keeps its steered classes.
+	assert(!eth0->queues[2].role.rss);
+	assert(eth0->queues[2].role.dscp == (UINT64_C(1) << 48));
+	assert(eth0->queues[2].role.nd);
+	assert(!eth0->queues[2].role.arp);
+	assert(!eth0->queues[2].role.l2_control);
+	assert(dataplane_device_config_has_roles(eth0));
+
+	// An explicit zero counts as unset and falls back the same way.
+	assert(eth1->queues[0].rx_queue_len == 4096);
+	assert(eth1->queues[0].tx_queue_len == 4096);
+	assert(eth1->queues[0].num_mbufs == 16384);
+	assert(!dataplane_device_config_has_roles(eth1));
+
+	// One worker dedicates itself to the steering queue; another holds
+	// rx assignments of two devices.
+	assert(config->worker_count == 2);
+	assert(config->workers[0].assignment_count == 1);
+	assert(config->workers[0].assignments[0].device_id == 0);
+	assert(config->workers[0].assignments[0].queue_id == 2);
+	assert(config->workers[1].assignment_count == 3);
+	assert(config->workers[1].assignments[0].device_id == 0);
+	assert(config->workers[1].assignments[0].queue_id == 0);
+	assert(config->workers[1].assignments[1].device_id == 0);
+	assert(config->workers[1].assignments[1].queue_id == 1);
+	assert(config->workers[1].assignments[2].device_id == 1);
+	assert(config->workers[1].assignments[2].queue_id == 0);
+
+	dataplane_config_free(config);
+}
+
+// The weight carries an assignment's rx service: parsed explicit, 1 by
+// default, and 1 through the nested form's expansion.
+static void
+test_assignment_weights(void) {
+	const char yaml[] = "dataplane:\n"
+			    "  devices:\n"
+			    "    - port_name: eth0\n"
+			    "      queue_count: 2\n"
+			    "    - port_name: eth1\n"
+			    "      queue_count: 1\n"
+			    "  workers:\n"
+			    "    - core_id: 4\n"
+			    "      assignments:\n"
+			    "        - {device: eth0, queue: 0, weight: 4}\n"
+			    "        - {device: eth0, queue: 1}\n"
+			    "    - core_id: 3\n"
+			    "      assignments:\n"
+			    "        - {device: eth1, queue: 0}\n";
+
+	struct dataplane_config *config = NULL;
+	assert(parse_yaml(yaml, &config) == 0);
+
+	// The top-level assignments take the explicit weight and the
+	// default.
+	assert(config->worker_count == 2);
+	assert(config->workers[0].assignments[0].weight == 4);
+	assert(config->workers[0].assignments[1].weight == 1);
+	assert(config->workers[1].assignments[0].weight == 1);
+	assert(config->workers[1].assignments[0].device_id == 1);
+
+	dataplane_config_free(config);
+
+	// The nested form keeps its one-burst meaning: weight 1.
+	const char nested[] = "dataplane:\n"
+			      "  devices:\n"
+			      "    - port_name: eth0\n"
+			      "      workers:\n"
+			      "        - core_id: 3\n";
+	config = NULL;
+	assert(parse_yaml(nested, &config) == 0);
+	assert(config->worker_count == 1);
+	assert(config->workers[0].assignments[0].weight == 1);
+	dataplane_config_free(config);
+}
+
+// The nested devices[].workers[] shape and the explicit queues plus
+// top-level workers shape describe the same configuration.
+static void
+test_worker_forms_equivalent(void) {
+	const char nested[] = "dataplane:\n"
+			      "  devices:\n"
+			      "    - port_name: eth0\n"
+			      "      workers:\n"
+			      "        - core_id: 3\n"
+			      "          instance_id: 1\n"
+			      "          rx_queue_len: 1024\n"
+			      "        - core_id: 4\n"
+			      "          rx_queue_len: 2048\n"
+			      "          rss: false\n"
+			      "          steer: {arp: true}\n";
+	const char flat[] = "dataplane:\n"
+			    "  devices:\n"
+			    "    - port_name: eth0\n"
+			    "      queues:\n"
+			    "        - rx_queue_len: 1024\n"
+			    "        - rx_queue_len: 2048\n"
+			    "          rss: false\n"
+			    "          steer: {arp: true}\n"
+			    "  workers:\n"
+			    "    - core_id: 3\n"
+			    "      instance_id: 1\n"
+			    "      assignments:\n"
+			    "        - {device: eth0, queue: 0}\n"
+			    "    - core_id: 4\n"
+			    "      assignments:\n"
+			    "        - {device: eth0, queue: 1}\n";
+
+	struct dataplane_config *nested_config = NULL;
+	struct dataplane_config *flat_config = NULL;
+	assert(parse_yaml(nested, &nested_config) == 0);
+	assert(parse_yaml(flat, &flat_config) == 0);
+
+	const struct dataplane_device_config *nested_device =
+		nested_config->devices;
+	const struct dataplane_device_config *flat_device =
+		flat_config->devices;
+	assert(nested_device->queue_count == flat_device->queue_count);
+	for (uint32_t idx = 0; idx < flat_device->queue_count; ++idx) {
+		const struct dataplane_queue_config *nested_queue =
+			nested_device->queues + idx;
+		const struct dataplane_queue_config *flat_queue =
+			flat_device->queues + idx;
+		assert(nested_queue->rx_queue_len == flat_queue->rx_queue_len);
+		assert(nested_queue->tx_queue_len == flat_queue->tx_queue_len);
+		assert(nested_queue->num_mbufs == flat_queue->num_mbufs);
+		assert(nested_queue->role.rss == flat_queue->role.rss);
+		assert(nested_queue->role.dscp == flat_queue->role.dscp);
+		assert(nested_queue->role.arp == flat_queue->role.arp);
+	}
+
+	assert(nested_config->worker_count == flat_config->worker_count);
+	for (uint64_t idx = 0; idx < flat_config->worker_count; ++idx) {
+		const struct dataplane_worker_config *nested_worker =
+			nested_config->workers + idx;
+		const struct dataplane_worker_config *flat_worker =
+			flat_config->workers + idx;
+		assert(nested_worker->core_id == flat_worker->core_id);
+		assert(nested_worker->instance_id == flat_worker->instance_id);
+		assert(nested_worker->assignment_count ==
+		       flat_worker->assignment_count);
+		for (uint32_t asgn_idx = 0;
+		     asgn_idx < flat_worker->assignment_count;
+		     ++asgn_idx) {
+			assert(nested_worker->assignments[asgn_idx].device_id ==
+			       flat_worker->assignments[asgn_idx].device_id);
+			assert(nested_worker->assignments[asgn_idx].queue_id ==
+			       flat_worker->assignments[asgn_idx].queue_id);
+		}
+	}
+
+	dataplane_config_free(nested_config);
+	dataplane_config_free(flat_config);
+}
+
+// Verifies that a device may declare its queues through exactly one shape.
+static void
+test_queue_declarations_rejected(void) {
+	const struct {
+		const char *name;
+		const char *yaml;
+	} cases[] = {
+		{"queue_count beside queues",
+		 "dataplane:\n"
+		 "  devices:\n"
+		 "    - port_name: eth0\n"
+		 "      queue_count: 2\n"
+		 "      queues:\n"
+		 "        - {}\n"
+		 "        - {}\n"
+		 "  workers:\n"
+		 "    - assignments:\n"
+		 "        - {device: eth0, queue: 0}\n"
+		 "        - {device: eth0, queue: 1}\n"},
+		{"queues beside nested workers",
+		 "dataplane:\n"
+		 "  devices:\n"
+		 "    - port_name: eth0\n"
+		 "      queues:\n"
+		 "        - {}\n"
+		 "        - {}\n"
+		 "      workers:\n"
+		 "        - core_id: 3\n"
+		 "        - core_id: 4\n"},
+		{"an empty queues list",
+		 "dataplane:\n"
+		 "  devices:\n"
+		 "    - port_name: eth0\n"
+		 "      queues: []\n"},
+		{"a role on the device defaults",
+		 "dataplane:\n"
+		 "  devices:\n"
+		 "    - port_name: eth0\n"
+		 "      queue_count: 1\n"
+		 "      default_queue:\n"
+		 "        rss: false\n"
+		 "  workers:\n"
+		 "    - assignments:\n"
+		 "        - {device: eth0, queue: 0}\n"},
+		{"workers declared at both levels",
+		 "dataplane:\n"
+		 "  devices:\n"
+		 "    - port_name: eth0\n"
+		 "      workers:\n"
+		 "        - core_id: 3\n"
+		 "    - port_name: eth1\n"
+		 "      queue_count: 1\n"
+		 "  workers:\n"
+		 "    - core_id: 4\n"
+		 "      assignments:\n"
+		 "        - {device: eth1, queue: 0}\n"},
+		{"a ring device with two queues",
+		 "dataplane:\n"
+		 "  devices:\n"
+		 "    - port_name: net_ring_:0:a:b\n"
+		 "      queue_count: 2\n"
+		 "  workers:\n"
+		 "    - assignments:\n"
+		 "        - {device: net_ring_:0:a:b, queue: 0}\n"
+		 "        - {device: net_ring_:0:a:b, queue: 1}\n"},
+	};
+
+	for (size_t idx = 0; idx < sizeof(cases) / sizeof(cases[0]); ++idx) {
+		fprintf(stderr, "rejects %s:\n", cases[idx].name);
+		struct dataplane_config *config = NULL;
+		assert(parse_yaml(cases[idx].yaml, &config) == -1);
+		assert(config == NULL);
+	}
+}
+
+// Verifies the assignment contract: names resolve, every declared queue is
+// assigned exactly once, and a worker keeps at least one assignment.
+static void
+test_assignments_rejected(void) {
+	const struct {
+		const char *name;
+		const char *yaml;
+	} cases[] = {
+		{"an assignment naming an unknown device",
+		 "dataplane:\n"
+		 "  devices:\n"
+		 "    - port_name: eth0\n"
+		 "      queue_count: 1\n"
+		 "  workers:\n"
+		 "    - assignments:\n"
+		 "        - {device: does_not_exist, queue: 0}\n"},
+		{"an assignment naming an ambiguous device",
+		 "dataplane:\n"
+		 "  devices:\n"
+		 "    - port_name: eth0\n"
+		 "      queue_count: 1\n"
+		 "    - port_name: eth0\n"
+		 "      queue_count: 1\n"
+		 "  workers:\n"
+		 "    - assignments:\n"
+		 "        - {device: eth0, queue: 0}\n"},
+		{"a queue index out of range",
+		 "dataplane:\n"
+		 "  devices:\n"
+		 "    - port_name: eth0\n"
+		 "      queue_count: 1\n"
+		 "  workers:\n"
+		 "    - assignments:\n"
+		 "        - {device: eth0, queue: 1}\n"},
+		{"a queue assigned to two workers",
+		 "dataplane:\n"
+		 "  devices:\n"
+		 "    - port_name: eth0\n"
+		 "      queue_count: 1\n"
+		 "  workers:\n"
+		 "    - core_id: 3\n"
+		 "      assignments:\n"
+		 "        - {device: eth0, queue: 0}\n"
+		 "    - core_id: 4\n"
+		 "      assignments:\n"
+		 "        - {device: eth0, queue: 0}\n"},
+		{"a queue assigned twice within one worker",
+		 "dataplane:\n"
+		 "  devices:\n"
+		 "    - port_name: eth0\n"
+		 "      queue_count: 1\n"
+		 "  workers:\n"
+		 "    - assignments:\n"
+		 "        - {device: eth0, queue: 0}\n"
+		 "        - {device: eth0, queue: 0}\n"},
+		{"a queue left unassigned",
+		 "dataplane:\n"
+		 "  devices:\n"
+		 "    - port_name: eth0\n"
+		 "      queue_count: 2\n"
+		 "  workers:\n"
+		 "    - assignments:\n"
+		 "        - {device: eth0, queue: 1}\n"},
+		{"an assignment naming no device",
+		 "dataplane:\n"
+		 "  devices:\n"
+		 "    - port_name: eth0\n"
+		 "      queue_count: 1\n"
+		 "  workers:\n"
+		 "    - assignments:\n"
+		 "        - {queue: 0}\n"},
+		{"a weight below one",
+		 "dataplane:\n"
+		 "  devices:\n"
+		 "    - port_name: eth0\n"
+		 "      queue_count: 1\n"
+		 "  workers:\n"
+		 "    - assignments:\n"
+		 "        - {device: eth0, queue: 0, weight: 0}\n"},
+		{"a weight above the service bound",
+		 "dataplane:\n"
+		 "  devices:\n"
+		 "    - port_name: eth0\n"
+		 "      queue_count: 1\n"
+		 "  workers:\n"
+		 "    - assignments:\n"
+		 "        - {device: eth0, queue: 0, weight: 17}\n"},
+		{"an rx queue after a steering queue in one worker",
+		 "dataplane:\n"
+		 "  devices:\n"
+		 "    - port_name: eth0\n"
+		 "      queues:\n"
+		 "        - {}\n"
+		 "        - rss: false\n"
+		 "          steer: {arp: true}\n"
+		 "  workers:\n"
+		 "    - assignments:\n"
+		 "        - {device: eth0, queue: 1}\n"
+		 "        - {device: eth0, queue: 0}\n"},
+		{"a steering queue after an rx queue in one worker",
+		 "dataplane:\n"
+		 "  devices:\n"
+		 "    - port_name: eth0\n"
+		 "      queues:\n"
+		 "        - {}\n"
+		 "        - rss: false\n"
+		 "          steer: {arp: true}\n"
+		 "  workers:\n"
+		 "    - assignments:\n"
+		 "        - {device: eth0, queue: 0}\n"
+		 "        - {device: eth0, queue: 1}\n"},
+		{"a worker without assignments",
+		 "dataplane:\n"
+		 "  devices:\n"
+		 "    - port_name: eth0\n"
+		 "      queue_count: 1\n"
+		 "  workers:\n"
+		 "    - core_id: 3\n"
+		 "    - core_id: 4\n"
+		 "      assignments:\n"
+		 "        - {device: eth0, queue: 0}\n"},
 	};
 
 	for (size_t idx = 0; idx < sizeof(cases) / sizeof(cases[0]); ++idx) {
@@ -455,6 +962,23 @@ test_valid_config(void) {
 	assert(config->connections[1].src_device_id == 1);
 	assert(config->connections[1].device_id == 0);
 
+	// Both devices declare one nested worker each, so one queue each:
+	// the entry's sizing with the unset num_mbufs at the built-in
+	// default, polled by one single-assignment flat worker each.
+	assert(config->devices[0].queue_count == 1);
+	assert(config->devices[0].queues[0].rx_queue_len == 1024);
+	assert(config->devices[0].queues[0].tx_queue_len == 512);
+	assert(config->devices[0].queues[0].num_mbufs == 16384);
+	assert(config->devices[1].queue_count == 1);
+	assert(config->devices[1].queues[0].rx_queue_len == 128);
+	assert(config->devices[1].queues[0].tx_queue_len == 4096);
+	assert(config->worker_count == 2);
+	assert(config->workers[0].assignment_count == 1);
+	assert(config->workers[0].assignments[0].device_id == 0);
+	assert(config->workers[0].assignments[0].queue_id == 0);
+	assert(config->workers[1].assignments[0].device_id == 1);
+	assert(config->workers[1].assignments[0].queue_id == 0);
+
 	dataplane_config_free(config);
 
 	fclose(f);
@@ -478,6 +1002,12 @@ main(int argc, char **argv) {
 	test_resolve_connections_empty_device_name();
 	test_queue_roles_parsed();
 	test_queue_roles_rejected();
+	test_queue_count_form();
+	test_queues_list_form();
+	test_assignment_weights();
+	test_worker_forms_equivalent();
+	test_queue_declarations_rejected();
+	test_assignments_rejected();
 
 	return 0;
 }

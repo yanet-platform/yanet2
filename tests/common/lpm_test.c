@@ -2,6 +2,8 @@
 #include "common/memory.h"
 #include "common/memory_block.h"
 
+#include "lpm_reference.h"
+
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -71,6 +73,118 @@ test_overlapping_prefixes(void) {
 	return rc;
 }
 
+// A deterministic xorshift generator, so a failing run reproduces.
+static uint64_t
+next_random(uint64_t *state) {
+	*state ^= *state << 13;
+	*state ^= *state >> 7;
+	*state ^= *state << 17;
+	return *state;
+}
+
+/*
+ * Packs random ranges for the reference comparison: prefixes and arbitrary
+ * ranges whose ends share a random prefix, of bytes drawn from all values,
+ * from the page edges or from 0..3 so that ranges overlap and meet.
+ */
+static void
+random_ranges(uint64_t *state, uint8_t key_size, size_t count, uint8_t *out) {
+	static const uint8_t edges[] = {0x00, 0x01, 0x7f, 0x80, 0xfe, 0xff};
+	uint8_t alphabet = (uint8_t)(next_random(state) % 3);
+	for (size_t idx = 0; idx < count; ++idx) {
+		uint8_t *from = out + idx * (2u * key_size + 2);
+		uint8_t *to = from + key_size;
+		for (uint8_t pos = 0; pos < 2 * key_size + 2; ++pos) {
+			uint64_t r = next_random(state);
+			from[pos] = alphabet == 0   ? (uint8_t)r
+				    : alphabet == 1 ? edges[r % sizeof(edges)]
+						    : (uint8_t)(r % 4);
+		}
+		uint32_t len = next_random(state) % (key_size * 8u + 1);
+		bool prefix = next_random(state) % 2;
+		for (uint8_t pos = 0; pos < key_size; ++pos) {
+			uint32_t kept = len > pos * 8u ? len - pos * 8u : 0;
+			uint8_t mask =
+				kept >= 8 ? 0xff : (uint8_t)~(0xff >> kept);
+			if (prefix) {
+				from[pos] &= mask;
+				to[pos] = from[pos] | (uint8_t)~mask;
+			} else if (pos * 8u < len) {
+				to[pos] = from[pos];
+			}
+		}
+		bool inverted = filter_key_cmp(key_size, from, to) > 0;
+		for (uint8_t pos = 0; inverted && pos < key_size; ++pos) {
+			uint8_t swap = from[pos];
+			from[pos] = to[pos];
+			to[pos] = swap;
+		}
+	}
+}
+
+/*
+ * verifies that the insert builds the tree the reference walk builds and
+ * fails where the reference fails when the arena runs out.
+ *
+ * Seeded random ranges cover keys of every size from 1 to 16 bytes. Over one
+ * run of 16-byte ranges the budget grows from 16 KiB to 2 MiB in 16 KiB
+ * steps, half a chunk of pages, so the first, the second and each later
+ * chunk allocation fails in turn. A fixed run pins that a range whose start
+ * is past its end maps nothing.
+ */
+static int
+run_insert_matches_reference_test(void) {
+	uint8_t ranges[32 * (2 * LPM_KEY_SIZE_MAX + 2)];
+	uint64_t state = 0x9e3779b97f4a7c15;
+	size_t failed_pages;
+	for (uint32_t run = 0; run < 2000; ++run) {
+		uint8_t key_size = (uint8_t)(1 + run % LPM_KEY_SIZE_MAX);
+		size_t count = 1 + next_random(&state) % 24;
+		random_ranges(&state, key_size, count, ranges);
+		if (reference_compare(
+			    ranges,
+			    count,
+			    key_size,
+			    LPM_REFERENCE_ARENA,
+			    &failed_pages
+		    )) {
+			fprintf(stdout, "run %u: trees differ\n", run);
+			return -1;
+		}
+	}
+
+	random_ranges(&state, 16, 32, ranges);
+	size_t failures = 0;
+	size_t last_pages = 0;
+	for (size_t budget = 16 << 10; budget <= (2 << 20);
+	     budget += 16 << 10) {
+		if (reference_compare(ranges, 32, 16, budget, &failed_pages)) {
+			fprintf(stdout, "budget %zu: trees differ\n", budget);
+			return -1;
+		}
+		failures += failed_pages != 0 && failed_pages != last_pages;
+		last_pages = failed_pages ? failed_pages : last_pages;
+	}
+	if (failures < 8) {
+		fprintf(stdout, "only %zu allocations failed\n", failures);
+		return -1;
+	}
+
+	// 10.0.0.0/8, then ranges inverted at the first byte and under it.
+	const uint8_t inverted[3][10] = {
+		{10, 0, 0, 0, 10, 0xff, 0xff, 0xff, 0, 1},
+		{20, 0, 0, 0, 10, 0, 0, 0, 0, 2},
+		{10, 1, 2, 9, 10, 1, 2, 3, 0, 2},
+	};
+	if (reference_compare(
+		    &inverted[0][0], 3, 4, LPM_REFERENCE_ARENA, &failed_pages
+	    )) {
+		fprintf(stdout, "an inverted range changed the tree\n");
+		return -1;
+	}
+	return 0;
+}
+
 int
 main(int argc, char **argv) {
 	(void)argc;
@@ -78,6 +192,11 @@ main(int argc, char **argv) {
 
 	if (test_overlapping_prefixes()) {
 		fprintf(stdout, "test_overlapping_prefixes: FAILED\n");
+		return -1;
+	}
+
+	if (run_insert_matches_reference_test()) {
+		fprintf(stdout, "run_insert_matches_reference_test: FAILED\n");
 		return -1;
 	}
 

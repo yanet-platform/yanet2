@@ -7,19 +7,19 @@
 
 int
 counter_registry_init(
-	struct counter_registry *registry,
-	struct memory_context *memory_context,
-	uint64_t gen
+	struct counter_registry *registry, struct memory_context *memory_context
 ) {
 	SET_OFFSET_OF(&registry->memory_context, memory_context);
 
 	registry->count = 0;
 	for (uint64_t idx = 0; idx < COUNTER_POOL_SIZE; ++idx) {
 		registry->counts[idx] = 0;
+		SET_OFFSET_OF(&registry->free_slots[idx], NULL);
+		registry->free_counts[idx] = 0;
+		registry->free_capacities[idx] = 0;
 	}
 
 	registry->capacity = 0;
-	registry->gen = gen;
 
 	SET_OFFSET_OF(&registry->names, NULL);
 
@@ -41,6 +41,18 @@ counter_registry_fini(struct counter_registry *registry) {
 			names,
 			sizeof(struct counter) * registry->capacity
 		);
+	}
+
+	for (uint64_t pool_idx = 0; pool_idx < COUNTER_POOL_SIZE; ++pool_idx) {
+		uint64_t *free_slots = ADDR_OF(&registry->free_slots[pool_idx]);
+		if (free_slots != NULL) {
+			memory_bfree(
+				memory_context,
+				free_slots,
+				sizeof(uint64_t) *
+					registry->free_capacities[pool_idx]
+			);
+		}
 	}
 
 	str_index_fini(&registry->str_index);
@@ -134,7 +146,7 @@ counter_registry_insert(
 	struct counter_registry *registry,
 	const char *name,
 	uint64_t size,
-	uint64_t gen,
+	uint32_t age,
 	yanet_error **err
 ) {
 	if (!size) {
@@ -172,8 +184,9 @@ counter_registry_insert(
 
 	strtcpy(new_name->name, name, COUNTER_NAME_LEN);
 	new_name->size = size;
-	new_name->gen = gen;
+	new_name->age = age;
 	new_name->offset = (uint64_t)-1;
+	new_name->flags = 0;
 
 	return registry->count++;
 }
@@ -209,7 +222,9 @@ counter_registry_register(
 
 	if (idx != (uint64_t)-1) {
 		struct counter *name = ADDR_OF(&registry->names) + idx;
-		name->gen = registry->gen;
+		// A configuration that registers a carried name again counts
+		// into it, so its age restarts while its slot and values stay.
+		name->age = 0;
 		if (name->size != size) {
 			yanet_error_add(
 				err, "counter redeclared with different size"
@@ -220,9 +235,57 @@ counter_registry_register(
 		return idx;
 	}
 
-	return counter_registry_insert(
-		registry, name, size, registry->gen, err
-	);
+	return counter_registry_insert(registry, name, size, 0, err);
+}
+
+// Remember a released value slot for a later name of the same pool.
+static int
+counter_registry_free_slot_push(
+	struct counter_registry *registry,
+	uint64_t pool_idx,
+	uint64_t offset,
+	yanet_error **err
+) {
+	if (registry->free_counts[pool_idx] ==
+	    registry->free_capacities[pool_idx]) {
+		uint64_t new_capacity = registry->free_capacities[pool_idx] * 2;
+		if (new_capacity == 0) {
+			new_capacity = 8;
+		}
+
+		struct memory_context *memory_context =
+			ADDR_OF(&registry->memory_context);
+		uint64_t *new_slots = (uint64_t *)memory_balloc(
+			memory_context, sizeof(uint64_t) * new_capacity
+		);
+		if (new_slots == NULL) {
+			yanet_error_add(
+				err, "failed to allocate free counter slots"
+			);
+			return -1;
+		}
+
+		uint64_t *free_slots = ADDR_OF(&registry->free_slots[pool_idx]);
+		if (free_slots != NULL) {
+			memcpy(new_slots,
+			       free_slots,
+			       sizeof(uint64_t) *
+				       registry->free_counts[pool_idx]);
+			memory_bfree(
+				memory_context,
+				free_slots,
+				sizeof(uint64_t) *
+					registry->free_capacities[pool_idx]
+			);
+		}
+
+		SET_OFFSET_OF(&registry->free_slots[pool_idx], new_slots);
+		registry->free_capacities[pool_idx] = new_capacity;
+	}
+
+	uint64_t *free_slots = ADDR_OF(&registry->free_slots[pool_idx]);
+	free_slots[registry->free_counts[pool_idx]++] = offset;
+	return 0;
 }
 
 int
@@ -231,33 +294,49 @@ counter_registry_link(
 	struct counter_registry *src,
 	yanet_error **err
 ) {
+	if (src == dst) {
+		// Re-upserting the identical configuration passes the same
+		// registry as its own predecessor: nothing carries over, ages
+		// or takes a slot, and aging it would release slots its own
+		// configuration still counts into.
+		return 0;
+	}
+
 	if (src != NULL) {
 		for (uint64_t pool_idx = 0; pool_idx < COUNTER_POOL_SIZE;
 		     ++pool_idx) {
 			dst->counts[pool_idx] = src->counts[pool_idx];
+
+			// A registry that was already linked once holds free
+			// slots of its own; dropping them keeps a second link
+			// from handing one slot to two names.
+			dst->free_counts[pool_idx] = 0;
+
+			// Slots the replaced registry never reused stay free.
+			uint64_t *src_free_slots =
+				ADDR_OF(&src->free_slots[pool_idx]);
+			for (uint64_t free_idx = 0;
+			     free_idx < src->free_counts[pool_idx];
+			     ++free_idx) {
+				if (counter_registry_free_slot_push(
+					    dst,
+					    pool_idx,
+					    src_free_slots[free_idx],
+					    err
+				    )) {
+					return -1;
+				}
+			}
 		}
 
 		for (uint64_t src_idx = 0; src_idx < src->count; ++src_idx) {
 			struct counter *src_name =
 				ADDR_OF(&src->names) + src_idx;
 
-			// Skip outdated counters
-			if (src_name->gen != src->gen) {
-				continue;
-			}
-
 			uint64_t dst_idx = counter_registry_lookup_index(
 				dst, src_name->name
 			);
-			if (dst_idx == (uint64_t)-1) {
-				dst_idx = counter_registry_insert(
-					dst,
-					src_name->name,
-					src_name->size,
-					src_name->gen,
-					err
-				);
-			} else {
+			if (dst_idx != (uint64_t)-1) {
 				struct counter *dst_name =
 					ADDR_OF(&dst->names) + dst_idx;
 				if (dst_name->size != src_name->size) {
@@ -268,7 +347,33 @@ counter_registry_link(
 					);
 					return -1;
 				}
+				dst_name->offset = src_name->offset;
+				continue;
 			}
+
+			// A name whose carrying age ran out leaves the
+			// registry; the generation that last counted into it
+			// has been installed and replaced, so its slot may
+			// serve a new name that starts from zero.
+			if (src_name->age >= COUNTER_MAX_AGE) {
+				if (counter_registry_free_slot_push(
+					    dst,
+					    uint64_log_up(src_name->size),
+					    src_name->offset,
+					    err
+				    )) {
+					return -1;
+				}
+				continue;
+			}
+
+			dst_idx = counter_registry_insert(
+				dst,
+				src_name->name,
+				src_name->size,
+				src_name->age + 1,
+				err
+			);
 			if (dst_idx == (uint64_t)-1) {
 				return -1;
 			}
@@ -286,8 +391,16 @@ counter_registry_link(
 		}
 
 		uint64_t pool_idx = uint64_log_up(dst_name->size);
-		// FIXME reuse old links (with clearance)
-		dst_name->offset = dst->counts[pool_idx]++ * (8 << pool_idx);
+		if (dst->free_counts[pool_idx] > 0) {
+			uint64_t *free_slots =
+				ADDR_OF(&dst->free_slots[pool_idx]);
+			dst_name->offset =
+				free_slots[--dst->free_counts[pool_idx]];
+			dst_name->flags |= COUNTER_FLAG_CLEAR_SLOT;
+		} else {
+			dst_name->offset =
+				dst->counts[pool_idx]++ * (8 << pool_idx);
+		}
 	}
 
 	return 0;
@@ -460,6 +573,13 @@ counter_storage_spawn(
 			ADDR_OF(ADDR_OF(&pool->blocks) + block_idx);
 
 		uint8_t *base = (uint8_t *)ADDR_OF(&block->pages);
+
+		if (name->flags & COUNTER_FLAG_CLEAR_SLOT) {
+			// The slot last served a name that left the registry a
+			// replacement ago, so no worker of a published
+			// generation writes it; the new name starts from zero.
+			memset(base + offset, 0, name->size * sizeof(uint64_t));
+		}
 
 		SET_OFFSET_OF(
 			counter_value_handles + idx,

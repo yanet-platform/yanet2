@@ -7,7 +7,8 @@ covering every module config and function pushed to that gateway.
   is the operator's own name (`forward`, `decap`, ...). The service is the
   `controlplane.ynpb.v1.ReadinessService` contract registered under that name,
   so several operators can share one gateway.
-- Service implementation and scope logic: `static.go`.
+- Service implementation: the operator framework, which records every apply
+  outcome in the gateway's scope; scope naming: `static.go`.
 
 ## Scopes
 
@@ -18,23 +19,23 @@ covering every module config and function pushed to that gateway.
 One scope per entry in `gateways`, named `config:<gateway.name>`. Each scope
 starts at `STATE_UNKNOWN`.
 
-State is driven by the apply outcome recorded through `Observe` (via
-`NewObservedActuator`):
+State is driven by the apply outcome the framework records for the gateway's
+target:
 
 - Apply succeeded: `STATE_READY`.
 - Apply failed, scope previously READY or DEGRADED: `STATE_DEGRADED`, reason
   `APPLY_FAILED`.
 - Apply failed, scope never applied: `STATE_NOT_READY`, reason `APPLY_FAILED`.
 
-On shutdown `Drain` flips every scope to `STATE_NOT_READY` (`SHUTTING_DOWN`).
-This is best-effort: operator trackers are not drain-latched, so an apply in
-flight when shutdown begins can overwrite the `SHUTTING_DOWN` value before the
-reconciler stops.
+On shutdown `Drain` flips every scope to `STATE_NOT_READY` (`SHUTTING_DOWN`)
+before the reconciler stops, while the service still answers. The tracker is
+drain-latched, so an apply cut off by the shutdown leaves `SHUTTING_DOWN` in
+place.
 
 ## `observed_at` freshness
 
 `observed_at` advances on every reconcile apply attempt, regardless of
-success, because `Observe` fires inside each `Apply`. Advancing `observed_at`
+success, because the framework records every apply. Advancing `observed_at`
 means the reconcile loop is alive — it does **not** mean the config applied
 correctly (read `state` for that).
 

@@ -1,4 +1,4 @@
-use core::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use core::net::IpAddr;
 use std::path::{Path, PathBuf};
 
 use clap::{ArgAction, Parser};
@@ -413,12 +413,8 @@ impl TryFrom<&ProtoRangeDoc> for filterpb::pb::ProtoRange {
 
 impl From<&RealServerDoc> for l3bpb::RealServer {
     fn from(server: &RealServerDoc) -> Self {
-        let address = match server.destination_address {
-            IpAddr::V4(address) => address.octets().to_vec(),
-            IpAddr::V6(address) => address.octets().to_vec(),
-        };
         Self {
-            destination_address: address,
+            destination_address: commonpb::ip_octets(server.destination_address),
             source_network: Some(server.source_network),
         }
     }
@@ -528,13 +524,12 @@ struct SessionRow {
 impl SessionRow {
     /// Render a record against the response's dataplane time.
     fn of(record: &l3bpb::SessionRecord, now_ns: u64) -> Self {
-        let source = match ip_address(&record.source_address) {
-            Some(address) => format!("[{address}]:{}", record.source_port),
-            None => format!("[?]:{}", record.source_port),
+        let source = match commonpb::ip_from_octets(&record.source_address) {
+            Ok(address) => format!("[{address}]:{}", record.source_port),
+            Err(_) => format!("[?]:{}", record.source_port),
         };
-        let real = ip_address(&record.real_address)
-            .map(|address| address.to_string())
-            .unwrap_or_else(|| "?".to_string());
+        let real = commonpb::ip_from_octets(&record.real_address)
+            .map_or_else(|_| "?".to_string(), |address| address.to_string());
 
         let remaining = record.expires_at.saturating_sub(now_ns);
         let expires_in = if remaining == 0 {
@@ -544,21 +539,6 @@ impl SessionRow {
         };
 
         Self { source, real, expires_in }
-    }
-}
-
-/// Decode a 4- or 16-byte wire address.
-fn ip_address(bytes: &[u8]) -> Option<IpAddr> {
-    match bytes.len() {
-        4 => {
-            let octets: [u8; 4] = bytes.try_into().expect("length checked");
-            Some(IpAddr::V4(Ipv4Addr::from(octets)))
-        }
-        16 => {
-            let octets: [u8; 16] = bytes.try_into().expect("length checked");
-            Some(IpAddr::V6(Ipv6Addr::from(octets)))
-        }
-        _ => None,
     }
 }
 
@@ -577,9 +557,8 @@ struct RealServerRow {
 
 impl From<&l3bpb::RealServerState> for RealServerRow {
     fn from(real: &l3bpb::RealServerState) -> Self {
-        let destination = ip_address(&real.destination_address)
-            .map(|address| address.to_string())
-            .unwrap_or_else(|| "?".to_string());
+        let destination = commonpb::ip_from_octets(&real.destination_address)
+            .map_or_else(|_| "?".to_string(), |address| address.to_string());
         let source_net = real
             .source_network
             .as_ref()

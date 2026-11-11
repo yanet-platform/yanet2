@@ -176,6 +176,7 @@ func (m *Counters) Workers(
 			assignments = append(assignments, &ynpb.WorkerAssignment{
 				DeviceId: assignment.DeviceID,
 				QueueId:  assignment.QueueID,
+				Weight:   assignment.Weight,
 			})
 		}
 

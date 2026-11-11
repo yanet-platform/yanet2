@@ -56,6 +56,7 @@
 #include "lib/dataplane/worker/counters.h"
 #include "lib/dataplane/worker/pipeline_round.h"
 #include "lib/dataplane/worker/round.h"
+#include "lib/dataplane/worker/rx_service.h"
 #include "lib/dataplane/worker/tx_pipe.h"
 
 #include "lib/logging/log.h"
@@ -74,9 +75,11 @@
 // Every received packet costs two cache lines nobody has touched lately:
 // its metadata in the headroom, last written a whole pool rotation ago,
 // and the first line of the frame, written by the NIC. Each assignment's
-// batch is held until the next round and parsed only after this round
-// transmits its predecessor, giving the prefetches a whole transmit to
-// land. One burst per assignment per round.
+// batches are held until the next round and parsed only after this round
+// transmits their predecessor, giving the prefetches a whole transmit to
+// land. An assignment takes up to its weight bursts per round; a burst
+// that does not fill the read window leaves the queue drained and ends
+// its service for the round.
 static void
 worker_rx_stage(struct dataplane_worker *worker) {
 	for (uint32_t asgn_idx = 0; asgn_idx < worker->assignment_count;
@@ -85,23 +88,35 @@ worker_rx_stage(struct dataplane_worker *worker) {
 			worker->assignments + asgn_idx;
 		struct worker_read_ctx *ctx = &assignment->read_ctx;
 
-		uint16_t read = rte_eth_rx_burst(
-			assignment->port_id,
-			assignment->queue_id,
-			ctx->staged,
-			ctx->read_size
-		);
-		ctx->staged_count = read;
+		for (uint16_t burst = 0; burst < ctx->weight; ++burst) {
+			struct rte_mbuf **burst_mbufs =
+				ctx->staged + ctx->staged_count;
 
-		*(worker->dp_worker->rx_count) += read;
-		if (worker->dp_worker->rx_bursts != NULL) {
-			worker->dp_worker->rx_bursts[read] += 1;
-		}
-
-		for (uint16_t idx = 0; idx < read; ++idx) {
-			rte_prefetch0(ctx->staged[idx]->buf_addr);
-			rte_prefetch0(rte_pktmbuf_mtod(ctx->staged[idx], void *)
+			uint16_t read = rte_eth_rx_burst(
+				assignment->port_id,
+				assignment->queue_id,
+				burst_mbufs,
+				ctx->read_size
 			);
+			ctx->staged_count += read;
+
+			*(worker->dp_worker->rx_count) += read;
+			if (worker->dp_worker->rx_bursts != NULL) {
+				worker->dp_worker->rx_bursts[read] += 1;
+			}
+
+			for (uint16_t idx = 0; idx < read; ++idx) {
+				rte_prefetch0(burst_mbufs[idx]->buf_addr);
+				rte_prefetch0(
+					rte_pktmbuf_mtod(burst_mbufs[idx], void *)
+				);
+			}
+
+			if (!worker_rx_service_continues(
+				    read, ctx->read_size
+			    )) {
+				break;
+			}
 		}
 	}
 }
@@ -543,6 +558,17 @@ dataplane_worker_init(
 				    .queue_count);
 			return -1;
 		}
+		if (assignment->weight == 0 ||
+		    assignment->weight > WORKER_RX_WEIGHT_MAX) {
+			LOG(ERROR,
+			    "worker core=%u assignment %u carries weight=%u "
+			    "outside 1..%u",
+			    config->core_id,
+			    asgn_idx,
+			    assignment->weight,
+			    WORKER_RX_WEIGHT_MAX);
+			return -1;
+		}
 	}
 
 	worker->dataplane = dataplane;
@@ -621,6 +647,7 @@ dataplane_worker_init(
 		dp_assignments[asgn_idx] = (struct dp_worker_assignment){
 			.device_id = assignment->device_id,
 			.queue_id = assignment->queue_id,
+			.weight = assignment->weight,
 		};
 	}
 	SET_OFFSET_OF(&dp_worker->assignments, dp_assignments);
@@ -700,7 +727,21 @@ dataplane_worker_init(
 		assignment->port_id = device->port_id;
 		assignment->queue_id = assignment_config->queue_id;
 		assignment->read_ctx.read_size = WORKER_RX_BURST_SIZE;
+		assignment->read_ctx.weight = assignment_config->weight;
 		assignment->read_ctx.staged_count = 0;
+		assignment->read_ctx.staged = (struct rte_mbuf **)malloc(
+			sizeof(struct rte_mbuf *) *
+			assignment->read_ctx.weight *
+			assignment->read_ctx.read_size
+		);
+		if (assignment->read_ctx.staged == NULL) {
+			LOG(ERROR,
+			    "failed to allocate the rx staging of assignment "
+			    "%u for worker core=%u",
+			    asgn_idx,
+			    config->core_id);
+			goto error_assignments;
+		}
 
 		// The device's first assignment is its designated transmit
 		// queue; later assignments of the same device keep their own
@@ -710,14 +751,13 @@ dataplane_worker_init(
 			worker->owned[assignment->device_id] = asgn_idx;
 		}
 
-		uint16_t rx_queue_len =
-			assignment_config->rx_queue_len
-				? assignment_config->rx_queue_len
-				: 4096;
-		uint16_t tx_queue_len =
-			assignment_config->tx_queue_len
-				? assignment_config->tx_queue_len
-				: 4096;
+		// The declared queue carries the effective sizing: a field the
+		// queue left unset already took the device default or the
+		// built-in one at config parse.
+		const struct dataplane_queue_config *queue_config =
+			device->queues + assignment_config->queue_id;
+		uint16_t rx_queue_len = queue_config->rx_queue_len;
+		uint16_t tx_queue_len = queue_config->tx_queue_len;
 
 		if (rte_eth_tx_queue_setup(
 			    assignment->port_id,
@@ -743,9 +783,7 @@ dataplane_worker_init(
 			assignment->queue_id
 		);
 
-		uint32_t num_mbufs = assignment_config->num_mbufs
-					     ? assignment_config->num_mbufs
-					     : 16384;
+		uint32_t num_mbufs = queue_config->num_mbufs;
 
 		// Sized under both limits the pool enforces, so a small pool
 		// degrades instead of failing to start.
@@ -819,6 +857,7 @@ dataplane_worker_init(
 error_assignments:
 	for (uint32_t asgn_idx = 0; asgn_idx < config->assignment_count;
 	     ++asgn_idx) {
+		free(worker->assignments[asgn_idx].read_ctx.staged);
 		if (worker->assignments[asgn_idx].rx_mempool != NULL) {
 			rte_mempool_free(
 				worker->assignments[asgn_idx].rx_mempool

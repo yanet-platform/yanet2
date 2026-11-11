@@ -10,6 +10,7 @@
 #include "lib/fwstate/fwstate_cursor.h"
 #include "lib/fwstate/types.h"
 #include "lib/statemap/fwmap.h"
+#include "modules/fwstate/dataplane/config.h"
 #include "test_utils.h"
 
 #include <assert.h>
@@ -200,6 +201,12 @@ test_ttl_selection(void) {
 	/* TCP FIN (dst side) */
 	flags.tcp.src = 0;
 	flags.tcp.dst = FWSTATE_FIN;
+	assert(fwstate_entry_ttl(IPPROTO_TCP, flags.raw, &test_timeouts) ==
+	       test_timeouts.tcp_fin);
+
+	/* TCP FIN+ACK: the closing timeout wins over the ACK it rides on */
+	flags.tcp.src = FWSTATE_FIN;
+	flags.tcp.dst = FWSTATE_ACK;
 	assert(fwstate_entry_ttl(IPPROTO_TCP, flags.raw, &test_timeouts) ==
 	       test_timeouts.tcp_fin);
 

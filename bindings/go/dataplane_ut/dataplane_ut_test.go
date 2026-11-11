@@ -1,6 +1,7 @@
 package dataplaneut
 
 import (
+	"math"
 	"net"
 	"testing"
 	"time"
@@ -597,11 +598,84 @@ func Test_HandleSegmentedPackets_ReportsParsedOffsets(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Empty(t, result.Output)
-	require.Equal(
-		t,
-		[]PacketDescriptor{{NetworkOffset: 14, TransportOffset: 34}},
-		result.DropDescriptors,
+	require.Len(t, result.DropDescriptors, 1)
+	require.Equal(t, uint16(14), result.DropDescriptors[0].NetworkOffset)
+	require.Equal(t, uint16(34), result.DropDescriptors[0].TransportOffset)
+}
+
+// Test_HandleSegmentedPacketsWithHeadroom_LeavesAskedHeadroom verifies that
+// a packet enters the round with the headroom asked for it and its bytes
+// intact, and that a packet without an entry keeps the default.
+func Test_HandleSegmentedPacketsWithHeadroom_LeavesAskedHeadroom(t *testing.T) {
+	h, err := NewHarness(Config{
+		CPMemory:    uint64(datasize.MB * 32),
+		DPMemory:    uint64(datasize.MB * 4),
+		WorkerCount: 1,
+	})
+	require.NoError(t, err)
+	t.Cleanup(h.Free)
+	frames := make([][]byte, 3)
+	for idx := range frames {
+		frames[idx] = make([]byte, 60)
+		frames[idx][0] = byte(0x42 + idx)
+	}
+	built, err := h.HandleSegmentedPackets([][]byte{frames[2]})
+	require.NoError(t, err)
+	require.Len(t, built.DropDescriptors, 1)
+
+	result, err := h.HandleSegmentedPacketsWithHeadroom(
+		[]uint16{0, 40},
+		[][]byte{frames[0]}, [][]byte{frames[1]}, [][]byte{frames[2]},
 	)
+
+	require.NoError(t, err)
+	require.Equal(t, frames, result.Drop)
+	headroom := make([]uint16, 0, len(result.DropDescriptors))
+	for _, descriptor := range result.DropDescriptors {
+		headroom = append(headroom, descriptor.Headroom)
+	}
+	require.Equal(
+		t, []uint16{0, 40, built.DropDescriptors[0].Headroom}, headroom,
+	)
+}
+
+// Test_HandleSegmentedPacketsWithHeadroom_RejectsInvalidHeadroom verifies
+// that a round is refused when the headroom asked for cannot be left.
+func Test_HandleSegmentedPacketsWithHeadroom_RejectsInvalidHeadroom(t *testing.T) {
+	cases := []struct {
+		name     string
+		headroom []uint16
+		message  string
+	}{
+		{
+			name:     "more entries than packets",
+			headroom: []uint16{0, 0},
+			message:  "exceeds packets length",
+		},
+		{
+			name:     "more headroom than a packet is built with",
+			headroom: []uint16{math.MaxUint16},
+			message:  "failed to limit packet headroom",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, err := NewHarness(Config{
+				CPMemory:    uint64(datasize.MB * 32),
+				DPMemory:    uint64(datasize.MB * 4),
+				WorkerCount: 1,
+			})
+			require.NoError(t, err)
+			t.Cleanup(h.Free)
+
+			result, err := h.HandleSegmentedPacketsWithHeadroom(
+				tc.headroom, [][]byte{make([]byte, 60)},
+			)
+
+			require.ErrorContains(t, err, tc.message)
+			require.Nil(t, result)
+		})
+	}
 }
 
 // Test_HandleSegmentedPackets_ReclaimLostPackets_KeepsListedPackets verifies

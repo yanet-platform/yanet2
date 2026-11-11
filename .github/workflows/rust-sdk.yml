@@ -1,6 +1,6 @@
 name: Rust SDK
 
-# Checks of the Rust module SDK workspace (lib/rust): formatting, lints, the
+# Checks of the Rust module SDK workspace (bindings/rust): formatting, lints, the
 # test suite, std-freedom of the SDK crates and the extractable packet.
 # Clippy with the bare-metal check and the tests also run on arm64, where
 # the C bindings and the layouts they check can differ; the rest does not
@@ -21,7 +21,7 @@ on:
   push:
     branches: ["main"]
     paths:
-      - "lib/rust/**"
+      - "bindings/rust/**"
       - ".cargo/config.toml"
       - ".rustfmt.toml"
       - "common/**.h"
@@ -36,7 +36,7 @@ on:
     # A stacked pull request has a non-main base, so a main-only filter would skip it.
     branches: ["**"]
     paths:
-      - "lib/rust/**"
+      - "bindings/rust/**"
       - ".cargo/config.toml"
       - ".rustfmt.toml"
       - "common/**.h"
@@ -80,7 +80,7 @@ jobs:
         with:
           toolchain: nightly-2026-10-22
           components: rustfmt
-      - working-directory: lib/rust
+      - working-directory: bindings/rust
         run: cargo fmt -- --check
 
   # Every check on this toolchain runs in this one job, which owns the
@@ -107,7 +107,7 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          workspaces: lib/rust
+          workspaces: bindings/rust
           shared-key: rust-sdk
           save-if: ${{ github.ref == 'refs/heads/main' }}
       # Configuring is enough: the bindings crate reads the C flags from the
@@ -115,19 +115,37 @@ jobs:
       # tooling.
       - run: |
           meson setup build -Ddataplane_only=true
-      # Workspace lints deny undocumented unsafe blocks and unsafe
-      # operations in unsafe functions.
-      - working-directory: lib/rust
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # The workspace lints (bindings/rust/Cargo.toml) are deny-level, from
+      # undocumented unsafe blocks to missing docs.
+      #
+      # With CARGO_BUILD_WARNINGS=deny a crate that only warns still builds, so
+      # --keep-going checks its dependents too and the run lists every warning
+      # before it fails.
+      - working-directory: bindings/rust
+        run: cargo clippy --workspace --all-targets --locked --keep-going
+        env:
+          CARGO_BUILD_WARNINGS: deny
       # The plugin examples need the `plugin` feature and the plugin profile
       # (a `no_std` cdylib cannot unwind), so the run above never sees them.
-      - working-directory: lib/rust
-        run: cargo clippy --profile plugin -p yanet-sdk-fixture --features plugin --examples --locked -- -D warnings
+      - working-directory: bindings/rust
+        run: cargo clippy --profile plugin -p yanet-sdk-fixture --features plugin --examples --locked --keep-going
+        env:
+          CARGO_BUILD_WARNINGS: deny
+      # Clippy runs no rustdoc, so the rustdoc lints of the workspace, such as
+      # broken intra-doc links, fail only here.
+      #
+      # The control-plane test owner of the testing crate is built only for
+      # the tests of other crates, so its feature is named here; the fixture's
+      # no_std plugin feature cannot be documented with std and stays out.
+      - working-directory: bindings/rust
+        run: cargo doc --workspace --no-deps --locked --features yanet-sdk-testing/cp
+        env:
+          RUSTDOCFLAGS: -D warnings
       # A bare-metal target has no std: the crates compile only if nothing
       # pulls std or alloc in. The bindings follow the meson configuration of
       # the machine, so an arm64 row on a runner that is not arm64 skips it.
       - if: matrix.arch != 'arm64' || runner.arch == 'ARM64'
-        working-directory: lib/rust
+        working-directory: bindings/rust
         run: cargo check --locked --target ${{ matrix.target }} -p yanet-shm -p yanet-sys -p yanet-sdk -p yanet-sdk-plugin -p yanet-packet
 
   test:
@@ -149,12 +167,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          workspaces: lib/rust
+          workspaces: bindings/rust
           shared-key: rust-sdk-test
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: |
           meson setup build -Ddataplane_only=true
-      - working-directory: lib/rust
+      - working-directory: bindings/rust
         run: cargo test --workspace --locked
 
   packet:
@@ -172,7 +190,7 @@ jobs:
       # dependency or workspace inheritance fails this build.
       - name: Test outside the workspace
         run: |
-          cp -r lib/rust/yanet-packet "$RUNNER_TEMP/yanet-packet"
+          cp -r bindings/rust/yanet-packet "$RUNNER_TEMP/yanet-packet"
           cd "$RUNNER_TEMP/yanet-packet"
           cargo test
           cargo check --target x86_64-unknown-none

@@ -9,7 +9,7 @@ paths:
 Loaded by path in Claude Code and on demand elsewhere, for the agent writing or reviewing Rust; this is the single source for these rules.
 
 - `.rustfmt.toml` uses nightly-only options (`wrap_comments`, `format_code_in_doc_comments`, `imports_granularity`, `group_imports`). Always use `cargo +nightly-2026-10-22 fmt` — the date `rust-check.yml` pins, installed once with `rustup toolchain install nightly-2026-10-22 --component rustfmt`; a newer nightly rewraps comments differently. Bump the date together with a workspace reformat.
-- Run `cargo +nightly-2026-10-22 fmt -- --check` and `cargo clippy --workspace --all-targets --locked -- -D warnings` (what CI runs, tests included) before committing.
+- Run `cargo +nightly-2026-10-22 fmt -- --check` and `CARGO_BUILD_WARNINGS=deny cargo clippy --workspace --all-targets --locked --keep-going` (what CI runs, tests included) before committing.
 - **`cargo fmt --all` also formats local path dependencies**, so it reaches outside the crate you think you are formatting. Scope it deliberately when the workspace pulls in path deps from another tree.
 - Proto compilation needs `protobuf-compiler` in CI.
 - **Proto crates**: tonic-include crates expose `pub mod pb`, never `pub mod <crate>`; consume shared `common/rust/` crates through `extern_path`.
@@ -27,6 +27,7 @@ Loaded by path in Claude Code and on demand elsewhere, for the agent writing or 
 - **Comments**: follow `.agents/conventions/comments.md` (brief + blank + detailed), for both `///`/`//!` doc comments and plain `//`. `.rustfmt.toml`'s `wrap_comments` reflows any line past `comment_width` (80 columns) on `cargo +nightly-2026-10-22 fmt`, so keep each line within that width and author the blank-line separator so a reflow never merges it away. Place a comment only where the item is not self-explanatory.
 - **No infallible `TryFrom`**: replace with `From`, or remove the impl if the call site is trivially inlinable.
 - **`assert_eq!` order**: expected first, actual second: `assert_eq!(expected, actual)`.
+- **`assert_matches!` for shapes**: in new or touched tests, assert a variant with `assert_matches!(result, Err(Error::Parse { .. }))`, not `assert!(result.is_err())` or `assert!(matches!(…))`: a failure prints the value, and the pattern pins the error kind rather than any error (`Err(_)` when the error type has no variant to name). The macro is not in the prelude: `use core::assert_matches;`.
 - **Style**: prefer shadowing to `_str`, destructure `self` rather than `self.0`, put bounds in `where`, and import types directly.
 - **Struct literals**: follow declaration order, including generated protos; rustfmt/clippy do not check this.
 - **Tests**: follow `.agents/conventions/tests.md` (naming `fn test_<what_to_test>_<case>`, one-brief `verifies that` doc comment, self-describing `#[case]` names). Reference: `modules/pdump/cli/src/printer.rs`.

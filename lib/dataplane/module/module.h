@@ -44,7 +44,9 @@
 // memory context; the former config_item, agent and memory_context
 // members are reached through the base now.
 // 47: struct dp_port gained rss_queue_count.
-#define YANET_MODULE_ABI_VERSION 47
+// 48: struct dp_worker_assignment gained the assignment's rx service
+// weight; the list stays part of dp_worker's plugin-visible contract.
+#define YANET_MODULE_ABI_VERSION 49
 
 // Symbol name a module .so exports carrying its compiled-against
 // YANET_MODULE_ABI_VERSION, as a uint32_t global.

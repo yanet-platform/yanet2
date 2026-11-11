@@ -269,7 +269,10 @@ func (m *birdRIBReadiness) tick(now time.Time, rate float64) {
 	// session liveness.
 	m.tracker.Touch("bird-session")
 
-	if !m.bulkSettled {
+	// A session settles only after its first route update: until then the
+	// RIB holds older sessions' routes at most, and a quiet start, as when a
+	// heartbeat opened the session before the table arrived, proves nothing.
+	if !m.bulkSettled && m.counter.Load() > 0 {
 		if rate < m.rateThreshold {
 			if m.belowSince.IsZero() {
 				m.belowSince = now

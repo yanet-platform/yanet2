@@ -44,7 +44,11 @@ vlan_output_handle(
 	while (packet != NULL) {
 		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 		uint16_t offset = 0;
-		if (rte_pktmbuf_pkt_len(mbuf) < sizeof(struct rte_ether_hdr)) {
+		// Every header access below stays inside the head segment,
+		// so each length guard bounds the head, not the chained
+		// total: a frame whose headers do not fit the head segment
+		// is dropped, not chased.
+		if (rte_pktmbuf_data_len(mbuf) < sizeof(struct rte_ether_hdr)) {
 			packet_front_drop(packet_front, packet);
 			goto next;
 		}
@@ -69,8 +73,8 @@ vlan_output_handle(
 			 * We do not care about the header after the vlan one so
 			 * just drop the vlan.
 			 */
-			if (rte_pktmbuf_pkt_len(mbuf) <
-			    sizeof(struct rte_ether_hdr) + offset) {
+			if (rte_pktmbuf_data_len(mbuf) <
+			    offset + sizeof(struct rte_vlan_hdr)) {
 				packet_front_drop(packet_front, packet);
 				goto next;
 			}
@@ -97,8 +101,8 @@ vlan_output_handle(
 		// We have to set vlan tag
 		if (ether_hdr->ether_type ==
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_VLAN)) {
-			if (rte_pktmbuf_pkt_len(mbuf) <
-			    sizeof(struct rte_ether_hdr) + offset) {
+			if (rte_pktmbuf_data_len(mbuf) <
+			    offset + sizeof(struct rte_vlan_hdr)) {
 				packet_front_drop(packet_front, packet);
 				goto next;
 			}

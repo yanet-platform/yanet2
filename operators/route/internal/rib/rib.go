@@ -272,7 +272,9 @@ func (m *RIB) IsActive(sessionID uint64) bool {
 }
 
 // CleanupTask removes stale BIRD routes (those with sessionID <= provided sessionID) after a TTL.
-// It's launched when a BIRD import stream ends, targeting routes from that now-defunct session.
+// It's launched when a BIRD import stream ends, targeting routes from that now-defunct session,
+// and when a session starts, targeting the older sessions' routes it does not send again, so a
+// predecessor whose stream never ends is swept too.
 // The 'quit' channel allows for early termination, e.g., on service shutdown.
 func (m *RIB) CleanupTask(sessionID uint64, quit chan bool, ttl time.Duration) {
 	timeout := time.After(ttl)

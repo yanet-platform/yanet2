@@ -27,3 +27,18 @@ func Test_ShippedDefaultConfig_OmittedServerEndpointUsesEphemeralPort(t *testing
 	require.NoError(t, err)
 	require.Equal(t, "[::1]:0", config.Server.Endpoint.Unwrap())
 }
+
+// Test_Config_RejectsDuplicateGateways verifies that two gateways sharing a
+// name are refused at decode time.
+func Test_Config_RejectsDuplicateGateways(t *testing.T) {
+	raw := `
+gateways:
+  - name: numa0
+    endpoint: "[::1]:8080"
+  - name: numa0
+    endpoint: "[::1]:8082"
+`
+	cfg := operator.DefaultConfig()
+	err := xcfg.Decode([]byte(raw), cfg)
+	require.ErrorContains(t, err, `duplicate gateway name "numa0"`)
+}

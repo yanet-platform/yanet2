@@ -2,8 +2,8 @@ use clap::{CommandFactory, Parser, ValueEnum, value_parser};
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use commonpb::partition_prefixes;
 use dscppb::{
-    AddPrefixesRequest, Config, DeleteConfigRequest, DscpConfig, RemovePrefixesRequest, SetDscpMarkingRequest,
-    ShowConfigRequest, dscp_service_client::DscpServiceClient, dscp_service_server::SERVICE_NAME,
+    Config, DeleteConfigRequest, DscpConfig, ShowConfigRequest, UpdateConfigRequest,
+    dscp_service_client::DscpServiceClient, dscp_service_server::SERVICE_NAME,
 };
 use netip::{Contiguous, IpNetwork};
 use tonic::codec::CompressionEncoding;
@@ -22,6 +22,11 @@ pub mod dscppb {
     tonic::include_proto!("modules.dscp.controlplane.dscppb.v1");
 }
 
+/// How to create a config: an update carries the whole config, its marking
+/// included.
+const CREATE_CONFIG_HINT: &str =
+    "create one with 'yanet-cli-dscp update --name <name> --prefix <cidr> --flag <flag> --mark <mark>'";
+
 /// Manages dscp module configs.
 #[derive(Debug, Clone, Parser)]
 #[command(version = ync::version(), about)]
@@ -39,12 +44,8 @@ pub enum ModeCmd {
     List,
     /// Show a config.
     Show(ShowConfigCmd),
-    /// Add prefixes to the input filter of a config.
-    PrefixAdd(AddPrefixesCmd),
-    /// Remove prefixes from the input filter of a config.
-    PrefixRemove(RemovePrefixesCmd),
-    /// Set the DSCP marking of a config.
-    SetMarking(SetDscpMarkingCmd),
+    /// Create or replace a config.
+    Update(UpdateConfigCmd),
     /// Delete a config.
     Delete(DeleteConfigCmd),
 }
@@ -54,9 +55,7 @@ impl ModeCmd {
         match self {
             Self::List => "list",
             Self::Show(..) => "show",
-            Self::PrefixAdd(..) => "prefix-add",
-            Self::PrefixRemove(..) => "prefix-remove",
-            Self::SetMarking(..) => "set-marking",
+            Self::Update(..) => "update",
             Self::Delete(..) => "delete",
         }
     }
@@ -70,30 +69,13 @@ pub struct ShowConfigCmd {
 }
 
 #[derive(Debug, Clone, Parser)]
-pub struct AddPrefixesCmd {
+pub struct UpdateConfigCmd {
     /// DSCP module name to operate on.
     #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
-    /// Prefix to be added to the input filter of the DSCP module.
-    #[arg(long, short = 'p', required = true)]
-    pub prefix: Vec<Contiguous<IpNetwork>>,
-}
-
-#[derive(Debug, Clone, Parser)]
-pub struct RemovePrefixesCmd {
-    /// DSCP module name to operate on.
-    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
-    pub config_name: String,
-    /// Prefix to be removed from the input filter of the DSCP module.
-    #[arg(long, short = 'p', required = true)]
-    pub prefix: Vec<Contiguous<IpNetwork>>,
-}
-
-#[derive(Debug, Clone, Parser)]
-pub struct SetDscpMarkingCmd {
-    /// DSCP module name to operate on.
-    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
-    pub config_name: String,
+    /// Destination prefixes to mark, replacing the current set entirely.
+    #[arg(long = "prefix", short = 'p', required = true, num_args = 0..)]
+    pub prefixes: Vec<Contiguous<IpNetwork>>,
     /// When the DSCP field is rewritten.
     #[arg(long, value_enum)]
     pub flag: MarkingFlag,
@@ -148,9 +130,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
     match cmd.mode {
         ModeCmd::List => list_configs(&mut service).await,
         ModeCmd::Show(cmd) => show_config(&mut service, cmd).await,
-        ModeCmd::PrefixAdd(cmd) => add_prefixes(&mut service, cmd).await,
-        ModeCmd::PrefixRemove(cmd) => remove_prefixes(&mut service, cmd).await,
-        ModeCmd::SetMarking(cmd) => set_dscp_marking(&mut service, cmd).await,
+        ModeCmd::Update(cmd) => update_config(&mut service, cmd).await,
         ModeCmd::Delete(cmd) => delete_config(&mut service, cmd).await,
     }
 }
@@ -170,7 +150,7 @@ async fn list_configs(service: &mut DscpService) -> Result<(), Error> {
             display::print_names_with_hint(
                 &response.configs,
                 format_args!("No DSCP configurations found."),
-                format_args!("create one with 'yanet-cli-dscp prefix-add --name <name> --prefix <cidr>'"),
+                format_args!("{CREATE_CONFIG_HINT}"),
             )
         },
     );
@@ -195,7 +175,7 @@ async fn show_config(service: &mut DscpService, cmd: ShowConfigCmd) -> Result<()
             let Some(config) = &response.config else {
                 output::empty_with_hint(
                     format_args!("No DSCP configuration found for '{}'.", cmd.config_name),
-                    format_args!("create one with 'yanet-cli-dscp prefix-add --name <name> --prefix <cidr>'"),
+                    format_args!("{CREATE_CONFIG_HINT}"),
                 );
                 return;
             };
@@ -207,70 +187,26 @@ async fn show_config(service: &mut DscpService, cmd: ShowConfigCmd) -> Result<()
     Ok(())
 }
 
-async fn add_prefixes(service: &mut DscpService, cmd: AddPrefixesCmd) -> Result<(), Error> {
-    let (prefixes4, prefixes6) = partition_prefixes(cmd.prefix.iter().copied());
-    let request = AddPrefixesRequest {
+async fn update_config(service: &mut DscpService, cmd: UpdateConfigCmd) -> Result<(), Error> {
+    let (prefixes4, prefixes6) = partition_prefixes(cmd.prefixes);
+    let request = UpdateConfigRequest {
         name: cmd.config_name.clone(),
-        prefixes4,
-        prefixes6,
-    };
-    service
-        .unary("prefix-add", request, async |client, request| {
-            client.add_prefixes(request).await
-        })
-        .await?;
-
-    output::success(
-        "prefix-add",
-        format_args!("Added {} prefix(es) to config '{}'.", cmd.prefix.len(), cmd.config_name),
-    );
-
-    Ok(())
-}
-
-async fn remove_prefixes(service: &mut DscpService, cmd: RemovePrefixesCmd) -> Result<(), Error> {
-    let (prefixes4, prefixes6) = partition_prefixes(cmd.prefix.iter().copied());
-    let request = RemovePrefixesRequest {
-        name: cmd.config_name.clone(),
-        prefixes4,
-        prefixes6,
-    };
-    service
-        .unary("prefix-remove", request, async |client, request| {
-            client.remove_prefixes(request).await
-        })
-        .await?;
-
-    output::success(
-        "prefix-remove",
-        format_args!(
-            "Removed {} prefix(es) from config '{}'.",
-            cmd.prefix.len(),
-            cmd.config_name
-        ),
-    );
-
-    Ok(())
-}
-
-async fn set_dscp_marking(service: &mut DscpService, cmd: SetDscpMarkingCmd) -> Result<(), Error> {
-    let request = SetDscpMarkingRequest {
-        name: cmd.config_name.clone(),
-        dscp_config: Some(DscpConfig {
-            flag: cmd.flag.into(),
-            mark: cmd.mark,
+        config: Some(Config {
+            prefixes4,
+            prefixes6,
+            dscp_config: Some(DscpConfig {
+                flag: cmd.flag.into(),
+                mark: cmd.mark,
+            }),
         }),
     };
     service
-        .unary("set-marking", request, async |client, request| {
-            client.set_dscp_marking(request).await
+        .unary("update", request, async |client, request| {
+            client.update_config(request).await
         })
         .await?;
 
-    output::success(
-        "set-marking",
-        format_args!("Set marking on config '{}'.", cmd.config_name),
-    );
+    output::success("update", format_args!("Updated config '{}'.", cmd.config_name));
 
     Ok(())
 }

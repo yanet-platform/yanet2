@@ -1,7 +1,7 @@
 name: Rust Miri
 
 # Miri over the unsafe, provenance and shared-memory suites of the Rust
-# module SDK workspace (lib/rust): strict provenance under Stacked and Tree
+# module SDK workspace (bindings/rust): strict provenance under Stacked and Tree
 # Borrows.
 #
 # The bindings crate's build script runs bindgen and compiles both C shims, of
@@ -19,14 +19,14 @@ on:
   push:
     branches: ["main"]
     paths:
-      - "lib/rust/**"
+      - "bindings/rust/**"
       - ".cargo/config.toml"
       - ".github/workflows/rust-miri.yml"
   pull_request:
     # A stacked pull request has a non-main base, so a main-only filter would skip it.
     branches: ["**"]
     paths:
-      - "lib/rust/**"
+      - "bindings/rust/**"
       - ".cargo/config.toml"
       - ".github/workflows/rust-miri.yml"
 
@@ -72,7 +72,7 @@ jobs:
           toolchain: ${{ env.MIRI_TOOLCHAIN }}
           components: miri, rust-src
       # One nextest run per model executes every suite, one process per test.
-      - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
         with:
           tool: cargo-nextest@0.9.148
       # The borrow model is an interpreter flag (MIRIFLAGS), so both models
@@ -80,7 +80,7 @@ jobs:
       - name: Cache cargo registry and target directory
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          workspaces: lib/rust
+          workspaces: bindings/rust
           shared-key: rust-miri
           save-if: ${{ github.ref == 'refs/heads/main' && matrix.model == 'stacked' }}
       # The standard library Miri interprets, cached per pinned toolchain.
@@ -117,7 +117,7 @@ jobs:
       # construction, so Miri has nothing to check there, while its header
       # tests took over 90% of the interpreted time.
       - name: Miri
-        working-directory: lib/rust
+        working-directory: bindings/rust
         env:
           MIRIFLAGS: ${{ matrix.miriflags }}
         run: cargo "+$MIRI_TOOLCHAIN" miri nextest run --workspace --exclude yanet-packet --locked --no-fail-fast

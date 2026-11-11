@@ -1,6 +1,6 @@
 name: Rust SDK dataplane tests (ASan)
 
-# The Go tests of the Rust module SDK fixtures (lib/rust) over the C dataplane
+# The Go tests of the Rust module SDK fixtures (bindings/rust) over the C dataplane
 # harness under AddressSanitizer, with the Rust code instrumented.
 # rust-sdk-ut.yml runs them natively and shares the setup steps below; change
 # both files together.
@@ -18,7 +18,7 @@ on:
   push:
     branches: ["main"]
     paths:
-      - "lib/rust/**"
+      - "bindings/rust/**"
       - "api/**.c"
       - "api/**.h"
       - "common/**.c"
@@ -48,7 +48,7 @@ on:
     # A stacked pull request has a non-main base, so a main-only filter would skip it.
     branches: ["**"]
     paths:
-      - "lib/rust/**"
+      - "bindings/rust/**"
       - ".github/workflows/rust-sdk-ut-asan.yml"
 
 concurrency:
@@ -77,7 +77,7 @@ jobs:
     container: ghcr.io/yanet-platform/yanet2-ci@sha256:3cbb2aae05beb4efc16f160cfa4d5307deba5d3110005d6557fdb49e5e2ee7a1
     env:
       # The Makefile runs just these Go packages, and no meson tests.
-      GO_TEST_PACKAGES: ./lib/rust/yanet-sdk-fixture-api/bindings/go/cfixture
+      GO_TEST_PACKAGES: ./bindings/rust/yanet-sdk-fixture-api/bindings/go/cfixture
       # Pinned with the rustfmt nightly, see rust-miri.yml.
       ASAN_TOOLCHAIN: nightly-2026-10-22
     steps:
@@ -118,7 +118,7 @@ jobs:
       - name: Cache rust
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          workspaces: lib/rust -> ../../build/lib/rust/cargo-target
+          workspaces: bindings/rust -> ../../build/bindings/rust/cargo-target
           shared-key: rust-sdk-ut-asan
           save-if: ${{ github.ref == 'refs/heads/main' }}
 

@@ -53,7 +53,7 @@ func setupNAT64Harness(t *testing.T) (*dataplaneut.Harness, *nat64.NAT64Service)
 	t.Cleanup(func() { _ = agent.CleanUp() })
 
 	svc := nat64.NewNAT64Service(nat64.NewBackend(agent))
-	mustSetDropUnknown(t, svc, "nat64-test", false, false)
+	mustUpdateConfig(t, svc, "nat64-test", &nat64pb.Config{})
 	wireNAT64Pipeline(t, agent, "nat64-test")
 	return h, svc
 }
@@ -105,36 +105,36 @@ func wireNAT64Pipeline(t *testing.T, agent *ffi.Agent, name string) {
 	require.NoError(t, err)
 }
 
-func mustAddPrefix(t *testing.T, svc *nat64.NAT64Service, name string, prefix netip.Prefix) {
+// nat64Config returns a config of the test /96 prefix and the given
+// mappings into it, every other field left to its default.
+func nat64Config(t *testing.T, mappings ...*nat64pb.Mapping) *nat64pb.Config {
 	t.Helper()
 
-	wirePrefix, err := commonpb.NewIPv6PrefixFromPrefix(prefix)
+	prefix, err := commonpb.NewIPv6PrefixFromPrefix(nat64Prefix96)
 	require.NoError(t, err)
 
-	_, err = svc.AddPrefix(t.Context(), &nat64pb.AddPrefixRequest{
+	return &nat64pb.Config{
+		Prefixes: []*commonpb.IPv6Prefix{prefix},
+		Mappings: mappings,
+	}
+}
+
+// nat64Mapping returns the mapping of valid address text through the first
+// prefix of the config.
+func nat64Mapping(ip4, ip6 string) *nat64pb.Mapping {
+	return &nat64pb.Mapping{
+		Ipv4: commonpb.NewIPv4Address(netip.MustParseAddr(ip4).As4()),
+		Ipv6: commonpb.NewIPv6Address(netip.MustParseAddr(ip6).As16()),
+	}
+}
+
+// mustUpdateConfig replaces the whole named config with the given one.
+func mustUpdateConfig(t *testing.T, svc *nat64.NAT64Service, name string, config *nat64pb.Config) {
+	t.Helper()
+
+	_, err := svc.UpdateConfig(t.Context(), &nat64pb.UpdateConfigRequest{
 		Name:   name,
-		Prefix: wirePrefix,
-	})
-	require.NoError(t, err)
-}
-
-func mustAddMapping(t *testing.T, svc *nat64.NAT64Service, name string, ip4, ip6 string, prefixIdx uint32) {
-	t.Helper()
-	_, err := svc.AddMapping(t.Context(), &nat64pb.AddMappingRequest{
-		Name:        name,
-		Ipv4:        commonpb.NewIPv4Address(netip.MustParseAddr(ip4).As4()),
-		Ipv6:        commonpb.NewIPv6Address(netip.MustParseAddr(ip6).As16()),
-		PrefixIndex: prefixIdx,
-	})
-	require.NoError(t, err)
-}
-
-func mustSetDropUnknown(t *testing.T, svc *nat64.NAT64Service, name string, dropPrefix, dropMapping bool) {
-	t.Helper()
-	_, err := svc.SetDropUnknown(t.Context(), &nat64pb.SetDropUnknownRequest{
-		Name:               name,
-		DropUnknownPrefix:  dropPrefix,
-		DropUnknownMapping: dropMapping,
+		Config: config,
 	})
 	require.NoError(t, err)
 }
@@ -211,24 +211,11 @@ func packetWithIPv4RawPayload(
 	return gopacket.NewPacket(buf.Bytes(), layers.LayerTypeEthernet, gopacket.Default)
 }
 
-func mustSetMTU(t *testing.T, svc *nat64.NAT64Service, name string, v4, v6 uint32) {
-	t.Helper()
-	_, err := svc.SetMTU(t.Context(), &nat64pb.SetMTURequest{
-		Name: name,
-		Mtu: &nat64pb.MTUConfig{
-			Ipv4Mtu: v4,
-			Ipv6Mtu: v6,
-		},
-	})
-	require.NoError(t, err)
-}
-
 // TestNAT64_ICMPv6ToIPv4Echo verifies ICMP echo request translation from IPv6
 // to IPv4 using service-driven NAT64 configuration.
 func TestNAT64_ICMPv6ToIPv4Echo(t *testing.T) {
 	h, svc := setupNAT64Harness(t)
-	mustAddPrefix(t, svc, "nat64-test", nat64Prefix96)
-	mustAddMapping(t, svc, "nat64-test", "192.0.2.10", "2001:db8::10", 0)
+	mustUpdateConfig(t, svc, "nat64-test", nat64Config(t, nat64Mapping("192.0.2.10", "2001:db8::10")))
 
 	ip6 := layers.IPv6{
 		Version:    6,
@@ -276,8 +263,7 @@ func TestNAT64_ICMPv6ToIPv4Echo(t *testing.T) {
 // to IPv6 using NAT64 prefix synthesis and mapping lookup.
 func TestNAT64_ICMPv4ToIPv6Echo(t *testing.T) {
 	h, svc := setupNAT64Harness(t)
-	mustAddPrefix(t, svc, "nat64-test", nat64Prefix96)
-	mustAddMapping(t, svc, "nat64-test", "192.0.2.30", "2001:db8::30", 0)
+	mustUpdateConfig(t, svc, "nat64-test", nat64Config(t, nat64Mapping("192.0.2.30", "2001:db8::30")))
 
 	ip4 := layers.IPv4{Version: 4, TTL: 64, Protocol: layers.IPProtocolICMPv4, SrcIP: net.ParseIP("192.0.2.20"), DstIP: net.ParseIP("192.0.2.30")}
 	icmp4 := layers.ICMPv4{TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoRequest, 0), Id: 7, Seq: 9}
@@ -306,8 +292,7 @@ func TestNAT64_ICMPv4ToIPv6Echo(t *testing.T) {
 // TestNAT64_UDPv6ToIPv4 verifies UDP translation from IPv6 to IPv4.
 func TestNAT64_UDPv6ToIPv4(t *testing.T) {
 	h, svc := setupNAT64Harness(t)
-	mustAddPrefix(t, svc, "nat64-test", nat64Prefix96)
-	mustAddMapping(t, svc, "nat64-test", "192.0.2.10", "2001:db8::10", 0)
+	mustUpdateConfig(t, svc, "nat64-test", nat64Config(t, nat64Mapping("192.0.2.10", "2001:db8::10")))
 
 	ip6 := layers.IPv6{
 		Version:    6,
@@ -344,8 +329,7 @@ func TestNAT64_UDPv6ToIPv4(t *testing.T) {
 // are translated without transport-layer rewrites.
 func TestNAT64_UDPv6NonFirstFragmentToIPv4(t *testing.T) {
 	h, svc := setupNAT64Harness(t)
-	mustAddPrefix(t, svc, "nat64-test", nat64Prefix96)
-	mustAddMapping(t, svc, "nat64-test", "192.0.2.10", "2001:db8::10", 0)
+	mustUpdateConfig(t, svc, "nat64-test", nat64Config(t, nat64Mapping("192.0.2.10", "2001:db8::10")))
 
 	ip6 := layers.IPv6{
 		Version:    6,
@@ -391,8 +375,7 @@ func TestNAT64_UDPv6NonFirstFragmentToIPv4(t *testing.T) {
 // destination options header before UDP are translated to IPv4 UDP.
 func TestNAT64_IPv6DestinationOptionsBeforeUDP(t *testing.T) {
 	h, svc := setupNAT64Harness(t)
-	mustAddPrefix(t, svc, "nat64-test", nat64Prefix96)
-	mustAddMapping(t, svc, "nat64-test", "192.0.2.10", "2001:db8::10", 0)
+	mustUpdateConfig(t, svc, "nat64-test", nat64Config(t, nat64Mapping("192.0.2.10", "2001:db8::10")))
 
 	srcIP := net.ParseIP("2001:db8::10")
 	dstIP := net.ParseIP("2001:db8::198.51.100.2")
@@ -445,8 +428,7 @@ func TestNAT64_IPv6DestinationOptionsBeforeUDP(t *testing.T) {
 // TestNAT64_TCPv4ToIPv6 verifies TCP translation from IPv4 to IPv6.
 func TestNAT64_TCPv4ToIPv6(t *testing.T) {
 	h, svc := setupNAT64Harness(t)
-	mustAddPrefix(t, svc, "nat64-test", nat64Prefix96)
-	mustAddMapping(t, svc, "nat64-test", "198.51.100.9", "2001:db8::9", 0)
+	mustUpdateConfig(t, svc, "nat64-test", nat64Config(t, nat64Mapping("198.51.100.9", "2001:db8::9")))
 
 	ip4 := layers.IPv4{Version: 4, TTL: 64, Protocol: layers.IPProtocolTCP, SrcIP: net.ParseIP("203.0.113.4"), DstIP: net.ParseIP("198.51.100.9")}
 	tcp := layers.TCP{SrcPort: 40000, DstPort: 443, SYN: true, Seq: 100}
@@ -477,8 +459,7 @@ func TestNAT64_TCPv4ToIPv6(t *testing.T) {
 // TestNAT64_TCPv6ToIPv4 verifies TCP translation from IPv6 to IPv4.
 func TestNAT64_TCPv6ToIPv4(t *testing.T) {
 	h, svc := setupNAT64Harness(t)
-	mustAddPrefix(t, svc, "nat64-test", nat64Prefix96)
-	mustAddMapping(t, svc, "nat64-test", "192.0.2.10", "2001:db8::10", 0)
+	mustUpdateConfig(t, svc, "nat64-test", nat64Config(t, nat64Mapping("192.0.2.10", "2001:db8::10")))
 
 	ip6 := layers.IPv6{
 		Version:    6,
@@ -517,8 +498,7 @@ func TestNAT64_TCPv6ToIPv4(t *testing.T) {
 // TestNAT64_UDPv4ToIPv6 verifies UDP translation from IPv4 to IPv6.
 func TestNAT64_UDPv4ToIPv6(t *testing.T) {
 	h, svc := setupNAT64Harness(t)
-	mustAddPrefix(t, svc, "nat64-test", nat64Prefix96)
-	mustAddMapping(t, svc, "nat64-test", "198.51.100.9", "2001:db8::9", 0)
+	mustUpdateConfig(t, svc, "nat64-test", nat64Config(t, nat64Mapping("198.51.100.9", "2001:db8::9")))
 
 	ip4 := layers.IPv4{Version: 4, TTL: 64, Protocol: layers.IPProtocolUDP, SrcIP: net.ParseIP("203.0.113.4"), DstIP: net.ParseIP("198.51.100.9")}
 	udp := layers.UDP{SrcPort: 12000, DstPort: 5353}
@@ -551,7 +531,7 @@ func TestNAT64_UDPv4ToIPv6(t *testing.T) {
 // drop_unknown_mapping is disabled.
 func TestNAT64_UnknownMappingPassThrough(t *testing.T) {
 	h, svc := setupNAT64Harness(t)
-	mustAddPrefix(t, svc, "nat64-test", nat64Prefix96)
+	mustUpdateConfig(t, svc, "nat64-test", nat64Config(t))
 
 	ip6 := layers.IPv6{
 		Version:    6,
@@ -571,7 +551,6 @@ func TestNAT64_UnknownMappingPassThrough(t *testing.T) {
 		&ip6, &udp,
 	)
 
-	mustSetDropUnknown(t, svc, "nat64-test", false, false)
 	passRes, err := h.HandlePackets(pkt)
 	require.NoError(t, err)
 	out := parseOneOutput(t, passRes)
@@ -587,8 +566,9 @@ func TestNAT64_UnknownMappingPassThrough(t *testing.T) {
 // drop_unknown_mapping is enabled.
 func TestNAT64_UnknownMappingDrop(t *testing.T) {
 	h, svc := setupNAT64Harness(t)
-	mustAddPrefix(t, svc, "nat64-test", nat64Prefix96)
-	mustSetDropUnknown(t, svc, "nat64-test", false, true)
+	config := nat64Config(t)
+	config.DropUnknownMapping = true
+	mustUpdateConfig(t, svc, "nat64-test", config)
 
 	ip6 := layers.IPv6{
 		Version:    6,
@@ -618,8 +598,9 @@ func TestNAT64_UnknownMappingDrop(t *testing.T) {
 // IPv6 prefix when source mapping is missing in v6->v4 processing.
 func TestNAT64_DropUnknownPrefix(t *testing.T) {
 	h, svc := setupNAT64Harness(t)
-	mustAddPrefix(t, svc, "nat64-test", nat64Prefix96)
-	mustSetDropUnknown(t, svc, "nat64-test", true, false)
+	config := nat64Config(t)
+	config.DropUnknownPrefix = true
+	mustUpdateConfig(t, svc, "nat64-test", config)
 
 	ip6 := layers.IPv6{
 		Version:    6,
@@ -649,8 +630,7 @@ func TestNAT64_DropUnknownPrefix(t *testing.T) {
 // source-route packets hit NAT64 drop paths.
 func TestNAT64_RepresentativeDropPaths(t *testing.T) {
 	h, svc := setupNAT64Harness(t)
-	mustAddPrefix(t, svc, "nat64-test", nat64Prefix96)
-	mustAddMapping(t, svc, "nat64-test", "192.0.2.30", "2001:db8::30", 0)
+	mustUpdateConfig(t, svc, "nat64-test", nat64Config(t, nat64Mapping("192.0.2.30", "2001:db8::30")))
 
 	nonIP := xpacket.LayersToPacket(t,
 		&layers.Ethernet{
@@ -708,8 +688,7 @@ func TestNAT64_RepresentativeDropPaths(t *testing.T) {
 // header are dropped in IPv6 extension-header handling.
 func TestNAT64_IPv6ESPHeader_Dropped(t *testing.T) {
 	h, svc := setupNAT64Harness(t)
-	mustAddPrefix(t, svc, "nat64-test", nat64Prefix96)
-	mustAddMapping(t, svc, "nat64-test", "192.0.2.10", "2001:db8::10", 0)
+	mustUpdateConfig(t, svc, "nat64-test", nat64Config(t, nat64Mapping("192.0.2.10", "2001:db8::10")))
 
 	srcIP := net.ParseIP("2001:db8::10")
 	dstIP := net.ParseIP("2001:db8::198.51.100.2")
@@ -731,8 +710,7 @@ func TestNAT64_IPv6ESPHeader_Dropped(t *testing.T) {
 // rejected by IPv6 extension-header processing.
 func TestNAT64_IPv6RoutingHeaderType0_Dropped(t *testing.T) {
 	h, svc := setupNAT64Harness(t)
-	mustAddPrefix(t, svc, "nat64-test", nat64Prefix96)
-	mustAddMapping(t, svc, "nat64-test", "192.0.2.10", "2001:db8::10", 0)
+	mustUpdateConfig(t, svc, "nat64-test", nat64Config(t, nat64Mapping("192.0.2.10", "2001:db8::10")))
 
 	srcIP := net.ParseIP("2001:db8::10")
 	dstIP := net.ParseIP("2001:db8::198.51.100.2")
@@ -775,9 +753,9 @@ func TestNAT64_IPv6RoutingHeaderType0_Dropped(t *testing.T) {
 // Fragmentation Needed is translated to ICMPv6 Packet Too Big.
 func TestNAT64_ICMPv4FragNeededToICMPv6PacketTooBig(t *testing.T) {
 	h, svc := setupNAT64Harness(t)
-	mustAddPrefix(t, svc, "nat64-test", nat64Prefix96)
-	mustAddMapping(t, svc, "nat64-test", "192.0.2.30", "2001:db8::30", 0)
-	mustSetMTU(t, svc, "nat64-test", 1400, 1500)
+	config := nat64Config(t, nat64Mapping("192.0.2.30", "2001:db8::30"))
+	config.Mtu = &nat64pb.MTUConfig{Ipv4Mtu: 1400, Ipv6Mtu: 1500}
+	mustUpdateConfig(t, svc, "nat64-test", config)
 
 	innerIP4 := layers.IPv4{
 		Version:  4,
@@ -829,9 +807,9 @@ func TestNAT64_ICMPv4FragNeededToICMPv6PacketTooBig(t *testing.T) {
 // Big is translated to ICMPv4 Fragmentation Needed.
 func TestNAT64_ICMPv6PacketTooBigToICMPv4FragNeeded(t *testing.T) {
 	h, svc := setupNAT64Harness(t)
-	mustAddPrefix(t, svc, "nat64-test", nat64Prefix96)
-	mustAddMapping(t, svc, "nat64-test", "192.0.2.30", "2001:db8::30", 0)
-	mustSetMTU(t, svc, "nat64-test", 1450, 1280)
+	config := nat64Config(t, nat64Mapping("192.0.2.30", "2001:db8::30"))
+	config.Mtu = &nat64pb.MTUConfig{Ipv4Mtu: 1450, Ipv6Mtu: 1280}
+	mustUpdateConfig(t, svc, "nat64-test", config)
 
 	innerIP6 := layers.IPv6{
 		Version:    6,
@@ -908,9 +886,9 @@ func TestNAT64_ICMPv6PacketTooBigMTUFloor(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h, svc := setupNAT64Harness(t)
-			mustAddPrefix(t, svc, "nat64-test", nat64Prefix96)
-			mustAddMapping(t, svc, "nat64-test", "192.0.2.30", "2001:db8::30", 0)
-			mustSetMTU(t, svc, "nat64-test", tt.cfg4, tt.cfg6)
+			config := nat64Config(t, nat64Mapping("192.0.2.30", "2001:db8::30"))
+			config.Mtu = &nat64pb.MTUConfig{Ipv4Mtu: tt.cfg4, Ipv6Mtu: tt.cfg6}
+			mustUpdateConfig(t, svc, "nat64-test", config)
 
 			innerIP6 := layers.IPv6{
 				Version:    6,
@@ -996,11 +974,19 @@ var (
 func setupNAT64EmbeddedHarness(t *testing.T) (*dataplaneut.Harness, *nat64.NAT64Service) {
 	t.Helper()
 	harness, service := setupNAT64Harness(t)
-	mustAddPrefix(t, service, "nat64-test", nat64Prefix96)
-	for _, mapping := range nat64EmbeddedMappings {
-		mustAddMapping(t, service, "nat64-test", mapping.IPv4.String(), mapping.IPv6.String(), 0)
-	}
+	mustUpdateConfig(t, service, "nat64-test", nat64EmbeddedConfig(t))
 	return harness, service
+}
+
+// nat64EmbeddedConfig returns the documentation prefix with the eight
+// embedded-test mappings into it.
+func nat64EmbeddedConfig(t *testing.T) *nat64pb.Config {
+	t.Helper()
+	config := nat64Config(t)
+	for _, mapping := range nat64EmbeddedMappings {
+		config.Mappings = append(config.Mappings, nat64Mapping(mapping.IPv4.String(), mapping.IPv6.String()))
+	}
+	return config
 }
 
 // nat64EmbeddedOuterDestination embeds the external IPv4 address in the prefix.
@@ -1234,7 +1220,9 @@ func Test_NAT64_MalformedDiagnosticFollowsPublishedConfig(t *testing.T) {
 	require.EqualValues(t, 1, readNAT64MalformedPackets(t, harness))
 
 	generation := harness.PublishedGeneration()
-	mustSetMTU(t, service, "nat64-test", 1500, 1500)
+	config := nat64EmbeddedConfig(t)
+	config.Mtu = &nat64pb.MTUConfig{Ipv4Mtu: 1500, Ipv6Mtu: 1500}
+	mustUpdateConfig(t, service, "nat64-test", config)
 	require.Greater(t, harness.PublishedGeneration(), generation)
 	require.Zero(t, readNAT64MalformedPackets(t, harness))
 

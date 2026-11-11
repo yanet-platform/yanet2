@@ -158,35 +158,69 @@ lpm_free(struct lpm *lpm) {
 	memory_context_fini(memory_context);
 }
 
+// A range insert as every page of its walk reads it.
+struct lpm_insert_range {
+	struct lpm *lpm;
+	uint8_t key_size;
+	const uint8_t *from;
+	const uint8_t *to;
+	// The length of the start up to its last nonzero byte, 0 if none.
+	uint8_t from_len;
+	// The length of the end up to its last byte other than 0xff, 0 if none.
+	uint8_t to_len;
+	uint64_t leaf;
+};
+
+/*
+ * Writes the value into the slots of one page the range covers, in key order.
+ *
+ * The flags tell whether the key prefix leading to the page equals the
+ * prefix of the range start and of the range end: only then does the page
+ * bound the walk, and only its slot on that boundary can cover a subtree in
+ * part. Such a slot splits its leaf into a page of the old value and the
+ * walk goes down; any other leaf takes the value. An existing child page
+ * is always walked and never collapsed, so the tree only grows.
+ */
 static inline int
-lpm_check_range_lo(
-	uint8_t key_size, const uint8_t *key, const uint8_t *from, uint8_t hop
+lpm_insert_page(
+	const struct lpm_insert_range *range,
+	struct lpm_page *page,
+	uint8_t hop,
+	bool on_from,
+	bool on_to
 ) {
-	uint8_t check[key_size];
-	memcpy(check, key, hop + 1);
+	uint32_t first = on_from ? range->from[hop] : 0x00;
+	uint32_t last = on_to ? range->to[hop] : 0xff;
+	bool last_hop = hop + 1 == range->key_size;
 
-	if (hop + 1 < key_size) {
-		memset(check + hop + 1, 0x00, key_size - hop - 1);
-	}
-	if (filter_key_cmp(key_size, check, from) < 0) {
-		return -1;
-	}
+	for (uint32_t key = first; key <= last; ++key) {
+		union lpm_value *stored_value = page->values + key;
+		bool key_from = on_from && key == first;
+		bool key_to = on_to && key == last;
 
-	return 0;
-}
+		if (stored_value->value & LPM_VALUE_FLAG) {
+			bool partial =
+				!last_hop &&
+				((key_from && range->from_len > hop + 1) ||
+				 (key_to && range->to_len > hop + 1));
+			if (!partial) {
+				stored_value->value = range->leaf;
+				continue;
+			}
+			if (lpm_new_page(range->lpm, stored_value)) {
+				return -1;
+			}
+		}
 
-static inline int
-lpm_check_range_hi(
-	uint8_t key_size, const uint8_t *key, const uint8_t *to, uint8_t hop
-) {
-	uint8_t check[key_size];
-	memcpy(check, key, key_size);
-
-	if (hop + 1 < key_size) {
-		memset(check + hop + 1, 0xff, key_size - hop - 1);
-	}
-	if (filter_key_cmp(key_size, check, to) > 0) {
-		return -1;
+		if (lpm_insert_page(
+			    range,
+			    ADDR_OF(&stored_value->page),
+			    hop + 1,
+			    key_from,
+			    key_to
+		    )) {
+			return -1;
+		}
 	}
 
 	return 0;
@@ -199,9 +233,12 @@ lpm_check_range_hi(
  * @param to     The ending point of the range (inclusive).
  * @param value  The value to which the range is mapped.
  *
- * @note Keys are big-endian encoded.
+ * @note Keys are big-endian encoded. A range whose start is past its end is
+ *       empty: it maps nothing and leaves the tree as it was.
  *
- * @return On success, returns 0. If an error occurs, sets errno and returns -1.
+ * @return On success, returns 0. If an error occurs, sets errno and returns -1:
+ *         EINVAL for a key size of 0, which leaves the tree untouched,
+ *         ENOMEM when a page cannot be allocated.
  */
 static inline int
 lpm_insert(
@@ -211,69 +248,32 @@ lpm_insert(
 	const uint8_t *to,
 	uint32_t value
 ) {
-	uint8_t key[key_size];
-	struct lpm_page *pages[key_size];
-
-	int8_t hop = 0;
-	key[hop] = from[hop];
-	pages[hop] = lpm_page(lpm, 0);
-	int8_t max_hop = 0;
-
-	while (1) {
-		union lpm_value *stored_value = pages[hop]->values + key[hop];
-		if (stored_value->value & LPM_VALUE_FLAG) {
-			/*
-			 * Assume there is only invalid values, in the opposite
-			 * one have to propagate the value deeper.
-			 */
-			if (hop < key_size - 1 &&
-			    (lpm_check_range_lo(key_size, key, from, hop) ||
-			     lpm_check_range_hi(key_size, key, to, hop))) {
-				if (lpm_new_page(lpm, stored_value)) {
-					return -1;
-				}
-				++hop;
-				if (hop > max_hop) {
-					key[hop] = from[hop];
-					max_hop = hop;
-				} else {
-					key[hop] = 0;
-				}
-				pages[hop] = ADDR_OF(&stored_value->page);
-				continue;
-			} else {
-				stored_value->value = LPM_VALUE_SET(value);
-			}
-		} else {
-			++hop;
-			if (hop > max_hop) {
-				key[hop] = from[hop];
-				max_hop = hop;
-			} else {
-				key[hop] = 0;
-			}
-			pages[hop] = ADDR_OF(&stored_value->page);
-			continue;
-		}
-
-		do {
-			key[hop]++;
-			uint8_t upper_bound = 0xff;
-			if (lpm_check_range_hi(key_size, key, to, hop)) {
-				upper_bound = to[hop];
-			}
-			if (key[hop] == (uint8_t)(upper_bound + 1)) {
-				if (hop == 0) {
-					return 0;
-				}
-				--hop;
-			} else {
-				break;
-			}
-		} while (1);
+	if (key_size == 0) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (filter_key_cmp(key_size, from, to) > 0) {
+		return 0;
 	}
 
-	return 0;
+	struct lpm_insert_range range = {
+		.lpm = lpm,
+		.key_size = key_size,
+		.from = from,
+		.to = to,
+		.leaf = LPM_VALUE_SET(value),
+	};
+
+	for (uint8_t len = key_size; len > 0; --len) {
+		if (range.from_len == 0 && from[len - 1] != 0x00) {
+			range.from_len = len;
+		}
+		if (range.to_len == 0 && to[len - 1] != 0xff) {
+			range.to_len = len;
+		}
+	}
+
+	return lpm_insert_page(&range, lpm_page(lpm, 0), 0, true, true);
 }
 
 static inline uint32_t

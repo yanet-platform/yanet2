@@ -61,7 +61,7 @@ cp_pipeline_init(
 
 	strtcpy(self->name, cp_pipeline_config->name, CP_PIPELINE_NAME_LEN);
 
-	if (counter_registry_init(&self->counter_registry, mctx, 0)) {
+	if (counter_registry_init(&self->counter_registry, mctx)) {
 		yanet_error_add(
 			err,
 			"failed to initialize counter registry for pipeline "

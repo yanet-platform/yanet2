@@ -24,3 +24,13 @@ lint:
 breaking:
   use:
     - PACKAGE
+  ignore:
+    # TODO: drop once the fossil removal reaches main; the deprecated
+    # acl SyncConfig is deleted with its field slots reserved by number
+    # and name, the server never read them and show never set them, so
+    # the wire form of old clients skips cleanly.
+    - modules/acl/controlplane/aclpb/v1/acl.proto
+    # TODO: drop once the endpoint-list cutover (#3224) reaches main; the
+    # flat source/multicast/unicast fields are replaced by the repeated
+    # endpoints message.
+    - modules/fwstate/controlplane/fwstatepb/v1/fwstate.proto

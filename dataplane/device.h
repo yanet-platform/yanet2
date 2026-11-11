@@ -19,6 +19,11 @@ struct dataplane_device {
 	// some are steering queues.
 	uint32_t rss_queue_count;
 
+	// The declared queues with their materialized sizing and roles;
+	// queue_count entries. Points into dataplane_config, which outlives
+	// the dataplane. NULL when the device declares no queues.
+	const struct dataplane_queue_config *queues;
+
 	char port_name[80];
 
 	uint16_t port_id;

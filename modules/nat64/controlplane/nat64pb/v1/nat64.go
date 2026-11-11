@@ -57,67 +57,6 @@ func (m *Mapping) Validate() error {
 	return nil
 }
 
-func (m *AddPrefixRequest) Validate() error {
-	if err := commonpb.ValidateModuleName("name", m.GetName()); err != nil {
-		return err
-	}
-	if m.GetPrefix() == nil {
-		return errors.New("prefix is required")
-	}
-
-	return nil
-}
-
-func (m *RemovePrefixRequest) Validate() error {
-	if err := commonpb.ValidateModuleName("name", m.GetName()); err != nil {
-		return err
-	}
-	if m.GetPrefix() == nil {
-		return errors.New("prefix is required")
-	}
-
-	return nil
-}
-
-func (m *AddMappingRequest) Validate() error {
-	if err := commonpb.ValidateModuleName("name", m.GetName()); err != nil {
-		return err
-	}
-	if m.GetIpv4() == nil {
-		return errors.New("ipv4 is required")
-	}
-	if m.GetIpv6() == nil {
-		return errors.New("ipv6 is required")
-	}
-
-	return nil
-}
-
-func (m *RemoveMappingRequest) Validate() error {
-	if err := commonpb.ValidateModuleName("name", m.GetName()); err != nil {
-		return err
-	}
-	if m.GetIpv4() == nil {
-		return errors.New("ipv4 is required")
-	}
-
-	return nil
-}
-
-func (m *SetMTURequest) Validate() error {
-	if err := commonpb.ValidateModuleName("name", m.GetName()); err != nil {
-		return err
-	}
-	if m.GetMtu() == nil {
-		return errors.New("mtu is required")
-	}
-	if err := m.GetMtu().Validate(); err != nil {
-		return fmt.Errorf("mtu: %w", err)
-	}
-
-	return nil
-}
-
 func (m *MTUConfig) Validate() error {
 	if m.GetIpv4Mtu() > MaxMTU {
 		return fmt.Errorf(
@@ -135,10 +74,6 @@ func (m *MTUConfig) Validate() error {
 	}
 
 	return nil
-}
-
-func (m *SetDropUnknownRequest) Validate() error {
-	return commonpb.ValidateModuleName("name", m.GetName())
 }
 
 func (m *DeleteConfigRequest) Validate() error {

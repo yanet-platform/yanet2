@@ -8,9 +8,9 @@ import (
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 )
 
-// maxMPLSLabel is the highest value representable by the dataplane's 20-bit
+// MaxMPLSLabel is the highest value representable by the dataplane's 20-bit
 // label field.
-const maxMPLSLabel = 1<<20 - 1
+const MaxMPLSLabel = 1<<20 - 1
 
 func (m *CreateConfigRequest) Validate() error {
 	if err := commonpb.ValidateModuleName("name", m.GetName()); err != nil {
@@ -119,8 +119,8 @@ func validateLabel(m *NextHop) error {
 
 func (m *NextHop) validateLabel() error {
 	label := m.GetLabel()
-	if label > maxMPLSLabel {
-		return fmt.Errorf("label %d must be in range 0..%d", label, maxMPLSLabel)
+	if label > MaxMPLSLabel {
+		return fmt.Errorf("label %d must be in range 0..%d", label, MaxMPLSLabel)
 	}
 
 	return nil

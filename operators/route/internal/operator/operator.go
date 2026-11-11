@@ -33,10 +33,6 @@ const (
 	staticTablePriority = 10
 )
 
-// Actuator applies a desired set of FIBs to one or more downstream
-// targets (gateways).
-type Actuator = operator.Actuator[RouteSnapshot]
-
 // Operator is the route operator's thin wrapper around the generic
 // operator framework.
 type Operator struct {
@@ -62,20 +58,21 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	routeRIBStore := newRIBStore(withRIBStoreLog(log))
 
 	tracker := readiness.NewTracker(readinessScopeSpecs(cfg, moduleName),
+		readiness.WithDrainLatch(),
 		readiness.WithLog(log.With(zap.String("operator", "route"))),
 	)
 
-	// The neighbour table wakes the reconcile loop and the loop's state
-	// source reads that table, so the sender is bound once both exist.
-	wakeOnNeighbours := func() {}
-	neighTable := neigh.NewNeighTable(neigh.WithTableOnChanged(func() { wakeOnNeighbours() }))
+	// The neighbour table invalidates the desired state and the state is
+	// built from that table, so the sender is bound once both exist.
+	invalidateOnNeighbours := func() {}
+	neighTable := neigh.NewNeighTable(neigh.WithTableOnChanged(func() { invalidateOnNeighbours() }))
 	if _, err := neighTable.CreateSource("static", staticTablePriority, true); err != nil {
 		return nil, fmt.Errorf("failed to create static neighbour source: %w", err)
 	}
 
 	source := NewRouteSource(neighTable, routeRIBStore)
-	wake := source.WakeFunc()
-	wakeOnNeighbours = wake
+	desired := operator.NewRebuilder(source.Build)
+	invalidateOnNeighbours = desired.Invalidate
 
 	metricsOptions := []MetricsOption{}
 	if !cfg.NetlinkMonitor.Disabled {
@@ -130,7 +127,7 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		neighTable,
 		WithRouteServiceRIBStore(routeRIBStore),
 		WithRouteServiceRIBTTL(ribTTL(cfg)),
-		WithRouteServiceOnChanged(wake),
+		WithRouteServiceOnChanged(desired.Invalidate),
 		WithRouteServiceLog(log),
 		WithRouteServiceConfiguredModules(moduleName),
 		WithRouteServiceOnRIBSessionStart(func(name string, sessionID uint64) {
@@ -154,15 +151,10 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		}))
 	}
 	neighbourSvc := NewNeighbourService(neighTable, neighbourOptions...)
-	metricsSvc := NewMetricsService(
-		WithMetricsServiceCollector(metrics),
-	)
 	operatorSvc := NewRouteOperatorService()
 
-	actuators := make([]Actuator, 0, len(cfg.Gateways))
+	gateways := make([]operator.Target[RouteSnapshot], 0, len(cfg.Gateways))
 	for _, gw := range cfg.Gateways {
-		gatewayMetrics := metrics.Gateway(gw.Name)
-
 		actuator, err := NewGatewayActuator(
 			gw,
 			WithGatewayActuatorLog(log),
@@ -170,28 +162,22 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 			WithGatewayActuatorDevices(cfg.GatewayDevices[gw.Name]),
 			WithGatewayActuatorStaticRoutes(cfg.Static.Routes),
 			WithGatewayActuatorExpectBird(cfg.Readiness.ExpectBird),
-			WithGatewayActuatorOnFIBBuilt(gatewayMetrics.OnFIBBuilt),
+			WithGatewayActuatorOnFIBBuilt(metrics.Gateway(gw.Name).OnFIBBuilt),
+			WithGatewayActuatorDialOptions(opts.GatewayDialOptions...),
 		)
 		if err != nil {
-			for _, a := range actuators {
-				_ = a.Close()
+			for _, gateway := range gateways {
+				_ = gateway.Actuator.Close()
 			}
 			return nil, fmt.Errorf("failed to construct gateway actuator %q: %w", gw.Name, err)
 		}
 
-		// Wrap each actuator so that apply outcomes drive the per-gateway apply
-		// metrics, then so that they drive the per-gateway fib readiness scope.
-		metered := newMeteredActuator(actuator, gatewayMetrics)
-		observed := operator.NewObservedActuator(metered, fmt.Sprintf("fib:%s:%s", gw.Name, moduleName), tracker.Observe)
-		actuators = append(actuators, observed)
+		gateways = append(gateways, operator.Target[RouteSnapshot]{
+			Name:     gw.Name,
+			Actuator: actuator,
+			Scope:    fibScope(gw.Name, moduleName),
+		})
 	}
-
-	fanOut := operator.NewFanOutActuator(
-		actuators,
-		operator.WithFanOutLog(log),
-	)
-
-	readinessSvc := NewReadinessService(tracker)
 
 	services := []operator.ServiceRegistrar{
 		func(s *grpc.Server) string {
@@ -203,25 +189,14 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 			return operatorpb.NeighbourService_ServiceDesc.ServiceName
 		},
 		func(s *grpc.Server) string {
-			operatorpb.RegisterMetricsServiceServer(s, metricsSvc)
-			return operatorpb.MetricsService_ServiceDesc.ServiceName
-		},
-		func(s *grpc.Server) string {
 			operatorpb.RegisterRouteOperatorServiceServer(s, operatorSvc)
 			return operatorpb.RouteOperatorService_ServiceDesc.ServiceName
-		},
-		func(s *grpc.Server) string {
-			operatorpb.RegisterReadinessServiceServer(s, readinessSvc)
-			return operatorpb.ReadinessService_ServiceDesc.ServiceName
 		},
 	}
 
 	workers := []operator.Runner{
-		func(ctx context.Context) error {
-			<-ctx.Done()
-			tracker.Drain()
-			return nil
-		},
+		desired.Run,
+		pollRIBChanges(source, desired.Invalidate, reconcileInterval(cfg)),
 		ribHelper.Run,
 	}
 	if !cfg.NetlinkMonitor.Disabled {
@@ -229,25 +204,18 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	}
 
 	app := operator.NewOperator(
-		fanOut,
-		source,
+		gateways,
+		desired.Latest(),
 		operator.WithGRPCServer(cfg.Server, services...),
+		operator.WithListener(opts.Listener),
+		operator.WithGatewayDialOptions(opts.GatewayDialOptions...),
+		operator.WithReadiness("route", tracker),
+		operator.WithMetrics(operator.MetricsConfig{Name: "route", Prefix: "route_operator"}, metrics),
 		operator.WithLog(log),
 		operator.WithReconcile(cfg.Reconcile),
 		operator.WithGateways(cfg.Register, cfg.Gateways...),
-		operator.WithMetrics(metrics),
 		operator.WithPreRun(func(ctx context.Context) error {
-			if err := applyStaticSeed(cfg, routeSvc, neighTable); err != nil {
-				return err
-			}
-
-			// The route source is woken so the first reconcile pass observes
-			// the seeded state.
-			if len(cfg.Static.Routes) > 0 || len(cfg.Static.Neighbours) > 0 {
-				source.WakeFunc()()
-			}
-
-			return nil
+			return applyStaticSeed(cfg, routeSvc, neighTable)
 		}),
 		operator.WithWorkers(workers...),
 	)
@@ -260,6 +228,37 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		source:     source,
 		log:        log,
 	}, nil
+}
+
+// pollRIBChanges reports, once per interval, the RIB changes nobody
+// reported, such as routes added without a flush or expired after their
+// feed session ended.
+func pollRIBChanges(source *RouteSource, invalidate func(), interval time.Duration) operator.Runner {
+	return func(ctx context.Context) error {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-ticker.C:
+				if source.Changed() {
+					invalidate()
+				}
+			}
+		}
+	}
+}
+
+// reconcileInterval returns the configured reconcile interval, or the
+// default the reconcile loop falls back to for a non-positive one.
+func reconcileInterval(cfg *Config) time.Duration {
+	if interval := cfg.Reconcile.Interval.Unwrap(); interval > 0 {
+		return interval
+	}
+
+	return operator.DefaultReconcileInterval
 }
 
 // ribTTL returns the configured RIB TTL or the default if unset.
@@ -393,6 +392,11 @@ func parseMAC(s string) ([6]byte, error) {
 	return [6]byte(hw), nil
 }
 
+// fibScope names the readiness scope of the module's FIB on a gateway.
+func fibScope(gateway, module string) string {
+	return fmt.Sprintf("fib:%s:%s", gateway, module)
+}
+
 // readinessScopeSpecs maps each readiness source to its nominal cadence.
 // External publishers have no configured observation cadence here.
 func readinessScopeSpecs(cfg *Config, moduleName string) []readiness.ScopeSpec {
@@ -400,7 +404,7 @@ func readinessScopeSpecs(cfg *Config, moduleName string) []readiness.ScopeSpec {
 	specs := make([]readiness.ScopeSpec, 0, len(cfg.Gateways)+3)
 	for _, gw := range cfg.Gateways {
 		specs = append(specs, readiness.ScopeSpec{
-			Name:                        fmt.Sprintf("fib:%s:%s", gw.Name, moduleName),
+			Name:                        fibScope(gw.Name, moduleName),
 			ExpectedObservationInterval: fibInterval,
 		})
 	}

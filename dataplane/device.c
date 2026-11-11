@@ -153,7 +153,8 @@ dataplane_device_init(
 	(void)dataplane;
 
 	device->device_id = device_id;
-	device->queue_count = config->worker_count;
+	device->queue_count = config->queue_count;
+	device->queues = config->queues;
 	device->rss_hash = config->rss_hash;
 	device->queue_roles = NULL;
 	strtcpy(device->port_name, config->port_name, 80);
@@ -161,13 +162,13 @@ dataplane_device_init(
 	if (dataplane_device_config_has_roles(config)) {
 		device->queue_roles = (struct dataplane_queue_role *)malloc(
 			sizeof(struct dataplane_queue_role) *
-			config->worker_count
+			config->queue_count
 		);
 		if (device->queue_roles == NULL) {
 			return -1;
 		}
-		for (uint32_t idx = 0; idx < config->worker_count; ++idx) {
-			device->queue_roles[idx] = config->workers[idx].role;
+		for (uint32_t idx = 0; idx < config->queue_count; ++idx) {
+			device->queue_roles[idx] = config->queues[idx].role;
 		}
 	}
 	device->rss_queue_count = 0;
@@ -180,8 +181,8 @@ dataplane_device_init(
 		    config->port_name,
 		    &device->port_id,
 		    config->rss_hash,
-		    config->worker_count,
-		    config->worker_count,
+		    config->queue_count,
+		    config->queue_count,
 		    config->mtu,
 		    config->max_lro_packet_size
 	    )) {

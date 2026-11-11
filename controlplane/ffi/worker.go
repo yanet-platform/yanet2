@@ -26,10 +26,12 @@ type WorkerRxMempool struct {
 	Available uint32
 }
 
-// WorkerAssignment is one (device, queue) pair a worker polls.
+// WorkerAssignment is one (device, queue) pair a worker polls, with the
+// pair's rx service: how many bursts the pair takes per worker round.
 type WorkerAssignment struct {
 	DeviceID uint32
 	QueueID  uint32
+	Weight   uint32
 }
 
 type WorkerCounter struct {
@@ -151,6 +153,7 @@ func workerAssignments(ptr *C.struct_dp_config, idx int, count C.uint32_t) ([]Wo
 		assignments[idx] = WorkerAssignment{
 			DeviceID: uint32(raw[idx].device_id),
 			QueueID:  uint32(raw[idx].queue_id),
+			Weight:   uint32(raw[idx].weight),
 		}
 	}
 	return assignments, nil

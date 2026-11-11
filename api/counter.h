@@ -136,9 +136,13 @@ void
 yanet_port_counter_group_list_free(struct port_counter_group_list *groups);
 
 // One (device, queue) pair a worker polls.
+//
+// The weight is the assignment's rx service: up to weight bursts in a
+// worker round, always at least 1.
 struct worker_assignment_metadata {
 	uint32_t device_id;
 	uint32_t queue_id;
+	uint32_t weight;
 };
 
 struct worker_counter_metadata {

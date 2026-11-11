@@ -24,6 +24,7 @@ func Test_PublishError_MapsFailures(t *testing.T) {
 		{name: "status from the mutation", err: status.Error(codes.InvalidArgument, "bad prefix"), code: codes.InvalidArgument},
 		{name: "dataplane refusal", err: ffi.ErrFailedPrecondition, code: codes.FailedPrecondition},
 		{name: "no room left", err: ffi.ErrResourceExhausted, code: codes.ResourceExhausted},
+		{name: "refused input", err: ffi.ErrInvalidArgument, code: codes.InvalidArgument},
 		{name: "anything else", err: errors.New("boom"), code: codes.Internal},
 	}
 

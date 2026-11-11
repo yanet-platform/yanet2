@@ -41,7 +41,7 @@ on:
       # the CLI builds; its own workflows check it.
       #
       # A negation applies only to the patterns above it, so it stays last.
-      - "!lib/rust/**"
+      - "!bindings/rust/**"
   pull_request:
     # A stacked pull request has a non-main base, so a main-only filter would skip it.
     branches: ["**"]
@@ -83,7 +83,7 @@ on:
       # the CLI builds; its own workflows check it.
       #
       # A negation applies only to the patterns above it, so it stays last.
-      - "!lib/rust/**"
+      - "!bindings/rust/**"
 
 concurrency:
   # The run_id fallback keeps non-PR runs from cancelling each other.
@@ -99,6 +99,20 @@ permissions:
   contents: read
 
 jobs:
+  functional-makefile:
+    name: Functional Makefile sandbox
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check Makefile behavior
+        run: |
+          test "$(id -u)" -ne 0
+          bash tests/functional/test-makefile.sh
+          bash tests/functional/test-makefile.sh default
+
   build-asan-test:
     runs-on: ubuntu-24.04
     timeout-minutes: 45

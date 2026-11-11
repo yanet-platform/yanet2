@@ -43,16 +43,42 @@ struct dataplane_device_worker_config {
 	struct dataplane_queue_role role;
 };
 
-// One (device, queue) pair a worker polls.
+// One declared queue of a device: the ring and pool sizing of its rx/tx
+// pair, plus the traffic the NIC delivers to it.
 //
-// The queue's ring and pool sizing travels with the assignment: it is a
-// property of the queue, not of the worker.
-struct dataplane_assignment_config {
-	uint32_t device_id;
-	uint32_t queue_id;
+// Every queue ends up fully materialized: a field the queue leaves at zero
+// takes the device's default_queue value, and one that is still zero takes
+// the built-in default. Consumers read the effective numbers directly.
+struct dataplane_queue_config {
 	uint16_t rx_queue_len;
 	uint16_t tx_queue_len;
 	uint32_t num_mbufs;
+
+	struct dataplane_queue_role role;
+};
+
+// Which YAML shapes declared a device's queues: a parsed device carries
+// at most one of these bits.
+enum dataplane_queue_declaration {
+	dataplane_queue_none = 0,
+	dataplane_queue_count = 1 << 0,	 // queue_count: N
+	dataplane_queue_list = 1 << 1,	 // queues: [...]
+	dataplane_queue_nested = 1 << 2, // nested devices[].workers[] entries
+};
+
+// One (device, queue) pair a worker polls, with the pair's rx service:
+// how many bursts the pair takes per worker round, always at least one;
+// the nested workers[] form keeps its one-burst-per-round meaning.
+//
+// The device travels by name and is resolved to device_id by
+// dataplane_config_init, exactly like a connection's src_device; the
+// nested workers[] expansion, which knows the device, fills device_id
+// directly and leaves the name empty.
+struct dataplane_assignment_config {
+	char device[80];
+	uint32_t device_id;
+	uint32_t queue_id;
+	uint8_t weight;
 };
 
 // A worker thread: one core, one instance, one or more assignments.
@@ -72,9 +98,28 @@ struct dataplane_device_config {
 	uint64_t max_lro_packet_size;
 	uint64_t rss_hash;
 
-	// The workers declared inside the device; also the device's queue
-	// count, with worker i polling queue i. Expanded into the flat
-	// top-level worker list (one single-assignment worker per entry) by
+	// Sizing a queue of this device takes when the queue itself declares
+	// none: the middle step between the queue entry and the built-in
+	// defaults. The role member is not user-configurable here; every
+	// queue keeps role.rss set until its own declaration clears it.
+	struct dataplane_queue_config default_queue;
+
+	// Which shapes declared the queues; see enum
+	// dataplane_queue_declaration.
+	uint8_t queue_declarations;
+
+	// The device's queues, one per rx/tx pair; the queue id is the index
+	// into this array, which maps directly onto the port's RSS/RETA
+	// entries. Materialized from the declaring shape by
+	// dataplane_config_init, so the fields hold effective values
+	// afterwards. NULL when the device declares no queues.
+	uint32_t queue_count;
+	struct dataplane_queue_config *queues;
+
+	// The workers declared inside the device; the legacy shape, where
+	// worker i declares and polls queue i, carrying that queue's sizing
+	// and role. Expanded into the queues array and the flat top-level
+	// worker list (one single-assignment worker per entry) by
 	// dataplane_config_init.
 	uint32_t worker_count;
 	struct dataplane_device_worker_config *workers;
@@ -109,9 +154,11 @@ struct dataplane_config {
 	uint64_t connection_count;
 	struct dataplane_connection_config *connections;
 
-	// The flat worker list the nested devices[].workers[] entries expand
-	// into, one single-assignment worker per entry in device and entry
-	// order; worker i of device d polls queue i of d.
+	// The flat worker list: written directly by the top-level workers
+	// section, and expanded from the nested devices[].workers[] entries
+	// (one single-assignment worker per entry, in device and entry order;
+	// worker i of device d polls queue i of d) by dataplane_config_init.
+	// The two shapes cannot be mixed in one config.
 	uint64_t worker_count;
 	struct dataplane_worker_config *workers;
 

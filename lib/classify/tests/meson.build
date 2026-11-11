@@ -55,3 +55,12 @@ classify_join_test = executable(
   include_directories: yanet_rootdir,
 )
 test('classify_join_test', classify_join_test, suite: ['filter'])
+
+classify_net_hash = executable(
+  'classify_net_hash',
+  ['net_hash.c'],
+  c_args: yanet_test_c_args,
+  dependencies: [lib_common_dep, lib_classify_compiler_dep, libdpdk_inc_dep],
+  include_directories: yanet_rootdir,
+)
+test('classify_net_hash', classify_net_hash, suite: ['filter'])

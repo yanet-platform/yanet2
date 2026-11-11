@@ -29,9 +29,6 @@ func (m *UpdateConfigRequest) Validate() error {
 	// A rule without networks matches through the l2 device filter, so
 	// the ruleset takes both kinds; vlan ranges from older clients are
 	// accepted and ignored.
-	if m.GetSyncConfig() != nil {
-		return errors.New("sync_config belongs to fwstate")
-	}
 	if err := validateOptionalMapName(
 		"fwtable_name_v4",
 		m.GetFwtableNameV4(),

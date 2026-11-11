@@ -2,12 +2,13 @@
 
 #include <stdarg.h>
 
-// Error type.
+// A chain of error frames, the outermost first, that a failed call leaves in
+// its trailing out-parameter.
 //
-// Functions that can fail and that wishes to set an extended error message
-// should accept `yanet_error **` as a last out-parameter.
-//
-// If such function does not fail, it should leave the error pointer unchanged.
+// A function that reports why it failed takes a `yanet_error **` as its last
+// parameter and leaves it unchanged when it succeeds. A frame is never written
+// after it is made, so any number of threads may read a chain at once, and
+// the owner of a chain may free it from any thread.
 struct yanet_error;
 
 typedef struct yanet_error yanet_error;
@@ -37,11 +38,13 @@ enum yanet_error_kind {
 
 // Frees the whole chain.
 //
-// No-op on NULL and on the out-of-memory singleton.
+// No-op on NULL. The out-of-memory singleton, which may end any chain, is
+// never freed.
 void
 yanet_error_free(yanet_error *err);
 
-// Returns the message of this frame (not the whole chain).
+// Returns the message of this frame (not the whole chain), which lives as long
+// as the frame.
 const char *
 yanet_error_message(const yanet_error *err);
 

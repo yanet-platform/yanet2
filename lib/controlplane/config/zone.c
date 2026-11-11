@@ -378,6 +378,7 @@ cp_config_update_modules(
 	cp_config_lock(cp_config);
 
 	struct agent **owners = NULL;
+
 	if (module_count > 0) {
 		owners =
 			(struct agent **)malloc(sizeof(*owners) * module_count);
@@ -428,6 +429,43 @@ cp_config_update_modules(
 			__atomic_add_fetch(
 				&owner->loaded_entity_count, 1, __ATOMIC_RELEASE
 			);
+		}
+	}
+
+	// A repeated identity would replace the item this same update just
+	// installed, so the second item's counters link from the first without
+	// a published generation between the two links. Counter value slots
+	// are only reused once the generation that last counted into them has
+	// been installed and retired, so the repetition is refused rather
+	// than allowed to shorten that grace. The check reads the items
+	// under the agent lock for the same reason the owner validation
+	// above does.
+	for (uint64_t idx = 0; idx < module_count; ++idx) {
+		for (uint64_t prev = 0; prev < idx; ++prev) {
+			if (!strncmp(
+				    cp_modules[idx]->type,
+				    cp_modules[prev]->type,
+				    CP_MODULE_TYPE_LEN
+			    ) &&
+			    !strncmp(
+				    cp_modules[idx]->name,
+				    cp_modules[prev]->name,
+				    CP_MODULE_NAME_LEN
+			    )) {
+				yanet_error_add_kind(
+					err,
+					YANET_ERROR_FAILED_PRECONDITION,
+					"module '%s:%s' appears more than once "
+					"in one update",
+					cp_modules[idx]->type,
+					cp_modules[idx]->name
+				);
+				agent_unload_references(owners, module_count);
+				spinlock_unlock(&cp_config->agent_lock);
+				free(owners);
+				owners = NULL;
+				goto error_unlock;
+			}
 		}
 	}
 	spinlock_unlock(&cp_config->agent_lock);
@@ -539,6 +577,30 @@ cp_config_update_functions(
 	yanet_error **err
 ) {
 	cp_config_lock(cp_config);
+
+	// A repeated identity would link the second function's chain counters
+	// from the first without a published generation between the two
+	// links, which counter value slot reuse cannot allow; see the module
+	// update path.
+	for (uint64_t idx = 0; idx < function_count; ++idx) {
+		for (uint64_t prev = 0; prev < idx; ++prev) {
+			if (!strncmp(
+				    cp_function_configs[idx]->name,
+				    cp_function_configs[prev]->name,
+				    CP_FUNCTION_NAME_LEN
+			    )) {
+				yanet_error_add_kind(
+					err,
+					YANET_ERROR_FAILED_PRECONDITION,
+					"function '%s' appears more than once "
+					"in "
+					"one update",
+					cp_function_configs[idx]->name
+				);
+				goto error_unlock;
+			}
+		}
+	}
 
 	struct cp_config_gen *old_config_gen = cp_config_current_gen(cp_config);
 	struct cp_config_gen *new_config_gen =
@@ -677,6 +739,29 @@ cp_config_update_pipelines(
 	yanet_error **err
 ) {
 	cp_config_lock(cp_config);
+
+	// A repeated identity would link the second pipeline's counters from
+	// the first without a published generation between the two links,
+	// which counter value slot reuse cannot allow; see the module update
+	// path.
+	for (uint64_t idx = 0; idx < pipeline_count; ++idx) {
+		for (uint64_t prev = 0; prev < idx; ++prev) {
+			if (!strncmp(
+				    cp_pipeline_configs[idx]->name,
+				    cp_pipeline_configs[prev]->name,
+				    CP_PIPELINE_NAME_LEN
+			    )) {
+				yanet_error_add_kind(
+					err,
+					YANET_ERROR_FAILED_PRECONDITION,
+					"pipeline '%s' appears more than once "
+					"in one update",
+					cp_pipeline_configs[idx]->name
+				);
+				goto error_unlock;
+			}
+		}
+	}
 
 	struct cp_config_gen *old_config_gen = cp_config_current_gen(cp_config);
 	struct cp_config_gen *new_config_gen =
@@ -883,6 +968,7 @@ cp_config_update_devices(
 	cp_config_lock(cp_config);
 
 	struct agent **owners = NULL;
+
 	if (device_count > 0) {
 		owners =
 			(struct agent **)malloc(sizeof(*owners) * device_count);
@@ -928,6 +1014,34 @@ cp_config_update_devices(
 			__atomic_add_fetch(
 				&owner->loaded_entity_count, 1, __ATOMIC_RELEASE
 			);
+		}
+	}
+
+	// A repeated identity would link the second device's counters from
+	// the first without a published generation between the two links,
+	// which counter value slot reuse cannot allow; the check reads the
+	// items under the agent lock for the same reason the owner
+	// validation above does.
+	for (uint64_t idx = 0; idx < device_count; ++idx) {
+		for (uint64_t prev = 0; prev < idx; ++prev) {
+			if (!strncmp(
+				    devices[idx]->name,
+				    devices[prev]->name,
+				    CP_DEVICE_NAME_LEN
+			    )) {
+				yanet_error_add_kind(
+					err,
+					YANET_ERROR_FAILED_PRECONDITION,
+					"device '%s' appears more than once in "
+					"one update",
+					devices[idx]->name
+				);
+				agent_unload_references(owners, device_count);
+				spinlock_unlock(&cp_config->agent_lock);
+				free(owners);
+				owners = NULL;
+				goto error_unlock;
+			}
 		}
 	}
 	spinlock_unlock(&cp_config->agent_lock);
@@ -1061,6 +1175,7 @@ cp_config_update_objects(
 	cp_config_lock(cp_config);
 
 	struct agent **owners = NULL;
+
 	if (object_count > 0) {
 		owners =
 			(struct agent **)malloc(sizeof(*owners) * object_count);
@@ -1108,6 +1223,40 @@ cp_config_update_objects(
 			__atomic_add_fetch(
 				&owner->loaded_entity_count, 1, __ATOMIC_RELEASE
 			);
+		}
+	}
+
+	// A repeated identity would link the second item's counters from the
+	// first without a published generation between the two links, which
+	// counter value slot reuse cannot allow; the check reads the items
+	// under the agent lock for the same reason the owner validation
+	// above does.
+	for (uint64_t idx = 0; idx < object_count; ++idx) {
+		for (uint64_t prev = 0; prev < idx; ++prev) {
+			if (!strncmp(
+				    objects[idx]->type,
+				    objects[prev]->type,
+				    CP_OBJECT_TYPE_LEN
+			    ) &&
+			    !strncmp(
+				    objects[idx]->name,
+				    objects[prev]->name,
+				    CP_OBJECT_NAME_LEN
+			    )) {
+				yanet_error_add_kind(
+					err,
+					YANET_ERROR_FAILED_PRECONDITION,
+					"object '%s:%s' appears more than once "
+					"in one update",
+					objects[idx]->type,
+					objects[idx]->name
+				);
+				agent_unload_references(owners, object_count);
+				spinlock_unlock(&cp_config->agent_lock);
+				free(owners);
+				owners = NULL;
+				goto error_unlock;
+			}
 		}
 	}
 	spinlock_unlock(&cp_config->agent_lock);

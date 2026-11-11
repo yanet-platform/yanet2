@@ -5,6 +5,7 @@ import (
 	"net/netip"
 	"testing"
 
+	"github.com/cenkalti/backoff/v5"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -84,23 +85,37 @@ func Test_Sync_Push_UnknownConfigSendsWholeTable(t *testing.T) {
 	require.Len(t, client.creates[0].Rules, 2, "the create carries every route, not only the latest change")
 }
 
-// Test_Sync_Push_FailedPushKeepsChanges verifies that the changes a failed
-// push could not deliver are sent again by the next push, together with
-// newer ones, without replacing the whole table.
-func Test_Sync_Push_FailedPushKeepsChanges(t *testing.T) {
+// Test_Sync_Push_FailedPushSendsWholeTable verifies that the push after a
+// failed one sends the whole table instead of a queue of changes.
+func Test_Sync_Push_FailedPushSendsWholeTable(t *testing.T) {
 	ctx := t.Context()
 	client := &fakeClient{updateErrs: []error{status.Error(codes.Unavailable, "control plane restarting")}}
-	mplsSync := mpls.NewSync("mpls0", client, sourceV4, sourceV6)
+	mplsSync := mpls.NewSync("mpls0", client, sourceV4, sourceV6, mpls.WithRetryBackOff(&backoff.ZeroBackOff{}))
 
 	mplsSync.Apply(mplsRoute("2001:db8:1::/48", "2001:db8::1", 100))
 	require.Error(t, mplsSync.Push(ctx))
 	mplsSync.Apply(mplsRoute("2001:db8:2::/48", "2001:db8::2", 200))
 	require.NoError(t, mplsSync.Push(ctx))
 
-	require.Len(t, client.updates, 2)
-	require.Len(t, client.updates[1].Updates, 2, "the retry carries the undelivered change and the newer one")
-	require.Empty(t, client.creates)
+	require.Len(t, client.updates, 1, "the failed changes are not sent again as changes")
+	require.Len(t, client.creates, 1)
+	require.Len(t, client.creates[0].Rules, 2, "the table carries the failed change and the newer one")
 
 	require.NoError(t, mplsSync.Push(ctx))
-	require.Len(t, client.updates, 2, "nothing is left to push once delivered")
+	require.Len(t, client.creates, 1, "nothing is left to push once delivered")
+}
+
+// Test_Sync_Push_InvalidRuleLeftOut verifies that a route whose label
+// route-mpls cannot carry is left out of the whole table.
+func Test_Sync_Push_InvalidRuleLeftOut(t *testing.T) {
+	ctx := t.Context()
+	client := &fakeClient{updateErrs: []error{status.Error(codes.NotFound, "config not found")}}
+	mplsSync := mpls.NewSync("mpls0", client, sourceV4, sourceV6)
+
+	mplsSync.Apply(mplsRoute("2001:db8:1::/48", "2001:db8::1", 100))
+	mplsSync.Apply(mplsRoute("2001:db8:2::/48", "2001:db8::2", 1<<20))
+	require.NoError(t, mplsSync.Push(ctx))
+
+	require.Len(t, client.creates, 1)
+	require.Len(t, client.creates[0].Rules, 1, "the label route-mpls rejects stays out")
 }

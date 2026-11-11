@@ -2,7 +2,7 @@ project(
   'yanet',
   'c',
   meson_version: '>= 1.3',
-  version: '0.4.1',
+  version: '0.5.0',
   default_options: [
     'buildtype=release',
     'warning_level=2',
@@ -298,7 +298,7 @@ if get_option('sdk_rust_fixtures').enabled()
   yanet_go_env += {
     'CGO_CPPFLAGS': yanet_go_env['CGO_CPPFLAGS']
       + ' "-I' + meson.project_source_root() + '"'
-      + ' "-I' + (meson.project_build_root() / 'lib/rust') + '"'
+      + ' "-I' + (meson.project_build_root() / 'bindings/rust') + '"'
       + ' "-I' + (meson.global_build_root() / 'subprojects/dpdk') + '"',
   }
 endif
@@ -463,7 +463,7 @@ if not dataplane_only
   #
   # Their cgo package is test-only, so the directory is entered after the
   # production closure of the control plane is fixed.
-  subdir('lib/rust')
+  subdir('bindings/rust')
 
   # Meson computes the link closure of each package for a probe program.
   #

@@ -1,5 +1,8 @@
 #include "controlplane.h"
 
+#include <errno.h>
+#include <inttypes.h>
+
 #include "config.h"
 
 #include "common/container_of.h"
@@ -18,6 +21,14 @@ target_memory_size(uint64_t nexthop_map_size) {
 	return sizeof(struct target) + sizeof(uint64_t) * nexthop_map_size;
 }
 
+// Returns the most slots a selection map can have: a target and its map
+// share one allocator block.
+static inline uint64_t
+target_map_size_max(void) {
+	return (MEMORY_BLOCK_ALLOCATOR_MAX_SIZE - sizeof(struct target)) /
+	       sizeof(uint64_t);
+}
+
 static void
 route_mpls_module_config_fini(struct module_config *config) {
 	struct memory_context *memory_context =
@@ -28,7 +39,13 @@ route_mpls_module_config_fini(struct module_config *config) {
 	filter_free(&config->filter_ip4, FILTER_IP4_TAG);
 	memset(&config->filter_ip4, 0, sizeof(config->filter_ip4));
 
+	// A failed update finalizes the config and its destroy finalizes it
+	// again, so the second pass must find no targets left.
 	struct target **targets = ADDR_OF(&config->targets);
+	if (targets == NULL) {
+		return;
+	}
+
 	for (uint64_t idx = 0; idx < config->target_count; ++idx) {
 		struct target *target = ADDR_OF(targets + idx);
 		if (target == NULL) {
@@ -56,6 +73,7 @@ route_mpls_module_config_fini(struct module_config *config) {
 		sizeof(struct target *) * config->target_count
 	);
 	SET_OFFSET_OF(&config->targets, NULL);
+	config->target_count = 0;
 }
 
 static void
@@ -265,6 +283,9 @@ route_mpls_rule_target_new(
 	struct memory_context *memory_context =
 		&cp_module->entity.memory_context;
 
+	// The map takes one slot per unit of weight, so the sum is bounded as
+	// it grows: a sum that wrapped would size the map below the slots the
+	// fill loop below writes.
 	uint64_t map_size = 0;
 
 	for (uint64_t nexthop_idx = 0;
@@ -272,6 +293,17 @@ route_mpls_rule_target_new(
 	     ++nexthop_idx) {
 		struct route_mpls_nexthop *nexthop =
 			route_mpls_rule->nexthops + nexthop_idx;
+		if (nexthop->weight > target_map_size_max() - map_size) {
+			yanet_error_add_kind(
+				err,
+				YANET_ERROR_INVALID_ARGUMENT,
+				"nexthop weights of a rule exceed the %" PRIu64
+				" slots one selection map holds",
+				target_map_size_max()
+			);
+			errno = E2BIG;
+			return NULL;
+		}
 		map_size += nexthop->weight;
 	}
 
@@ -279,6 +311,13 @@ route_mpls_rule_target_new(
 		memory_context, target_memory_size(map_size)
 	);
 	if (target == NULL) {
+		yanet_error_add_kind(
+			err,
+			YANET_ERROR_RESOURCE_EXHAUSTED,
+			"failed to allocate a selection map of %" PRIu64
+			" slots",
+			map_size
+		);
 		return NULL;
 	}
 
@@ -290,6 +329,12 @@ route_mpls_rule_target_new(
 		sizeof(struct nexthop) * route_mpls_rule->nexthop_count
 	);
 	if (nexthops == NULL) {
+		yanet_error_add_kind(
+			err,
+			YANET_ERROR_RESOURCE_EXHAUSTED,
+			"failed to allocate %" PRIu64 " nexthops",
+			route_mpls_rule->nexthop_count
+		);
 		goto error_target;
 	}
 
@@ -385,6 +430,12 @@ route_mpls_module_config_update(
 	);
 
 	if (targets == NULL) {
+		yanet_error_add_kind(
+			err,
+			YANET_ERROR_RESOURCE_EXHAUSTED,
+			"failed to allocate %" PRIu64 " rule targets",
+			route_mpls_rule_count
+		);
 		return -1;
 	}
 	memset(targets, 0, sizeof(struct target *) * route_mpls_rule_count);
@@ -408,6 +459,7 @@ route_mpls_module_config_update(
 		sizeof(struct filter_rule) * route_mpls_rule_count
 	);
 	if (filter_rules == NULL) {
+		yanet_error_add(err, "failed to allocate filter rules");
 		goto error;
 	}
 
@@ -420,6 +472,7 @@ route_mpls_module_config_update(
 			sizeof(struct filter_rule *) * route_mpls_rule_count
 		);
 	if (filter_rule_ptrs == NULL) {
+		yanet_error_add(err, "failed to allocate filter rule pointers");
 		goto error_rules;
 	}
 

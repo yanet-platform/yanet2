@@ -1,27 +1,26 @@
 [package]
 name = "yanet-cli-route"
-version = "0.4.1"
-edition = "2024"
-publish = false
-
-rust-version = "1.99"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+rust-version.workspace = true
 
 [lints]
 workspace = true
 
 [dependencies]
-commonpb = { path = "../../../common/rust/commonpb", package = "yanet-commonpb" }
-ync = { path = "../../../cli/core", package = "yanet-cli" }
-clap = { version = "4.5", features = ["derive", "wrap_help"] }
-clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
-prost = "0.14"
-tonic = { version = "0.14", features = ["gzip", "zstd"] }
-tabled = { version = "0.22", default-features = false, features = ["ansi", "derive"] }
-serde = { version = "1", features = ["derive"] }
+commonpb.workspace = true
+ync.workspace = true
+clap = { workspace = true, features = ["wrap_help"] }
+clap_complete.workspace = true
+prost.workspace = true
+tonic.workspace = true
+tabled = { workspace = true, features = ["derive"] }
+serde = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
-serde_yaml = "0.9"
-netip = "0.4"
+serde_yaml.workspace = true
+netip.workspace = true
 
 [build-dependencies]
-ync-build = { path = "../../../cli/ync-build", package = "yanet-cli-build" }
+ync-build.workspace = true

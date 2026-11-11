@@ -191,7 +191,7 @@ insert_worker1_extra_storage(struct cp_config *cp_config) {
 	);
 	memset(registry, 0, sizeof(*registry));
 	TEST_ASSERT_SUCCESS(
-		counter_registry_init(registry, memory_context, 0),
+		counter_registry_init(registry, memory_context),
 		"failed to init the extra counter registry"
 	);
 
@@ -660,6 +660,12 @@ test_worker_rx_mempool_gauges(struct dp_config *dp_config) {
 			"worker %lu assignment queue id",
 			(unsigned long)w_idx
 		);
+		TEST_ASSERT_EQUAL(
+			1,
+			assignments[0].weight,
+			"worker %lu assignment weight",
+			(unsigned long)w_idx
+		);
 	}
 
 	// An out-of-range worker index must refuse rather than fill.
@@ -699,7 +705,7 @@ test_registry_exact_lookup(struct cp_config *cp_config) {
 	);
 	memset(extra_registry, 0, sizeof(*extra_registry));
 	TEST_ASSERT_SUCCESS(
-		counter_registry_init(extra_registry, memory_context, 0),
+		counter_registry_init(extra_registry, memory_context),
 		"failed to init the growth counter registry"
 	);
 	TEST_ASSERT_SUCCESS(

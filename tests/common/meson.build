@@ -141,3 +141,11 @@ ring_bench = executable(
   include_directories: yanet_rootdir,
 )
 benchmark('ring_bench', ring_bench, timeout: 300)
+
+# Register the LPM fuzzing target: the range insert against its lookups.
+fuzzing_targets += {
+  'lpm': {
+    'source': files('lpm_fuzz.c'),
+    'deps': [lib_common_dep],
+  }
+}

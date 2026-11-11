@@ -20,9 +20,10 @@ import (
 
 // RouteService implements the operator-owned RouteService surface.
 //
-// Mutation RPCs update the RIB held in this process and wake the
-// reconcile loop via onChanged. The reconcile loop snapshots state and
-// pushes the rebuilt FIB to the gateways through the actuator.
+// Mutation RPCs update the RIB held in this process, and a flush or the end
+// of a feed session reports the change. The desired state is rebuilt from
+// the RIB on such a report, and within a reconcile interval after an
+// unreported change; the gateways get FIBs built from it.
 type RouteService struct {
 	operatorpb.UnimplementedRouteServiceServer
 
@@ -329,7 +330,9 @@ func (m *RouteService) FeedRIB(stream operatorpb.RouteService_FeedRIBServer) err
 		if err != nil {
 			break
 		}
-
+		// The first message of a stream, a heartbeat included, starts its
+		// session, so an import whose BIRD table is empty still takes the
+		// RIB over.
 		if ribRef == nil {
 			name = update.GetName()
 			ribRef = m.getOrCreateRib(name)
@@ -339,6 +342,21 @@ func (m *RouteService) FeedRIB(stream operatorpb.RouteService_FeedRIBServer) err
 				zap.String("name", name),
 			)
 			m.onRIBSessionStart(name, sessionID)
+			// The older sessions' routes this one does not send again go
+			// after the TTL, even when an older stream never ends.
+			if sessionID > 1 {
+				go ribRef.CleanupTask(sessionID-1, m.quitCh, m.ribTTL)
+			}
+		}
+
+		// A heartbeat only proves the stream alive to its sender and changes
+		// no routes, but a superseded stream ends on it like on a flush.
+		if update.GetHeartbeat() {
+			if !ribRef.IsActive(sessionID) {
+				err = m.terminateFeedRIBSession(stream, name, sessionID)
+				break
+			}
+			continue
 		}
 
 		if update.GetRoute() == nil {

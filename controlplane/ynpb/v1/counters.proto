@@ -66,6 +66,9 @@ message WorkerAssignment {
   uint32 device_id = 1;
   // RX queue identifier polled by the worker.
   uint32 queue_id = 2;
+  // The pair's rx service: up to this many bursts per worker round; a
+  // short burst ends the pair's service for the round.
+  uint32 weight = 3;
 }
 
 message WorkerCounter {
