@@ -1,6 +1,8 @@
 package dscppb
 
 import (
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 
@@ -12,6 +14,35 @@ const MaxFlag = 2
 
 // MaxMark mirrors the largest six-bit DSCP value of the C marking.
 const MaxMark = 63
+
+// UnmarshalJSON accepts the legacy destination keys as aliases for the
+// explicit direction names, rejecting a direction specified twice.
+func (m *Config) UnmarshalJSON(data []byte) error {
+	fields := map[string]jsontext.Value{}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	for _, alias := range []struct{ Legacy, Canonical string }{
+		{"prefixes4", "destination_prefixes4"},
+		{"prefixes6", "destination_prefixes6"},
+	} {
+		value, ok := fields[alias.Legacy]
+		if !ok {
+			continue
+		}
+		if _, ok := fields[alias.Canonical]; ok {
+			return fmt.Errorf("both %q and %q are specified", alias.Legacy, alias.Canonical)
+		}
+		fields[alias.Canonical] = value
+		delete(fields, alias.Legacy)
+	}
+	encoded, err := json.Marshal(fields, json.Deterministic(true))
+	if err != nil {
+		return err
+	}
+	type plainConfig Config
+	return json.Unmarshal(encoded, (*plainConfig)(m))
+}
 
 func (m *ShowConfigRequest) Validate() error {
 	return commonpb.ValidateModuleName("name", m.GetName())

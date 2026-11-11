@@ -63,7 +63,9 @@ run_round_restore_test(void) {
 	uint8_t first_addr[4] = {0, 0, 0, 0};
 	uint8_t last_addr[4] = {255, 255, 255, 255};
 	TEST_ASSERT_SUCCESS(
-		dscp_module_config_add_prefix_v4(dscp, first_addr, last_addr),
+		dscp_module_config_add_destination_prefix_v4(
+			dscp, first_addr, last_addr
+		),
 		"dscp prefix setup failed"
 	);
 	TEST_ASSERT_SUCCESS(

@@ -36,24 +36,38 @@ dscp_test_config(struct cp_module **cp_module) {
 
 	struct memory_context *memory_context =
 		&config->cp_module.entity.memory_context;
-	if (lpm_init(&config->lpm_v4, memory_context, "lpm_v4")) {
-		goto error_lpm_v4;
+	if (dscp_module_config_data_init(config, memory_context)) {
+		goto error_config;
 	}
-	if (lpm_init(&config->lpm_v6, memory_context, "lpm_v6")) {
-		goto error_lpm_v6;
+
+	int rc = dscp_module_config_add_source_prefix_v4(
+		&config->cp_module,
+		(uint8_t[4]){0},
+		(uint8_t[4]){0x7f, 0xff, 0xff, 0xff}
+	);
+	if (rc != 0) {
+		goto error_data;
+	}
+	rc = dscp_module_config_add_source_prefix_v6(
+		&config->cp_module,
+		(uint8_t[16]){0},
+		(uint8_t[16]){0x7f, [1 ... 15] = 0xff}
+	);
+	if (rc != 0) {
+		goto error_data;
 	}
 
 	// 127.0.0.0/24
-	int rc = dscp_module_config_add_prefix_v4(
+	rc = dscp_module_config_add_destination_prefix_v4(
 		&config->cp_module,
 		(uint8_t[4]){127, 0, 0, 0},
 		(uint8_t[4]){127, 0, 0, 0xff}
 	);
 	if (rc != 0) {
-		goto error_lpm_v6;
+		goto error_data;
 	}
 	// fe80::0/96
-	rc = dscp_module_config_add_prefix_v6(
+	rc = dscp_module_config_add_destination_prefix_v6(
 		&config->cp_module,
 		(uint8_t[16]){0xfe, 0x80, [15] = 0},
 		(uint8_t[16]
@@ -61,23 +75,23 @@ dscp_test_config(struct cp_module **cp_module) {
 		}
 	);
 	if (rc != 0) {
-		goto error_lpm_v6;
+		goto error_data;
 	}
 
 	rc = dscp_module_config_set_dscp_marking(
 		&config->cp_module, DSCP_MARK_DEFAULT, 46
 	);
 	if (rc != 0) {
-		goto error_lpm_v6;
+		goto error_data;
 	}
 
 	*cp_module = (struct cp_module *)config;
 	return 0;
 
-error_lpm_v6:
-	lpm_free(&config->lpm_v4);
+error_data:
+	dscp_module_config_data_fini(config);
 
-error_lpm_v4:
+error_config:
 	memory_bfree(
 		&fuzz_params.mctx, config, sizeof(struct dscp_module_config)
 	);

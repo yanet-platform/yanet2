@@ -3,6 +3,9 @@ package dscp_test
 import (
 	"net"
 	"net/netip"
+	"os"
+	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -14,12 +17,15 @@ import (
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/devices/plain/bindings/go/cplain"
 	"github.com/yanet-platform/yanet2/modules/dscp/bindings/go/cdscp"
+	dscppb "github.com/yanet-platform/yanet2/modules/dscp/controlplane/dscppb/v1"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
+	"github.com/yanet-platform/yanet2/operators/generic/operator"
 )
 
 const (
@@ -41,6 +47,27 @@ const (
 func setupDSCPHarness(t *testing.T, flag, mark uint8) *dataplaneut.Harness {
 	t.Helper()
 
+	return setupDSCPSelectionHarness(t, flag, mark, dscpSelection{
+		destinations: []netip.Prefix{
+			netip.MustParsePrefix("1:2:3:4::/64"),
+			netip.MustParsePrefix("1.1.0.0/32"),
+		},
+	})
+}
+
+type dscpSelection struct {
+	sources      []netip.Prefix
+	destinations []netip.Prefix
+}
+
+// setupDSCPSelectionHarness publishes both prefix sets with unchanged egress.
+func setupDSCPSelectionHarness(
+	t *testing.T,
+	flag, mark uint8,
+	selection dscpSelection,
+) *dataplaneut.Harness {
+	t.Helper()
+
 	harness, err := dataplaneut.NewHarness(dataplaneut.Config{
 		CPMemory:      uint64(64 * datasize.MB),
 		DPMemory:      uint64(4 * datasize.MB),
@@ -59,11 +86,11 @@ func setupDSCPHarness(t *testing.T, flag, mark uint8) *dataplaneut.Harness {
 	module, err := cdscp.NewModuleConfig(agent, "mark")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = module.Free() })
-	for _, prefix := range []netip.Prefix{
-		netip.MustParsePrefix("1:2:3:4::/64"),
-		netip.MustParsePrefix("1.1.0.0/32"),
-	} {
-		require.NoError(t, module.PrefixAdd(prefix))
+	for _, prefix := range selection.sources {
+		require.NoError(t, module.SourcePrefixAdd(prefix))
+	}
+	for _, prefix := range selection.destinations {
+		require.NoError(t, module.DestinationPrefixAdd(prefix))
 	}
 	require.NoError(t, module.SetDscpMarking(flag, mark))
 
@@ -148,6 +175,17 @@ type dscpFrame struct {
 func dscpFrames(t *testing.T, destination4, destination6 string) []dscpFrame {
 	t.Helper()
 
+	return dscpFramesWithAddresses(t, "0.0.0.0", destination4, "::", destination6)
+}
+
+// dscpFramesWithAddresses returns both IP families, tagged and untagged,
+// with independently selected source and destination addresses.
+func dscpFramesWithAddresses(
+	t *testing.T,
+	source4, destination4, source6, destination6 string,
+) []dscpFrame {
+	t.Helper()
+
 	ethernet := layers.Ethernet{
 		SrcMAC:       xerror.Unwrap(net.ParseMAC("00:00:00:00:00:01")),
 		DstMAC:       xerror.Unwrap(net.ParseMAC("00:11:22:33:44:55")),
@@ -169,7 +207,7 @@ func dscpFrames(t *testing.T, destination4, destination6 string) []dscpFrame {
 		Version:    6,
 		NextHeader: layers.IPProtocolICMPv4,
 		HopLimit:   64,
-		SrcIP:      net.IPv6zero,
+		SrcIP:      net.ParseIP(source6),
 		DstIP:      net.ParseIP(destination6),
 	}
 	ipv4 := layers.IPv4{
@@ -177,7 +215,7 @@ func dscpFrames(t *testing.T, destination4, destination6 string) []dscpFrame {
 		Id:       1,
 		TTL:      64,
 		Protocol: layers.IPProtocolICMPv4,
-		SrcIP:    net.IPv4zero,
+		SrcIP:    net.ParseIP(source4),
 		DstIP:    net.ParseIP(destination4),
 	}
 	icmp := layers.ICMPv4{
@@ -342,6 +380,281 @@ func Test_DSCP_ResultsSurviveNextRound(t *testing.T) {
 			require.NoError(t, err)
 			requireDSCPOutput(t, harness, secondResult, second)
 			requireDSCPOutput(t, harness, firstResult, first)
+		})
+	}
+}
+
+// setupDSCPYAMLHarness loads the generic operator's request and publishes its
+// prefix sets and marking through the native module binding.
+func setupDSCPYAMLHarness(t *testing.T, document string) *dataplaneut.Harness {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "dscp.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(document), 0o600))
+	message, err := operator.LoadRequest(
+		"modules.dscp.controlplane.dscppb.v1.DscpService/UpdateConfig",
+		path,
+	)
+	require.NoError(t, err)
+	request := message.(*dscppb.UpdateConfigRequest)
+	require.NoError(t, request.Validate())
+	config := request.GetConfig()
+	sources4, err := commonpb.PrefixesFromNetworks("source_prefixes4", config.GetSourcePrefixes4())
+	require.NoError(t, err)
+	sources6, err := commonpb.PrefixesFromNetworks("source_prefixes6", config.GetSourcePrefixes6())
+	require.NoError(t, err)
+	destinations4, err := commonpb.PrefixesFromNetworks("destination_prefixes4", config.GetDestinationPrefixes4())
+	require.NoError(t, err)
+	destinations6, err := commonpb.PrefixesFromNetworks("destination_prefixes6", config.GetDestinationPrefixes6())
+	require.NoError(t, err)
+	return setupDSCPSelectionHarness(t,
+		uint8(config.GetDscpConfig().GetFlag()),
+		uint8(config.GetDscpConfig().GetMark()),
+		dscpSelection{
+			sources:      slices.Concat(sources4, sources6),
+			destinations: slices.Concat(destinations4, destinations6),
+		},
+	)
+}
+
+// Test_DSCP_ConfigWithoutSourcesMatchesOnlyDestinations verifies that legacy
+// YAML marks matching destinations independently of the source address and
+// preserves packets whose destination misses, including empty selections.
+func Test_DSCP_ConfigWithoutSourcesMatchesOnlyDestinations(t *testing.T) {
+	cases := []struct {
+		name   string
+		config string
+		marks4 bool
+		marks6 bool
+	}{
+		{
+			name: "IPv4 destinations",
+			config: `config:
+  prefixes4: [1.1.0.0/32]
+  dscp_config: {flag: 2, mark: 40}
+`,
+			marks4: true,
+		},
+		{
+			name: "IPv6 destinations",
+			config: `config:
+  prefixes6: ["1:2:3:4::/64"]
+  dscp_config: {flag: 2, mark: 40}
+`,
+			marks6: true,
+		},
+		{
+			name: "both destination families",
+			config: `config:
+  prefixes4: [1.1.0.0/32]
+  prefixes6: ["1:2:3:4::/64"]
+  dscp_config: {flag: 2, mark: 40}
+`,
+			marks4: true,
+			marks6: true,
+		},
+		{
+			name: "explicit empty destinations",
+			config: `config:
+  prefixes4: []
+  prefixes6: []
+  dscp_config: {flag: 2, mark: 40}
+`,
+		},
+		{
+			name:   "omitted destinations",
+			config: "config: {dscp_config: {flag: 2, mark: 40}}\n",
+		},
+		{
+			name:   "empty config",
+			config: "config: {}\n",
+		},
+		{
+			name: "omitted marking",
+			config: `config:
+  prefixes4: [1.1.0.0/32]
+  prefixes6: ["1:2:3:4::/64"]
+`,
+		},
+	}
+	addresses := []struct {
+		name     string
+		address4 string
+		address6 string
+		matches  bool
+	}{
+		{"inside destination prefixes", "1.1.0.0", "1:2:3:4::abcd", true},
+		{"outside destination prefixes", "203.0.113.7", "2001:db8::7", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			harness := setupDSCPYAMLHarness(t, "name: mark\n"+tc.config)
+			for _, source := range addresses {
+				for _, destination := range addresses {
+					t.Run("source "+source.name+"/destination "+destination.name, func(t *testing.T) {
+						for _, frame := range dscpFramesWithAddresses(t,
+							source.address4, destination.address4,
+							source.address6, destination.address6,
+						) {
+							t.Run(frame.name, func(t *testing.T) {
+								packet := markPacket(t, frame.packet, 7, ecnCE)
+								marks := tc.marks4
+								if packet.NetworkLayer().LayerType() == layers.LayerTypeIPv6 {
+									marks = tc.marks6
+								}
+								expected := packet
+								if destination.matches && marks {
+									expected = markPacket(t, frame.packet, 40, ecnCE)
+								}
+								result, err := harness.HandlePackets(packet)
+								require.NoError(t, err)
+								requireDSCPOutput(t, harness, result, expected)
+							})
+						}
+					})
+				}
+			}
+		})
+	}
+}
+
+// Test_DSCP_SourceSelection verifies that source-only filters ignore the
+// destination, combined filters require both directions, and a populated
+// direction without prefixes for the packet's family never matches.
+func Test_DSCP_SourceSelection(t *testing.T) {
+	cases := []struct {
+		name     string
+		prefixes string
+		marks4   [4]bool
+		marks6   [4]bool
+	}{
+		{
+			name:     "IPv4 source only",
+			prefixes: "  source_prefixes4: [192.0.2.0/24]\n",
+			marks4:   [4]bool{false, false, true, true},
+		},
+		{
+			name:     "IPv6 source only",
+			prefixes: "  source_prefixes6: ['2001:db8:1::/48']\n",
+			marks6:   [4]bool{false, false, true, true},
+		},
+		{
+			name: "both source families",
+			prefixes: `  source_prefixes4: [192.0.2.0/24]
+  source_prefixes6: ["2001:db8:1::/48"]
+`,
+			marks4: [4]bool{false, false, true, true},
+			marks6: [4]bool{false, false, true, true},
+		},
+		{
+			name: "both directions and families",
+			prefixes: `  source_prefixes4: [192.0.2.0/24]
+  source_prefixes6: ["2001:db8:1::/48"]
+  destination_prefixes4: [198.51.100.0/24]
+  destination_prefixes6: ["2001:db8:2::/48"]
+`,
+			marks4: [4]bool{false, false, false, true},
+			marks6: [4]bool{false, false, false, true},
+		},
+		{
+			name: "directions with different address families",
+			prefixes: `  source_prefixes4: [192.0.2.0/24]
+  destination_prefixes6: ["2001:db8:2::/48"]
+`,
+		},
+	}
+	packets := []struct {
+		name         string
+		source4      string
+		destination4 string
+		source6      string
+		destination6 string
+	}{
+		{"neither matches", "203.0.113.7", "203.0.113.9", "2001:db8:3::7", "2001:db8:4::9"},
+		{"destination matches", "203.0.113.7", "198.51.100.7", "2001:db8:3::7", "2001:db8:2::7"},
+		{"source matches", "192.0.2.7", "203.0.113.9", "2001:db8:1::7", "2001:db8:4::9"},
+		{"both match", "192.0.2.7", "198.51.100.7", "2001:db8:1::7", "2001:db8:2::7"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			harness := setupDSCPYAMLHarness(t,
+				"name: mark\nconfig:\n"+tc.prefixes+"  dscp_config: {flag: 2, mark: 40}\n",
+			)
+			for idx, addresses := range packets {
+				t.Run(addresses.name, func(t *testing.T) {
+					for _, frame := range dscpFramesWithAddresses(t,
+						addresses.source4, addresses.destination4,
+						addresses.source6, addresses.destination6,
+					) {
+						t.Run(frame.name, func(t *testing.T) {
+							marks := tc.marks4[idx]
+							if frame.packet.NetworkLayer().LayerType() == layers.LayerTypeIPv6 {
+								marks = tc.marks6[idx]
+							}
+							packet := markPacket(t, frame.packet, 7, ecnECT0)
+							expected := packet
+							if marks {
+								expected = markPacket(t, frame.packet, 40, ecnECT0)
+							}
+							result, err := harness.HandlePackets(packet)
+							require.NoError(t, err)
+							requireDSCPOutput(t, harness, result, expected)
+						})
+					}
+				})
+			}
+		})
+	}
+}
+
+// Test_DSCP_SourceMarkingPoliciesKeepECN verifies that source-selected packets
+// obey every marking mode while preserving ECN and updating IPv4 checksums.
+func Test_DSCP_SourceMarkingPoliciesKeepECN(t *testing.T) {
+	cases := []struct {
+		name     string
+		flag     uint8
+		from     uint8
+		expected uint8
+	}{
+		{"never preserves unmarked packets", dscpMarkNever, 0, 0},
+		{"never preserves marked packets", dscpMarkNever, 7, 7},
+		{"default marks unmarked packets", dscpMarkDefault, 0, 40},
+		{"default preserves marked packets", dscpMarkDefault, 7, 7},
+		{"always marks unmarked packets", dscpMarkAlways, 0, 40},
+		{"always remarks marked packets", dscpMarkAlways, 7, 40},
+	}
+	codepoints := []struct {
+		name string
+		ecn  uint8
+	}{
+		{"not ECT", ecnNotECT},
+		{"ECT1", ecnECT1},
+		{"ECT0", ecnECT0},
+		{"CE", ecnCE},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			harness := setupDSCPSelectionHarness(t, tc.flag, 40, dscpSelection{
+				sources: []netip.Prefix{
+					netip.MustParsePrefix("192.0.2.0/24"),
+					netip.MustParsePrefix("2001:db8:1::/48"),
+				},
+			})
+			for _, codepoint := range codepoints {
+				t.Run(codepoint.name, func(t *testing.T) {
+					for _, frame := range dscpFramesWithAddresses(t,
+						"192.0.2.7", "198.51.100.7", "2001:db8:1::7", "2001:db8:2::7",
+					) {
+						t.Run(frame.name, func(t *testing.T) {
+							packet := markPacket(t, frame.packet, tc.from, codepoint.ecn)
+							expected := markPacket(t, frame.packet, tc.expected, codepoint.ecn)
+							result, err := harness.HandlePackets(packet)
+							require.NoError(t, err)
+							requireDSCPOutput(t, harness, result, expected)
+						})
+					}
+				})
+			}
 		})
 	}
 }

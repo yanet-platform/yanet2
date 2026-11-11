@@ -22,12 +22,19 @@ dscp_handle_v4(struct dscp_module_config *config, struct packet *packet) {
 		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
 	);
 
-	if (lpm_lookup(&config->lpm_v4, 4, (uint8_t *)&header->dst_addr) !=
-	    LPM_VALUE_INVALID) {
-		return dscp_mark_v4(header, config->dscp);
+	if (config->has_source_prefixes &&
+	    lpm_lookup(
+		    &config->source_lpm_v4, 4, (uint8_t *)&header->src_addr
+	    ) == LPM_VALUE_INVALID) {
+		return -1;
 	}
-
-	return -1;
+	if (config->has_destination_prefixes &&
+	    lpm_lookup(
+		    &config->destination_lpm_v4, 4, (uint8_t *)&header->dst_addr
+	    ) == LPM_VALUE_INVALID) {
+		return -1;
+	}
+	return dscp_mark_v4(header, config->dscp);
 }
 
 static int
@@ -38,12 +45,21 @@ dscp_handle_v6(struct dscp_module_config *config, struct packet *packet) {
 		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
 	);
 
-	if (lpm_lookup(&config->lpm_v6, 16, (uint8_t *)&header->dst_addr) !=
-	    LPM_VALUE_INVALID) {
-		return dscp_mark_v6(header, config->dscp);
+	if (config->has_source_prefixes &&
+	    lpm_lookup(
+		    &config->source_lpm_v6, 16, (uint8_t *)&header->src_addr
+	    ) == LPM_VALUE_INVALID) {
+		return -1;
 	}
-
-	return -1;
+	if (config->has_destination_prefixes &&
+	    lpm_lookup(
+		    &config->destination_lpm_v6,
+		    16,
+		    (uint8_t *)&header->dst_addr
+	    ) == LPM_VALUE_INVALID) {
+		return -1;
+	}
+	return dscp_mark_v6(header, config->dscp);
 }
 
 static inline int
@@ -69,7 +85,9 @@ dscp_handle_packets(
 		module_ectx->abs_cp_module, struct dscp_module_config, cp_module
 	);
 
-	if (dscp_config->dscp.flag != DSCP_MARK_NEVER) {
+	if (dscp_config->dscp.flag != DSCP_MARK_NEVER &&
+	    (dscp_config->has_source_prefixes ||
+	     dscp_config->has_destination_prefixes)) {
 		struct packet *packet;
 		while ((packet = packet_list_pop(&packet_front->input)) != NULL
 		) {

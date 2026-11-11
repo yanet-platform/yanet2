@@ -3,6 +3,29 @@
 Manual steps required when upgrading an existing deployment. The packaging
 does not perform these automatically.
 
+## DSCP supports optional source prefixes
+
+DSCP configs may add `source_prefixes4` and `source_prefixes6`. Destinations are
+named `destination_prefixes4` and `destination_prefixes6`; the generic operator
+retains `prefixes4` and `prefixes6` as YAML aliases. A config without sources
+continues to match destinations only; no configuration migration is needed.
+When both directions have prefixes, both must match. An empty config still
+marks no packets. See [DSCP configuration](../modules/dscp/README.md).
+
+An older generic operator with permissive YAML loading ignores source fields
+and applies the legacy destination aliases and marking fields it understands.
+Use those aliases for configs that older readers must consume. A config with
+only source prefixes marks nothing on older code. Source filtering takes effect
+when supporting code reapplies the configuration.
+
+The protobuf destination fields are renamed with their existing field numbers;
+regenerate API clients for the new names. The CLI uses `--source-prefix` and
+`--destination-prefix`, retaining `--prefix` and `-p` as destination aliases.
+
+The module's shared-memory layout changes. Upgrade and restart the dataplane
+and control plane together; the shared-memory version prevents attaching
+processes built against different layouts.
+
 ## Go and CLI configuration loaders tolerate additional keys
 
 The generic operator's module YAML, the BIRD adapter, TLS key-pair and X.509

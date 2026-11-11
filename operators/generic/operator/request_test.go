@@ -59,8 +59,8 @@ config:
 	require.NoError(t, err)
 	dscp := request.(*dscppb.UpdateConfigRequest)
 	require.Equal(t, "dscp0", dscp.GetName())
-	require.Len(t, dscp.GetConfig().GetPrefixes4(), 1)
-	require.Equal(t, "192.0.2.0/24", dscp.GetConfig().GetPrefixes4()[0].AsLogValue())
+	require.Len(t, dscp.GetConfig().GetDestinationPrefixes4(), 1)
+	require.Equal(t, "192.0.2.0/24", dscp.GetConfig().GetDestinationPrefixes4()[0].AsLogValue())
 	require.Equal(t, uint32(2), dscp.GetConfig().GetDscpConfig().GetFlag())
 	require.Equal(t, uint32(46), dscp.GetConfig().GetDscpConfig().GetMark())
 }
