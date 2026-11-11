@@ -1,7 +1,9 @@
 package dataplaneut_test
 
 import (
+	"bytes"
 	"net"
+	"net/netip"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -15,6 +17,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/devices/plain/bindings/go/cplain"
+	"github.com/yanet-platform/yanet2/modules/decap/bindings/go/cdecap"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 )
@@ -25,6 +28,10 @@ var (
 	rewritingSource      = net.IPv4(10, 0, 0, 1).To4()
 	rewritingDestination = net.IPv4(10, 0, 0, 2).To4()
 )
+
+// tunnelEndpoint is the address that the tunnel packets are sent to and
+// that stripTunnel decapsulates.
+var tunnelEndpoint = netip.MustParseAddr("192.0.2.1")
 
 const (
 	ipv4SourceOffset      = 14 + 12
@@ -38,9 +45,13 @@ const rewritingCounter = "matched"
 // newRewritingHarness returns a one-worker harness whose device port0 runs
 // one forward module with the rule, which counts the packets it matches
 // and passes them on.
+//
+// The modules that the callbacks configure over the harness's agent run
+// before it, in the order given.
 func newRewritingHarness(
 	t *testing.T,
 	rule cforward.ForwardRule,
+	before ...func(agent *ffi.Agent) ffi.ChainModuleConfig,
 ) *dataplaneut.Harness {
 	t.Helper()
 
@@ -49,7 +60,7 @@ func newRewritingHarness(
 		DPMemory:      uint64(4 * datasize.MB),
 		WorkerCount:   1,
 		Devices:       []string{"port0"},
-		Modules:       []string{"forward"},
+		Modules:       []string{"forward", "decap"},
 		DevicesToLoad: []string{"plain"},
 	})
 	require.NoError(t, err)
@@ -68,16 +79,17 @@ func newRewritingHarness(
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = handle.Free() })
 
+	modules := make([]ffi.ChainModuleConfig, 0, len(before)+1)
+	for _, configure := range before {
+		modules = append(modules, configure(agent))
+	}
+	modules = append(modules, ffi.ChainModuleConfig{Type: "forward", Name: "bench"})
+
 	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
 		Name: "bench",
 		Chains: []ffi.FunctionChainConfig{{
 			Weight: 1,
-			Chain: ffi.ChainConfig{
-				Name: "bench_chain",
-				Modules: []ffi.ChainModuleConfig{
-					{Type: "forward", Name: "bench"},
-				},
-			},
+			Chain:  ffi.ChainConfig{Name: "bench_chain", Modules: modules},
 		}},
 	}))
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
@@ -198,5 +210,127 @@ func Test_BenchRewriting_ModuleReadsRewrittenFrames(t *testing.T) {
 		rounds += b.N
 	})
 	require.NotZero(t, result.N, "the benchmark failed")
+	require.Equal(t, rounds*len(packets), int(matchedPackets(t, harness)))
+}
+
+// stripTunnel returns the configuration of a decap module that strips the
+// outer header of the packets sent to the tunnel endpoint, for
+// newRewritingHarness to run before its rule.
+func stripTunnel(t *testing.T) func(agent *ffi.Agent) ffi.ChainModuleConfig {
+	t.Helper()
+
+	return func(agent *ffi.Agent) ffi.ChainModuleConfig {
+		decap, err := cdecap.NewModuleConfig(agent, "strip")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = decap.Free() })
+		require.NoError(t, decap.PrefixAdd(netip.PrefixFrom(tunnelEndpoint, 32)))
+		require.NoError(t, agent.UpdateModules(
+			[]ffi.ModuleConfig{decap.AsFFIModule()},
+		))
+		return ffi.ChainModuleConfig{Type: "decap", Name: "strip"}
+	}
+}
+
+// innerPacketRule returns a rule that matches only what stripTunnel leaves
+// of a tunnel packet: a packet addressed to the rewriting destination.
+func innerPacketRule() cforward.ForwardRule {
+	return cforward.ForwardRule{
+		Target:  "port0",
+		Mode:    cforward.ModeNone,
+		Counter: rewritingCounter,
+		Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Dst4s: []xnetip.Contiguous[xnetip.Network4]{
+			xnetip.MustParseContiguous4(rewritingDestination.String() + "/32"),
+		},
+	}
+}
+
+// tunnelPackets returns two ICMP echo requests from the rewriting source
+// to the rewriting destination, each inside an IPv4 packet sent to the
+// tunnel endpoint.
+func tunnelPackets(t *testing.T) []gopacket.Packet {
+	t.Helper()
+
+	packets := make([]gopacket.Packet, 0, 2)
+	for seq := range uint16(2) {
+		packets = append(packets, xpacket.LayersToPacket(t,
+			&layers.Ethernet{
+				SrcMAC:       net.HardwareAddr{0, 1, 2, 3, 4, 5},
+				DstMAC:       net.HardwareAddr{0, 1, 2, 3, 4, 6},
+				EthernetType: layers.EthernetTypeIPv4,
+			},
+			&layers.IPv4{
+				Version:  4,
+				TTL:      64,
+				Protocol: layers.IPProtocolIPv4,
+				SrcIP:    net.IPv4(192, 0, 2, 2).To4(),
+				DstIP:    tunnelEndpoint.AsSlice(),
+			},
+			&layers.IPv4{
+				Version:  4,
+				TTL:      64,
+				Protocol: layers.IPProtocolICMPv4,
+				SrcIP:    rewritingSource,
+				DstIP:    rewritingDestination,
+			},
+			&layers.ICMPv4{
+				TypeCode: layers.CreateICMPv4TypeCode(
+					layers.ICMPv4TypeEchoRequest, 0,
+				),
+				Seq: seq,
+			},
+		))
+	}
+	return packets
+}
+
+// Test_Bench_GeometryReset_ModuleStripsHeaderEveryRound verifies that under
+// the payload and geometry resets a module that strips a header gets the
+// packets whole in every round.
+func Test_Bench_GeometryReset_ModuleStripsHeaderEveryRound(t *testing.T) {
+	harness := newRewritingHarness(t, innerPacketRule(), stripTunnel(t))
+	packets := tunnelPackets(t)
+
+	// The rule matches a packet only once its outer header is stripped,
+	// which takes a whole tunnel packet, so its count tells the rounds
+	// that began with whole packets.
+	rounds := 0
+	result := testing.Benchmark(func(b *testing.B) {
+		harness.Bench(
+			b, packets,
+			dataplaneut.WithPayloadReset(), dataplaneut.WithGeometryReset(),
+		)
+		rounds += b.N
+	})
+	require.NotZero(t, result.N, "the benchmark failed")
+	require.Equal(t, rounds*len(packets), int(matchedPackets(t, harness)))
+}
+
+// Test_BenchRewriting_GeometryReset_ReturnsFramesWhole verifies that under
+// the payload and geometry resets the callback gets the frames as the
+// packets were given in every round, although the module strips a header
+// of each.
+func Test_BenchRewriting_GeometryReset_ReturnsFramesWhole(t *testing.T) {
+	harness := newRewritingHarness(t, innerPacketRule(), stripTunnel(t))
+	packets := tunnelPackets(t)
+	whole := xpacket.PacketsGoPayload(packets...)
+
+	rounds, changed := 0, 0
+	result := testing.Benchmark(func(b *testing.B) {
+		harness.BenchRewriting(
+			b, packets,
+			func(_ int, frames [][]byte) {
+				for idx, frame := range frames {
+					if !bytes.Equal(whole[idx], frame) {
+						changed++
+					}
+				}
+			},
+			dataplaneut.WithPayloadReset(), dataplaneut.WithGeometryReset(),
+		)
+		rounds += b.N
+	})
+	require.NotZero(t, result.N, "the benchmark failed")
+	require.Zero(t, changed)
 	require.Equal(t, rounds*len(packets), int(matchedPackets(t, harness)))
 }
