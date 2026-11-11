@@ -5,7 +5,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .with(|builder| {
             builder
                 .message_attribute(".", "#[derive(serde::Serialize, serde::Deserialize)]")
-                .message_attribute(".", "#[serde(default, deny_unknown_fields)]")
+                .message_attribute(".", "#[serde(default)]")
                 .field_attribute(
                     ".modules.forward.controlplane.forwardpb.v1.Action.mode",
                     "#[serde(serialize_with = \"crate::serialize_forward_mode\", deserialize_with = \"crate::deserialize_forward_mode\")]",

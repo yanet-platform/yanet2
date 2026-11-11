@@ -118,13 +118,29 @@ func Test_Unmarshal_TrailingSeparator(t *testing.T) {
 }
 
 // Test_Unmarshal_FieldlessMessage verifies that a message without fields,
-// such as a request that lists configs, takes an empty mapping and rejects
-// a key.
+// such as a request that lists configs, ignores every mapping member.
 func Test_Unmarshal_FieldlessMessage(t *testing.T) {
 	require.NoError(t, xproto.Unmarshal([]byte("{}\n"), &emptypb.Empty{}))
 
-	err := xproto.Unmarshal([]byte("name: x\n"), &emptypb.Empty{})
-	require.ErrorContains(t, err, `unknown object member name "name"`)
+	require.NoError(t, xproto.Unmarshal([]byte("name: x\nnested: {future: [1, 2]}\n"), &emptypb.Empty{}))
+}
+
+// Test_Unmarshal_IgnoresUnknownKeys verifies that additions at any depth
+// leave known fields and their exact spelling unchanged.
+func Test_Unmarshal_IgnoresUnknownKeys(t *testing.T) {
+	for _, input := range []string{
+		"name: file.proto\nfuture: null\n",
+		"name: file.proto\nfuture: {enabled: true, values: [1, 2]}\n",
+		"name: file.proto\nName: ignored\njsonName: ignored\n",
+		"name: file.proto\nmessage_type: [{name: Message, future: true}]\n",
+	} {
+		message := &descriptorpb.FileDescriptorProto{}
+		require.NoError(t, xproto.Unmarshal([]byte(input), message))
+		require.Equal(t, "file.proto", message.GetName())
+		if len(message.GetMessageType()) != 0 {
+			require.Equal(t, "Message", message.GetMessageType()[0].GetName())
+		}
+	}
 }
 
 // Test_Unmarshal_NullLeavesZeroValue verifies that a null leaves its field
@@ -163,24 +179,6 @@ func Test_Unmarshal_RejectsMalformedDocuments(t *testing.T) {
 		message proto.Message
 		wantErr string
 	}{
-		{
-			name:    "unknown field",
-			input:   "value: 1\nfoo: 2\n",
-			message: &wrapperspb.Int32Value{},
-			wantErr: `unknown object member name "foo"`,
-		},
-		{
-			name:    "json name spelling",
-			input:   "jsonName: x\n",
-			message: &descriptorpb.FieldDescriptorProto{},
-			wantErr: `unknown object member name "jsonName"`,
-		},
-		{
-			name:    "key in another letter case",
-			input:   "Value: x\n",
-			message: &wrapperspb.StringValue{},
-			wantErr: `unknown object member name "Value"`,
-		},
 		{
 			name:    "duplicate key",
 			input:   "value: a\nvalue: b\n",

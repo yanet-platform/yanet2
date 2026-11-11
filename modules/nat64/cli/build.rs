@@ -5,7 +5,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .with(|builder| {
             builder
                 .message_attribute(".", "#[derive(serde::Serialize, serde::Deserialize)]")
-                .message_attribute(".", "#[serde(default, deny_unknown_fields)]")
+                .message_attribute(".", "#[serde(default)]")
         })
         .compile()
 }

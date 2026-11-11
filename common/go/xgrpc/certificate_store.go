@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -27,8 +26,6 @@ const (
 	defaultCertificateRefreshInterval = time.Hour
 	// keyPairTypeFile is the key pair type read from two PEM files.
 	keyPairTypeFile = "file"
-	// yamlMergeTag is the resolved tag of a YAML merge key.
-	yamlMergeTag = "!!merge"
 	// pemBlockStart opens every PEM block.
 	pemBlockStart = "-----BEGIN"
 )
@@ -101,7 +98,7 @@ type keyPairFilesConfig struct {
 // decodeKeyPairFiles builds a file key pair from its settings.
 func decodeKeyPairFiles(node *yaml.Node) (KeyPairLoader, error) {
 	var config keyPairFilesConfig
-	if err := decodeStrict(node, &config); err != nil {
+	if err := node.Decode(&config); err != nil {
 		return nil, fmt.Errorf("decode file key pair config: %w", err)
 	}
 	if config.CertFile == "" || config.KeyFile == "" {
@@ -109,96 +106,6 @@ func decodeKeyPairFiles(node *yaml.Node) (KeyPairLoader, error) {
 	}
 
 	return NewKeyPairFiles(config.CertFile, config.KeyFile), nil
-}
-
-// decodeStrict decodes the node into out, a pointer to a struct, refusing
-// mapping keys the struct does not declare.
-//
-// The node may be an alias, hold aliased values and merge in other
-// mappings; a mapping that merges itself is an error. Errors carry the line
-// numbers of the file.
-func decodeStrict(node *yaml.Node, out any) error {
-	node = resolveAlias(node)
-	if node.Kind == 0 {
-		return nil
-	}
-
-	known := yamlKeys(reflect.TypeOf(out).Elem())
-	if err := checkKnownKeys(node, known, map[*yaml.Node]bool{}); err != nil {
-		return err
-	}
-
-	return node.Decode(out)
-}
-
-// checkKnownKeys rejects a mapping key outside the known ones, including
-// the keys merge keys pull in from other mappings.
-//
-// Every mapping walked is recorded as under way, then as done, so a mapping
-// merged again is not walked again and one that merges itself is an error.
-func checkKnownKeys(node *yaml.Node, known map[string]bool, visits map[*yaml.Node]bool) error {
-	node = resolveAlias(node)
-	if node.Kind != yaml.MappingNode {
-		return nil
-	}
-	if done, ok := visits[node]; ok {
-		if !done {
-			return fmt.Errorf("line %d: mapping merges itself", node.Line)
-		}
-		return nil
-	}
-	visits[node] = false
-
-	for idx := 0; idx+1 < len(node.Content); idx += 2 {
-		key := resolveAlias(node.Content[idx])
-		if key.ShortTag() != yamlMergeTag {
-			if !known[key.Value] {
-				return fmt.Errorf("line %d: unknown key %q", key.Line, key.Value)
-			}
-			continue
-		}
-
-		merged := resolveAlias(node.Content[idx+1])
-		sources := []*yaml.Node{merged}
-		if merged.Kind == yaml.SequenceNode {
-			sources = merged.Content
-		}
-		for _, source := range sources {
-			if err := checkKnownKeys(source, known, visits); err != nil {
-				return err
-			}
-		}
-	}
-	visits[node] = true
-
-	return nil
-}
-
-// resolveAlias returns the node an alias stands for, else the node itself.
-func resolveAlias(node *yaml.Node) *yaml.Node {
-	if node.Kind == yaml.AliasNode && node.Alias != nil {
-		return node.Alias
-	}
-
-	return node
-}
-
-// yamlKeys returns the mapping keys a struct type decodes, as the yaml tags
-// of its fields name them.
-func yamlKeys(structType reflect.Type) map[string]bool {
-	keys := map[string]bool{}
-	for field := range structType.Fields() {
-		name, _, _ := strings.Cut(field.Tag.Get("yaml"), ",")
-		if !field.IsExported() || name == "-" {
-			continue
-		}
-		if name == "" {
-			name = strings.ToLower(field.Name)
-		}
-		keys[name] = true
-	}
-
-	return keys
 }
 
 // KeyPairFiles loads a key pair from a PEM certificate chain file and a PEM

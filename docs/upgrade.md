@@ -3,6 +3,24 @@
 Manual steps required when upgrading an existing deployment. The packaging
 does not perform these automatically.
 
+## Go and CLI configuration loaders tolerate additional keys
+
+The generic operator's module YAML, the BIRD adapter, TLS key-pair and X.509
+settings, and Rust CLI connection and module documents now ignore unknown
+mapping keys. Known values still undergo type and domain validation. Existing
+syntax, duplicate-key and document-count checks remain in place.
+
+`xcfg.WithKnownFields()` and `xcfg.CheckKnownKeys()` remain available for
+explicit validation, including checks of shipped configuration examples.
+The L3B CLI's offline validation commands also retain their strict policy.
+The native dataplane bootstrap parser is unchanged.
+
+Upgrade the readers before deploying additional configuration fields.
+Previously released readers retain their own behavior. Ignoring a field does
+not implement it: it takes effect only after a supporting reader reapplies
+the configuration. This does not make renamed fields or changed meanings
+compatible.
+
 ## Weighted assignments change the shared worker layout
 
 Worker assignments gain their rx service weight, which moves from the
@@ -284,10 +302,10 @@ block left with only `cert_file` and `key_file` dials without one, since
 the old keys are ignored like any unknown key. Keep `cert_file` and
 `key_file` next to `key_pairs` through the package upgrade, as the older
 binaries ignore `key_pairs` and the newer ones the old keys, and drop the
-old keys afterwards. The BIRD adapter rejects unknown keys in both
-versions, so its `route_operator_tls` moves to `key_pairs` together with
-the package. An unknown `type`, or an unknown key under `config`, fails
-the config load. Environment overrides cannot reach the settings under
+old keys afterwards. BIRD adapter releases that reject unknown keys must
+move `route_operator_tls` to `key_pairs` together with the package.
+An unknown key-pair `type` still fails the config load; additional keys
+under `config` are ignored. Environment overrides cannot reach the settings under
 `config`, so key pair paths are YAML-only.
 
 The files are reread without a restart. The gateway and every client

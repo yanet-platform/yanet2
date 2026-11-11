@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	decappb "github.com/yanet-platform/yanet2/modules/decap/controlplane/decappb/v1"
+	dscppb "github.com/yanet-platform/yanet2/modules/dscp/controlplane/dscppb/v1"
 	"github.com/yanet-platform/yanet2/operators/generic/operator"
 )
 
@@ -41,13 +42,25 @@ prefixes4:
 	require.Equal(t, "10.0.0.0/8", decap.GetPrefixes4()[0].AsLogValue())
 }
 
-// Test_LoadRequest_RejectsUnknownKey verifies that a key outside the
-// request is rejected, not ignored, naming the file.
-func Test_LoadRequest_RejectsUnknownKey(t *testing.T) {
-	path := writeModuleConfig(t, "config: decap0\nprefixes4: []\n")
-
-	_, err := operator.LoadRequest(decapUpdateMethod, path)
-
-	require.ErrorContains(t, err, "failed to parse module config")
-	require.ErrorContains(t, err, `unknown object member name "config"`)
+// Test_LoadRequest_IgnoresUnknownKeys verifies that newer module fields
+// do not prevent an operator from publishing the fields it understands.
+func Test_LoadRequest_IgnoresUnknownKeys(t *testing.T) {
+	path := writeModuleConfig(t, `
+name: dscp0
+future: true
+config:
+  prefixes4: [192.0.2.0/24]
+  future: {prefixes: [198.51.100.0/24]}
+  dscp_config: {flag: 2, mark: 46, future: null}
+`)
+	request, err := operator.LoadRequest(
+		"modules.dscp.controlplane.dscppb.v1.DscpService/UpdateConfig", path,
+	)
+	require.NoError(t, err)
+	dscp := request.(*dscppb.UpdateConfigRequest)
+	require.Equal(t, "dscp0", dscp.GetName())
+	require.Len(t, dscp.GetConfig().GetPrefixes4(), 1)
+	require.Equal(t, "192.0.2.0/24", dscp.GetConfig().GetPrefixes4()[0].AsLogValue())
+	require.Equal(t, uint32(2), dscp.GetConfig().GetDscpConfig().GetFlag())
+	require.Equal(t, uint32(46), dscp.GetConfig().GetDscpConfig().GetMark())
 }
