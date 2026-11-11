@@ -15,8 +15,9 @@ import (
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
+	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
+	cplain "github.com/yanet-platform/yanet2/devices/plain/bindings/go/cplain"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	"github.com/yanet-platform/yanet2/modules/mirror/bindings/go/cmirror"
@@ -73,7 +74,7 @@ func setupMirrorHarnessWithLimit(
 	return h, agent, backend
 }
 
-// applyRules pushes the given rules via backend.UpdateModule.
+// applyRules pushes the given rules via the backend.
 //
 // The module handle is freed via t.Cleanup. The caller must wire the pipeline
 // after calling applyRules, because the mirror module config must exist in
@@ -83,10 +84,10 @@ func applyRules(
 	backend mirror.Backend,
 	name string,
 	rules []cmirror.MirrorRule,
-) mirror.ModuleHandle {
+) crud.Handle {
 	t.Helper()
 
-	handle, err := backend.UpdateModule(name, rules)
+	handle, err := backend.Update(name, mirror.RuleSet{Compiled: rules})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = handle.Free() })
 	return handle
@@ -143,7 +144,7 @@ func wireMirrorPipeline(
 	// packets that pass through (originals and ModeNone mirrors) reach the
 	// output stage.
 	primarySink := configName + "-sink"
-	primarySinkHandle, err := fwdBackend.UpdateModule(primarySink, catchAllForwardRules(primaryDevice))
+	primarySinkHandle, err := fwdBackend.Update(primarySink, forward.RuleSet{Compiled: catchAllForwardRules(primaryDevice)})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = primarySinkHandle.Free() })
 
@@ -151,7 +152,7 @@ func wireMirrorPipeline(
 	// sink so mirrored packets re-routed via ModeIn reach the output stage.
 	for _, dev := range extraDevices {
 		sinkName := configName + "-sink-" + dev
-		sinkHandle, err := fwdBackend.UpdateModule(sinkName, catchAllForwardRules(dev))
+		sinkHandle, err := fwdBackend.Update(sinkName, forward.RuleSet{Compiled: catchAllForwardRules(dev)})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = sinkHandle.Free() })
 
@@ -220,7 +221,7 @@ func wireMirrorPipeline(
 		})
 	}
 
-	_, err = plain.UpdateDevices(agent, allDevices)
+	_, err = cplain.UpdateDevices(agent, allDevices)
 	require.NoError(t, err)
 }
 
@@ -254,8 +255,6 @@ func mirEtherLayers() (layers.Ethernet, layers.IPv4, layers.IPv6, layers.ICMPv4)
 
 // TestMirror_NoMatch verifies that a packet not matched by any rule passes
 // through to the next module unchanged.
-//
-// Covers branch: action == FILTER_RULE_INVALID -> packet_front_output (no target).
 func TestMirror_NoMatch(t *testing.T) {
 	// A rule with only Dst4s and no Src4s is excluded from the ip4 filter
 	// by check_has_ip4 (which requires both src and dst). Such a rule also
@@ -282,12 +281,12 @@ func TestMirror_NoMatch(t *testing.T) {
 	require.Empty(t, result.Drop, "unmatched packet must not be dropped")
 }
 
-// Test_MirrorBackend_UpdateModuleEmptyRules verifies that an empty ruleset is
-// rejected with an actionable error.
-func Test_MirrorBackend_UpdateModuleEmptyRules(t *testing.T) {
+// Test_MirrorBackend_UpdateWithEmptyRules verifies that an empty ruleset
+// is rejected with an actionable error.
+func Test_MirrorBackend_UpdateWithEmptyRules(t *testing.T) {
 	_, _, backend := setupMirrorHarness(t, []string{"port0"})
 
-	_, err := backend.UpdateModule("test", nil)
+	_, err := backend.Update("test", mirror.RuleSet{})
 	require.EqualError(
 		t,
 		err,
@@ -299,8 +298,6 @@ func Test_MirrorBackend_UpdateModuleEmptyRules(t *testing.T) {
 // TestMirror_ModeNone_IPv4 verifies that an IPv4 packet matched by an ip4
 // rule with ModeNone passes through to the next module without device redirect,
 // and that the per-rule counter is incremented.
-//
-// Covers branch: target found, mode == MIRROR_MODE_NONE -> packet_front_output.
 func TestMirror_ModeNone_IPv4(t *testing.T) {
 	eth, ip4, _, icmp := mirEtherLayers()
 	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
@@ -337,9 +334,6 @@ func TestMirror_ModeNone_IPv4(t *testing.T) {
 // TestMirror_ModeOut_IPv4 verifies that an IPv4 packet matched by a ModeOut
 // rule is re-queued for egress via the target device, and that the per-rule
 // counter is incremented.
-//
-// Covers branch: target found, mode == MIRROR_MODE_OUT -> set tx_device_id,
-// queue to pending_output.
 func TestMirror_ModeOut_IPv4(t *testing.T) {
 	eth, ip4, _, icmp := mirEtherLayers()
 	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
@@ -379,9 +373,6 @@ func TestMirror_ModeOut_IPv4(t *testing.T) {
 // TestMirror_ModeIn_IPv4 verifies that an IPv4 packet matched by a ModeIn
 // rule is re-queued for ingress via the target device, and that the per-rule
 // counter is incremented.
-//
-// Covers branch: target found, mode == MIRROR_MODE_IN -> set tx_device_id,
-// queue to pending_input.
 func TestMirror_ModeIn_IPv4(t *testing.T) {
 	eth, ip4, _, icmp := mirEtherLayers()
 	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
@@ -425,9 +416,6 @@ func TestMirror_ModeIn_IPv4(t *testing.T) {
 //
 // The per-rule counter is incremented BEFORE the device translation check,
 // so the counter must show 1 even though no mirror copy is emitted.
-//
-// Covers branch: target found, module_ectx_encode_device returns -1 -> the
-// mirror copy is skipped while the original is forwarded unconditionally.
 func TestMirror_UnmappedDevice(t *testing.T) {
 	eth, ip4, _, icmp := mirEtherLayers()
 	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
@@ -576,9 +564,6 @@ func TestMirror_NonIP(t *testing.T) {
 // Rule 0: device-only (L2 filter, action 0).
 // Rule 1: ip4 prefix rule (ip4 filter, action 1).
 // An IPv4 packet satisfies both filters. action = min(0, 1) = 0 -> rule 0 wins.
-//
-// Covers branch: both vlan_result and ip4_result valid -> action = min ->
-// lower-index rule's target is used.
 func TestMirror_MinAction(t *testing.T) {
 	eth, ip4, _, icmp := mirEtherLayers()
 	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
@@ -677,10 +662,8 @@ func Test_Mirror_OutputSelfLoopHasBoundedPopulation(t *testing.T) {
 		Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 		Dst4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 	}})
-	forwardHandle, err := forward.NewBackend(agent).UpdateModule(
-		"sink",
-		catchAllForwardRules("port0"),
-	)
+	forwardHandle, err := forward.NewBackend(agent).Update(
+		"sink", forward.RuleSet{Compiled: catchAllForwardRules("port0")})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = forwardHandle.Free() })
 
@@ -705,7 +688,7 @@ func Test_Mirror_OutputSelfLoopHasBoundedPopulation(t *testing.T) {
 		Name:      "feeder",
 		Functions: []string{"loop"},
 	}))
-	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	_, err = cplain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: "feeder", Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "loop", Weight: 1}},
@@ -802,9 +785,9 @@ func TestMirrorConfigMemoryLeak(t *testing.T) {
 // generation still referenced them, mirroring what the module control
 // plane keeps: the owner remembers the handle and retries it once the
 // generations drain.
-type modulePark []mirror.ModuleHandle
+type modulePark []crud.Handle
 
-func (m *modulePark) freeOrPark(handle mirror.ModuleHandle) {
+func (m *modulePark) freeOrPark(handle crud.Handle) {
 	if handle == nil {
 		return
 	}

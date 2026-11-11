@@ -1,20 +1,20 @@
 package cfwstate
 
 //#cgo CFLAGS: -I../../../../../
-//#cgo LDFLAGS: -L../../../../../build/modules/fwstate/api -lfwstate_cp
-//#cgo LDFLAGS: -L../../../../../build/objects/fwstate/api -lfwstate_objects
-//#cgo LDFLAGS: -L../../../../../build/lib/statemap -lstatemap
-//#cgo LDFLAGS: -L../../../../../build/lib/controlplane/config -lconfig_cp
-//#cgo LDFLAGS: -L../../../../../build/lib/dataplane/config -lconfig_dp
-//#cgo LDFLAGS: -L../../../../../build/lib/dataplane/pipeline -lpipeline
-//#cgo LDFLAGS: -L../../../../../build/lib/counters -lcounters
 //
 //#include "api/agent.h"
 //#include "modules/fwstate/api/fwstate_cp.h"
-//#include "lib/fwstate/config.h"
 //#include "lib/statemap/fwmap.h"
 //#include "lib/fwstate/fwstate_cursor.h"
 //#include "lib/errors/errors.h"
+//#include "lib/dataplane/packet/packet.h"
+//#include "modules/fwstate/dataplane/config.h"
+//
+//static inline uint64_t
+//cfwstate_stash_position_count(struct cp_module *module) {
+//	struct fwstate_module_config *config = (struct fwstate_module_config *)module;
+//	return ADDR_OF(&config->positions) == NULL ? 0 : config->worker_count;
+//}
 import "C"
 
 import (
@@ -59,9 +59,21 @@ func NewModuleConfig(
 	defer C.free(unsafe.Pointer(cName))
 
 	var cSync *C.struct_fwstate_sync_config
+	var cEndpoints []C.struct_fwstate_sync_endpoint
+	var cListeners []C.struct_fwstate_sync_listen_endpoint
 	if syncConfig != nil {
 		cSyncConfig := syncConfig.toC()
 		cSync = &cSyncConfig
+		cEndpoints = syncConfig.endpointsToC()
+		cListeners = syncConfig.listenersToC()
+	}
+	var cEndpointsPtr *C.struct_fwstate_sync_endpoint
+	if len(cEndpoints) > 0 {
+		cEndpointsPtr = &cEndpoints[0]
+	}
+	var cListenersPtr *C.struct_fwstate_sync_listen_endpoint
+	if len(cListeners) > 0 {
+		cListenersPtr = &cListeners[0]
 	}
 
 	var cFw4Name *C.char
@@ -81,6 +93,10 @@ func NewModuleConfig(
 		(*C.struct_agent)(agent.AsRawPtr()),
 		cName,
 		cSync,
+		cEndpointsPtr,
+		C.uint32_t(len(cEndpoints)),
+		cListenersPtr,
+		C.uint32_t(len(cListeners)),
 		cFw4Name,
 		cFw6Name,
 		&cErr,
@@ -114,5 +130,14 @@ func (m *ModuleConfig) Free() error {
 		var cErr *C.yanet_error
 		rc, errno := C.fwstate_module_config_free((*C.struct_cp_module)(ptr), &cErr)
 		return int(rc), unsafe.Pointer(cErr), errno
-	})
+	},
+	)
+}
+
+// SyncInternalPacketFlag marks a local emission for downstream pass-through.
+const SyncInternalPacketFlag = uint16(1 << C.PACKET_FLAG_FWSTATE_SYNC_INTERNAL)
+
+// StashPositionCount reports the worker cursors actually allocated by a config.
+func (m *ModuleConfig) StashPositionCount() uint64 {
+	return uint64(C.cfwstate_stash_position_count(m.asRawPtr()))
 }

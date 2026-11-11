@@ -371,7 +371,7 @@ test_attach_initialised_segment_succeeds() {
 	struct cp_config_gen *cp_config_gen =
 		cp_config_gen_new(sys_agent, &setup_err);
 	TEST_ASSERT_NOT_NULL(cp_config_gen, "cp_config_gen_new failed");
-	SET_OFFSET_OF(&cp_config->cp_config_gen, cp_config_gen);
+	cp_config_publish_gen(cp_config, cp_config_gen);
 	cp_config_unlock(cp_config);
 
 	dp_config->instance_count = 1;
@@ -456,6 +456,126 @@ test_get_port_counters_zero_port_count_returns_empty_list() {
 	TEST_ASSERT_EQUAL(groups->port_count, 0, "port count must be zero");
 
 	yanet_port_counter_group_list_free(groups);
+	free(storage);
+	return TEST_SUCCESS;
+}
+
+// Verify that the controlplane zone snapshot is rooted at the "cp" bootstrap
+// context, carries the zone's fixed children (ectx, counter storage, the
+// system agent) with their allocation accounting, and never folds a
+// separately attached agent's own arena into the zone tree.
+static int
+test_get_cp_memory_info_reports_zone_tree() {
+	void *storage = calloc(1, TEST_STORAGE_SIZE);
+	TEST_ASSERT_NOT_NULL(storage, "calloc failed");
+
+	struct dp_config *dp_config = NULL;
+	struct cp_config *cp_config = NULL;
+	int rc = dp_storage_init(
+		0,
+		0,
+		storage,
+		TEST_DP_MEMORY,
+		TEST_CP_MEMORY,
+		&dp_config,
+		&cp_config
+	);
+	TEST_ASSERT(rc == 0, "dp_storage_init failed");
+
+	cp_config_lock(cp_config);
+	struct agent *sys_agent =
+		dp_system_agent_new(cp_config, dp_config, "dataplane");
+	TEST_ASSERT_NOT_NULL(sys_agent, "dp_system_agent_new failed");
+
+	yanet_error *err = NULL;
+	struct cp_config_gen *config_gen = cp_config_gen_new(sys_agent, &err);
+	TEST_ASSERT_NOT_NULL(config_gen, "cp_config_gen_new failed");
+	cp_config_publish_gen(cp_config, config_gen);
+	cp_config_unlock(cp_config);
+
+	dp_config->instance_count = 1;
+	dp_config_mark_ready(dp_config);
+
+	void *block = memory_balloc(&cp_config->ectx_memory_context, 256);
+	TEST_ASSERT_NOT_NULL(block, "ectx allocation failed");
+
+	struct yanet_shm shm = {.base = storage, .size = TEST_STORAGE_SIZE};
+	struct agent *probe = agent_attach(&shm, 0, "probe", 4096, &err);
+	TEST_ASSERT_NOT_NULL(probe, "agent_attach failed");
+	TEST_ASSERT_NOT_NULL(
+		memory_balloc(&probe->memory_context, 128),
+		"probe arena allocation failed"
+	);
+
+	struct cp_memory_info *memory_info =
+		yanet_get_cp_memory_info(dp_config);
+	TEST_ASSERT_NOT_NULL(memory_info, "yanet_get_cp_memory_info failed");
+	TEST_ASSERT(
+		memory_info->memory_node_count >= 4,
+		"the zone tree must hold at least cp, ectx, counter_storage "
+		"and the system agent"
+	);
+
+	const struct cp_memory_node_info *root = &memory_info->memory_nodes[0];
+	TEST_ASSERT(
+		root->parent_idx == UINT32_MAX && !strncmp(root->name, "cp", 3),
+		"node 0 must be the cp bootstrap root"
+	);
+
+	int has_ectx = 0;
+	int has_counter_storage = 0;
+	int has_system_agent = 0;
+	int has_probe = 0;
+	for (uint64_t idx = 1; idx < memory_info->memory_node_count; ++idx) {
+		const struct cp_memory_node_info *node =
+			&memory_info->memory_nodes[idx];
+		TEST_ASSERT(
+			node->parent_idx < idx,
+			"every zone node after the root must name an earlier "
+			"parent"
+		);
+		if (!strncmp(node->name, "ectx", sizeof(node->name))) {
+			has_ectx = 1;
+			TEST_ASSERT(
+				node->balloc_size >= 256 &&
+					node->balloc_count >= 1,
+				"the ectx node must account for the allocation "
+				"above"
+			);
+		}
+		if (!strncmp(
+			    node->name, "counter_storage", sizeof(node->name)
+		    )) {
+			has_counter_storage = 1;
+		}
+		if (!strncmp(node->name, "dataplane", sizeof(node->name))) {
+			has_system_agent = 1;
+		}
+		if (!strncmp(node->name, "probe", sizeof(node->name))) {
+			has_probe = 1;
+		}
+	}
+	TEST_ASSERT(has_ectx, "the ectx context must be in the zone tree");
+	TEST_ASSERT(
+		has_counter_storage,
+		"the counter storage context must be present"
+	);
+	TEST_ASSERT(
+		has_system_agent, "the system agent subtree must be present"
+	);
+	TEST_ASSERT(
+		!has_probe,
+		"an attached agent draws from its own arena and must stay out "
+		"of the zone tree"
+	);
+
+	TEST_ASSERT(
+		memory_info->free_bytes > 0 &&
+			memory_info->free_bytes <= TEST_CP_MEMORY,
+		"the reported free bytes must sit within the zone"
+	);
+
+	cp_memory_info_free(memory_info);
 	free(storage);
 	return TEST_SUCCESS;
 }
@@ -624,7 +744,7 @@ extend_env_init(
 		yanet_error_free(err);
 		return -1;
 	}
-	SET_OFFSET_OF(&cp_config->cp_config_gen, config_gen);
+	cp_config_publish_gen(cp_config, config_gen);
 	cp_config_unlock(cp_config);
 
 	dp_config->instance_count = 1;
@@ -650,10 +770,8 @@ agent_reserved_size(struct agent *agent) {
 }
 
 static void
-extend_agent_release(struct agent *agent, struct cp_config *cp_config) {
-	cp_config_lock(cp_config);
-	agent_cleanup(agent);
-	cp_config_unlock(cp_config);
+extend_agent_release(struct agent *agent) {
+	agent_destroy(agent);
 }
 
 // Verify that growing an agent adds usable capacity, records the new arena
@@ -706,7 +824,7 @@ test_extend_grows_agent_capacity() {
 	TEST_ASSERT_NOT_NULL(block, "the added capacity must be usable");
 	memory_bfree(&agent->memory_context, block, 1 << 14);
 
-	extend_agent_release(agent, cp_config);
+	extend_agent_release(agent);
 	free(storage);
 	return TEST_SUCCESS;
 }
@@ -733,6 +851,11 @@ test_extend_rejects_borrowing_agent() {
 	rc = agent_extend(sys_agent, 1u << 20, &err);
 	TEST_ASSERT(rc == -1, "a borrowing agent must not be extended");
 	TEST_ASSERT_NOT_NULL(err, "a rejected extend must set an error");
+	TEST_ASSERT_EQUAL(
+		yanet_error_kind(err),
+		YANET_ERROR_FAILED_PRECONDITION,
+		"a borrowing agent must be told apart from a server fault"
+	);
 	TEST_ASSERT_EQUAL(
 		sys_agent->arena_count,
 		(uint64_t)0,
@@ -803,7 +926,7 @@ test_extend_rolls_back_on_exhausted_pool() {
 	TEST_ASSERT_NOT_NULL(block, "the agent must survive a failed extend");
 	memory_bfree(&agent->memory_context, block, 256);
 
-	extend_agent_release(agent, cp_config);
+	extend_agent_release(agent);
 	free(storage);
 	return TEST_SUCCESS;
 }
@@ -869,8 +992,8 @@ test_extend_agent_grows_the_named_agent() {
 		"an agent nobody named must keep its memory"
 	);
 
-	extend_agent_release(first, cp_config);
-	extend_agent_release(second, cp_config);
+	extend_agent_release(first);
+	extend_agent_release(second);
 	free(storage);
 	return TEST_SUCCESS;
 }
@@ -916,7 +1039,7 @@ test_extend_agent_gates_on_readiness() {
 		"a refused growth must not move any agent's memory"
 	);
 
-	extend_agent_release(agent, cp_config);
+	extend_agent_release(agent);
 	free(storage);
 	return TEST_SUCCESS;
 }
@@ -939,8 +1062,8 @@ main() {
 	    TEST_SUCCESS) {
 		++tests_failed;
 		LOG(ERROR,
-		    "test_initialised_segment_magic_and_cp_config_valid failed"
-		);
+		    "test_initialised_segment_magic_and_cp_config_valid "
+		    "failed");
 	}
 
 	++tests_count;
@@ -991,12 +1114,18 @@ main() {
 	}
 
 	++tests_count;
+	if (test_get_cp_memory_info_reports_zone_tree() != TEST_SUCCESS) {
+		++tests_failed;
+		LOG(ERROR, "test_get_cp_memory_info_reports_zone_tree failed");
+	}
+
+	++tests_count;
 	if (test_detach_uninitialised_segment_releases_mapping() !=
 	    TEST_SUCCESS) {
 		++tests_failed;
 		LOG(ERROR,
-		    "test_detach_uninitialised_segment_releases_mapping failed"
-		);
+		    "test_detach_uninitialised_segment_releases_mapping "
+		    "failed");
 	}
 
 	++tests_count;

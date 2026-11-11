@@ -169,7 +169,8 @@ check_slot_bounds(struct dp_config *dp_config) {
 // deadline starts expired so a first call resamples both pools, an
 // earlier call is a no-op, a call at the deadline resamples and
 // reschedules, and a pool whose sampler then stays idle keeps its
-// gauge.
+// gauge. A sampler spanning both pools, as a multi-assignment worker
+// sees them, must publish the sums.
 static int
 check_sampler_interval(struct dp_config *dp_config) {
 	struct rte_mempool *pool_a = test_mempool_create_sized(8);
@@ -188,17 +189,28 @@ check_sampler_interval(struct dp_config *dp_config) {
 		slots_b.available, "worker 1 has no available slot"
 	);
 
+	struct rte_mempool *pools_a[1] = {pool_a};
+	struct rte_mempool *pools_b[1] = {pool_b};
+
 	struct worker_rx_pool_sampler sampler_a;
 	struct worker_rx_pool_sampler sampler_b;
 	TEST_ASSERT_SUCCESS(
 		worker_rx_pool_sampler_init(
-			&sampler_a, pool_a, slots_a.capacity, slots_a.available
+			&sampler_a,
+			1,
+			pools_a,
+			slots_a.capacity,
+			slots_a.available
 		),
 		"failed to init the sampler for the 8-object pool"
 	);
 	TEST_ASSERT_SUCCESS(
 		worker_rx_pool_sampler_init(
-			&sampler_b, pool_b, slots_b.capacity, slots_b.available
+			&sampler_b,
+			1,
+			pools_b,
+			slots_b.capacity,
+			slots_b.available
 		),
 		"failed to init the sampler for the 16-object pool"
 	);
@@ -217,8 +229,8 @@ check_sampler_interval(struct dp_config *dp_config) {
 
 	// Both deadlines start expired, so this call resamples both pools;
 	// only pool A lost objects, so only its gauge moves.
-	worker_rx_pool_sampler_sample(&sampler_a, pool_a, 0);
-	worker_rx_pool_sampler_sample(&sampler_b, pool_b, 0);
+	worker_rx_pool_sampler_sample(&sampler_a, 0);
+	worker_rx_pool_sampler_sample(&sampler_b, 0);
 	TEST_ASSERT_EQUAL(6, *slots_a.available, "pool A first resample");
 	TEST_ASSERT_EQUAL(16, *slots_b.available, "pool B first resample");
 
@@ -230,7 +242,7 @@ check_sampler_interval(struct dp_config *dp_config) {
 	}
 
 	worker_rx_pool_sampler_sample(
-		&sampler_a, pool_a, WORKER_RX_POOL_SAMPLE_INTERVAL_NS - 1
+		&sampler_a, WORKER_RX_POOL_SAMPLE_INTERVAL_NS - 1
 	);
 	TEST_ASSERT_EQUAL(
 		6,
@@ -239,7 +251,7 @@ check_sampler_interval(struct dp_config *dp_config) {
 	);
 
 	worker_rx_pool_sampler_sample(
-		&sampler_a, pool_a, WORKER_RX_POOL_SAMPLE_INTERVAL_NS
+		&sampler_a, WORKER_RX_POOL_SAMPLE_INTERVAL_NS
 	);
 	TEST_ASSERT_EQUAL(
 		3, *slots_a.available, "an elapsed deadline must republish"
@@ -248,6 +260,38 @@ check_sampler_interval(struct dp_config *dp_config) {
 		16,
 		*slots_b.available,
 		"a pool not resampled again must keep its gauge"
+	);
+
+	// A multi-assignment worker's sampler spans both pools and reports
+	// their sums: capacity 8 + 16, availability 3 held in A plus all of
+	// B.
+	struct rte_mempool *pools_ab[2] = {pool_a, pool_b};
+	struct worker_rx_pool_sampler sampler_ab;
+	TEST_ASSERT_SUCCESS(
+		worker_rx_pool_sampler_init(
+			&sampler_ab,
+			2,
+			pools_ab,
+			slots_b.capacity,
+			slots_b.available
+		),
+		"failed to init the sampler spanning both pools"
+	);
+	TEST_ASSERT_EQUAL(
+		24,
+		*slots_b.capacity,
+		"the spanning sampler must sum capacities"
+	);
+	TEST_ASSERT_EQUAL(
+		19,
+		*slots_b.available,
+		"the spanning sampler must sum availability"
+	);
+	worker_rx_pool_sampler_sample(&sampler_ab, 0);
+	TEST_ASSERT_EQUAL(
+		19,
+		*slots_b.available,
+		"the spanning resample must sum availability"
 	);
 
 	for (size_t idx = 0; idx < 5; ++idx) {

@@ -1,5 +1,5 @@
 // Command stylelint enforces this repository's Go micro-conventions from
-// CLAUDE.md in a single pass over the source tree.
+// .agents/conventions/go.md in a single pass over the source tree.
 //
 // It runs fourteen checks sharing one allowlist, lint/style/allowlist.txt,
 // keyed "<check>:<path>:<name>:<ordinal>" where <check> is one of:

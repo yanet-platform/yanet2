@@ -6,7 +6,6 @@ import (
 	"maps"
 	"net/netip"
 	"slices"
-	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -21,9 +20,10 @@ import (
 
 // RouteService implements the operator-owned RouteService surface.
 //
-// Mutation RPCs update the RIB held in this process and wake the
-// reconcile loop via onChanged. The reconcile loop snapshots state and
-// pushes the rebuilt FIB to the gateways through the actuator.
+// Mutation RPCs update the RIB held in this process, and a flush or the end
+// of a feed session reports the change. The desired state is rebuilt from
+// the RIB on such a report, and within a reconcile interval after an
+// unreported change; the gateways get FIBs built from it.
 type RouteService struct {
 	operatorpb.UnimplementedRouteServiceServer
 
@@ -315,12 +315,11 @@ func (m *RouteService) FlushRoutes(
 // same RIB and stale routes are cleaned up after RIBTTL.
 func (m *RouteService) FeedRIB(stream operatorpb.RouteService_FeedRIBServer) error {
 	var (
-		update     *operatorpb.Update
-		name       string
-		err        error
-		ribRef     *rib.RIB
-		sessionID  uint64
-		terminated *atomic.Bool
+		update    *operatorpb.Update
+		name      string
+		err       error
+		ribRef    *rib.RIB
+		sessionID uint64
 	)
 	for {
 		update, err = stream.Recv()
@@ -331,27 +330,42 @@ func (m *RouteService) FeedRIB(stream operatorpb.RouteService_FeedRIBServer) err
 		if err != nil {
 			break
 		}
-
+		// The first message of a stream, a heartbeat included, starts its
+		// session, so an import whose BIRD table is empty still takes the
+		// RIB over.
 		if ribRef == nil {
 			name = update.GetName()
 			ribRef = m.getOrCreateRib(name)
-			sessionID, terminated = ribRef.NewSession()
+			sessionID = ribRef.NewSession()
 			m.log.Info("started FeedRIB session",
 				zap.Uint64("session_id", sessionID),
 				zap.String("name", name),
 			)
 			m.onRIBSessionStart(name, sessionID)
+			// The older sessions' routes this one does not send again go
+			// after the TTL, even when an older stream never ends.
+			if sessionID > 1 {
+				go ribRef.CleanupTask(sessionID-1, m.quitCh, m.ribTTL)
+			}
 		}
 
-		if terminated.Load() {
-			m.log.Warn("FeedRIB session terminated by a newer session",
-				zap.Uint64("session_id", sessionID),
-				zap.String("name", name),
-			)
-			err = stream.SendAndClose(&operatorpb.UpdateSummary{})
-			break
+		// A heartbeat only proves the stream alive to its sender and changes
+		// no routes, but a superseded stream ends on it like on a flush.
+		if update.GetHeartbeat() {
+			if !ribRef.IsActive(sessionID) {
+				err = m.terminateFeedRIBSession(stream, name, sessionID)
+				break
+			}
+			continue
 		}
+
 		if update.GetRoute() == nil {
+			// A flush never reaches Update's fence, so a superseded stream is
+			// closed here and its cleanup scheduled.
+			if !ribRef.IsActive(sessionID) {
+				err = m.terminateFeedRIBSession(stream, name, sessionID)
+				break
+			}
 			m.log.Info("flushed routes due to FeedRIB flush event",
 				zap.Uint64("session_id", sessionID),
 				zap.String("name", name),
@@ -362,14 +376,22 @@ func (m *RouteService) FeedRIB(stream operatorpb.RouteService_FeedRIBServer) err
 
 		route, convertErr := operatorpb.ToRIBRoute(update.GetRoute(), update.GetIsDelete())
 		if convertErr != nil {
+			// An unconvertible route never reaches Update's fence, so a
+			// superseded stream is closed here and its cleanup scheduled.
+			if !ribRef.IsActive(sessionID) {
+				err = m.terminateFeedRIBSession(stream, name, sessionID)
+				break
+			}
 			m.log.Error("failed to convert proto route to RIB route",
 				zap.Uint64("session_id", sessionID),
 				zap.Error(convertErr),
 			)
 			continue
 		}
-		route.SessionID = sessionID
-		ribRef.Update(*route)
+		if !ribRef.Update(sessionID, *route) {
+			err = m.terminateFeedRIBSession(stream, name, sessionID)
+			break
+		}
 		m.onRIBUpdate(1)
 	}
 
@@ -385,6 +407,24 @@ func (m *RouteService) FeedRIB(stream operatorpb.RouteService_FeedRIBServer) err
 	}
 
 	return err
+}
+
+// terminateFeedRIBSession warns that a stream lost its session to a newer
+// one and closes the stream with an empty summary.
+//
+// It covers a route write rejected by the RIB's own fence and every
+// non-writing message caught by the advisory liveness check, so any of
+// them ends a superseded stream the same way.
+func (m *RouteService) terminateFeedRIBSession(
+	stream operatorpb.RouteService_FeedRIBServer,
+	name string,
+	sessionID uint64,
+) error {
+	m.log.Warn("terminating FeedRIB session superseded by a newer one",
+		zap.Uint64("session_id", sessionID),
+		zap.String("name", name),
+	)
+	return stream.SendAndClose(&operatorpb.UpdateSummary{})
 }
 
 func (m *RouteService) getRib(name string) (*rib.RIB, bool) {

@@ -71,6 +71,16 @@ func (m *FIBNexthop) Validate() error {
 }
 
 func (m *FIBEntry) Validate() error {
+	if m.GetRange() == nil {
+		return errors.New("range is required")
+	}
+	if m.GetRange().GetStart() == nil {
+		return errors.New("range.start is required")
+	}
+	if m.GetRange().GetEnd() == nil {
+		return errors.New("range.end is required")
+	}
+
 	for idx, nexthop := range m.GetNexthops() {
 		if err := nexthop.Validate(); err != nil {
 			return fmt.Errorf("nexthops[%d]: %w", idx, err)

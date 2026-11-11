@@ -1,0 +1,19 @@
+[package]
+name = "yanet-sdk-testing"
+description = "Test support of the Rust module SDK: the block arena that serves tests as shared memory and the configuration owner."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+yanet-shm = { path = "../yanet-shm" }
+yanet-sys = { path = "../yanet-sys", optional = true }
+
+[features]
+# The configuration owner of the builder tests, which runs under Miri: it
+# names the owner seam of the C bindings and calls no C.
+cp = ["dep:yanet-sys"]

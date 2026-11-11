@@ -35,30 +35,46 @@ func Test_ShowConfigRequest_Validate(t *testing.T) {
 	}
 }
 
-// Test_AddPrefixRequest_Validate verifies that the name is checked before the
-// required prefix and that prefix parsing remains outside request validation.
-func Test_AddPrefixRequest_Validate(t *testing.T) {
+// Test_UpdateConfigRequest_Validate verifies that the name and the config
+// are required and that a failure inside the config is reported at its
+// field path.
+func Test_UpdateConfigRequest_Validate(t *testing.T) {
+	ipv6 := commonpb.NewIPv6Address([16]byte{})
+
 	cases := []struct {
 		name    string
-		request *nat64pb.AddPrefixRequest
+		request *nat64pb.UpdateConfigRequest
 		message string
 	}{
 		{
-			name:    "empty name precedes missing prefix",
-			request: &nat64pb.AddPrefixRequest{},
+			name:    "empty name precedes missing config",
+			request: &nat64pb.UpdateConfigRequest{},
 			message: "name is required",
 		},
 		{
-			name:    "missing prefix",
-			request: &nat64pb.AddPrefixRequest{Name: "nat64-0"},
-			message: "prefix is required",
+			name:    "missing config",
+			request: &nat64pb.UpdateConfigRequest{Name: "nat64-0"},
+			message: "config is required",
 		},
 		{
-			name: "non-nil prefix",
-			request: &nat64pb.AddPrefixRequest{
+			name: "mapping without an IPv4 address",
+			request: &nat64pb.UpdateConfigRequest{
 				Name:   "nat64-0",
-				Prefix: &commonpb.IPv6Prefix{},
+				Config: &nat64pb.Config{Mappings: []*nat64pb.Mapping{{Ipv6: ipv6}}},
 			},
+			message: "config: mappings[0]: ipv4 is required",
+		},
+		{
+			name: "IPv4 MTU above maximum",
+			request: &nat64pb.UpdateConfigRequest{
+				Name:   "nat64-0",
+				Config: &nat64pb.Config{Mtu: &nat64pb.MTUConfig{Ipv4Mtu: math.MaxUint16 + 1}},
+			},
+			message: "config: mtu: ipv4_mtu 65536 must be in range 0..65535",
+		},
+		{
+			name:    "empty config is accepted",
+			request: &nat64pb.UpdateConfigRequest{Name: "nat64-0", Config: &nat64pb.Config{}},
 		},
 		{name: "nil request", request: nil, message: "name is required"},
 	}
@@ -75,209 +91,71 @@ func Test_AddPrefixRequest_Validate(t *testing.T) {
 	}
 }
 
-// Test_RemovePrefixRequest_Validate verifies that the name is checked before
-// the required prefix and that prefix parsing remains outside validation.
-func Test_RemovePrefixRequest_Validate(t *testing.T) {
-	cases := []struct {
-		name    string
-		request *nat64pb.RemovePrefixRequest
-		message string
-	}{
-		{
-			name:    "empty name precedes missing prefix",
-			request: &nat64pb.RemovePrefixRequest{},
-			message: "name is required",
-		},
-		{
-			name:    "missing prefix",
-			request: &nat64pb.RemovePrefixRequest{Name: "nat64-0"},
-			message: "prefix is required",
-		},
-		{
-			name: "non-nil prefix",
-			request: &nat64pb.RemovePrefixRequest{
-				Name:   "nat64-0",
-				Prefix: &commonpb.IPv6Prefix{},
-			},
-		},
-		{name: "nil request", request: nil, message: "name is required"},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			err := tc.request.Validate()
-			if tc.message == "" {
-				require.NoError(t, err)
-			} else {
-				require.EqualError(t, err, tc.message)
-			}
-		})
-	}
-}
-
-// Test_AddMappingRequest_Validate verifies that names and required address
-// messages are checked in field order.
-func Test_AddMappingRequest_Validate(t *testing.T) {
+// Test_Config_Validate verifies that every mapping and a set MTU are checked
+// at their field paths while an unset MTU is accepted.
+func Test_Config_Validate(t *testing.T) {
 	ipv4 := commonpb.NewIPv4Address([4]byte{})
 	ipv6 := commonpb.NewIPv6Address([16]byte{})
 
 	cases := []struct {
 		name    string
-		request *nat64pb.AddMappingRequest
+		config  *nat64pb.Config
 		message string
 	}{
+		{name: "empty config", config: &nat64pb.Config{}},
 		{
-			name:    "empty name precedes missing addresses",
-			request: &nat64pb.AddMappingRequest{},
-			message: "name is required",
-		},
-		{
-			name:    "missing IPv4 address",
-			request: &nat64pb.AddMappingRequest{Name: "nat64-0", Ipv6: ipv6},
-			message: "ipv4 is required",
-		},
-		{
-			name:    "missing IPv6 address",
-			request: &nat64pb.AddMappingRequest{Name: "nat64-0", Ipv4: ipv4},
-			message: "ipv6 is required",
-		},
-		{
-			name: "missing both addresses keeps IPv4 first",
-			request: &nat64pb.AddMappingRequest{
-				Name: "nat64-0",
-			},
-			message: "ipv4 is required",
-		},
-		{
-			name: "valid mapping",
-			request: &nat64pb.AddMappingRequest{
-				Name: "nat64-0",
-				Ipv4: ipv4,
-				Ipv6: ipv6,
+			name: "complete mapping and MTU",
+			config: &nat64pb.Config{
+				Mappings: []*nat64pb.Mapping{{Ipv4: ipv4, Ipv6: ipv6}},
+				Mtu:      &nat64pb.MTUConfig{Ipv4Mtu: 1450, Ipv6Mtu: 1280},
 			},
 		},
-		{name: "nil request", request: nil, message: "name is required"},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			err := tc.request.Validate()
-			if tc.message == "" {
-				require.NoError(t, err)
-			} else {
-				require.EqualError(t, err, tc.message)
-			}
-		})
-	}
-}
-
-// Test_RemoveMappingRequest_Validate verifies that the name is checked before
-// the required IPv4 address.
-func Test_RemoveMappingRequest_Validate(t *testing.T) {
-	ipv4 := commonpb.NewIPv4Address([4]byte{})
-
-	cases := []struct {
-		name    string
-		request *nat64pb.RemoveMappingRequest
-		message string
-	}{
 		{
-			name:    "empty name precedes missing address",
-			request: &nat64pb.RemoveMappingRequest{},
-			message: "name is required",
-		},
-		{
-			name:    "missing IPv4 address",
-			request: &nat64pb.RemoveMappingRequest{Name: "nat64-0"},
-			message: "ipv4 is required",
-		},
-		{
-			name:    "valid request",
-			request: &nat64pb.RemoveMappingRequest{Name: "nat64-0", Ipv4: ipv4},
-		},
-		{name: "nil request", request: nil, message: "name is required"},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			err := tc.request.Validate()
-			if tc.message == "" {
-				require.NoError(t, err)
-			} else {
-				require.EqualError(t, err, tc.message)
-			}
-		})
-	}
-}
-
-// Test_SetMTURequest_Validate verifies that names, the required MTU message,
-// and nested MTU bounds are reported at their protobuf field paths.
-func Test_SetMTURequest_Validate(t *testing.T) {
-	cases := []struct {
-		name    string
-		request *nat64pb.SetMTURequest
-		message string
-	}{
-		{
-			name:    "empty name precedes missing MTU",
-			request: &nat64pb.SetMTURequest{},
-			message: "name is required",
-		},
-		{
-			name:    "missing MTU",
-			request: &nat64pb.SetMTURequest{Name: "nat64-0"},
-			message: "mtu is required",
-		},
-		{
-			name: "IPv4 MTU above maximum",
-			request: &nat64pb.SetMTURequest{
-				Name: "nat64-0",
-				Mtu:  &nat64pb.MTUConfig{Ipv4Mtu: math.MaxUint16 + 1},
+			name: "second mapping without an IPv6 address",
+			config: &nat64pb.Config{
+				Mappings: []*nat64pb.Mapping{{Ipv4: ipv4, Ipv6: ipv6}, {Ipv4: ipv4}},
 			},
-			message: "mtu: ipv4_mtu 65536 must be in range 0..65535",
+			message: "mappings[1]: ipv6 is required",
 		},
 		{
-			name: "IPv6 MTU above maximum",
-			request: &nat64pb.SetMTURequest{
-				Name: "nat64-0",
-				Mtu:  &nat64pb.MTUConfig{Ipv6Mtu: math.MaxUint16 + 1},
-			},
+			name:    "IPv6 MTU above maximum",
+			config:  &nat64pb.Config{Mtu: &nat64pb.MTUConfig{Ipv6Mtu: math.MaxUint16 + 1}},
 			message: "mtu: ipv6_mtu 65536 must be in range 0..65535",
 		},
-		{
-			name: "IPv4 MTU is checked before IPv6 MTU",
-			request: &nat64pb.SetMTURequest{
-				Name: "nat64-0",
-				Mtu: &nat64pb.MTUConfig{
-					Ipv4Mtu: math.MaxUint16 + 1,
-					Ipv6Mtu: math.MaxUint16 + 1,
-				},
-			},
-			message: "mtu: ipv4_mtu 65536 must be in range 0..65535",
-		},
-		{
-			name: "explicit zero MTU is accepted",
-			request: &nat64pb.SetMTURequest{
-				Name: "nat64-0",
-				Mtu:  &nat64pb.MTUConfig{},
-			},
-		},
-		{
-			name: "MTU values at maximum are accepted",
-			request: &nat64pb.SetMTURequest{
-				Name: "nat64-0",
-				Mtu: &nat64pb.MTUConfig{
-					Ipv4Mtu: math.MaxUint16,
-					Ipv6Mtu: math.MaxUint16,
-				},
-			},
-		},
-		{name: "nil request", request: nil, message: "name is required"},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := tc.request.Validate()
+			err := tc.config.Validate()
+			if tc.message == "" {
+				require.NoError(t, err)
+			} else {
+				require.EqualError(t, err, tc.message)
+			}
+		})
+	}
+}
+
+// Test_Mapping_Validate verifies that both addresses are required, the IPv4
+// one checked first.
+func Test_Mapping_Validate(t *testing.T) {
+	ipv4 := commonpb.NewIPv4Address([4]byte{})
+	ipv6 := commonpb.NewIPv6Address([16]byte{})
+
+	cases := []struct {
+		name    string
+		mapping *nat64pb.Mapping
+		message string
+	}{
+		{name: "both addresses", mapping: &nat64pb.Mapping{Ipv4: ipv4, Ipv6: ipv6}},
+		{name: "missing IPv4 address", mapping: &nat64pb.Mapping{Ipv6: ipv6}, message: "ipv4 is required"},
+		{name: "missing IPv6 address", mapping: &nat64pb.Mapping{Ipv4: ipv4}, message: "ipv6 is required"},
+		{name: "missing both addresses keeps IPv4 first", mapping: &nat64pb.Mapping{}, message: "ipv4 is required"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.mapping.Validate()
 			if tc.message == "" {
 				require.NoError(t, err)
 			} else {
@@ -326,31 +204,6 @@ func Test_MTUConfig_Validate(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.config.Validate()
-			if tc.message == "" {
-				require.NoError(t, err)
-			} else {
-				require.EqualError(t, err, tc.message)
-			}
-		})
-	}
-}
-
-// Test_SetDropUnknownRequest_Validate verifies that an empty or nil request
-// is rejected while a named request passes.
-func Test_SetDropUnknownRequest_Validate(t *testing.T) {
-	cases := []struct {
-		name    string
-		request *nat64pb.SetDropUnknownRequest
-		message string
-	}{
-		{name: "empty name", request: &nat64pb.SetDropUnknownRequest{}, message: "name is required"},
-		{name: "name set", request: &nat64pb.SetDropUnknownRequest{Name: "nat64-0"}},
-		{name: "nil request", request: nil, message: "name is required"},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			err := tc.request.Validate()
 			if tc.message == "" {
 				require.NoError(t, err)
 			} else {

@@ -82,11 +82,7 @@ impl TryFrom<&pb::MacAddress> for MacAddr {
     type Error = Box<dyn Error>;
 
     fn try_from(mac: &pb::MacAddress) -> Result<Self, Self::Error> {
-        if mac.addr >> 48 != 0 {
-            return Err("upper 16 bits are set for MAC address".into());
-        }
-
-        Ok(MacAddr::from(mac.addr))
+        MacAddr::from_u64(mac.addr).ok_or_else(|| "upper 16 bits are set for MAC address".into())
     }
 }
 
@@ -303,7 +299,7 @@ impl<'de> Deserialize<'de> for pb::IPv6Address {
 impl From<Contiguous<Ipv4Network>> for pb::IPv4Prefix {
     fn from(net: Contiguous<Ipv4Network>) -> Self {
         pb::IPv4Prefix {
-            addr: Some(pb::IPv4Address::from(*net.addr())),
+            addr: Some(pb::IPv4Address::from(net.addr())),
             prefix_len: u32::from(net.prefix()),
         }
     }
@@ -368,8 +364,8 @@ impl<'de> Deserialize<'de> for pb::IPv4Prefix {
 impl From<Ipv4Network> for pb::IPv4Network {
     fn from(net: Ipv4Network) -> Self {
         pb::IPv4Network {
-            addr: Some(pb::IPv4Address::from(*net.addr())),
-            mask: Some(pb::IPv4Address::from(*net.mask())),
+            addr: Some(pb::IPv4Address::from(net.addr())),
+            mask: Some(pb::IPv4Address::from(net.mask())),
         }
     }
 }
@@ -424,7 +420,7 @@ impl<'de> Deserialize<'de> for pb::IPv4Network {
 impl From<Contiguous<Ipv6Network>> for pb::IPv6Prefix {
     fn from(net: Contiguous<Ipv6Network>) -> Self {
         pb::IPv6Prefix {
-            addr: Some(pb::IPv6Address::from(*net.addr())),
+            addr: Some(pb::IPv6Address::from(net.addr())),
             prefix_len: u32::from(net.prefix()),
         }
     }
@@ -489,8 +485,8 @@ impl<'de> Deserialize<'de> for pb::IPv6Prefix {
 impl From<Ipv6Network> for pb::IPv6Network {
     fn from(net: Ipv6Network) -> Self {
         pb::IPv6Network {
-            addr: Some(pb::IPv6Address::from(*net.addr())),
-            mask: Some(pb::IPv6Address::from(*net.mask())),
+            addr: Some(pb::IPv6Address::from(net.addr())),
+            mask: Some(pb::IPv6Address::from(net.mask())),
         }
     }
 }
@@ -830,6 +826,8 @@ pub fn partition_prefixes(
 
 #[cfg(test)]
 mod test {
+    use core::assert_matches;
+
     use super::*;
 
     #[test]
@@ -1191,7 +1189,7 @@ mod test {
     fn contiguous_ip_network_v4_round_trip() {
         let net = Contiguous::<IpNetwork>::parse("10.0.0.0/24").unwrap();
         let msg = pb::IpPrefix::from(net);
-        assert!(matches!(&msg.prefix, Some(pb::ip_prefix::Prefix::V4(prefix)) if prefix.prefix_len == 24));
+        assert_matches!(&msg.prefix, Some(pb::ip_prefix::Prefix::V4(prefix)) if prefix.prefix_len == 24);
         let got = IpNetwork::try_from(&msg).unwrap();
         assert_eq!(*net, got);
     }
@@ -1200,7 +1198,7 @@ mod test {
     fn contiguous_ip_network_v6_round_trip() {
         let net = Contiguous::<IpNetwork>::parse("2001:db8::/32").unwrap();
         let msg = pb::IpPrefix::from(net);
-        assert!(matches!(&msg.prefix, Some(pb::ip_prefix::Prefix::V6(prefix)) if prefix.prefix_len == 32));
+        assert_matches!(&msg.prefix, Some(pb::ip_prefix::Prefix::V6(prefix)) if prefix.prefix_len == 32);
         let got = IpNetwork::try_from(&msg).unwrap();
         assert_eq!(*net, got);
     }
@@ -1292,7 +1290,7 @@ mod test {
     fn contiguous_ip_network_try_from_accepts_contiguous_mask() {
         let net = IpNetwork::parse("192.168.0.0/255.255.255.0").unwrap();
         let msg = pb::IpPrefix::try_from(net).unwrap();
-        assert!(matches!(&msg.prefix, Some(pb::ip_prefix::Prefix::V4(prefix)) if prefix.prefix_len == 24));
+        assert_matches!(&msg.prefix, Some(pb::ip_prefix::Prefix::V4(prefix)) if prefix.prefix_len == 24);
     }
 
     #[test]

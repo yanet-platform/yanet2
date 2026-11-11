@@ -24,9 +24,14 @@ struct eq_context {
 	uint32_t want_tag;
 };
 
+// Equality callbacks received so far; reset and asserted by the test
+// proving that foreign slots bypass the callback.
+static uint32_t match_item_calls;
+
 static int
 match_item(uint32_t value, const void *data) {
 	const struct eq_context *ctx = (const struct eq_context *)data;
+	match_item_calls += 1;
 	if (items[value].key == ctx->want_key &&
 	    items[value].tag == ctx->want_tag) {
 		return 0;
@@ -74,6 +79,14 @@ static void
 fixture_fini(struct fixture *fix) {
 	hash_index_fini(&fix->index);
 	free(fix->arena);
+}
+
+// Look up the item carrying the given key and tag, reporting absence
+// when none matches.
+static uint32_t
+lookup_item(const struct fixture *fix, uint32_t key, uint32_t tag) {
+	struct eq_context ctx = {.want_key = key, .want_tag = tag};
+	return hash_index_lookup(&fix->index, hash_key(key), match_item, &ctx);
 }
 
 // Inserts one item and looks it up by hash plus tag, then confirms a
@@ -280,6 +293,63 @@ test_same_hash_multiple_values(void) {
 	return 0;
 }
 
+// Inserts two entries whose hashes differ yet share a bucket, then
+// confirms each lookup still reaches its own entry and consults the
+// equality callback for that entry alone: the foreign slot is bypassed
+// without a callback round.
+static int
+test_bucket_collision_distinct_hashes(void) {
+	struct fixture fix;
+	if (fixture_init(&fix, ITEM_COUNT) != 0) {
+		return TEST_FAILED;
+	}
+
+	uint32_t slots = ITEM_COUNT * HASH_INDEX_SPARSE_FACTOR;
+	uint32_t far_hash = 1 + slots;
+
+	items[0] = (struct test_item){.key = 10, .tag = 1};
+	items[1] = (struct test_item){.key = 20, .tag = 2};
+
+	TEST_ASSERT(
+		hash_index_insert(&fix.index, far_hash, 0) == 0,
+		"far insert failed"
+	);
+	TEST_ASSERT(
+		hash_index_insert(&fix.index, 1, 1) == 0, "near insert failed"
+	);
+	TEST_ASSERT(fix.index.count == 2, "count must be 2");
+
+	struct eq_context far_ctx = {.want_key = 10, .want_tag = 1};
+	match_item_calls = 0;
+	uint32_t result =
+		hash_index_lookup(&fix.index, far_hash, match_item, &far_ctx);
+	TEST_ASSERT_EQUAL(0, result, "far-hash entry must be found");
+	TEST_ASSERT_EQUAL(
+		1, match_item_calls, "far-hash lookup consults one slot"
+	);
+
+	struct eq_context near_ctx = {.want_key = 20, .want_tag = 2};
+	match_item_calls = 0;
+	result = hash_index_lookup(&fix.index, 1, match_item, &near_ctx);
+	TEST_ASSERT_EQUAL(1, result, "entry behind a foreign slot");
+	TEST_ASSERT_EQUAL(
+		1, match_item_calls, "foreign slot must bypass the callback"
+	);
+
+	struct eq_context miss = {.want_key = 30, .want_tag = 3};
+	match_item_calls = 0;
+	result = hash_index_lookup(&fix.index, 1, match_item, &miss);
+	TEST_ASSERT_EQUAL(
+		HASH_INDEX_INVALID, result, "absent key behind a foreign slot"
+	);
+	TEST_ASSERT_EQUAL(
+		1, match_item_calls, "absent key consults its own slot only"
+	);
+
+	fixture_fini(&fix);
+	return 0;
+}
+
 // Confirms that hash_index_fini is idempotent and safe to call twice.
 static int
 test_fini_idempotent(void) {
@@ -301,6 +371,578 @@ test_fini_idempotent(void) {
 	TEST_ASSERT(fix.index.capacity == 0, "capacity must be 0 after fini");
 
 	free(fix.arena);
+	return 0;
+}
+
+static int
+test_rehash_grow_preserves_entries(void) {
+	struct fixture fix;
+	if (fixture_init(&fix, 8) != 0) {
+		return TEST_FAILED;
+	}
+
+	for (uint32_t idx = 0; idx < 8; ++idx) {
+		items[idx] = (struct test_item){.key = idx * 7 + 3,
+						.tag = idx * 13 + 5};
+		TEST_ASSERT(
+			hash_index_insert(
+				&fix.index, hash_key(items[idx].key), idx
+			) == 0,
+			"insert failed at %u",
+			idx
+		);
+	}
+
+	TEST_ASSERT(hash_index_rehash(&fix.index, 32) == 0, "rehash failed");
+	TEST_ASSERT(fix.index.capacity == 32, "capacity must follow rehash");
+	TEST_ASSERT(fix.index.count == 8, "count must survive rehash");
+
+	for (uint32_t idx = 0; idx < 8; ++idx) {
+		uint32_t result =
+			lookup_item(&fix, items[idx].key, items[idx].tag);
+		TEST_ASSERT_EQUAL(idx, result, "post-grow lookup %u", idx);
+	}
+
+	fixture_fini(&fix);
+	return 0;
+}
+
+static int
+test_rehash_shrink_to_count(void) {
+	struct fixture fix;
+	if (fixture_init(&fix, 32) != 0) {
+		return TEST_FAILED;
+	}
+
+	for (uint32_t idx = 0; idx < 5; ++idx) {
+		items[idx] = (struct test_item){.key = idx * 11 + 2,
+						.tag = idx * 17 + 9};
+		TEST_ASSERT(
+			hash_index_insert(
+				&fix.index, hash_key(items[idx].key), idx
+			) == 0,
+			"insert failed at %u",
+			idx
+		);
+	}
+
+	TEST_ASSERT(hash_index_rehash(&fix.index, 5) == 0, "rehash failed");
+	TEST_ASSERT(fix.index.capacity == 5, "capacity must follow rehash");
+	TEST_ASSERT(fix.index.count == 5, "count must survive rehash");
+
+	for (uint32_t idx = 0; idx < 5; ++idx) {
+		uint32_t result =
+			lookup_item(&fix, items[idx].key, items[idx].tag);
+		TEST_ASSERT_EQUAL(idx, result, "post-shrink lookup %u", idx);
+	}
+
+	fixture_fini(&fix);
+	return 0;
+}
+
+static int
+test_rehash_below_count_rejected(void) {
+	struct fixture fix;
+	if (fixture_init(&fix, 8) != 0) {
+		return TEST_FAILED;
+	}
+
+	for (uint32_t idx = 0; idx < 3; ++idx) {
+		items[idx] = (struct test_item){.key = idx * 5 + 1,
+						.tag = idx * 7 + 4};
+		TEST_ASSERT(
+			hash_index_insert(
+				&fix.index, hash_key(items[idx].key), idx
+			) == 0,
+			"insert failed at %u",
+			idx
+		);
+	}
+
+	TEST_ASSERT(
+		hash_index_rehash(&fix.index, 2) == -1,
+		"undersized rehash must be refused"
+	);
+	TEST_ASSERT(fix.index.capacity == 8, "capacity must be unchanged");
+	TEST_ASSERT(fix.index.count == 3, "count must be unchanged");
+
+	for (uint32_t idx = 0; idx < 3; ++idx) {
+		uint32_t result =
+			lookup_item(&fix, items[idx].key, items[idx].tag);
+		TEST_ASSERT_EQUAL(idx, result, "refused-rehash lookup %u", idx);
+	}
+
+	fixture_fini(&fix);
+	return 0;
+}
+
+static int
+test_rehash_from_zero_capacity(void) {
+	struct fixture fix;
+	if (fixture_init(&fix, 0) != 0) {
+		return TEST_FAILED;
+	}
+
+	TEST_ASSERT(fix.index.capacity == 0, "capacity must start at 0");
+	TEST_ASSERT(
+		hash_index_rehash(&fix.index, 0) == -1,
+		"zero rehash must be refused even from zero capacity"
+	);
+	TEST_ASSERT(hash_index_rehash(&fix.index, 4) == 0, "rehash failed");
+	TEST_ASSERT(fix.index.capacity == 4, "capacity must follow rehash");
+
+	items[0] = (struct test_item){.key = 42, .tag = 100};
+	TEST_ASSERT(
+		hash_index_insert(&fix.index, hash_key(42), 0) == 0,
+		"insert failed"
+	);
+	TEST_ASSERT_EQUAL(0, lookup_item(&fix, 42, 100), "late-init lookup");
+
+	fixture_fini(&fix);
+	return 0;
+}
+
+static int
+test_rehash_same_capacity_noop(void) {
+	struct fixture fix;
+	if (fixture_init(&fix, 8) != 0) {
+		return TEST_FAILED;
+	}
+
+	for (uint32_t idx = 0; idx < 3; ++idx) {
+		items[idx] = (struct test_item){.key = idx * 9 + 6,
+						.tag = idx * 15 + 3};
+		TEST_ASSERT(
+			hash_index_insert(
+				&fix.index, hash_key(items[idx].key), idx
+			) == 0,
+			"insert failed at %u",
+			idx
+		);
+	}
+
+	TEST_ASSERT(
+		hash_index_rehash(&fix.index, 8) == 0,
+		"same rehash must succeed"
+	);
+	TEST_ASSERT(fix.index.capacity == 8, "capacity must be unchanged");
+	TEST_ASSERT(fix.index.count == 3, "count must be unchanged");
+
+	for (uint32_t idx = 0; idx < 3; ++idx) {
+		uint32_t result =
+			lookup_item(&fix, items[idx].key, items[idx].tag);
+		TEST_ASSERT_EQUAL(idx, result, "no-op rehash lookup %u", idx);
+	}
+
+	fixture_fini(&fix);
+	return 0;
+}
+
+// The failure is forced by requesting a buffer larger than the fixture
+// arena can hold.
+static int
+test_rehash_failure_leaves_index_usable(void) {
+	struct fixture fix;
+	if (fixture_init(&fix, 8) != 0) {
+		return TEST_FAILED;
+	}
+
+	for (uint32_t idx = 0; idx < 3; ++idx) {
+		items[idx] = (struct test_item){.key = idx * 3 + 8,
+						.tag = idx * 21 + 7};
+		TEST_ASSERT(
+			hash_index_insert(
+				&fix.index, hash_key(items[idx].key), idx
+			) == 0,
+			"insert failed at %u",
+			idx
+		);
+	}
+
+	TEST_ASSERT(
+		hash_index_rehash(&fix.index, 1u << 20) == -1,
+		"oversized rehash must fail"
+	);
+	TEST_ASSERT(fix.index.capacity == 8, "capacity must be unchanged");
+	TEST_ASSERT(fix.index.count == 3, "count must be unchanged");
+
+	for (uint32_t idx = 0; idx < 3; ++idx) {
+		uint32_t result =
+			lookup_item(&fix, items[idx].key, items[idx].tag);
+		TEST_ASSERT_EQUAL(idx, result, "post-failure lookup %u", idx);
+	}
+
+	items[3] = (struct test_item){.key = 77, .tag = 88};
+	TEST_ASSERT(
+		hash_index_insert(&fix.index, hash_key(77), 3) == 0,
+		"insert after failed rehash"
+	);
+	TEST_ASSERT_EQUAL(3, lookup_item(&fix, 77, 88), "post-failure insert");
+
+	fixture_fini(&fix);
+	return 0;
+}
+
+// The capacity sits one past the slot-count bound, so scaling it by the
+// sparse factor would wrap to a near-zero slot count.
+static int
+test_rehash_overflowing_capacity_rejected(void) {
+	struct fixture fix;
+	if (fixture_init(&fix, 8) != 0) {
+		return TEST_FAILED;
+	}
+
+	struct hash_index probe;
+	TEST_ASSERT(
+		hash_index_init(&probe, &fix.memory_context, 0x40000001u) == -1,
+		"overflowing init capacity must be refused"
+	);
+	hash_index_fini(&probe);
+
+	items[0] = (struct test_item){.key = 4, .tag = 5};
+	TEST_ASSERT(
+		hash_index_insert(&fix.index, hash_key(4), 0) == 0,
+		"insert failed"
+	);
+	TEST_ASSERT(
+		hash_index_rehash(&fix.index, 0x40000001u) == -1,
+		"overflowing rehash capacity must be refused"
+	);
+	TEST_ASSERT(fix.index.capacity == 8, "capacity must be unchanged");
+	TEST_ASSERT_EQUAL(0, lookup_item(&fix, 4, 5), "index must stay usable");
+
+	fixture_fini(&fix);
+	return 0;
+}
+
+// Verifies that removing the middle entry of a collision cluster keeps
+// both neighbours reachable through their own probe paths.
+static int
+test_remove_middle_of_cluster(void) {
+	struct fixture fix;
+	if (fixture_init(&fix, ITEM_COUNT) != 0) {
+		return TEST_FAILED;
+	}
+
+	items[0] = (struct test_item){.key = 7, .tag = 10};
+	items[1] = (struct test_item){.key = 7, .tag = 20};
+	items[2] = (struct test_item){.key = 7, .tag = 30};
+
+	uint32_t hash = hash_key(7);
+	for (uint32_t idx = 0; idx < 3; ++idx) {
+		TEST_ASSERT(
+			hash_index_insert(&fix.index, hash, idx) == 0,
+			"insert failed at %u",
+			idx
+		);
+	}
+
+	TEST_ASSERT(
+		hash_index_remove(&fix.index, hash, 1) == 0,
+		"middle removal must succeed"
+	);
+	TEST_ASSERT(fix.index.count == 2, "count must drop to 2");
+	TEST_ASSERT_EQUAL(
+		0,
+		lookup_item(&fix, 7, 10),
+		"first neighbour after middle removal"
+	);
+	TEST_ASSERT_EQUAL(
+		2,
+		lookup_item(&fix, 7, 30),
+		"last neighbour after middle removal"
+	);
+	TEST_ASSERT_EQUAL(
+		HASH_INDEX_INVALID,
+		lookup_item(&fix, 7, 20),
+		"removed middle must be gone"
+	);
+
+	fixture_fini(&fix);
+	return 0;
+}
+
+// Verifies that removing the cluster head shifts every displaced entry
+// back into the freed slot and keeps all of them reachable.
+static int
+test_remove_first_of_cluster(void) {
+	struct fixture fix;
+	if (fixture_init(&fix, ITEM_COUNT) != 0) {
+		return TEST_FAILED;
+	}
+
+	items[0] = (struct test_item){.key = 9, .tag = 11};
+	items[1] = (struct test_item){.key = 9, .tag = 21};
+	items[2] = (struct test_item){.key = 9, .tag = 31};
+
+	uint32_t hash = hash_key(9);
+	for (uint32_t idx = 0; idx < 3; ++idx) {
+		TEST_ASSERT(
+			hash_index_insert(&fix.index, hash, idx) == 0,
+			"insert failed at %u",
+			idx
+		);
+	}
+
+	TEST_ASSERT(
+		hash_index_remove(&fix.index, hash, 0) == 0,
+		"head removal must succeed"
+	);
+	TEST_ASSERT(fix.index.count == 2, "count must drop to 2");
+	TEST_ASSERT_EQUAL(
+		1, lookup_item(&fix, 9, 21), "middle after head removal"
+	);
+	TEST_ASSERT_EQUAL(
+		2, lookup_item(&fix, 9, 31), "last after head removal"
+	);
+	TEST_ASSERT_EQUAL(
+		HASH_INDEX_INVALID,
+		lookup_item(&fix, 9, 11),
+		"removed head must be gone"
+	);
+
+	fixture_fini(&fix);
+	return 0;
+}
+
+static int
+test_remove_last_of_cluster(void) {
+	struct fixture fix;
+	if (fixture_init(&fix, ITEM_COUNT) != 0) {
+		return TEST_FAILED;
+	}
+
+	items[0] = (struct test_item){.key = 7, .tag = 10};
+	items[1] = (struct test_item){.key = 7, .tag = 20};
+	items[2] = (struct test_item){.key = 7, .tag = 30};
+
+	uint32_t hash = hash_key(7);
+	for (uint32_t idx = 0; idx < 3; ++idx) {
+		TEST_ASSERT(
+			hash_index_insert(&fix.index, hash, idx) == 0,
+			"insert failed at %u",
+			idx
+		);
+	}
+
+	TEST_ASSERT(
+		hash_index_remove(&fix.index, hash, 2) == 0,
+		"tail removal must succeed"
+	);
+	TEST_ASSERT(fix.index.count == 2, "count must drop to 2");
+	TEST_ASSERT_EQUAL(
+		0, lookup_item(&fix, 7, 10), "first after tail removal"
+	);
+	TEST_ASSERT_EQUAL(
+		1, lookup_item(&fix, 7, 20), "middle after tail removal"
+	);
+	TEST_ASSERT_EQUAL(
+		HASH_INDEX_INVALID,
+		lookup_item(&fix, 7, 30),
+		"removed tail must be gone"
+	);
+
+	fixture_fini(&fix);
+	return 0;
+}
+
+static int
+test_remove_absent(void) {
+	struct fixture fix;
+	if (fixture_init(&fix, ITEM_COUNT) != 0) {
+		return TEST_FAILED;
+	}
+
+	items[0] = (struct test_item){.key = 5, .tag = 6};
+	TEST_ASSERT(
+		hash_index_insert(&fix.index, hash_key(5), 0) == 0,
+		"insert failed"
+	);
+
+	TEST_ASSERT(
+		hash_index_remove(&fix.index, hash_key(5), 1) == -1,
+		"absent value must not be removed"
+	);
+	TEST_ASSERT(
+		hash_index_remove(&fix.index, hash_key(6), 0) == -1,
+		"absent hash must not be removed"
+	);
+	TEST_ASSERT(fix.index.count == 1, "count must stay at 1");
+	TEST_ASSERT_EQUAL(
+		0, lookup_item(&fix, 5, 6), "entry must survive misses"
+	);
+
+	fixture_fini(&fix);
+	return 0;
+}
+
+static int
+test_remove_zero_capacity(void) {
+	struct fixture fix;
+	if (fixture_init(&fix, 0) != 0) {
+		return TEST_FAILED;
+	}
+
+	TEST_ASSERT(
+		hash_index_remove(&fix.index, hash_key(1), 0) == -1,
+		"zero-capacity remove must be refused"
+	);
+
+	fixture_fini(&fix);
+	return 0;
+}
+
+static int
+test_remove_all_and_reinsert(void) {
+	struct fixture fix;
+	if (fixture_init(&fix, 8) != 0) {
+		return TEST_FAILED;
+	}
+
+	for (uint32_t idx = 0; idx < 8; ++idx) {
+		items[idx] = (struct test_item){.key = idx * 7 + 3,
+						.tag = idx * 13 + 5};
+		TEST_ASSERT(
+			hash_index_insert(
+				&fix.index, hash_key(items[idx].key), idx
+			) == 0,
+			"insert failed at %u",
+			idx
+		);
+	}
+
+	for (uint32_t idx = 0; idx < 8; ++idx) {
+		TEST_ASSERT(
+			hash_index_remove(
+				&fix.index, hash_key(items[idx].key), idx
+			) == 0,
+			"remove failed at %u",
+			idx
+		);
+	}
+	TEST_ASSERT(fix.index.count == 0, "count must reach 0");
+	TEST_ASSERT(fix.index.capacity == 8, "capacity must be unchanged");
+
+	for (uint32_t idx = 0; idx < 8; ++idx) {
+		TEST_ASSERT(
+			hash_index_insert(
+				&fix.index, hash_key(items[idx].key), idx
+			) == 0,
+			"reinsert failed at %u",
+			idx
+		);
+	}
+	TEST_ASSERT(fix.index.count == 8, "count must reach 8 again");
+	for (uint32_t idx = 0; idx < 8; ++idx) {
+		uint32_t result =
+			lookup_item(&fix, items[idx].key, items[idx].tag);
+		TEST_ASSERT_EQUAL(idx, result, "post-recycle lookup %u", idx);
+	}
+
+	fixture_fini(&fix);
+	return 0;
+}
+
+// Verifies that survivors of earlier rounds stay reachable through the
+// removals and shifts of every later round.
+static int
+test_remove_churn(void) {
+	struct fixture fix;
+	if (fixture_init(&fix, 32) != 0) {
+		return TEST_FAILED;
+	}
+
+	for (uint32_t round = 0; round < 4; ++round) {
+		for (uint32_t idx = 0; idx < 8; ++idx) {
+			uint32_t value = round * 8 + idx;
+			items[value] = (struct test_item
+			){.key = round * 100 + idx, .tag = value};
+			TEST_ASSERT(
+				hash_index_insert(
+					&fix.index,
+					hash_key(items[value].key),
+					value
+				) == 0,
+				"insert failed at round %u idx %u",
+				round,
+				idx
+			);
+		}
+
+		for (uint32_t idx = 0; idx < 8; idx += 2) {
+			uint32_t value = round * 8 + idx;
+			TEST_ASSERT(
+				hash_index_remove(
+					&fix.index,
+					hash_key(items[value].key),
+					value
+				) == 0,
+				"remove failed at round %u idx %u",
+				round,
+				idx
+			);
+		}
+
+		for (uint32_t prior = 0; prior <= round; ++prior) {
+			for (uint32_t idx = 1; idx < 8; idx += 2) {
+				uint32_t value = prior * 8 + idx;
+				uint32_t result = lookup_item(
+					&fix, items[value].key, items[value].tag
+				);
+				TEST_ASSERT_EQUAL(
+					value,
+					result,
+					"survivor lookup round %u prior %u idx "
+					"%u",
+					round,
+					prior,
+					idx
+				);
+			}
+		}
+	}
+
+	TEST_ASSERT(fix.index.count == 16, "count must be 16 after churn");
+
+	fixture_fini(&fix);
+	return 0;
+}
+
+// Verifies that removal keeps a wrapped cluster entry reachable when
+// probe distances cross the slot-zero wrap of a non-power-of-two slot
+// count.
+static int
+test_remove_wraparound_distance(void) {
+	struct fixture fix;
+	if (fixture_init(&fix, 3) != 0) {
+		return TEST_FAILED;
+	}
+
+	items[0] = (struct test_item){.key = 1, .tag = 1};
+	items[1] = (struct test_item){.key = 2, .tag = 2};
+	items[2] = (struct test_item){.key = 2, .tag = 3};
+
+	// The hashes place the cluster at slots 10, 11 and 0.
+	TEST_ASSERT(hash_index_insert(&fix.index, 10, 0) == 0, "insert failed");
+	TEST_ASSERT(hash_index_insert(&fix.index, 11, 1) == 0, "insert failed");
+	TEST_ASSERT(hash_index_insert(&fix.index, 11, 2) == 0, "insert failed");
+
+	TEST_ASSERT(hash_index_remove(&fix.index, 10, 0) == 0, "remove failed");
+
+	struct eq_context unwrapped = {.want_key = 2, .want_tag = 2};
+	uint32_t result =
+		hash_index_lookup(&fix.index, 11, match_item, &unwrapped);
+	TEST_ASSERT_EQUAL(1, result, "unwrapped entry after wrap removal");
+
+	struct eq_context wrapped = {.want_key = 2, .want_tag = 3};
+	result = hash_index_lookup(&fix.index, 11, match_item, &wrapped);
+	TEST_ASSERT_EQUAL(2, result, "wrapped entry after wrap removal");
+
+	struct eq_context miss = {.want_key = 1, .want_tag = 1};
+	result = hash_index_lookup(&fix.index, 10, match_item, &miss);
+	TEST_ASSERT_EQUAL(HASH_INDEX_INVALID, result, "removed entry is gone");
+
+	fixture_fini(&fix);
 	return 0;
 }
 
@@ -332,8 +974,72 @@ main(void) {
 		LOG(ERROR, "test_same_hash_multiple_values failed");
 		return -1;
 	}
+	if (test_bucket_collision_distinct_hashes() != 0) {
+		LOG(ERROR, "test_bucket_collision_distinct_hashes failed");
+		return -1;
+	}
 	if (test_fini_idempotent() != 0) {
 		LOG(ERROR, "test_fini_idempotent failed");
+		return -1;
+	}
+	if (test_rehash_grow_preserves_entries() != 0) {
+		LOG(ERROR, "test_rehash_grow_preserves_entries failed");
+		return -1;
+	}
+	if (test_rehash_shrink_to_count() != 0) {
+		LOG(ERROR, "test_rehash_shrink_to_count failed");
+		return -1;
+	}
+	if (test_rehash_below_count_rejected() != 0) {
+		LOG(ERROR, "test_rehash_below_count_rejected failed");
+		return -1;
+	}
+	if (test_rehash_from_zero_capacity() != 0) {
+		LOG(ERROR, "test_rehash_from_zero_capacity failed");
+		return -1;
+	}
+	if (test_rehash_same_capacity_noop() != 0) {
+		LOG(ERROR, "test_rehash_same_capacity_noop failed");
+		return -1;
+	}
+	if (test_rehash_failure_leaves_index_usable() != 0) {
+		LOG(ERROR, "test_rehash_failure_leaves_index_usable failed");
+		return -1;
+	}
+	if (test_rehash_overflowing_capacity_rejected() != 0) {
+		LOG(ERROR, "test_rehash_overflowing_capacity_rejected failed");
+		return -1;
+	}
+	if (test_remove_middle_of_cluster() != 0) {
+		LOG(ERROR, "test_remove_middle_of_cluster failed");
+		return -1;
+	}
+	if (test_remove_first_of_cluster() != 0) {
+		LOG(ERROR, "test_remove_first_of_cluster failed");
+		return -1;
+	}
+	if (test_remove_last_of_cluster() != 0) {
+		LOG(ERROR, "test_remove_last_of_cluster failed");
+		return -1;
+	}
+	if (test_remove_absent() != 0) {
+		LOG(ERROR, "test_remove_absent failed");
+		return -1;
+	}
+	if (test_remove_zero_capacity() != 0) {
+		LOG(ERROR, "test_remove_zero_capacity failed");
+		return -1;
+	}
+	if (test_remove_all_and_reinsert() != 0) {
+		LOG(ERROR, "test_remove_all_and_reinsert failed");
+		return -1;
+	}
+	if (test_remove_churn() != 0) {
+		LOG(ERROR, "test_remove_churn failed");
+		return -1;
+	}
+	if (test_remove_wraparound_distance() != 0) {
+		LOG(ERROR, "test_remove_wraparound_distance failed");
 		return -1;
 	}
 

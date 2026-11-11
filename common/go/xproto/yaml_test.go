@@ -9,6 +9,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/descriptorpb"
 	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
@@ -116,6 +117,16 @@ func Test_Unmarshal_TrailingSeparator(t *testing.T) {
 	}
 }
 
+// Test_Unmarshal_FieldlessMessage verifies that a message without fields,
+// such as a request that lists configs, takes an empty mapping and rejects
+// a key.
+func Test_Unmarshal_FieldlessMessage(t *testing.T) {
+	require.NoError(t, xproto.Unmarshal([]byte("{}\n"), &emptypb.Empty{}))
+
+	err := xproto.Unmarshal([]byte("name: x\n"), &emptypb.Empty{})
+	require.ErrorContains(t, err, `unknown object member name "name"`)
+}
+
 // Test_Unmarshal_NullLeavesZeroValue verifies that a null leaves its field
 // at the zero value instead of failing, as encoding/json treats null.
 func Test_Unmarshal_NullLeavesZeroValue(t *testing.T) {
@@ -156,13 +167,19 @@ func Test_Unmarshal_RejectsMalformedDocuments(t *testing.T) {
 			name:    "unknown field",
 			input:   "value: 1\nfoo: 2\n",
 			message: &wrapperspb.Int32Value{},
-			wantErr: `unknown field "foo"`,
+			wantErr: `unknown object member name "foo"`,
 		},
 		{
 			name:    "json name spelling",
 			input:   "jsonName: x\n",
 			message: &descriptorpb.FieldDescriptorProto{},
-			wantErr: `unknown field "jsonName"`,
+			wantErr: `unknown object member name "jsonName"`,
+		},
+		{
+			name:    "key in another letter case",
+			input:   "Value: x\n",
+			message: &wrapperspb.StringValue{},
+			wantErr: `unknown object member name "Value"`,
 		},
 		{
 			name:    "duplicate key",
@@ -234,7 +251,13 @@ func Test_Unmarshal_RejectsMalformedDocuments(t *testing.T) {
 			name:    "non-string mapping key",
 			input:   "443: allow\n",
 			message: &wrapperspb.StringValue{},
-			wantErr: "such as a non-string mapping key",
+			wantErr: "the document has a non-string mapping key",
+		},
+		{
+			name:    "non-string key in a nested mapping",
+			input:   "ports: {443: allow}\n",
+			message: &structpb.Struct{},
+			wantErr: "ports has a non-string mapping key",
 		},
 		{
 			name:    "value JSON cannot represent",
@@ -252,37 +275,37 @@ func Test_Unmarshal_RejectsMalformedDocuments(t *testing.T) {
 			name:    "scalar for a message without its own JSON form",
 			input:   "30s\n",
 			message: &durationpb.Duration{},
-			wantErr: "cannot unmarshal string",
+			wantErr: "JSON string into Go durationpb.Duration",
 		},
 		{
 			name:    "sequence where a scalar is expected",
 			input:   "value: [1]\n",
 			message: &wrapperspb.Int32Value{},
-			wantErr: "cannot unmarshal array",
+			wantErr: `JSON array into Go int32 within "/value"`,
 		},
 		{
 			name:    "mapping where a scalar is expected",
 			input:   "seconds: {a: 1}\n",
 			message: &durationpb.Duration{},
-			wantErr: "cannot unmarshal object",
+			wantErr: `JSON object into Go int64 within "/seconds"`,
 		},
 		{
 			name:    "unquoted number in a string field",
 			input:   "value: 42\n",
 			message: &wrapperspb.StringValue{},
-			wantErr: "cannot unmarshal number",
+			wantErr: `JSON number into Go string within "/value"`,
 		},
 		{
 			name:    "integer overflow",
 			input:   "value: 4294967296\n",
 			message: &wrapperspb.UInt32Value{},
-			wantErr: "cannot unmarshal number 4294967296",
+			wantErr: `JSON number 4294967296 into Go uint32 within "/value"`,
 		},
 		{
 			name:    "negative unsigned",
 			input:   "value: -1\n",
 			message: &wrapperspb.UInt32Value{},
-			wantErr: "cannot unmarshal number -1",
+			wantErr: `JSON number -1 into Go uint32 within "/value"`,
 		},
 		{
 			name:    "syntax error",

@@ -29,8 +29,6 @@ enum fwstate_sync_record_status {
 // packet never changes it.
 struct fwstate_sync_record {
 	struct fw_state_sync_frame frame;
-	uint16_t rx_device_id;
-	uint16_t tx_device_id;
 	uint8_t status;
 };
 

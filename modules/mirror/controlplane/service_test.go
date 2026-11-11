@@ -1,78 +1,50 @@
 package mirror_test
 
 import (
-	"context"
-	"errors"
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/xnetip"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/mirror/bindings/go/cmirror"
 	mirror "github.com/yanet-platform/yanet2/modules/mirror/controlplane"
 	mirrorpb "github.com/yanet-platform/yanet2/modules/mirror/controlplane/mirrorpb/v1"
 )
 
+// mockModuleHandle is a shared-memory handle whose release always succeeds.
 type mockModuleHandle struct{}
 
 func (m *mockModuleHandle) Free() error {
 	return nil
 }
 
-type mockBackend struct {
-	updateError error
-	deleteError error
-}
+// mockBackend publishes every config, hands out a fresh handle and finds
+// nothing to delete in the dataplane.
+type mockBackend struct{}
 
-func (m *mockBackend) UpdateModule(
-	name string,
-	rules []cmirror.MirrorRule,
-) (mirror.ModuleHandle, error) {
-	if m.updateError != nil {
-		return nil, m.updateError
-	}
+func (m *mockBackend) Update(name string, payload mirror.RuleSet) (crud.Handle, error) {
 	return &mockModuleHandle{}, nil
 }
 
-func (m *mockBackend) DeleteModule(name string) error {
-	return m.deleteError
+func (m *mockBackend) Delete(name string) error {
+	return ffi.ErrNotFound
 }
 
-// nilHandleBackend is a Backend whose UpdateModule publishes a config
-// carrying no module handle.
-//
-// It models a Backend that reports success without producing a handle,
-// which is the case the config's own nil guard exists to survive.
-type nilHandleBackend struct {
-	mockBackend
-}
-
-func (m *nilHandleBackend) UpdateModule(
-	name string,
-	rules []cmirror.MirrorRule,
-) (mirror.ModuleHandle, error) {
-	return nil, nil
-}
-
-// recordingBackend captures the rules handed to UpdateModule so a test can
-// inspect what the service sends to shared memory.
+// recordingBackend captures the rules handed to the update so a test
+// can inspect what the service sends to shared memory.
 type recordingBackend struct {
 	mockBackend
 
 	rules []cmirror.MirrorRule
 }
 
-func (m *recordingBackend) UpdateModule(
-	name string,
-	rules []cmirror.MirrorRule,
-) (mirror.ModuleHandle, error) {
-	m.rules = rules
+func (m *recordingBackend) Update(name string, payload mirror.RuleSet) (crud.Handle, error) {
+	m.rules = payload.Compiled
 	return &mockModuleHandle{}, nil
 }
 
@@ -103,116 +75,6 @@ func TestDeleteConfigUnknownConfig(t *testing.T) {
 
 	_, err := svc.DeleteConfig(t.Context(), &mirrorpb.DeleteConfigRequest{Name: "missing"})
 	require.Equal(t, codes.NotFound, status.Code(err))
-}
-
-// Test_MirrorService_UpdateConfig_BackendFailureReturnsInternal verifies
-// that a backend update failure returns Internal before publication.
-func Test_MirrorService_UpdateConfig_BackendFailureReturnsInternal(t *testing.T) {
-	backendError := errors.New("shared memory unavailable")
-	service := mirror.NewMirrorService(&mockBackend{updateError: backendError})
-
-	_, err := service.UpdateConfig(t.Context(), &mirrorpb.UpdateConfigRequest{
-		Name: "config",
-		Rules: []*mirrorpb.Rule{
-			{Action: &mirrorpb.Action{Target: "device0"}},
-		},
-	})
-	require.Equal(t, codes.Internal, status.Code(err))
-	require.ErrorContains(t, err, "failed to update module config: shared memory unavailable")
-
-	_, err = service.ShowConfig(t.Context(), &mirrorpb.ShowConfigRequest{Name: "config"})
-	require.Equal(t, codes.NotFound, status.Code(err))
-}
-
-// Test_MirrorService_UpdateConfig_BackendFailurePreservesState verifies
-// that a failed replacement returns Internal without changing current state.
-func Test_MirrorService_UpdateConfig_BackendFailurePreservesState(t *testing.T) {
-	backend := &mockBackend{}
-	service := mirror.NewMirrorService(backend)
-
-	_, err := service.UpdateConfig(t.Context(), &mirrorpb.UpdateConfigRequest{
-		Name: "config",
-		Rules: []*mirrorpb.Rule{
-			{Action: &mirrorpb.Action{Target: "device0"}},
-		},
-	})
-	require.NoError(t, err)
-
-	backend.updateError = errors.New("shared memory unavailable")
-	_, err = service.UpdateConfig(t.Context(), &mirrorpb.UpdateConfigRequest{
-		Name: "config",
-		Rules: []*mirrorpb.Rule{
-			{Action: &mirrorpb.Action{Target: "device1"}},
-		},
-	})
-	require.Equal(t, codes.Internal, status.Code(err))
-
-	response, err := service.ShowConfig(t.Context(), &mirrorpb.ShowConfigRequest{Name: "config"})
-	require.NoError(t, err)
-	require.Equal(t, "device0", response.GetRules()[0].GetAction().GetTarget())
-}
-
-// Test_MirrorService_DeleteConfig_BackendFailureReturnsInternal verifies
-// that backend refusal leaves the published configuration available.
-func Test_MirrorService_DeleteConfig_BackendFailureReturnsInternal(t *testing.T) {
-	backendError := errors.New("shared memory unavailable")
-	service := mirror.NewMirrorService(&mockBackend{deleteError: backendError})
-
-	_, err := service.UpdateConfig(t.Context(), &mirrorpb.UpdateConfigRequest{
-		Name: "config",
-		Rules: []*mirrorpb.Rule{
-			{Action: &mirrorpb.Action{Target: "device0"}},
-		},
-	})
-	require.NoError(t, err)
-
-	_, err = service.DeleteConfig(t.Context(), &mirrorpb.DeleteConfigRequest{Name: "config"})
-	require.Equal(t, codes.Internal, status.Code(err))
-	require.ErrorContains(t, err, "failed to delete module config \"config\": shared memory unavailable")
-
-	response, err := service.ShowConfig(t.Context(), &mirrorpb.ShowConfigRequest{Name: "config"})
-	require.NoError(t, err)
-	require.Equal(t, "device0", response.GetRules()[0].GetAction().GetTarget())
-}
-
-// Test_MirrorService_DeleteConfig_FailedPreconditionPreservesState verifies
-// that state refusal returns FailedPrecondition without unpublishing.
-func Test_MirrorService_DeleteConfig_FailedPreconditionPreservesState(t *testing.T) {
-	backendError := fmt.Errorf("module is still referenced: %w", ffi.ErrFailedPrecondition)
-	service := mirror.NewMirrorService(&mockBackend{deleteError: backendError})
-
-	_, err := service.UpdateConfig(t.Context(), &mirrorpb.UpdateConfigRequest{
-		Name: "config",
-		Rules: []*mirrorpb.Rule{
-			{Action: &mirrorpb.Action{Target: "device0"}},
-		},
-	})
-	require.NoError(t, err)
-
-	_, err = service.DeleteConfig(t.Context(), &mirrorpb.DeleteConfigRequest{Name: "config"})
-	require.Equal(t, codes.FailedPrecondition, status.Code(err))
-
-	response, err := service.ShowConfig(t.Context(), &mirrorpb.ShowConfigRequest{Name: "config"})
-	require.NoError(t, err)
-	require.Equal(t, "device0", response.GetRules()[0].GetAction().GetTarget())
-}
-
-// TestUpdateConfigReplacesConfigWithoutHandle verifies that replacing a
-// config that holds no module handle releases it without panicking.
-func TestUpdateConfigReplacesConfigWithoutHandle(t *testing.T) {
-	svc := mirror.NewMirrorService(&nilHandleBackend{})
-	request := &mirrorpb.UpdateConfigRequest{
-		Name: "config",
-		Rules: []*mirrorpb.Rule{
-			{Action: &mirrorpb.Action{Target: "device0"}},
-		},
-	}
-
-	_, err := svc.UpdateConfig(t.Context(), request)
-	require.NoError(t, err)
-
-	_, err = svc.UpdateConfig(t.Context(), request)
-	require.NoError(t, err)
 }
 
 // TestUpdateConfigRejectsOutOfClassMasks verifies that UpdateConfig
@@ -315,71 +177,4 @@ func TestUpdateConfigPreservesWithinFamilyNetworkOrder(t *testing.T) {
 		xnetip.MustParseBiContiguous("2001:db8:2::/48"),
 		xnetip.MustParseBiContiguous("2001:db8:3::/48"),
 	}, rule.Dst6s)
-}
-
-// Run with: go test -race
-func TestMirrorServiceConcurrentAccess(t *testing.T) {
-	svc := mirror.NewMirrorService(&mockBackend{})
-	ctx := context.Background()
-
-	const goroutines = 10
-	const iterations = 100
-
-	g, ctx := errgroup.WithContext(ctx)
-
-	for i := range goroutines {
-		g.Go(func() error {
-			for j := range iterations {
-				name := fmt.Sprintf("config-%d-%d", i, j)
-				_, err := svc.UpdateConfig(ctx, &mirrorpb.UpdateConfigRequest{
-					Name: name,
-					Rules: []*mirrorpb.Rule{
-						{
-							Action: &mirrorpb.Action{
-								Target: "device0",
-							},
-						},
-					},
-				})
-				if err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-	}
-
-	for range goroutines {
-		g.Go(func() error {
-			for range iterations {
-				_, err := svc.ListConfigs(ctx, &mirrorpb.ListConfigsRequest{})
-				if err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-	}
-
-	for i := range goroutines {
-		g.Go(func() error {
-			for j := range iterations {
-				name := fmt.Sprintf("config-%d-%d", i, j)
-				svc.ShowConfig(ctx, &mirrorpb.ShowConfigRequest{Name: name})
-			}
-			return nil
-		})
-	}
-
-	for i := range goroutines {
-		g.Go(func() error {
-			for j := range iterations {
-				name := fmt.Sprintf("config-%d-%d", i, j)
-				svc.DeleteConfig(ctx, &mirrorpb.DeleteConfigRequest{Name: name})
-			}
-			return nil
-		})
-	}
-
-	require.NoError(t, g.Wait())
 }

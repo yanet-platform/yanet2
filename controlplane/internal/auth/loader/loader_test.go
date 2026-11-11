@@ -38,8 +38,8 @@ func TestNewLoader_HTTPAutoDetect(t *testing.T) {
 	loader := loader.NewLoader(server.URL + "/ca.yaml")
 	_, err := loader.Load()
 	require.Error(t, err)
-	var verificationError *tls.CertificateVerificationError
-	require.True(t, errors.As(err, &verificationError))
+	_, ok := errors.AsType[*tls.CertificateVerificationError](err)
+	require.True(t, ok)
 }
 
 func TestNewLoader_HTTPAutoDetect_NoTLS(t *testing.T) {

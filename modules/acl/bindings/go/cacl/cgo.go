@@ -1,14 +1,10 @@
 package cacl
 
 //#cgo CFLAGS: -I../../../../../
-//#cgo LDFLAGS: -L../../../../../build/modules/acl/api -lacl_cp
-//#cgo LDFLAGS: -L../../../../../build/lib/classify -lclassify_compiler
-//#cgo LDFLAGS: -L../../../../../build/lib/logging -llogging
-//#cgo LDFLAGS: -L../../../../../build/objects/fwstate/api -lfwstate_objects
-//#cgo LDFLAGS: -L../../../../../build/lib/statemap -lstatemap
 //
 //#include "api/agent.h"
 //#include "modules/acl/api/controlplane.h"
+//#include "modules/acl/dataplane/config.h"
 import "C"
 
 import (
@@ -19,6 +15,9 @@ import (
 	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
+
+// MaxActions is the capacity of the C per-rule action storage.
+const MaxActions = C.ACL_MAX_ACTIONS
 
 // ModuleConfig is an opaque handle to the ACL module configuration in
 // shared memory.

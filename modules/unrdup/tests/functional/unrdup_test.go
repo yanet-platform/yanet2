@@ -16,8 +16,8 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
-	cforward "github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
+	cplain "github.com/yanet-platform/yanet2/devices/plain/bindings/go/cplain"
+	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	"github.com/yanet-platform/yanet2/modules/unrdup/bindings/go/cunrdup"
 )
@@ -109,7 +109,7 @@ func wirePipeline(t *testing.T, agent *ffi.Agent) {
 	t.Helper()
 
 	sinkName := configName + "-sink"
-	sink, err := forward.NewBackend(agent).UpdateModule(sinkName, catchAllRules())
+	sink, err := forward.NewBackend(agent).Update(sinkName, forward.RuleSet{Compiled: catchAllRules()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sink.Free() })
 
@@ -131,7 +131,7 @@ func wirePipeline(t *testing.T, agent *ffi.Agent) {
 		Functions: []string{configName},
 	}))
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy"}))
-	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	_, err = cplain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   deviceName,
 		Input:  []ffi.DevicePipelineConfig{{Name: configName, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},

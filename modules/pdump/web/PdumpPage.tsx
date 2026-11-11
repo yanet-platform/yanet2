@@ -3,17 +3,19 @@ import { Button, Icon } from '@gravity-ui/uikit';
 import { ArrowDownToLine, Plus } from '@gravity-ui/icons';
 import { useSearchParams } from 'react-router-dom';
 import { useSearchParamHelpers, usePageContribution, useTabCycle } from '@yanet/core/hooks';
-import { PageLayout, PageLoader, ConfigTabStrip, EmptyPagePlaceholder, CommandPaletteHeader } from '@yanet/core/components';
+import { PageLayout, PageLoader, ConfigTabStrip, EmptyPagePlaceholder, CommandPaletteHeader, ConfirmModal } from '@yanet/core/components';
 import { toaster } from '@yanet/core/utils';
 import {
     usePdumpConfigs,
     usePdumpCapture,
     useConfigPackets,
+    useRings,
 } from './hooks';
 import { ConfigDialog } from './ConfigDialog';
 import { PacketTable } from './PacketTable';
 import FilterRow from './FilterRow';
 import ConfigStrip from './ConfigStrip';
+import RingsPanel from './RingsPanel';
 import PacketDrawer from './PacketDrawer';
 import DeleteConfigDialog from './DeleteConfigDialog';
 import { createPcapBuffer } from './pcap';
@@ -35,6 +37,9 @@ const sanitizeFilenamePart = (value: string): string => {
 
 const PdumpPage: React.FC = () => {
     const { configs, cachedConfigs, loading, refetch, deleteConfig } = usePdumpConfigs();
+    const { rings, loading: ringsLoading, refetch: refetchRings, createRing, deleteRing } = useRings();
+    const [ringMutationBusy, setRingMutationBusy] = useState(false);
+    const [deleteRingTarget, setDeleteRingTarget] = useState<string | null>(null);
     const [searchParams, setSearchParams] = useSearchParams();
     const queryConfig = useMemo(() => searchParams.get(QP_CONFIG), [searchParams]);
     const searchQuery = useMemo(() => searchParams.get(QP_SEARCH) || '', [searchParams]);
@@ -295,6 +300,32 @@ const PdumpPage: React.FC = () => {
         refetch();
     }, [refetch]);
 
+    const handleCreateRing = useCallback(async (name: string, capacity: number, publishBatch?: number): Promise<boolean> => {
+        setRingMutationBusy(true);
+        try {
+            return await createRing(name, capacity, publishBatch);
+        } finally {
+            setRingMutationBusy(false);
+        }
+    }, [createRing]);
+
+    const handleDeleteRingRequest = useCallback((name: string) => {
+        setDeleteRingTarget(name);
+    }, []);
+
+    const handleConfirmDeleteRing = useCallback(async () => {
+        if (!deleteRingTarget || ringMutationBusy) return;
+        setRingMutationBusy(true);
+        try {
+            const deleted = await deleteRing(deleteRingTarget);
+            if (deleted) {
+                setDeleteRingTarget(null);
+            }
+        } finally {
+            setRingMutationBusy(false);
+        }
+    }, [deleteRing, deleteRingTarget, ringMutationBusy]);
+
     const handleSelectTab = useCallback((name: string) => {
         updateSearchParams({ [QP_CONFIG]: name || null });
     }, [updateSearchParams]);
@@ -523,6 +554,14 @@ const PdumpPage: React.FC = () => {
     return (
         <PageLayout header={pageHeader} className="yn-flat-layout">
             <div className="yn-page pdump-page yn-flat-page">
+                <RingsPanel
+                    rings={rings}
+                    loading={ringsLoading}
+                    busy={ringMutationBusy}
+                    onCreate={handleCreateRing}
+                    onDeleteRequest={handleDeleteRingRequest}
+                />
+
                 {tabConfigs.length === 0 ? (
                     <EmptyPagePlaceholder
                         message="No pdump configurations found."
@@ -603,6 +642,9 @@ const PdumpPage: React.FC = () => {
                 onClose={() => setIsCreateDialogOpen(false)}
                 onSaved={handleConfigSaved}
                 isCreate
+                rings={rings}
+                ringsLoading={ringsLoading}
+                onRefreshRings={refetchRings}
             />
 
             {editingConfig && (
@@ -612,6 +654,9 @@ const PdumpPage: React.FC = () => {
                     configName={editingConfig.name}
                     initialConfig={editingConfig.config}
                     onSaved={handleConfigSaved}
+                    rings={rings}
+                    ringsLoading={ringsLoading}
+                    onRefreshRings={refetchRings}
                 />
             )}
 
@@ -623,6 +668,17 @@ const PdumpPage: React.FC = () => {
                     onConfirm={handleConfirmDelete}
                 />
             )}
+
+            <ConfirmModal
+                open={deleteRingTarget !== null}
+                title="Delete ring"
+                confirmText="Delete"
+                busy={ringMutationBusy}
+                onClose={() => setDeleteRingTarget(null)}
+                onConfirm={() => { void handleConfirmDeleteRing(); }}
+            >
+                Delete ring "{deleteRingTarget}"? A ring still linked by a pdump config cannot be deleted.
+            </ConfirmModal>
         </PageLayout>
     );
 };

@@ -55,7 +55,8 @@ typedef void (*classify_line_get_ranges_func)(
 			struct memory_context *memory_context,                 \
 			const struct classifier_rule *const *rules,            \
 			uint32_t rule_count,                                   \
-			classify_line_get_ranges_func adapted_get_ranges       \
+			classify_line_get_ranges_func adapted_get_ranges,      \
+			const char *name                                       \
 		) {                                                            \
 		(void)rules;                                                   \
 		(void)rule_count;                                              \
@@ -71,10 +72,14 @@ typedef void (*classify_line_get_ranges_func)(
                                                                                \
 		compile->get_ranges = adapted_get_ranges;                      \
                                                                                \
+		char line_name[MEMORY_CONTEXT_NAME_SIZE];                      \
+		classify_leaf_name(                                            \
+			line_name, sizeof(line_name), name, "line"             \
+		);                                                             \
 		if (vline_init(                                                \
 			    &compile->line,                                    \
 			    memory_context,                                    \
-			    "filter:" #tag,                                    \
+			    line_name,                                         \
 			    domain_size                                        \
 		    )) {                                                       \
 			memory_bfree(                                          \
@@ -260,7 +265,10 @@ typedef void (*classify_line_get_ranges_func)(
 	/*                                                                     \
 	 * Declares the line compile entry of one consumer: the getter         \
 	 * derives the domain intervals of the module rule, and the entry      \
-	 * takes the module rule array the consumer owns.                      \
+	 * takes the module rule array the consumer owns. The name scopes      \
+	 * the memory contexts of the compile - the attribute line and the     \
+	 * stage registry - each titled with the name and its own artifact     \
+	 * leaf, in the memory tree.                                           \
 	 *                                                                     \
 	 * On success the attribute and the stage - the registry with the      \
 	 * rule group row - are owned by the caller, released through          \
@@ -269,6 +277,7 @@ typedef void (*classify_line_get_ranges_func)(
 	 */                                                                    \
 	static inline int classify_##tag##_compile(                            \
 		struct memory_context *memory_context,                         \
+		const char *name,                                              \
 		const struct classifier_rule **rules,                          \
 		uint32_t rule_count,                                           \
 		attr_type *attr,                                               \
@@ -279,7 +288,8 @@ typedef void (*classify_line_get_ranges_func)(
 				memory_context,                                \
 				(const struct classifier_rule *const *)rules,  \
 				rule_count,                                    \
-				get_ranges                                     \
+				get_ranges,                                    \
+				name                                           \
 			);                                                     \
 		if (compile == NULL) {                                         \
 			memset(attr, 0, sizeof(*attr));                        \
@@ -300,6 +310,7 @@ typedef void (*classify_line_get_ranges_func)(
                                                                                \
 		return classify_attr_compile(                                  \
 			memory_context,                                        \
+			name,                                                  \
 			&ops,                                                  \
 			compile,                                               \
 			(const struct classifier_rule *const *)rules,          \

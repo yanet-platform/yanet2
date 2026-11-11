@@ -3,16 +3,13 @@ install_data(
     install_dir: '/etc/yanet2',
 )
 
-# Not a fuzz target, and nothing in the fuzz suite runs it, so the
-# fuzzing configuration skips it to save build time.
-if not get_option('fuzzing').enabled()
+if yanet_go_binaries
   custom_target(
       'yanet-pipeline-operator',
       output: 'yanet-pipeline-operator',
       command: [
           go,
           'build',
-          '-ldflags=' + ld_flags,
           '-buildvcs=false',
           '-o', '@OUTPUT@',
           join_paths(meson.current_source_dir(), 'cmd', 'yanet-pipeline-operator'),
@@ -20,15 +17,7 @@ if not get_option('fuzzing').enabled()
       env: yanet_go_nocgo_env,
       build_by_default: true,
       build_always_stale: true,
-      depends: [
-          pipeline_operator_protoc_gen,
-          pipeline_operator_readiness_protoc_gen,
-          common_readiness_protoc_gen,
-          ynpb_gen,
-          common_protoc_gen,
-          plain_protoc_gen,
-          vlan_protoc_gen,
-      ],
+      depends: go_proto_targets,
       install: true,
       install_dir: get_option('bindir'),
   )

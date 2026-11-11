@@ -3,6 +3,8 @@
 //! The domain `Metric` mirrors the wire message for display code. Grouping
 //! and rendering stay in each CLI, since label sets and grouping keys differ.
 
+use core::fmt::NumBuffer;
+
 use commonpb::pb::metric::Value;
 use serde::Serialize;
 
@@ -112,15 +114,16 @@ pub fn proto_kind(m: &commonpb::pb::Metric) -> Kind {
 
 /// Formats `n` with thousands separators, e.g. `1234567` -> `1,234,567`.
 pub fn format_number(n: u64) -> String {
-    let s = n.to_string();
-    let mut result = String::new();
-    for (i, c) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            result.push(',');
-        }
-        result.push(c);
+    let mut buffer = NumBuffer::new();
+    let digits = n.format_into(&mut buffer);
+    let mut result = String::with_capacity(digits.len() + (digits.len() - 1) / 3);
+    let first_group = (digits.len() - 1) % 3 + 1;
+    result.push_str(&digits[..first_group]);
+    for start in (first_group..digits.len()).step_by(3) {
+        result.push(',');
+        result.push_str(&digits[start..start + 3]);
     }
-    result.chars().rev().collect()
+    result
 }
 
 #[cfg(test)]
@@ -158,6 +161,17 @@ mod test {
         assert_eq!("0", format_number(0));
         assert_eq!("999", format_number(999));
         assert_eq!("1,000", format_number(1000));
+        assert_eq!("9,999", format_number(9999));
+        assert_eq!("10,000", format_number(10000));
+        assert_eq!("99,999", format_number(99999));
+        assert_eq!("100,000", format_number(100000));
+        assert_eq!("999,999", format_number(999999));
+        assert_eq!("1,000,000", format_number(1000000));
         assert_eq!("1,234,567", format_number(1234567));
+    }
+
+    #[test]
+    fn test_format_number_max_counter() {
+        assert_eq!("18,446,744,073,709,551,615", format_number(u64::MAX));
     }
 }

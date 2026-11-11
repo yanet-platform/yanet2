@@ -10,6 +10,7 @@ struct agent;
 struct cp_module;
 struct memory_context;
 struct nat64_module_config;
+struct yanet_shm;
 
 // NAT64_MTU_MAX is the largest value accepted by the module's MTU fields.
 enum { NAT64_MTU_MAX = UINT16_MAX };
@@ -44,6 +45,20 @@ nat64_module_config_create(
 // the module; the caller must keep its handle and retry later.
 int
 nat64_module_config_free(struct cp_module *cp_module, yanet_error **err);
+
+// Read the currently published NAT64 configuration's malformed-packet count.
+//
+// The count resets when the configuration is replaced. The caller supplies a
+// live, initialized instance. The configuration lock protects the lookup and
+// read from replacement. Returns zero on success or -1 with errno ENOENT when
+// the named NAT64 module is absent.
+int
+nat64_module_config_malformed_packets(
+	struct yanet_shm *shm,
+	uint32_t instance_idx,
+	const char *name,
+	uint64_t *value
+);
 
 int
 nat64_module_config_data_init(

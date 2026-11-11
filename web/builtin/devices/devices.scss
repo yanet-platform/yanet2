@@ -737,6 +737,12 @@
             color: var(--violet);
             border: 1px solid rgba(196, 181, 253, 0.2);
         }
+
+        &.kind-vxlan {
+            background: rgba(125, 211, 252, 0.1);
+            color: var(--blue);
+            border: 1px solid rgba(125, 211, 252, 0.2);
+        }
     }
 
     .dv-unsaved {

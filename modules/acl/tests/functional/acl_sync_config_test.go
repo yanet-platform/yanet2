@@ -19,7 +19,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
+	cplain "github.com/yanet-platform/yanet2/devices/plain/bindings/go/cplain"
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
@@ -391,15 +391,15 @@ func Test_ACL_FWState_StashedEventEmitsConfiguredDestinations(t *testing.T) {
 			syncSource := netip.MustParseAddr("2001:db8::1").As16()
 			syncMulticast := netip.MustParseAddr("ff02::1").As16()
 			syncUnicast := netip.MustParseAddr("2001:db8::2").As16()
-			copy(syncConfig.SrcAddr[:], syncSource[:])
-			syncConfig.DstEther = [6]byte{0x33, 0x33, 0x00, 0x00, 0x00, 0x01}
 			if tc.multicast {
-				copy(syncConfig.DstAddrMulticast[:], syncMulticast[:])
-				syncConfig.PortMulticast = 9999
+				syncConfig.Endpoints = append(syncConfig.Endpoints, cfwstate.SyncEndpoint{
+					SrcAddr: syncSource, DstAddr: syncMulticast, Port: 9999,
+				})
 			}
 			if tc.unicast {
-				copy(syncConfig.DstAddrUnicast[:], syncUnicast[:])
-				syncConfig.PortUnicast = 10000
+				syncConfig.Endpoints = append(syncConfig.Endpoints, cfwstate.SyncEndpoint{
+					SrcAddr: syncSource, DstAddr: syncUnicast, Port: 10000,
+				})
 			}
 			syncConfig.SyncSuppressTimeout = uint64(time.Minute)
 
@@ -433,9 +433,13 @@ func Test_ACL_FWState_StashedEventEmitsConfiguredDestinations(t *testing.T) {
 			var payload []byte
 			for idx, want := range tc.want {
 				ether, ip6, udp, gotPayload := parseSyncPacket(t, first.Output[idx+1].RawData)
-				require.Equal(t, net.HardwareAddr{0x33, 0x33, 0, 0, 0, 1}, ether.DstMAC)
+				// The Ethernet destination stays zeroed: the route module
+				// downstream resolves and stamps the MAC addresses.
+				require.Equal(t, net.HardwareAddr{0, 0, 0, 0, 0, 0}, ether.DstMAC)
 				require.True(t, ip6.SrcIP.Equal(net.ParseIP("2001:db8::1")))
 				require.True(t, ip6.DstIP.Equal(net.ParseIP(want.address)))
+				// The endpoint's port names both UDP ends of the
+				// session.
 				require.Equal(t, layers.UDPPort(want.port), udp.SrcPort)
 				require.Equal(t, layers.UDPPort(want.port), udp.DstPort)
 				require.True(t, validIPv6UDPChecksum(ip6, udp))
@@ -473,16 +477,20 @@ func Test_ACL_FWStateChain_DecidesOnceAndEmitsPerConfig(t *testing.T) {
 	syncMulticast := netip.MustParseAddr("ff02::1").As16()
 	syncUnicast := netip.MustParseAddr("2001:db8::2").As16()
 	upstreamConfig := cfwstate.DefaultSyncConfig()
-	copy(upstreamConfig.SrcAddr[:], syncSource[:])
-	upstreamConfig.DstEther = [6]byte{0x33, 0x33, 0x00, 0x00, 0x00, 0x01}
-	copy(upstreamConfig.DstAddrMulticast[:], syncMulticast[:])
-	upstreamConfig.PortMulticast = 9999
-	// The downstream config receives on the same multicast endpoint, so
-	// only the local-emission flag keeps it from consuming the upstream
-	// packets as external sync.
+	upstreamConfig.Endpoints = []cfwstate.SyncEndpoint{
+		{SrcAddr: syncSource, DstAddr: syncMulticast, Port: 9999},
+	}
+	// The downstream config listens on the same multicast endpoint, so its
+	// claim check matches the upstream packets and only the local-emission
+	// flag keeps it from consuming them as external sync.
 	downstreamConfig := upstreamConfig
-	copy(downstreamConfig.DstAddrUnicast[:], syncUnicast[:])
-	downstreamConfig.PortUnicast = 10000
+	downstreamConfig.Listeners = []cfwstate.SyncListenEndpoint{
+		{DstAddr: syncMulticast, Port: 9999},
+	}
+	downstreamConfig.Endpoints = append(
+		append([]cfwstate.SyncEndpoint{}, upstreamConfig.Endpoints...),
+		cfwstate.SyncEndpoint{SrcAddr: syncSource, DstAddr: syncUnicast, Port: 10000},
+	)
 
 	for _, cfg := range []struct {
 		name   string
@@ -584,10 +592,9 @@ func Test_ACL_FWState_SecondWorkerUsesItsOwnSlotAndCursor(t *testing.T) {
 	syncConfig := cfwstate.DefaultSyncConfig()
 	syncSource := netip.MustParseAddr("2001:db8::1").As16()
 	syncMulticast := netip.MustParseAddr("ff02::1").As16()
-	copy(syncConfig.SrcAddr[:], syncSource[:])
-	syncConfig.DstEther = [6]byte{0x33, 0x33, 0x00, 0x00, 0x00, 0x01}
-	copy(syncConfig.DstAddrMulticast[:], syncMulticast[:])
-	syncConfig.PortMulticast = 9999
+	syncConfig.Endpoints = []cfwstate.SyncEndpoint{
+		{SrcAddr: syncSource, DstAddr: syncMulticast, Port: 9999},
+	}
 	fwConfig, err := cfwstate.NewModuleConfig(agent, "sync-fwstate", &syncConfig, map4.Name(), "")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = fwConfig.Free() })
@@ -642,10 +649,9 @@ func Test_ACL_FWState_ConfigOnTwoDevicesEmitsOnce(t *testing.T) {
 	syncConfig := cfwstate.DefaultSyncConfig()
 	syncSource := netip.MustParseAddr("2001:db8::1").As16()
 	syncMulticast := netip.MustParseAddr("ff02::1").As16()
-	copy(syncConfig.SrcAddr[:], syncSource[:])
-	syncConfig.DstEther = [6]byte{0x33, 0x33, 0x00, 0x00, 0x00, 0x01}
-	copy(syncConfig.DstAddrMulticast[:], syncMulticast[:])
-	syncConfig.PortMulticast = 9999
+	syncConfig.Endpoints = []cfwstate.SyncEndpoint{
+		{SrcAddr: syncSource, DstAddr: syncMulticast, Port: 9999},
+	}
 	fwConfig, err := cfwstate.NewModuleConfig(agent, "shared-fwstate", &syncConfig, map4.Name(), map6.Name())
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = fwConfig.Free() })
@@ -660,7 +666,7 @@ func Test_ACL_FWState_ConfigOnTwoDevicesEmitsOnce(t *testing.T) {
 		{Target: "port0", Mode: cforward.ModeOut, Counter: "sink4"},
 		{Target: "port0", Mode: cforward.ModeOut, Counter: "sink6"},
 	}
-	sinkHandle, err := forward.NewBackend(agent).UpdateModule("shared-sink", sinkRules)
+	sinkHandle, err := forward.NewBackend(agent).Update("shared-sink", forward.RuleSet{Compiled: sinkRules})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sinkHandle.Free() })
 	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
@@ -687,7 +693,7 @@ func Test_ACL_FWState_ConfigOnTwoDevicesEmitsOnce(t *testing.T) {
 			Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
 		})
 	}
-	_, err = plain.UpdateDevices(agent, devices)
+	_, err = cplain.UpdateDevices(agent, devices)
 	require.NoError(t, err)
 	h.SetCurrentTime(time.Unix(1, 0))
 
@@ -763,7 +769,7 @@ func wireACLFWStateSyncPipeline(t *testing.T, agent *ffi.Agent, aclName, fwstate
 		{Target: "port0", Mode: cforward.ModeOut, Counter: "sink4"},
 		{Target: "port0", Mode: cforward.ModeOut, Counter: "sink6"},
 	}
-	sinkHandle, err := forward.NewBackend(agent).UpdateModule(sinkName, sinkRules)
+	sinkHandle, err := forward.NewBackend(agent).Update(sinkName, forward.RuleSet{Compiled: sinkRules})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sinkHandle.Free() })
 
@@ -783,7 +789,7 @@ func wireACLFWStateSyncPipeline(t *testing.T, agent *ffi.Agent, aclName, fwstate
 	}))
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: aclName, Functions: []string{aclName}}))
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy"}))
-	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	_, err = cplain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: aclName, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
@@ -805,7 +811,7 @@ func wireACLForwardFWStatePipeline(t *testing.T, agent *ffi.Agent, aclName strin
 	middleName := aclName + "-middle"
 	sinkName := aclName + "-sink"
 	for _, name := range []string{middleName, sinkName} {
-		handle, err := forward.NewBackend(agent).UpdateModule(name, sinkRules)
+		handle, err := forward.NewBackend(agent).Update(name, forward.RuleSet{Compiled: sinkRules})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = handle.Free() })
 	}
@@ -827,7 +833,7 @@ func wireACLForwardFWStatePipeline(t *testing.T, agent *ffi.Agent, aclName strin
 	}))
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: aclName, Functions: []string{aclName}}))
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy"}))
-	_, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	_, err := cplain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: aclName, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},

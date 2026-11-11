@@ -24,7 +24,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
+	cplain "github.com/yanet-platform/yanet2/devices/plain/bindings/go/cplain"
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
 	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
@@ -51,13 +51,12 @@ func waitOnChan(t *testing.T, ch <-chan struct{}, msg string) {
 
 // fakeHandle is an in-memory implementation of acl.ModuleHandle for tests.
 type fakeHandle struct {
-	mu          sync.Mutex
-	name        string
-	rules       []cacl.ACLRule
-	fw4MapName  string
-	fw6MapName  string
-	freeCount   int
-	transferred bool
+	mu         sync.Mutex
+	name       string
+	rules      []cacl.ACLRule
+	fw4MapName string
+	fw6MapName string
+	freeCount  int
 }
 
 func (m *fakeHandle) Free() error {
@@ -268,7 +267,7 @@ func newMetricsSnapshotHarness(testingTB testing.TB) (*dataplaneut.Harness, *ffi
 		Name:      "pipeline0",
 		Functions: []string{"function0"},
 	}))
-	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	_, err = cplain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:  "port0",
 		Input: []ffi.DevicePipelineConfig{{Name: "pipeline0", Weight: 1}},
 	}})
@@ -329,6 +328,10 @@ func (m *fakeBackend) DeleteModule(name string) error {
 
 	if m.deleteErr != nil {
 		return m.deleteErr
+	}
+	if _, ok := m.modules[name]; !ok {
+		// Like the dataplane, which runs no module under the name.
+		return ffi.ErrNotFound
 	}
 
 	m.deleteCalls++
@@ -798,15 +801,14 @@ func TestUpdateConfig_RejectsTypedOutOfClassMasks(t *testing.T) {
 }
 
 // TestDeleteConfig_UnknownConfig verifies that DeleteConfig reports
-// codes.NotFound for a config name that was never applied and does not call
-// the backend.
+// codes.NotFound for a config name neither the service nor the dataplane
+// holds.
 func TestDeleteConfig_UnknownConfig(t *testing.T) {
 	backend := newFakeBackend()
 	svc := newTestService(backend)
 
 	_, err := svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: "missing"})
 	require.Equal(t, codes.NotFound, status.Code(err))
-	assert.Equal(t, 0, backend.DeleteCalls(), "an unknown target must not reach the backend")
 }
 
 // TestDeleteConfig_LiveNameTombstones verifies that deleting a name with a

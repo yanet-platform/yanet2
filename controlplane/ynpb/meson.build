@@ -1,58 +1,24 @@
-ynpb_dir = meson.current_source_dir()
-root_dir = meson.project_source_root()
-
-# Proto files for the controlplane
-ynpb_proto_files = [
-    join_paths(ynpb_dir, 'v1', 'gateway.proto'),
-    join_paths(ynpb_dir, 'v1', 'logging.proto'),
-    join_paths(ynpb_dir, 'v1', 'inspect.proto'),
-    join_paths(ynpb_dir, 'v1', 'function.proto'),
-    join_paths(ynpb_dir, 'v1', 'pipeline.proto'),
-    join_paths(ynpb_dir, 'v1', 'device.proto'),
-    join_paths(ynpb_dir, 'v1', 'counters.proto'),
-    join_paths(ynpb_dir, 'v1', 'auth.proto'),
-    join_paths(ynpb_dir, 'v1', 'readiness.proto'),
-    join_paths(ynpb_dir, 'v1', 'metrics.proto'),
-    join_paths(ynpb_dir, 'v1', 'port.proto'),
-    join_paths(ynpb_dir, 'v1', 'memory.proto'),
-]
-
-# Generate protobuf files
 ynpb_gen = custom_target(
-    'ynpb-protoc',
-    output: [
-        'gateway.pb.go',
-        'gateway_grpc.pb.go',
-        'logging.pb.go',
-        'logging_grpc.pb.go',
-        'inspect.pb.go',
-        'inspect_grpc.pb.go',
-        'function.pb.go',
-        'function_grpc.pb.go',
-        'pipeline.pb.go',
-        'pipeline_grpc.pb.go',
-        'device.pb.go',
-        'device_grpc.pb.go',
-        'counters.pb.go',
-        'counters_grpc.pb.go',
-        'auth.pb.go',
-        'auth_grpc.pb.go',
-        'readiness.pb.go',
-        'readiness_grpc.pb.go',
-        'metrics.pb.go',
-        'metrics_grpc.pb.go',
-        'port.pb.go',
-        'port_grpc.pb.go',
-        'memory.pb.go',
-        'memory_grpc.pb.go',
-    ],
-    input: ynpb_proto_files,
-    command: [
-        protoc,
-        '-I', root_dir,
-        '--go_out=paths=source_relative:' + root_dir,
-        '--go-grpc_out=paths=source_relative:' + root_dir,
-        '@INPUT@',
-    ],
-    build_by_default: true,
+  'ynpb-protoc',
+  output: 'ynpb.protoset',
+  input: [
+    meson.current_source_dir() / 'v1/gateway.proto',
+    meson.current_source_dir() / 'v1/logging.proto',
+    meson.current_source_dir() / 'v1/inspect.proto',
+    meson.current_source_dir() / 'v1/function.proto',
+    meson.current_source_dir() / 'v1/pipeline.proto',
+    meson.current_source_dir() / 'v1/device.proto',
+    meson.current_source_dir() / 'v1/counters.proto',
+    meson.current_source_dir() / 'v1/auth.proto',
+    meson.current_source_dir() / 'v1/readiness.proto',
+    meson.current_source_dir() / 'v1/metrics.proto',
+    meson.current_source_dir() / 'v1/port.proto',
+    meson.current_source_dir() / 'v1/memory.proto',
+  ],
+  command: go_protoc + ['@INPUT@'],
+  # protoc refuses --dependency_out with several inputs, so imports from
+  # other targets are tracked through their descriptor sets instead.
+  depends: [common_protoc_gen, common_readiness_protoc_gen],
+  build_by_default: true,
 )
+go_proto_targets += ynpb_gen

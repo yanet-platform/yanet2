@@ -15,24 +15,24 @@ const configNameMethod = "operators.generic.operator.testpb.ConfigNameService/Up
 // Register once per process, including when tests repeat in the same binary.
 func init() {
 	file, err := protodesc.NewFile(&descriptorpb.FileDescriptorProto{
-		Name:    proto.String("operators/generic/operator/config_name_test.proto"),
-		Package: proto.String("operators.generic.operator.testpb"),
-		Syntax:  proto.String("proto3"),
+		Name:    new("operators/generic/operator/config_name_test.proto"),
+		Package: new("operators.generic.operator.testpb"),
+		Syntax:  new("proto3"),
 		MessageType: []*descriptorpb.DescriptorProto{{
-			Name: proto.String("Config"),
+			Name: new("Config"),
 			Field: []*descriptorpb.FieldDescriptorProto{{
-				Name:   proto.String("config_name"),
+				Name:   new("config_name"),
 				Number: proto.Int32(1),
 				Label:  descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(),
 				Type:   descriptorpb.FieldDescriptorProto_TYPE_STRING.Enum(),
 			}},
 		}},
 		Service: []*descriptorpb.ServiceDescriptorProto{{
-			Name: proto.String("ConfigNameService"),
+			Name: new("ConfigNameService"),
 			Method: []*descriptorpb.MethodDescriptorProto{{
-				Name:       proto.String("UpdateConfig"),
-				InputType:  proto.String(".operators.generic.operator.testpb.Config"),
-				OutputType: proto.String(".operators.generic.operator.testpb.Config"),
+				Name:       new("UpdateConfig"),
+				InputType:  new(".operators.generic.operator.testpb.Config"),
+				OutputType: new(".operators.generic.operator.testpb.Config"),
 			}},
 		}},
 	}, nil,

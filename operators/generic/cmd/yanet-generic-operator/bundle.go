@@ -21,4 +21,5 @@ import (
 	_ "github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb/v1"
 	_ "github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1"
 	_ "github.com/yanet-platform/yanet2/modules/unrdup/controlplane/unrduppb/v1"
+	_ "github.com/yanet-platform/yanet2/objects/ring/controlplane/ringpb/v1"
 )

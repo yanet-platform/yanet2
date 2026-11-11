@@ -37,15 +37,6 @@ var expectedIPv6Sources = []string{
 	"[2001:db8:1::10]:20002",
 }
 
-// expectedIPv4Sources returns the sources of expectedEntries in listing order.
-func expectedIPv4Sources() []string {
-	sources := make([]string, 0, len(expectedEntries))
-	for _, entry := range expectedEntries {
-		sources = append(sources, entry.src)
-	}
-	return sources
-}
-
 // decodeJSONLines decodes the CLI's newline-delimited JSON output.
 func decodeJSONLines[T any](t *testing.T, output string) []T {
 	t.Helper()
@@ -133,10 +124,8 @@ func testFWStateMapListEntries(t *testing.T, fw *framework.TestFramework) {
 			framework.CLIFWState + " update --name fwstate0" +
 				" --map-name-v4 " + mapV4 +
 				" --map-name-v6 " + mapV6 +
-				" --src-addr 2001:db8::100" +
-				" --dst-ether 33:33:00:00:00:01" +
-				" --dst-addr-multicast ff02::1" +
-				" --port-multicast 9999" +
+				" --sync-endpoint 2001:db8::100@ff02::1:9999" +
+				" --listen-endpoint ff02::1:9999" +
 				" --tcp 120s --tcp-syn 60s --tcp-syn-ack 60s --tcp-fin 60s" +
 				" --udp 30s --default 16s",
 		}
@@ -283,7 +272,7 @@ func testFWStateMapListEntries(t *testing.T, fw *framework.TestFramework) {
 	// 10. Stats: verify total_elements matches the number of injected entries.
 	fw.Run("Stats_after_entries", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
-			framework.CLIFWStateMap + " stats --name " + mapV4,
+			framework.CLIFWStateMap + " stats --name " + mapV4 + " --format json",
 		)
 		require.NoError(t, err, "map stats command failed")
 		t.Log("Stats output:\n", output)
@@ -356,7 +345,7 @@ func testFWStateMapListEntries(t *testing.T, fw *framework.TestFramework) {
 	// 14. IPv6 stats: verify total_elements.
 	fw.Run("IPv6_stats", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
-			framework.CLIFWStateMap + " stats --name " + mapV6,
+			framework.CLIFWStateMap + " stats --name " + mapV6 + " --format json",
 		)
 		require.NoError(t, err, "map stats command failed")
 		t.Log("Stats output:\n", output)
@@ -399,10 +388,8 @@ func testFWStateCheckState(t *testing.T, fw *framework.TestFramework) {
 			framework.CLIFWState + " update --name fwstate0" +
 				" --map-name-v4 fwstate0-v4" +
 				" --map-name-v6 fwstate0-v6" +
-				" --src-addr 2001:db8::100" +
-				" --dst-ether 33:33:00:00:00:01" +
-				" --dst-addr-multicast ff02::1" +
-				" --port-multicast 9999" +
+				" --sync-endpoint 2001:db8::100@ff02::1:9999" +
+				" --listen-endpoint ff02::1:9999" +
 				" --tcp 120s --tcp-syn 60s --tcp-syn-ack 60s --tcp-fin 60s" +
 				" --udp 30s --default 16s",
 		}
@@ -571,10 +558,8 @@ func testFWStateUDPEndianness(t *testing.T, fw *framework.TestFramework) {
 			framework.CLIFWState + " update --name fwstate_udp" +
 				" --map-name-v4 fwstate_udp-v4" +
 				" --map-name-v6 fwstate_udp-v6" +
-				" --src-addr 2001:db8::100" +
-				" --dst-ether 33:33:00:00:00:01" +
-				" --dst-addr-multicast ff02::1" +
-				" --port-multicast 9999" +
+				" --sync-endpoint 2001:db8::100@ff02::1:9999" +
+				" --listen-endpoint ff02::1:9999" +
 				" --tcp 120s --tcp-syn 60s --tcp-syn-ack 60s --tcp-fin 60s" +
 				" --udp 30s --default 16s",
 		}
@@ -820,10 +805,8 @@ func testFWStateExternalSyncFrame(t *testing.T, fw *framework.TestFramework) {
 			framework.CLIFWState + " update --name fwstate_ext" +
 				" --map-name-v4 fwstate_ext-v4" +
 				" --map-name-v6 fwstate_ext-v6" +
-				" --src-addr 2001:db8::100" +
-				" --dst-ether 33:33:00:00:00:01" +
-				" --dst-addr-multicast ff02::1" +
-				" --port-multicast 9999" +
+				" --sync-endpoint 2001:db8::100@ff02::1:9999" +
+				" --listen-endpoint ff02::1:9999" +
 				" --tcp 120s --tcp-syn 60s --tcp-syn-ack 60s --tcp-fin 60s" +
 				" --udp 30s --default 16s",
 		}
@@ -847,7 +830,7 @@ func testFWStateExternalSyncFrame(t *testing.T, fw *framework.TestFramework) {
 	// 3. Verify no state entries exist initially.
 	fw.Run("Verify_empty_state", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
-			framework.CLIFWStateMap + " stats --name fwstate_ext-v4",
+			framework.CLIFWStateMap + " stats --name fwstate_ext-v4 --format json",
 		)
 		require.NoError(t, err, "map stats command failed")
 		t.Log("Initial stats:\n", output)
@@ -934,7 +917,7 @@ func testFWStateExternalSyncFrame(t *testing.T, fw *framework.TestFramework) {
 	// 7. Verify stats show exactly 1 entry.
 	fw.Run("Verify_stats", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
-			framework.CLIFWStateMap + " stats --name fwstate_ext-v4",
+			framework.CLIFWStateMap + " stats --name fwstate_ext-v4 --format json",
 		)
 		require.NoError(t, err, "map stats command failed")
 		t.Log("Stats after external sync:\n", output)

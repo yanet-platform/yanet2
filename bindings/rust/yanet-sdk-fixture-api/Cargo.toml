@@ -1,0 +1,24 @@
+[package]
+name = "yanet-sdk-fixture-api"
+description = "The control-plane api of the SDK fixture modules: what the Go tests call to build their configurations over an agent."
+build = "build.rs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+# No tests of its own: Go tests drive it through the exports.
+[lib]
+test = false
+doctest = false
+
+[dependencies]
+yanet-sdk = { path = "../yanet-sdk" }
+yanet-sdk-api = { path = "../yanet-sdk-api" }
+yanet-sdk-fixture = { path = "../yanet-sdk-fixture" }
+
+[build-dependencies]
+yanet-sdk-build = { path = "../yanet-sdk-build" }

@@ -18,19 +18,45 @@
 #define COUNTER_NAME_LEN 128
 #define COUNTER_INVALID (uint64_t)-1
 
+/*
+ * A name stays in a registry for this many replacements after a
+ * configuration stopped registering it. The carried name holds its value
+ * slot reserved, because workers of the replaced configuration keep
+ * counting into the slot until the replacement is installed; every update
+ * installs and waits for all workers before the next one can start, so
+ * once the name leaves the registry no worker of any published generation
+ * writes its slot again.
+ */
+#define COUNTER_MAX_AGE 1
+
 struct counter {
 	char name[COUNTER_NAME_LEN];
 	uint64_t size;
-	uint64_t gen;
 	uint64_t offset;
+	// Replacements since a configuration last registered this name; zero
+	// while the registry's own configuration counts into it.
+	uint32_t age;
+	uint32_t flags;
 };
+
+// The slot was taken from a registry's free list at the last link and
+// still holds the values of the name that left; a storage spawned for the
+// registry zeroes it before any worker can count into it.
+#define COUNTER_FLAG_CLEAR_SLOT 1
 
 struct counter_registry {
 	struct memory_context *memory_context;
-	uint64_t gen;
 	uint64_t capacity;
 	uint64_t count;
 	uint64_t counts[COUNTER_POOL_SIZE];
+
+	// Free value slots per pool, as byte offsets, in reverse order of
+	// their release. A name that needs a slot takes the latest released
+	// one before the pool grows; the watermark never shrinks, so storage
+	// stays at its historical peak.
+	uint64_t *free_slots[COUNTER_POOL_SIZE];
+	uint64_t free_counts[COUNTER_POOL_SIZE];
+	uint64_t free_capacities[COUNTER_POOL_SIZE];
 
 	struct counter *names;
 	struct str_index str_index;
@@ -38,9 +64,7 @@ struct counter_registry {
 
 int
 counter_registry_init(
-	struct counter_registry *registry,
-	struct memory_context *memory_context,
-	uint64_t gen
+	struct counter_registry *registry, struct memory_context *memory_context
 );
 
 uint64_t
@@ -135,13 +159,3 @@ counter_get_address(uint64_t counter_id, struct counter_storage *storage) {
 
 	return counter_handle_get_value(value_handle);
 }
-
-struct counter_handle;
-
-// Copies a single counter's values into `accum`.
-void
-counter_handle_accum(
-	uint64_t *accum,
-	size_t counter_size,
-	struct counter_value_handle *handle
-);

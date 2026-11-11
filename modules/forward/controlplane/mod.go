@@ -4,7 +4,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	cpffi "github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/modulebase"
 	forwardpb "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb/v1"
 )
 
@@ -14,80 +14,33 @@ const (
 )
 
 // Option configures the ForwardModule constructor.
-type Option func(*moduleOptions)
-
-type moduleOptions struct {
-	Log *zap.Logger
-}
-
-func newModuleOptions() *moduleOptions {
-	return &moduleOptions{
-		Log: zap.NewNop(),
-	}
-}
+type Option = modulebase.Option
 
 // WithLog sets the logger for the forward module.
 func WithLog(log *zap.Logger) Option {
-	return func(o *moduleOptions) {
-		o.Log = log
-	}
+	return modulebase.WithLog(log)
 }
 
 // ForwardModule is a control-plane component of a module that is responsible for
 // forwarding traffic between devices.
 type ForwardModule struct {
-	cfg            *Config
-	attachment     *cpffi.Attachment
-	forwardService *ForwardService
-	metricsService *MetricsService
+	*modulebase.Base
 }
 
 func NewForwardModule(cfg *Config, options ...Option) (*ForwardModule, error) {
-	opts := newModuleOptions()
-	for _, o := range options {
-		o(opts)
-	}
-
-	log := opts.Log.With(zap.String("module", forwardpb.ForwardService_ServiceDesc.ServiceName))
-
-	attachment, err := cpffi.Attach(cfg.AttachConfig, agentName, log)
+	base, err := modulebase.NewBase(cfg.AttachConfig, agentName, cfg.Endpoint.Unwrap(), options...)
 	if err != nil {
 		return nil, err
 	}
-	agent := attachment.Agent
 
-	forwardService := NewForwardService(NewBackend(agent))
+	forwardService := NewForwardService(NewBackend(base.Agent()))
 	metricsService := NewMetricsService(forwardService)
+	base.AddService(forwardpb.ForwardService_ServiceDesc.ServiceName, func(server *grpc.Server) {
+		forwardpb.RegisterForwardServiceServer(server, forwardService)
+	})
+	base.AddService(forwardpb.MetricsService_ServiceDesc.ServiceName, func(server *grpc.Server) {
+		forwardpb.RegisterMetricsServiceServer(server, metricsService)
+	})
 
-	return &ForwardModule{
-		cfg:            cfg,
-		attachment:     attachment,
-		forwardService: forwardService,
-		metricsService: metricsService,
-	}, nil
-}
-
-func (m *ForwardModule) Name() string {
-	return moduleType
-}
-
-func (m *ForwardModule) Endpoint() string {
-	return m.cfg.Endpoint.Unwrap()
-}
-
-func (m *ForwardModule) ServicesNames() []string {
-	return []string{
-		forwardpb.ForwardService_ServiceDesc.ServiceName,
-		forwardpb.MetricsService_ServiceDesc.ServiceName,
-	}
-}
-
-func (m *ForwardModule) RegisterService(server *grpc.Server) {
-	forwardpb.RegisterForwardServiceServer(server, m.forwardService)
-	forwardpb.RegisterMetricsServiceServer(server, m.metricsService)
-}
-
-// Close closes the module.
-func (m *ForwardModule) Close() error {
-	return m.attachment.Close()
+	return &ForwardModule{Base: base}, nil
 }

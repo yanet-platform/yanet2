@@ -6,6 +6,7 @@
 #include <rte_ip.h>
 
 #include "lib/controlplane/config/econtext.h"
+#include "lib/dataplane/pipeline/schedule.h"
 
 #include "lib/dataplane/config/zone.h"
 #include "lib/dataplane/module/module.h"
@@ -23,8 +24,8 @@ mirror_clone(
 	struct packet *packet,
 	struct module_ectx *module_ectx,
 	struct packet_front *packet_front,
-	void (*route)(struct module_ectx *, struct packet_front *, struct packet *),
-	uint16_t device_id
+	void (*route)(struct module_ectx *, struct packet_front *, struct device_entry_ectx *, struct packet *),
+	struct device_entry_ectx *entry_ectx
 ) {
 	struct packet *clone = worker_clone_packet(
 		worker, packet, module_ectx->packet_recirc_limit
@@ -33,8 +34,7 @@ mirror_clone(
 		return;
 	}
 
-	clone->tx_device_id = device_id;
-	route(module_ectx, packet_front, clone);
+	route(module_ectx, packet_front, entry_ectx, clone);
 }
 
 static void
@@ -87,7 +87,7 @@ mirror_handle_packets(
 
 	mirror_classify_vlan(
 		&mirror_config->classifier_vlan,
-		module_ectx->abs_cm_index,
+		module_ectx->module_device_id,
 		(const struct packet **)vlan_packets,
 		vlan_result,
 		vlan_idx
@@ -95,7 +95,7 @@ mirror_handle_packets(
 
 	mirror_classify_ip4(
 		&mirror_config->classifier_ip4,
-		module_ectx->abs_cm_index,
+		module_ectx->module_device_id,
 		(const struct packet **)ip4_packets,
 		ip4_result,
 		ip4_idx
@@ -103,7 +103,7 @@ mirror_handle_packets(
 
 	mirror_classify_ip6(
 		&mirror_config->classifier_ip6,
-		module_ectx->abs_cm_index,
+		module_ectx->module_device_id,
 		(const struct packet **)ip6_packets,
 		ip6_result,
 		ip6_idx
@@ -146,11 +146,12 @@ mirror_handle_packets(
 			counters[0] += 1;
 			counters[1] += packet_data_len(packet);
 
-			uint16_t device_id = module_ectx_encode_device(
-				module_ectx, target->device_id
-			);
+			struct module_device_target *device_target =
+				module_ectx_device_target(
+					module_ectx, target->device_id
+				);
 
-			if (device_id != (uint16_t)-1) {
+			if (device_target != NULL) {
 				if (target->mode == MIRROR_MODE_IN) {
 					mirror_clone(
 						dp_worker,
@@ -158,7 +159,7 @@ mirror_handle_packets(
 						module_ectx,
 						packet_front,
 						module_ectx_route_input,
-						device_id
+						device_target->abs_input_entry
 					);
 				} else if (target->mode == MIRROR_MODE_OUT) {
 					mirror_clone(
@@ -167,7 +168,7 @@ mirror_handle_packets(
 						module_ectx,
 						packet_front,
 						module_ectx_route_output,
-						device_id
+						device_target->abs_output_entry
 					);
 				}
 			}

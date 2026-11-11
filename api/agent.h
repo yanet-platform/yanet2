@@ -122,7 +122,7 @@ agent_extend(struct agent *agent, uint64_t size, yanet_error **err);
 // Grows the shared memory of a named agent and reports its new size.
 //
 // Finding the agent and growing it happen under one hold of the
-// configuration lock, so a concurrent re-attach of the same name cannot
+// agent lock, so a concurrent re-attach of the same name cannot
 // retire the agent midway.
 //
 // @param shm Handle to shared memory segment
@@ -285,17 +285,5 @@ agent_delete_object(
 	struct agent *agent,
 	const char *object_type,
 	const char *object_name,
-	yanet_error **err
-);
-
-void *
-agent_storage_read(struct agent *agent, const char *name);
-
-int
-agent_storage_put(
-	struct agent *agent,
-	const char *name,
-	void *data,
-	size_t size,
 	yanet_error **err
 );

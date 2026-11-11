@@ -16,12 +16,25 @@ service DscpService {
   // ShowConfig returns the current configuration for the dscp module.
   rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
 
-  // AddPrefixes adds prefixes to the dscp module configuration.
-  rpc AddPrefixes(AddPrefixesRequest) returns (AddPrefixesResponse);
-  // RemovePrefixes removes prefixes from the dscp module configuration.
-  rpc RemovePrefixes(RemovePrefixesRequest) returns (RemovePrefixesResponse);
-  // SetDscpMarking sets the DSCP marking configuration.
-  rpc SetDscpMarking(SetDscpMarkingRequest) returns (SetDscpMarkingResponse);
+  // UpdateConfig replaces the whole named configuration with the one the
+  // request carries.
+  rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
+
+  // AddPrefixes is replaced by UpdateConfig, and the server answers it with
+  // Unimplemented.
+  rpc AddPrefixes(AddPrefixesRequest) returns (AddPrefixesResponse) {
+    option deprecated = true;
+  }
+  // RemovePrefixes is replaced by UpdateConfig, and the server answers it
+  // with Unimplemented.
+  rpc RemovePrefixes(RemovePrefixesRequest) returns (RemovePrefixesResponse) {
+    option deprecated = true;
+  }
+  // SetDscpMarking is replaced by UpdateConfig, and the server answers it
+  // with Unimplemented.
+  rpc SetDscpMarking(SetDscpMarkingRequest) returns (SetDscpMarkingResponse) {
+    option deprecated = true;
+  }
   // DeleteConfig removes the named config when it is no longer referenced
   // by any pipeline.
   rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse) {}
@@ -53,7 +66,21 @@ message DscpConfig {
 // ShowConfigResponse contains the configuration details of the dscp module.
 message ShowConfigResponse { Config config = 1; }
 
-// AddPrefixesRequest adds prefixes to the input filter of the dscp module.
+// UpdateConfigRequest carries the whole desired configuration of the named
+// config.
+message UpdateConfigRequest {
+  string name = 1;
+  // Configuration that replaces the whole published one; required.
+  //
+  // Prefixes absent from it are removed, and an unset marking is the zero
+  // one, which never marks.
+  Config config = 2;
+}
+
+// UpdateConfigResponse is the response to an UpdateConfig call.
+message UpdateConfigResponse {}
+
+// AddPrefixesRequest is the request of the retired AddPrefixes call.
 message AddPrefixesRequest {
   string name = 1;
   repeated common.commonpb.v1.IPv4Prefix prefixes4 = 2;
@@ -61,8 +88,7 @@ message AddPrefixesRequest {
 }
 message AddPrefixesResponse {}
 
-// RemovePrefixesRequest removes prefixes from the input filter of the dscp
-// module.
+// RemovePrefixesRequest is the request of the retired RemovePrefixes call.
 message RemovePrefixesRequest {
   string name = 1;
   repeated common.commonpb.v1.IPv4Prefix prefixes4 = 2;
@@ -70,7 +96,7 @@ message RemovePrefixesRequest {
 }
 message RemovePrefixesResponse {}
 
-// SetDscpMarkingRequest sets the DSCP marking configuration.
+// SetDscpMarkingRequest is the request of the retired SetDscpMarking call.
 message SetDscpMarkingRequest {
   string name = 1;
   DscpConfig dscp_config = 2;

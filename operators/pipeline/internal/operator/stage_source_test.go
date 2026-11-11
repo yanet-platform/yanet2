@@ -1,6 +1,7 @@
 package operator
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -10,146 +11,157 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 )
 
-// drainWake consumes a single buffered wake signal if present.
-func drainWake(wake <-chan struct{}) bool {
-	select {
-	case <-wake:
-		return true
-	default:
-		return false
-	}
+// headOf returns the stage the queue publishes as the desired state, nil
+// before the first one.
+func headOf(source *StageQueueSource) *StageConfig {
+	return source.Latest().Load().Value
 }
 
-func Test_StageQueueSource_SetStagesPublishesAndWakes(t *testing.T) {
-	src := NewStageQueueSource()
+// Test_StageQueueSource_SetStages_PublishesHead verifies that nothing is
+// published before the first stages are set, and their head after.
+func Test_StageQueueSource_SetStages_PublishesHead(t *testing.T) {
+	source := NewStageQueueSource([]string{"gw0"})
+	require.Zero(t, source.Latest().Load().Number)
 
-	require.False(t, drainWake(src.Wake()), "wake should be empty initially")
+	first := &StageConfig{Name: "first"}
+	source.SetStages([]*StageConfig{first, {Name: "second"}})
 
-	target, ok := src.Snapshot()
-	require.False(t, ok)
-	require.Nil(t, target)
-
-	s1 := &StageConfig{Name: "s1"}
-	src.SetStages([]*StageConfig{s1})
-
-	require.True(t, drainWake(src.Wake()), "SetStages must signal wake")
-
-	target, ok = src.Snapshot()
-	require.True(t, ok)
-	require.Same(t, s1, target)
+	require.Same(t, first, headOf(source))
 }
 
-func Test_StageQueueSource_SwitchReplacesQueue(t *testing.T) {
-	src := NewStageQueueSource()
-
-	s1 := &StageConfig{Name: "s1"}
-	s2 := &StageConfig{Name: "s2"}
-	src.SetStages([]*StageConfig{s1, s2})
-	_ = drainWake(src.Wake())
+// Test_StageQueueSource_Switch_PublishesStage verifies that a switch
+// publishes the new stage in place of the queue.
+func Test_StageQueueSource_Switch_PublishesStage(t *testing.T) {
+	source := NewStageQueueSource([]string{"gw0"})
+	source.SetStages([]*StageConfig{{Name: "first"}, {Name: "second"}})
 
 	other := &StageConfig{Name: "other"}
-	src.Switch(other)
+	source.Switch(other)
 
-	require.True(t, drainWake(src.Wake()))
-
-	target, ok := src.Snapshot()
-	require.True(t, ok)
-	require.Same(t, other, target)
+	require.Same(t, other, headOf(source))
 }
 
-// Snapshot drains a pre-existing wake under the lock.
-func Test_StageQueueSource_SnapshotDrainsWake(t *testing.T) {
-	src := NewStageQueueSource()
+// Test_StageQueueSource_OnStageApplied_WaitsForEveryGateway verifies that a
+// stage applied by only some of the gateways stays the head, and nothing new
+// is published.
+func Test_StageQueueSource_OnStageApplied_WaitsForEveryGateway(t *testing.T) {
+	source := NewStageQueueSource([]string{"gw0", "gw1"})
+	first := &StageConfig{Name: "first"}
+	source.SetStages([]*StageConfig{first, {Name: "second"}})
+	before := source.Latest().Load()
 
-	s1 := &StageConfig{Name: "s1"}
-	src.SetStages([]*StageConfig{s1})
+	source.OnStageApplied("gw0", first, nil)
 
-	_, ok := src.Snapshot()
-	require.True(t, ok)
-	require.False(t, drainWake(src.Wake()),
-		"Snapshot must drain the wake announced alongside the target")
+	after := source.Latest().Load()
+	require.Equal(t, before.Number, after.Number)
+	require.Same(t, first, after.Value)
 }
 
-// Advance pops the head when more than one element is queued and
-// re-wakes for the next iteration.
-func Test_StageQueueSource_AdvancePopsHead(t *testing.T) {
-	src := NewStageQueueSource()
+// Test_StageQueueSource_OnStageApplied_PopsHeadAppliedEverywhere verifies
+// that the queue publishes the next stage once the last gateway applied the
+// head.
+func Test_StageQueueSource_OnStageApplied_PopsHeadAppliedEverywhere(t *testing.T) {
+	source := NewStageQueueSource([]string{"gw0", "gw1"})
+	first := &StageConfig{Name: "first"}
+	second := &StageConfig{Name: "second"}
+	source.SetStages([]*StageConfig{first, second})
 
-	s1 := &StageConfig{Name: "s1"}
-	s2 := &StageConfig{Name: "s2"}
-	src.SetStages([]*StageConfig{s1, s2})
-	_ = drainWake(src.Wake())
+	source.OnStageApplied("gw0", first, nil)
+	source.OnStageApplied("gw1", first, nil)
 
-	target, ok := src.Snapshot()
-	require.True(t, ok)
-	require.Same(t, s1, target)
-
-	src.Advance(s1)
-
-	require.True(t, drainWake(src.Wake()),
-		"Advance must wake the reconcile loop when more work is queued")
-
-	target, ok = src.Snapshot()
-	require.True(t, ok)
-	require.Same(t, s2, target)
+	require.Same(t, second, headOf(source))
 }
 
-// Single-element queue is retained as the steady-state target.
-func Test_StageQueueSource_AdvanceRetainsTail(t *testing.T) {
-	src := NewStageQueueSource()
+// Test_StageQueueSource_OnStageApplied_NextHeadWaitsForEveryGateway verifies that
+// the stage exposed by an advance is not advanced past by the gateway that
+// applied it first.
+func Test_StageQueueSource_OnStageApplied_NextHeadWaitsForEveryGateway(t *testing.T) {
+	source := NewStageQueueSource([]string{"gw0", "gw1"})
+	first := &StageConfig{Name: "first"}
+	second := &StageConfig{Name: "second"}
+	source.SetStages([]*StageConfig{first, second, {Name: "third"}})
+	source.OnStageApplied("gw0", first, nil)
+	source.OnStageApplied("gw1", first, nil)
 
-	s1 := &StageConfig{Name: "s1"}
-	src.SetStages([]*StageConfig{s1})
-	_ = drainWake(src.Wake())
+	source.OnStageApplied("gw1", second, nil)
 
-	src.Advance(s1)
-
-	require.False(t, drainWake(src.Wake()),
-		"Advance on tail must not wake")
-
-	target, ok := src.Snapshot()
-	require.True(t, ok)
-	require.Same(t, s1, target,
-		"steady-state queue must retain the tail stage")
+	require.Same(t, second, headOf(source))
 }
 
-// Advance is a no-op when the head changed mid-flight.
-func Test_StageQueueSource_AdvanceIgnoresHeadChange(t *testing.T) {
-	src := NewStageQueueSource()
+// Test_StageQueueSource_OnStageApplied_FailureHoldsHeadBack verifies that a gateway
+// whose latest apply of the head failed holds the head back, even though an
+// earlier apply of it succeeded.
+func Test_StageQueueSource_OnStageApplied_FailureHoldsHeadBack(t *testing.T) {
+	source := NewStageQueueSource([]string{"gw0", "gw1"})
+	first := &StageConfig{Name: "first"}
+	source.SetStages([]*StageConfig{first, {Name: "second"}})
 
-	s1 := &StageConfig{Name: "s1"}
-	other := &StageConfig{Name: "other"}
-	src.SetStages([]*StageConfig{s1})
-	_ = drainWake(src.Wake())
+	source.OnStageApplied("gw0", first, nil)
+	source.OnStageApplied("gw0", first, errors.New("gateway unavailable"))
+	source.OnStageApplied("gw1", first, nil)
 
-	target, ok := src.Snapshot()
-	require.True(t, ok)
-	require.Same(t, s1, target)
-
-	src.Switch(other)
-	_ = drainWake(src.Wake())
-
-	src.Advance(s1)
-
-	target, ok = src.Snapshot()
-	require.True(t, ok)
-	require.Same(t, other, target,
-		"Advance must not pop a head that no longer matches")
+	require.Same(t, first, headOf(source))
 }
 
-// Empty SetStages returns the source to idle.
-func Test_StageQueueSource_SetStagesEmptyIdles(t *testing.T) {
-	src := NewStageQueueSource()
+// Test_StageQueueSource_OnStageApplying_HoldsHeadBack verifies that a
+// gateway still applying the head holds it back, even though its previous
+// apply of the head succeeded.
+func Test_StageQueueSource_OnStageApplying_HoldsHeadBack(t *testing.T) {
+	source := NewStageQueueSource([]string{"gw0", "gw1"})
+	first := &StageConfig{Name: "first"}
+	source.SetStages([]*StageConfig{first, {Name: "second"}})
+	source.OnStageApplied("gw0", first, nil)
 
-	s1 := &StageConfig{Name: "s1"}
-	src.SetStages([]*StageConfig{s1})
-	_ = drainWake(src.Wake())
+	source.OnStageApplying("gw0", first)
+	source.OnStageApplied("gw1", first, nil)
 
-	src.SetStages(nil)
+	require.Same(t, first, headOf(source))
+}
 
-	target, ok := src.Snapshot()
-	require.False(t, ok)
-	require.Nil(t, target)
+// Test_StageQueueSource_OnStageApplied_RetainsTail verifies that the last stage
+// stays the steady-state target once every gateway applied it.
+func Test_StageQueueSource_OnStageApplied_RetainsTail(t *testing.T) {
+	source := NewStageQueueSource([]string{"gw0", "gw1"})
+	last := &StageConfig{Name: "last"}
+	source.SetStages([]*StageConfig{last})
+	before := source.Latest().Load()
+
+	source.OnStageApplied("gw0", last, nil)
+	source.OnStageApplied("gw1", last, nil)
+
+	after := source.Latest().Load()
+	require.Equal(t, before.Number, after.Number)
+	require.Same(t, last, after.Value)
+}
+
+// Test_StageQueueSource_OnStageApplied_IgnoresReplacedHead verifies that a stage
+// applied after the queue was replaced does not pop the new head.
+func Test_StageQueueSource_OnStageApplied_IgnoresReplacedHead(t *testing.T) {
+	source := NewStageQueueSource([]string{"gw0"})
+	replaced := &StageConfig{Name: "replaced"}
+	current := &StageConfig{Name: "current"}
+	source.SetStages([]*StageConfig{replaced, {Name: "next"}})
+	source.SetStages([]*StageConfig{current, {Name: "after"}})
+
+	source.OnStageApplied("gw0", replaced, nil)
+
+	require.Same(t, current, headOf(source))
+}
+
+// Test_StageQueueSource_SetStages_ForgetsAppliedGateways verifies that a
+// replaced queue waits for every gateway again, even when its head is the
+// stage some of them applied before.
+func Test_StageQueueSource_SetStages_ForgetsAppliedGateways(t *testing.T) {
+	source := NewStageQueueSource([]string{"gw0", "gw1"})
+	first := &StageConfig{Name: "first"}
+	second := &StageConfig{Name: "second"}
+	source.SetStages([]*StageConfig{first, second})
+	source.OnStageApplied("gw0", first, nil)
+
+	source.SetStages([]*StageConfig{first, second})
+	source.OnStageApplied("gw1", first, nil)
+
+	require.Same(t, first, headOf(source))
 }
 
 // verifies that stage activity selects the production freshness contract for

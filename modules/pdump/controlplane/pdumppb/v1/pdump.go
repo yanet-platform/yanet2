@@ -3,14 +3,17 @@ package pdumppb
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	ringpb "github.com/yanet-platform/yanet2/objects/ring/controlplane/ringpb/v1"
 )
 
 // MaxMode mirrors the largest bitmap accepted by the pdump dataplane.
 const MaxMode = 3
 
-const minRingSize = 1 << 20
+// MaxRatePPS mirrors the largest capture rate accepted by the dataplane.
+const MaxRatePPS = 1_000_000
 
 func (m *ShowConfigRequest) Validate() error {
 	return commonpb.ValidateModuleName("name", m.GetName())
@@ -25,25 +28,30 @@ func (m *SetConfigRequest) Validate() error {
 	if config == nil {
 		return errors.New("config is required")
 	}
-	if config.Mode != nil && config.GetMode() > MaxMode {
-		return fmt.Errorf("mode %d must be in range 0..%d", config.GetMode(), MaxMode)
+	if err := config.Validate(); err != nil {
+		return fmt.Errorf("config: %w", err)
 	}
-	if config.Snaplen != nil && config.GetSnaplen() == 0 {
+
+	return nil
+}
+
+func (m *Config) Validate() error {
+	if m.Mode != nil && m.GetMode() > MaxMode {
+		return fmt.Errorf("mode %d must be in range 0..%d", m.GetMode(), MaxMode)
+	}
+	if m.Snaplen != nil && m.GetSnaplen() == 0 {
 		return errors.New("snaplen must be greater than zero")
 	}
-	if config.RingSize != nil {
-		ringSize := config.GetRingSize()
-		if ringSize&(ringSize-1) != 0 {
-			return fmt.Errorf("ring_size %d must be a power of two", ringSize)
+	if m.GetRatePps() > MaxRatePPS {
+		return fmt.Errorf("rate_pps %d must be in range 0..%d", m.GetRatePps(), MaxRatePPS)
+	}
+	if m.RingName != nil {
+		if err := ringpb.ValidateRingName("ring_name", m.GetRingName()); err != nil {
+			return err
 		}
-		if ringSize < minRingSize || ringSize > MaxRingSize {
-			return fmt.Errorf(
-				"ring_size %d must be in range %d..%d",
-				ringSize,
-				minRingSize,
-				MaxRingSize,
-			)
-		}
+	}
+	if strings.ContainsRune(m.GetFilter(), '\x00') {
+		return errors.New("filter must not contain NUL")
 	}
 
 	return nil

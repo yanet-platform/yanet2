@@ -21,7 +21,7 @@ use ynpb::pb::{
 #[command(version = ync::version(), about)]
 #[command(flatten_help = true)]
 pub struct Cmd {
-    /// Include detailed memory contexts in human output.
+    /// Include memory contexts and allocator size classes in human output.
     #[arg(long)]
     pub memory: bool,
     #[command(flatten)]
@@ -35,7 +35,8 @@ fn main() -> std::process::ExitCode {
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let mut service = Service::connect_for(&cmd.globals.connection, "inspect", INSPECT_SERVICE, |channel| {
         InspectServiceClient::new(channel)
-            .send_compressed(CompressionEncoding::Gzip)
+            .send_compressed(CompressionEncoding::Zstd)
+            .accept_compressed(CompressionEncoding::Zstd)
             .accept_compressed(CompressionEncoding::Gzip)
     })
     .await?;

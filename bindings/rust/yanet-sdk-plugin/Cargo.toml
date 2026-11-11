@@ -1,0 +1,19 @@
+[package]
+name = "yanet-sdk-plugin"
+description = "A dataplane plugin's runtime for the Rust module SDK: the panic handler and export_module!."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# A panic handler collides with the one of std in a test binary, so the crate
+# has no test target.
+[lib]
+test = false
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+yanet-sys = { path = "../yanet-sys" }

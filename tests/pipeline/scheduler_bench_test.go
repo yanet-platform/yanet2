@@ -24,7 +24,7 @@ import (
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
+	cplain "github.com/yanet-platform/yanet2/devices/plain/bindings/go/cplain"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 )
@@ -128,7 +128,7 @@ func wireRedirect(
 		Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
 		Dst4s:   []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("10.0.0.0/8")},
 	}
-	handle, err := backend.UpdateModule(name, []cforward.ForwardRule{rule})
+	handle, err := backend.Update(name, forward.RuleSet{Compiled: []cforward.ForwardRule{rule}})
 	require.NoError(b, err)
 	b.Cleanup(func() { _ = handle.Free() })
 
@@ -171,7 +171,7 @@ func wireRedirect(
 			Output: []ffi.DevicePipelineConfig{{Name: "dummy_out_" + dev, Weight: 1}},
 		})
 	}
-	_, err = plain.UpdateDevices(agent, devices)
+	_, err = cplain.UpdateDevices(agent, devices)
 	require.NoError(b, err)
 }
 

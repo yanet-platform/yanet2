@@ -21,8 +21,9 @@ func Test_ShippedDefaultConfig_NoUnknownKeys(t *testing.T) {
 }
 
 // Test_ShippedDefaultConfig_LoadsIntendedEnabledSet asserts that the shipped
-// default config starts all eleven bundled modules plus the plain and vlan
-// devices, leaves trafgen disabled, and sets an explicit gateway instance.
+// default config starts all eleven bundled modules plus the plain, vlan and
+// vxlan devices, leaves trafgen disabled, and sets an explicit gateway
+// instance.
 func Test_ShippedDefaultConfig_LoadsIntendedEnabledSet(t *testing.T) {
 	cfg, err := xcfg.LoadConfig[yncp.Config]("../etc/yanet/controlplane.d/default.yaml")
 	require.NoError(t, err)
@@ -41,6 +42,7 @@ func Test_ShippedDefaultConfig_LoadsIntendedEnabledSet(t *testing.T) {
 
 	require.NotNil(t, cfg.Devices.Plain.Unwrap())
 	require.NotNil(t, cfg.Devices.Vlan.Unwrap())
+	require.NotNil(t, cfg.Devices.Vxlan.Unwrap())
 	require.Nil(t, cfg.Devices.Trafgen.Unwrap())
 
 	require.NoError(t, cfg.Gateway.InstanceID.Validate())
@@ -68,6 +70,7 @@ func Test_ShippedDefaultConfig_OmittedBackendEndpointsUseEphemeralPorts(t *testi
 		"blackhole module":  config.Modules.Blackhole.Unwrap().Endpoint.Unwrap(),
 		"plain device":      config.Devices.Plain.Unwrap().Endpoint.Unwrap(),
 		"VLAN device":       config.Devices.Vlan.Unwrap().Endpoint.Unwrap(),
+		"VXLAN device":      config.Devices.Vxlan.Unwrap().Endpoint.Unwrap(),
 	}
 	for name, endpoint := range endpoints {
 		t.Run(name, func(t *testing.T) {
@@ -133,18 +136,23 @@ func Test_NullTopLevelDevices_FailsValidation(t *testing.T) {
 	require.Equal(t, `key "devices" at line 3 has no value; give it a body or remove the key`, err.Error())
 }
 
-// Test_ModuleBlock_StrayNestedKey_RejectedByKnownFields asserts that a key
-// nested inside a module's own block, not just at the document's top level,
-// is rejected when loading through the director's WithKnownFields path.
-func Test_ModuleBlock_StrayNestedKey_RejectedByKnownFields(t *testing.T) {
-	input := "modules:\n  decap:\n" +
-		"    instance_id: 0\n" +
-		"    memory_path: /dev/hugepages/yanet\n" +
-		"    memory_requirements: 16MB\n" +
-		"    endpoint: \"[::1]:0\"\n" +
-		"    bogus: z\n"
-	var cfg yncp.Config
-	err := xcfg.Decode([]byte(input), &cfg, xcfg.WithKnownFields())
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "modules.decap.bogus")
+// Test_UnknownKeys_Ignored asserts that a config carrying keys from a newer
+// release, at the top level and inside a module block, still loads the way
+// the director loads it.
+func Test_UnknownKeys_Ignored(t *testing.T) {
+	input := `
+gateway:
+  instance_id: 0
+future_section:
+  enabled: true
+modules:
+  decap:
+    instance_id: 0
+    memory_path: /dev/hugepages/yanet
+    memory_requirements: 16MB
+    endpoint: "[::1]:0"
+    future_knob: 1
+`
+	cfg := yncp.DefaultConfig()
+	require.NoError(t, xcfg.Decode([]byte(input), cfg, xcfg.WithEnv()))
 }

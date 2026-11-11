@@ -15,8 +15,8 @@ import (
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
-	_ "google.golang.org/grpc/encoding/gzip"
 
+	"github.com/yanet-platform/yanet2/common/go/debugserver"
 	"github.com/yanet-platform/yanet2/common/go/logging"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	"github.com/yanet-platform/yanet2/common/go/xcmd"
@@ -54,6 +54,8 @@ func init() {
 type ServerConfig struct {
 	// Logging configuration.
 	Logging logging.Config `yaml:"logging"`
+	// Debug configures the debug server, disabled by default.
+	Debug debugserver.Config `yaml:"debug"`
 	// ListenAddr is the gRPC endpoint to listen on (e.g., "localhost:50051").
 	ListenAddr string `yaml:"listen_addr"`
 	// RouteOperatorEndpoint is the gRPC endpoint serving the route operator's
@@ -129,8 +131,8 @@ func (m *BIRDConfig) Validate() error {
 // interceptor chains.
 func newGRPCServer() *grpc.Server {
 	return grpc.NewServer(
-		grpc.ChainUnaryInterceptor(xgrpc.ValidateUnaryInterceptor()),
-		grpc.ChainStreamInterceptor(xgrpc.ValidateStreamInterceptor()),
+		grpc.ChainUnaryInterceptor(xgrpc.ResponseCompressionUnaryInterceptor(), xgrpc.ValidateUnaryInterceptor()),
+		grpc.ChainStreamInterceptor(xgrpc.ResponseCompressionStreamInterceptor(), xgrpc.ValidateStreamInterceptor()),
 	)
 }
 
@@ -151,7 +153,7 @@ func runServer() error {
 		zap.String("route_operator_endpoint", cfg.RouteOperatorEndpoint),
 	)
 
-	routeOperatorCreds, err := xgrpc.ClientCredentials(cfg.RouteOperatorTLS)
+	routeOperatorCreds, err := xgrpc.ClientCredentials(cfg.RouteOperatorTLS, xgrpc.WithCertificateStoreLog(log))
 	if err != nil {
 		return fmt.Errorf("failed to build transport credentials for the route operator endpoint: %w", err)
 	}
@@ -175,6 +177,11 @@ func runServer() error {
 
 	wg, ctx := errgroup.WithContext(context.Background())
 
+	// The startup import retries under its own context, so the shutdown
+	// stops it before it waits for the imports.
+	startupCtx, cancelStartup := context.WithCancel(ctx)
+	defer cancelStartup()
+
 	// Start gRPC server
 	wg.Go(func() error {
 		log.Info("gRPC server listening", zap.String("addr", cfg.ListenAddr))
@@ -184,10 +191,15 @@ func runServer() error {
 		return nil
 	})
 
+	debugServer := debugserver.NewServer(&cfg.Debug, debugserver.WithLog(log))
+	wg.Go(func() error {
+		return debugServer.Run(ctx)
+	})
+
 	if startupConfig := cfg.BIRD.Unwrap(); startupConfig != nil {
 		// Apply the configured startup BIRD import.
 		wg.Go(func() error {
-			runStartupImport(ctx, log, adapterService, *startupConfig, cfg.Logging.Level.String())
+			runStartupImport(startupCtx, log, adapterService, *startupConfig, cfg.Logging.Level.String())
 			return nil
 		})
 	}
@@ -196,6 +208,16 @@ func runServer() error {
 	wg.Go(func() error {
 		err := xcmd.WaitInterrupted(ctx)
 		log.Info("caught signal", zap.Error(err))
+
+		// The imports stop before the gRPC server, so a setup call in
+		// flight fails fast instead of holding up the graceful stop.
+		cancelStartup()
+		closeCtx, cancelClose := context.WithTimeout(context.Background(), xgrpc.GracefulStopTimeout)
+		defer cancelClose()
+		if err := adapterService.Close(closeCtx); err != nil {
+			log.Warn("failed to stop BIRD imports", zap.Error(err))
+		}
+
 		log.Info("shutting down gRPC server")
 
 		xgrpc.StopGracefully(grpcServer, xgrpc.GracefulStopTimeout, func() {

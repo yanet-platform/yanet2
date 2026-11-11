@@ -18,19 +18,19 @@ dataplane_ut_tx_stage_new(uint32_t device_count, uint32_t pipes_per_device);
 void
 dataplane_ut_tx_stage_free(struct dataplane_ut_tx_stage *fixture);
 
-// Take a packet from the mock pool, addressed to a device and carrying a
-// flow hash. Returns NULL on exhaustion.
+// Take a packet from the mock pool, carrying a flow hash. Returns NULL
+// on exhaustion.
 struct packet *
 dataplane_ut_tx_stage_packet(
-	struct dataplane_ut_tx_stage *fixture,
-	uint16_t tx_device_id,
-	uint32_t hash
+	struct dataplane_ut_tx_stage *fixture, uint32_t hash
 );
 
-// Offer one packet to the staging path.
+// Offer one packet to the staging path, addressed to a device.
 void
 dataplane_ut_tx_stage_offer(
-	struct dataplane_ut_tx_stage *fixture, struct packet *packet
+	struct dataplane_ut_tx_stage *fixture,
+	struct packet *packet,
+	uint16_t device_id
 );
 
 // Hand every pipe's held packets to their consumers.

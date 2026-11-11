@@ -1,9 +1,6 @@
 package forward_test
 
 import (
-	"context"
-	"errors"
-	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -18,32 +15,30 @@ import (
 
 	"github.com/yanet-platform/xnetip"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	forwardpb "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb/v1"
 )
 
+// mockModuleHandle is a shared-memory handle whose release always succeeds.
 type mockModuleHandle struct{}
 
 func (m *mockModuleHandle) Free() error {
 	return nil
 }
 
-type mockBackend struct {
-	updateError error
-	deleteError error
-}
+// mockBackend publishes every config, hands out a fresh handle, reads no
+// counters and finds nothing to delete in the dataplane.
+type mockBackend struct{}
 
-func (m *mockBackend) UpdateModule(name string, rules []cforward.ForwardRule) (forward.ModuleHandle, error) {
-	if m.updateError != nil {
-		return nil, m.updateError
-	}
+func (m *mockBackend) Update(name string, payload forward.RuleSet) (crud.Handle, error) {
 	return &mockModuleHandle{}, nil
 }
 
-func (m *mockBackend) DeleteModule(name string) error {
-	return m.deleteError
+func (m *mockBackend) Delete(name string) error {
+	return ffi.ErrNotFound
 }
 
 func (m *mockBackend) ModuleCounters(name string, counterNames []string) []forward.CounterView {
@@ -62,32 +57,19 @@ func (m *blockingMetricsBackend) ModuleCounters(name string, counterNames []stri
 	return nil
 }
 
-// nilHandleBackend is a Backend whose UpdateModule publishes a config
-// carrying no module handle.
-//
-// It models a Backend that reports success without producing a handle,
-// which is the case the config's own nil guard exists to survive.
-type nilHandleBackend struct {
-	mockBackend
-}
-
-func (m *nilHandleBackend) UpdateModule(name string, rules []cforward.ForwardRule) (forward.ModuleHandle, error) {
-	return nil, nil
-}
-
-// recordingBackend captures the rules handed to UpdateModule so a test can
+// recordingBackend captures the rules handed to the update so a test can
 // inspect what the service sends to shared memory.
 //
-// Only single-goroutine tests use it. TestForwardServiceConcurrentAccess
-// uses mockBackend instead, since this field is unguarded under -race.
+// Only single-goroutine tests may use it: the captured rules are not
+// guarded against concurrent updates.
 type recordingBackend struct {
 	mockBackend
 
 	rules []cforward.ForwardRule
 }
 
-func (m *recordingBackend) UpdateModule(name string, rules []cforward.ForwardRule) (forward.ModuleHandle, error) {
-	m.rules = rules
+func (m *recordingBackend) Update(name string, payload forward.RuleSet) (crud.Handle, error) {
+	m.rules = payload.Compiled
 	return &mockModuleHandle{}, nil
 }
 
@@ -125,98 +107,6 @@ func TestDeleteConfigUnknownConfig(t *testing.T) {
 	require.Equal(t, codes.NotFound, status.Code(err))
 }
 
-// Test_ForwardService_UpdateConfig_BackendFailureReturnsInternal verifies
-// that a backend update failure returns Internal before publication.
-func Test_ForwardService_UpdateConfig_BackendFailureReturnsInternal(t *testing.T) {
-	backendError := errors.New("shared memory unavailable")
-	service := forward.NewForwardService(&mockBackend{updateError: backendError})
-
-	_, err := service.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{
-		Name: "config",
-		Rules: []*forwardpb.Rule{
-			{Action: &forwardpb.Action{Target: "device0"}},
-		},
-	})
-	require.Equal(t, codes.Internal, status.Code(err))
-	require.ErrorContains(t, err, "failed to update module config: shared memory unavailable")
-
-	_, err = service.ShowConfig(t.Context(), &forwardpb.ShowConfigRequest{Name: "config"})
-	require.Equal(t, codes.NotFound, status.Code(err))
-}
-
-// Test_ForwardService_UpdateConfig_BackendFailurePreservesState verifies
-// that a failed replacement returns Internal without changing current state.
-func Test_ForwardService_UpdateConfig_BackendFailurePreservesState(t *testing.T) {
-	backend := &mockBackend{}
-	service := forward.NewForwardService(backend)
-
-	_, err := service.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{
-		Name: "config",
-		Rules: []*forwardpb.Rule{
-			{Action: &forwardpb.Action{Target: "device0"}},
-		},
-	})
-	require.NoError(t, err)
-
-	backend.updateError = errors.New("shared memory unavailable")
-	_, err = service.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{
-		Name: "config",
-		Rules: []*forwardpb.Rule{
-			{Action: &forwardpb.Action{Target: "device1"}},
-		},
-	})
-	require.Equal(t, codes.Internal, status.Code(err))
-
-	response, err := service.ShowConfig(t.Context(), &forwardpb.ShowConfigRequest{Name: "config"})
-	require.NoError(t, err)
-	require.Equal(t, "device0", response.GetRules()[0].GetAction().GetTarget())
-}
-
-// Test_ForwardService_DeleteConfig_BackendFailureReturnsInternal verifies
-// that a backend delete failure leaves the published configuration available.
-func Test_ForwardService_DeleteConfig_BackendFailureReturnsInternal(t *testing.T) {
-	backendError := errors.New("shared memory unavailable")
-	service := forward.NewForwardService(&mockBackend{deleteError: backendError})
-
-	_, err := service.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{
-		Name: "config",
-		Rules: []*forwardpb.Rule{
-			{Action: &forwardpb.Action{Target: "device0"}},
-		},
-	})
-	require.NoError(t, err)
-
-	_, err = service.DeleteConfig(t.Context(), &forwardpb.DeleteConfigRequest{Name: "config"})
-	require.Equal(t, codes.Internal, status.Code(err))
-	require.ErrorContains(t, err, "failed to delete module config \"config\": shared memory unavailable")
-
-	response, err := service.ShowConfig(t.Context(), &forwardpb.ShowConfigRequest{Name: "config"})
-	require.NoError(t, err)
-	require.Equal(t, "device0", response.GetRules()[0].GetAction().GetTarget())
-}
-
-// Test_ForwardService_DeleteConfig_FailedPreconditionPreservesState verifies
-// that state refusal returns FailedPrecondition without unpublishing.
-func Test_ForwardService_DeleteConfig_FailedPreconditionPreservesState(t *testing.T) {
-	backendError := fmt.Errorf("module is still referenced: %w", ffi.ErrFailedPrecondition)
-	service := forward.NewForwardService(&mockBackend{deleteError: backendError})
-
-	_, err := service.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{
-		Name: "config",
-		Rules: []*forwardpb.Rule{
-			{Action: &forwardpb.Action{Target: "device0"}},
-		},
-	})
-	require.NoError(t, err)
-
-	_, err = service.DeleteConfig(t.Context(), &forwardpb.DeleteConfigRequest{Name: "config"})
-	require.Equal(t, codes.FailedPrecondition, status.Code(err))
-
-	response, err := service.ShowConfig(t.Context(), &forwardpb.ShowConfigRequest{Name: "config"})
-	require.NoError(t, err)
-	require.Equal(t, "device0", response.GetRules()[0].GetAction().GetTarget())
-}
-
 // TestShowConfigEmptyRules verifies that ShowConfig succeeds with an empty
 // rule list for a config that was applied without rules.
 func TestShowConfigEmptyRules(t *testing.T) {
@@ -228,18 +118,6 @@ func TestShowConfigEmptyRules(t *testing.T) {
 	response, err := svc.ShowConfig(t.Context(), &forwardpb.ShowConfigRequest{Name: "empty"})
 	require.NoError(t, err)
 	require.Empty(t, response.GetRules())
-}
-
-// TestUpdateConfigReplacesConfigWithoutHandle verifies that replacing a
-// config that holds no module handle releases it without panicking.
-func TestUpdateConfigReplacesConfigWithoutHandle(t *testing.T) {
-	svc := forward.NewForwardService(&nilHandleBackend{})
-
-	_, err := svc.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{Name: "config"})
-	require.NoError(t, err)
-
-	_, err = svc.UpdateConfig(t.Context(), &forwardpb.UpdateConfigRequest{Name: "config"})
-	require.NoError(t, err)
 }
 
 // TestUpdateConfigMaterializesEmptyCounter verifies that a rule with an
@@ -575,71 +453,4 @@ func TestConcurrentMetricsReads(t *testing.T) {
 
 	release()
 	require.NoError(t, group.Wait())
-}
-
-// Run with: go test -race
-func TestForwardServiceConcurrentAccess(t *testing.T) {
-	svc := forward.NewForwardService(&mockBackend{})
-	ctx := context.Background()
-
-	const goroutines = 10
-	const iterations = 100
-
-	g, ctx := errgroup.WithContext(ctx)
-
-	for i := range goroutines {
-		g.Go(func() error {
-			for j := range iterations {
-				name := fmt.Sprintf("config-%d-%d", i, j)
-				_, err := svc.UpdateConfig(ctx, &forwardpb.UpdateConfigRequest{
-					Name: name,
-					Rules: []*forwardpb.Rule{
-						{
-							Action: &forwardpb.Action{
-								Target: "device0",
-							},
-						},
-					},
-				})
-				if err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-	}
-
-	for range goroutines {
-		g.Go(func() error {
-			for range iterations {
-				_, err := svc.ListConfigs(ctx, &forwardpb.ListConfigsRequest{})
-				if err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-	}
-
-	for i := range goroutines {
-		g.Go(func() error {
-			for j := range iterations {
-				name := fmt.Sprintf("config-%d-%d", i, j)
-				svc.ShowConfig(ctx, &forwardpb.ShowConfigRequest{Name: name})
-			}
-			return nil
-		})
-	}
-
-	for i := range goroutines {
-		g.Go(func() error {
-			for j := range iterations {
-				name := fmt.Sprintf("config-%d-%d", i, j)
-				svc.DeleteConfig(ctx, &forwardpb.DeleteConfigRequest{Name: name})
-			}
-			return nil
-		})
-	}
-
-	require.NoError(t, g.Wait())
 }

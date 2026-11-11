@@ -1,44 +1,90 @@
 package gateway
 
 import (
-	"bytes"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
-	"fmt"
 
 	"google.golang.org/grpc/credentials"
 
-	"github.com/yanet-platform/yanet2/common/go/xcfg"
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/common/go/xgrpc"
 )
 
-// TLSConfig holds the gateway server TLS material.
-//
-// Both files must be PEM-encoded.
+const (
+	// metricTLSCertificateNotAfter is the unix time the certificate a TLS
+	// listener serves for one key pair entry expires at.
+	metricTLSCertificateNotAfter = "gateway_tls_certificate_not_after_seconds"
+	// labelListener names the TLS listener a metric is about: grpcs or
+	// https.
+	labelListener = "listener"
+	// labelSource names the key pair entry a metric is about.
+	labelSource = "source"
+)
+
+// TLSConfig holds the certificates a gateway TLS listener serves.
 type TLSConfig struct {
-	// CertFile is the path to the PEM-encoded server certificate.
-	CertFile xcfg.NonEmptyString `yaml:"cert_file"`
-	// KeyFile is the path to the PEM-encoded server private key.
-	KeyFile xcfg.NonEmptyString `yaml:"key_file"`
+	// KeyPairs lists the certificates the listener serves, each with its
+	// private key.
+	//
+	// Required, at least one. A handshake gets the first pair that is valid
+	// and that the client supports, else the first pair. Renewed files are
+	// picked up without a restart.
+	KeyPairs []xgrpc.KeyPairConfig `yaml:"key_pairs"`
 }
 
-// ServerCredentials loads the cert/key pair and returns gRPC server
-// transport credentials.
+// Validate requires at least one key pair.
+func (m *TLSConfig) Validate() error {
+	if len(m.KeyPairs) == 0 {
+		return errors.New("key_pairs needs at least one entry")
+	}
+
+	return nil
+}
+
+// newCertificateStore loads the key pairs of a TLS listener into a store
+// that picks up renewed files without a restart.
 //
-// With clientCAs set the listener asks every client for a certificate and
-// verifies the one it gets against the pool clientCAs returns for that
+// Loading fails on an unreadable or mismatched pair, so a misconfigured
+// listener fails startup.
+func newCertificateStore(
+	config *TLSConfig,
+	options ...xgrpc.CertificateStoreOption,
+) (*xgrpc.CertificateStore, error) {
+	if err := config.Validate(); err != nil {
+		return nil, err
+	}
+
+	return xgrpc.NewCertificateStoreFromConfig(config.KeyPairs, options...)
+}
+
+// serverCredentials returns gRPC server transport credentials serving the
+// certificates of the store the way every gateway TLS listener does.
+func serverCredentials(
+	certificates *xgrpc.CertificateStore,
+	clientCAs func() *x509.CertPool,
+) credentials.TransportCredentials {
+	return credentials.NewTLS(serverTLSConfig(certificates, clientCAs))
+}
+
+// serverTLSConfig returns the configuration a gateway TLS listener serves
+// the certificates of the store with.
+//
+// Session tickets are off, since a resumed session carries over the client
+// certificate of the handshake it resumes. Given a source of client
+// authorities, the listener asks every client for a certificate and
+// verifies the one it gets against the pool the source returns for that
 // handshake, so a reloaded pool applies to new connections without a
 // restart. A client without a certificate is still accepted and
 // authenticates by other means.
-func (m *TLSConfig) ServerCredentials(clientCAs func() *x509.CertPool) (credentials.TransportCredentials, error) {
-	cert, err := tls.LoadX509KeyPair(m.CertFile.Unwrap(), m.KeyFile.Unwrap())
-	if err != nil {
-		return nil, fmt.Errorf("failed to load gateway TLS keypair: %w", err)
-	}
-
+func serverTLSConfig(
+	certificates *xgrpc.CertificateStore,
+	clientCAs func() *x509.CertPool,
+) *tls.Config {
 	config := &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		MinVersion:   tls.VersionTLS12,
+		GetCertificate:         certificates.GetCertificate,
+		MinVersion:             tls.VersionTLS12,
+		SessionTicketsDisabled: true,
 	}
 	if clientCAs != nil {
 		config.ClientAuth = tls.VerifyClientCertIfGiven
@@ -50,33 +96,36 @@ func (m *TLSConfig) ServerCredentials(clientCAs func() *x509.CertPool) (credenti
 		}
 	}
 
-	return credentials.NewTLS(config), nil
+	return config
 }
 
-// LoopbackCredentials returns client credentials that accept exactly the
-// certificate this config serves, for the hop the gateway makes into its
-// own server without leaving the process.
-//
-// Server credentials apply to every listener of a gRPC server, the
-// in-memory one included, so the loopback has to complete a TLS handshake.
-// Pinning replaces name and chain verification: the certificate need not
-// name any host for the loopback and no CA is consulted.
-func (m *TLSConfig) LoopbackCredentials() (credentials.TransportCredentials, error) {
-	cert, err := tls.LoadX509KeyPair(m.CertFile.Unwrap(), m.KeyFile.Unwrap())
-	if err != nil {
-		return nil, fmt.Errorf("failed to load gateway TLS keypair: %w", err)
+// listenerCertificates is the certificate store one TLS listener serves
+// from.
+type listenerCertificates struct {
+	// Listener names the listener: grpcs or https.
+	Listener string
+	// Store is the store the listener serves from.
+	Store *xgrpc.CertificateStore
+}
+
+// servedCertificates reports when the certificates the gateway TLS
+// listeners serve expire, one series per key pair entry.
+type servedCertificates []listenerCertificates
+
+// Collect reports the expiry of every served certificate, refreshing the
+// entries that are due first.
+func (m servedCertificates) Collect() []*commonpb.Metric {
+	var out []*commonpb.Metric
+	for _, listener := range m {
+		for _, leaf := range listener.Store.Leaves() {
+			out = append(out, commonpb.NewMetricGauge(
+				metricTLSCertificateNotAfter,
+				float64(leaf.Leaf.NotAfter.Unix()),
+				commonpb.NewLabel(labelListener, listener.Listener),
+				commonpb.NewLabel(labelSource, leaf.Source),
+			))
+		}
 	}
 
-	pinned := cert.Certificate[0]
-
-	return credentials.NewTLS(&tls.Config{
-		MinVersion:         tls.VersionTLS12,
-		InsecureSkipVerify: true,
-		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
-			if len(rawCerts) == 0 || !bytes.Equal(rawCerts[0], pinned) {
-				return errors.New("loopback peer did not present the gateway's own certificate")
-			}
-			return nil
-		},
-	}), nil
+	return out
 }

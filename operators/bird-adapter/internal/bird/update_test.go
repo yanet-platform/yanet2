@@ -528,8 +528,7 @@ func Benchmark_update_Decode(b *testing.B) {
 	// here would benchmark a path nothing runs.
 	log := zap.NewNop()
 
-	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		decoder, err := bird.NewUpdateDecoder(dataIPv6WithLargeCommunities, bird.WithUpdateDecoderLog(log))
 		if err != nil {
 			b.Logf("unexpected error: %v", err)

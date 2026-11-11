@@ -3,11 +3,6 @@ package cl3bobject
 
 //#cgo CFLAGS: -I../../../../../
 //#cgo CFLAGS: -I../../../../../lib
-//#cgo LDFLAGS: -L../../../../../build/objects/l3b/api -ll3b_objects
-//#cgo LDFLAGS: -L../../../../../build/lib/filter -lfilter_compiler
-//#cgo LDFLAGS: -L../../../../../build/lib/statemap -lstatemap
-//#cgo LDFLAGS: -L../../../../../build/lib/l3state -ll3state
-//#cgo LDFLAGS: -L../../../../../build/lib/counters -lcounters
 //
 //#include "api/agent.h"
 //#include "lib/l3state/l3state.h"
@@ -309,6 +304,19 @@ func CreateVirtualService(
 	cSessionTable := sessionTable.asRawPtr()
 	if cSessionTable == nil {
 		return nil, fmt.Errorf("session table object is nil")
+	}
+	for idx, real := range config.RealServers {
+		switch real.Type {
+		case IPv4:
+			if real.DestinationAddress.Is4() && real.SourceNet.Is4() {
+				continue
+			}
+		case IPv6:
+			if real.DestinationAddress.Is6() && real.SourceNet.Is6() {
+				continue
+			}
+		}
+		return nil, fmt.Errorf("real server %d: unsupported tunnel type or mismatched address families", idx)
 	}
 
 	pinner := &runtime.Pinner{}

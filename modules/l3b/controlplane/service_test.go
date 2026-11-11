@@ -1,18 +1,26 @@
 package l3b_test
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"math"
 	"net/netip"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"github.com/yanet-platform/xnetip"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/common/go/xgrpc"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	controlplane "github.com/yanet-platform/yanet2/modules/l3b/controlplane"
 	l3bpb "github.com/yanet-platform/yanet2/modules/l3b/controlplane/l3bpb/v1"
-	cl3bobject "github.com/yanet-platform/yanet2/objects/l3b/bindings/go/cl3bobject"
+	"github.com/yanet-platform/yanet2/modules/l3b/internal/testutils"
+	"github.com/yanet-platform/yanet2/objects/l3b/bindings/go/cl3bobject"
 )
 
 type mockBackend struct {
@@ -147,6 +155,55 @@ func Test_L3BService_CreateAndListService(t *testing.T) {
 	require.Len(t, backend.services, 1)
 }
 
+// Test_L3BService_CreateService_CapacityValidation verifies interceptor rejection
+// before the handler and preservation of direct-backend status by the service.
+func Test_L3BService_CreateService_CapacityValidation(t *testing.T) {
+	operations := &fakeSharedMemory{}
+	backend := controlplane.NewBackendWithSharedMemory(operations)
+	require.NoError(t, backend.CreateService(sampleService("existing")))
+	service := controlplane.NewL3BService(backend)
+	for _, name := range []string{"absent", "existing"} {
+		request := &l3bpb.CreateServiceRequest{Service: sampleService(name)}
+		request.Service.SessionIndexSize = math.MaxUint32
+		called := false
+		_, err := xgrpc.ValidateUnaryInterceptor()(
+			t.Context(), request, &grpc.UnaryServerInfo{},
+			func(ctx context.Context, message any) (any, error) {
+				called = true
+				return service.CreateService(ctx, message.(*l3bpb.CreateServiceRequest))
+			},
+		)
+		require.Equal(t, codes.InvalidArgument, status.Code(err))
+		require.False(t, called)
+		_, err = service.CreateService(t.Context(), request)
+		require.Equal(t, codes.InvalidArgument, status.Code(err))
+		require.Len(t, operations.Tables, 1)
+		require.Len(t, operations.Services, 1)
+	}
+}
+
+// Test_L3BService_CreateService_DuplicateName verifies that a repeated name
+// keeps the backend's duplicate status rather than an internal failure.
+func Test_L3BService_CreateService_DuplicateName(t *testing.T) {
+	service := controlplane.NewL3BService(
+		controlplane.NewBackendWithSharedMemory(&fakeSharedMemory{}),
+	)
+
+	response, err := service.CreateService(
+		t.Context(),
+		&l3bpb.CreateServiceRequest{Service: sampleService("vs0")},
+	)
+	require.NoError(t, err)
+	require.NotNil(t, response)
+
+	response, err = service.CreateService(
+		t.Context(),
+		&l3bpb.CreateServiceRequest{Service: sampleService("vs0")},
+	)
+	require.Equal(t, codes.AlreadyExists, status.Code(err))
+	require.Nil(t, response)
+}
+
 func Test_L3BService_UpdateServiceMissing(t *testing.T) {
 	svc, _ := newTestService(t)
 
@@ -169,6 +226,185 @@ func Test_L3BService_DeleteService(t *testing.T) {
 	resp, err := svc.ListServices(ctx, &l3bpb.ListServicesRequest{})
 	require.NoError(t, err)
 	require.Empty(t, resp.Services)
+}
+
+// Test_L3BService_DeleteService_LinkedModules verifies that every accepted link
+// blocks deletion without changing published state until the last unlink.
+func Test_L3BService_DeleteService_LinkedModules(t *testing.T) {
+	backend, agent, harness := newTestBackendFixture(t)
+	service := controlplane.NewL3BService(backend)
+	descriptor := serviceWithRealServer("vs0")
+	descriptor.SessionIndexSize = 16
+	_, err := service.CreateService(t.Context(), &l3bpb.CreateServiceRequest{Service: descriptor})
+	require.NoError(t, err)
+	for _, name := range []string{"cfg0", "cfg1"} {
+		_, err := service.UpdateModuleConfig(t.Context(), &l3bpb.UpdateModuleConfigRequest{
+			Config: &l3bpb.ModuleConfig{
+				Name:                   name,
+				DestinationFilterRules: []*l3bpb.DestinationFilterRule{{Service: "vs0"}},
+			},
+		})
+		require.NoError(t, err)
+	}
+	for _, name := range []string{"cfg0", "cfg1"} {
+		before, err := backend.GetService("vs0")
+		require.NoError(t, err)
+		require.False(t, before.RealServers[0].Enabled)
+		modules := agent.DPConfig().CPConfigs()
+		generation, err := harness.PublishedExecutionContext(0)
+		require.NoError(t, err)
+		require.NotZero(t, generation)
+		capacity := agent.BlockAllocatorFreeSize()
+		response, err := service.DeleteService(t.Context(), &l3bpb.DeleteServiceRequest{Name: "vs0"})
+		require.Equal(t, codes.FailedPrecondition, status.Code(err))
+		require.Nil(t, response)
+		after, err := backend.GetService("vs0")
+		require.NoError(t, err)
+		require.Equal(t, before, after)
+		require.Equal(t, []string{"vs0"}, backend.ListServices())
+		require.Equal(t, []string{"cfg0", "cfg1"}, backend.ListModuleConfigs())
+		require.ElementsMatch(t, modules, agent.DPConfig().CPConfigs())
+		current, err := harness.PublishedExecutionContext(0)
+		require.NoError(t, err)
+		require.Equal(t, generation, current)
+		require.Equal(t, capacity, agent.BlockAllocatorFreeSize())
+		_, err = service.UpdateModuleConfig(t.Context(), &l3bpb.UpdateModuleConfigRequest{
+			Config: &l3bpb.ModuleConfig{Name: name},
+		})
+		require.NoError(t, err)
+	}
+	modules := agent.DPConfig().CPConfigs()
+	response, err := service.DeleteService(t.Context(), &l3bpb.DeleteServiceRequest{Name: "vs0"})
+	require.NoError(t, err)
+	require.True(t, response.Deleted)
+	_, err = backend.GetService("vs0")
+	require.Equal(t, codes.NotFound, status.Code(err))
+	require.Empty(t, backend.ListServices())
+	require.Equal(t, []string{"cfg0", "cfg1"}, backend.ListModuleConfigs())
+	require.ElementsMatch(t, modules, agent.DPConfig().CPConfigs())
+	_, err = testutils.ReadRealRing(agent, "vs0", 1)
+	require.Error(t, err)
+}
+
+// Test_L3BService_DeleteService_Errors verifies that only reference refusals
+// return FailedPrecondition while other native failures remain Internal.
+func Test_L3BService_DeleteService_Errors(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		code codes.Code
+	}{
+		{"wrapped reference refusal", fmt.Errorf("native refusal: %w", ffi.ErrBusy), codes.FailedPrecondition},
+		{"wrapped native absence", fmt.Errorf("native absence: %w", ffi.ErrNotFound), codes.Internal},
+		{"unclassified failure", errors.New("deletion failed"), codes.Internal},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			operations := &fakeSharedMemory{}
+			backend := controlplane.NewBackendWithSharedMemory(operations)
+			require.NoError(t, backend.CreateService(serviceWithRealServer("vs0")))
+			service := controlplane.NewL3BService(backend)
+			operations.Hook = func(operation string) error {
+				if operation == "delete-service" {
+					return tc.err
+				}
+				return nil
+			}
+			response, err := service.DeleteService(t.Context(), &l3bpb.DeleteServiceRequest{Name: "vs0"})
+			require.Equal(t, tc.code, status.Code(err))
+			require.Nil(t, response)
+		})
+	}
+}
+
+// Test_L3BService_DeleteService_MissingName verifies that an unknown managed
+// service returns NotFound without attempting native deletion.
+func Test_L3BService_DeleteService_MissingName(t *testing.T) {
+	operations := &fakeSharedMemory{}
+	backend := controlplane.NewBackendWithSharedMemory(operations)
+	service := controlplane.NewL3BService(backend)
+	deletions := 0
+	operations.Hook = func(operation string) error {
+		if operation == "delete-service" {
+			deletions++
+			return ffi.ErrBusy
+		}
+		return nil
+	}
+	response, err := service.DeleteService(t.Context(), &l3bpb.DeleteServiceRequest{Name: "absent"})
+	require.Equal(t, codes.NotFound, status.Code(err))
+	require.Nil(t, response)
+	require.Zero(t, deletions)
+}
+
+// Test_L3BService_DeleteService_FailurePreservesOwnership verifies that native
+// deletion failures retain the managed snapshot and both owned handles.
+func Test_L3BService_DeleteService_FailurePreservesOwnership(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"wrapped reference refusal", fmt.Errorf("native refusal: %w", ffi.ErrBusy)},
+		{"wrapped native absence", fmt.Errorf("native absence: %w", ffi.ErrNotFound)},
+		{"unclassified failure", errors.New("deletion failed")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			operations := &fakeSharedMemory{}
+			backend := controlplane.NewBackendWithSharedMemory(operations)
+			require.NoError(t, backend.CreateService(serviceWithRealServer("vs0")))
+			service := controlplane.NewL3BService(backend)
+			before, err := backend.GetService("vs0")
+			require.NoError(t, err)
+			operations.Hook = func(operation string) error {
+				if operation == "delete-service" {
+					return tc.err
+				}
+				return nil
+			}
+			_, err = service.DeleteService(t.Context(), &l3bpb.DeleteServiceRequest{Name: "vs0"})
+			require.Error(t, err)
+			after, err := backend.GetService("vs0")
+			require.NoError(t, err)
+			require.Equal(t, before, after)
+			require.Equal(t, []string{"vs0"}, backend.ListServices())
+			require.Zero(t, operations.Services[0].FreeCalls.Load())
+			require.Zero(t, operations.Tables[0].FreeCalls.Load())
+		})
+	}
+}
+
+// Test_L3BService_DeleteService_RetryAfterFailure verifies that clearing a native
+// deletion failure allows the next attempt to delete the retained service.
+func Test_L3BService_DeleteService_RetryAfterFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"wrapped reference refusal", fmt.Errorf("native refusal: %w", ffi.ErrBusy)},
+		{"wrapped native absence", fmt.Errorf("native absence: %w", ffi.ErrNotFound)},
+		{"unclassified failure", errors.New("deletion failed")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			operations := &fakeSharedMemory{}
+			backend := controlplane.NewBackendWithSharedMemory(operations)
+			require.NoError(t, backend.CreateService(serviceWithRealServer("vs0")))
+			service := controlplane.NewL3BService(backend)
+			deletions := 0
+			operations.Hook = func(operation string) error {
+				if operation == "delete-service" {
+					deletions++
+					return tc.err
+				}
+				return nil
+			}
+			_, err := service.DeleteService(t.Context(), &l3bpb.DeleteServiceRequest{Name: "vs0"})
+			require.Error(t, err)
+			require.Equal(t, 1, deletions)
+			operations.Hook = nil
+			response, err := service.DeleteService(t.Context(), &l3bpb.DeleteServiceRequest{Name: "vs0"})
+			require.NoError(t, err)
+			require.True(t, response.Deleted)
+		})
+	}
 }
 
 func Test_L3BService_UpdateModuleConfigUnknownService(t *testing.T) {

@@ -12,7 +12,7 @@ manifests, or built-in packet scenarios, see [`docs/lab.md`](../../docs/lab.md).
 
 - Go version required by the repository.
 - QEMU with `qemu-system-x86_64` and `qemu-img`.
-- `hdiutil` on macOS or `mkisofs` on Linux for the cloud-init image.
+- `hdiutil` on macOS or `mkisofs` on Linux when creating a local cloud-init image.
 - A prepared functional-test image and Linux x86_64 guest artifacts.
 - YANET dataplane, controlplane, operator, and CLI binaries built before the
   VM starts.
@@ -32,6 +32,66 @@ make -C tests/functional test
 
 `make -C tests/functional check-deps` checks the host tools. The test target
 runs `go test -count=1 -v ./main/...` after preparing the image.
+
+### Existing Shared Image
+
+Export an existing image to avoid creating VM media in each worktree:
+
+```bash
+export YANET_QEMU_IMAGE="/srv/yanet/images/functional base.qcow2"
+make -C tests/functional prepare-vm
+make -C tests/functional test-main
+```
+
+A nonempty override must be an absolute path to a readable regular file; invalid
+paths fail without local fallback. Unset or empty values retain local preparation.
+Shared `prepare-vm` only validates the image, while test targets still require Go,
+QEMU and prepared guest artifacts. `check-deps` checks local tools.
+
+With direct invocation of this Makefile, exported values, ordinary command-line
+assignments and `make -e` preserve the image path literally. Command-line `:=`
+and `::=` assignments expand before Makefile loading; repository-root wrappers
+are outside this guarantee.
+
+Read-only preparation does not make runtime caches read-only. The harness writes
+templates beside the selected image and opens a writable sibling lock even when
+reusing a cached baseline. The image directory and cache/lock files must support
+these writes; runtime may replace caches and prune superseded sibling baselines.
+Make validation does not check QCOW2 correctness or discover backing chains.
+
+Run host functional tests serially across worktrees. The main package uses fixed
+VM pool names, so sharing an image does not provide concurrent-session isolation;
+an already-running same-named VM is rejected by the runtime.
+
+With a nonempty `YANET_QEMU_IMAGE`, `clean` and `clean-all` fail without deleting
+files or running Go, even when the selected image is missing. Local artifacts
+are left in place too. This restriction does not prevent runtime cache writes
+or pruning.
+
+`debug-vm` and `debug-vm-ssh` explicitly reject nonempty overrides before any
+image creation or QEMU startup. Unset the override to use these local-image
+debug targets.
+
+### Makefile Sandbox Regression
+
+Run the host-only contract checks as an unprivileged user, without real Go,
+QEMU, downloads or ISO generation:
+
+```bash
+bash -n tests/functional/test-makefile.sh
+bash tests/functional/test-makefile.sh
+bash tests/functional/test-makefile.sh default
+```
+
+The optional argument selects recipe mode: `bash` (the default) uses the
+invoking Bash; `default` uses Make's normal `/bin/sh` interpreter. Disposable
+fixtures check the adjacent Makefile's image selection and refusal contracts.
+Go is recorded; destructive and bootstrap tools record their invocation and
+fail without acting. Local cleanup and cold preparation are checked only up
+to the first blocked tool, not emulated. CI runs both modes without the VM suite.
+
+Default-shell coverage uses the current host's `/bin/sh`; CI exercises it on
+Ubuntu. It does not cover every Linux shell.
 
 ## Minimal Test Package
 
@@ -203,7 +263,9 @@ configuration hooks complete. For a custom package:
 3. Use `WithBootedVM` for tests that can start from the captured template.
 4. Use `Restore` when the package needs the baseline fast path and fallback.
 5. Use `PrepareLocalStorage`, `SaveSnapshot`, and `RestoreAndReconnect` only
-   when the test owns an additional snapshot lifecycle.
+   when the test owns an additional snapshot lifecycle. Calling
+   `PrepareLocalStorage` again after restoring such a snapshot refreshes the
+   guest's local copies from the current build.
 
 `SaveSnapshot` captures full VM state. 9P shares must be unmounted before a
 manual save; the framework handles this for its standard snapshot helpers.
@@ -213,6 +275,11 @@ manual save; the framework handles this for its standard snapshot helpers.
 Environment variables:
 
 - `YANET_QEMU_IMAGE` overrides the base image path.
+- `YANET_VM_CPUS` and `YANET_VM_MEMORY` (megabytes, optionally with an `M`
+  or `G` suffix, e.g. `2048` or `16G`) override the VM's vCPUs and RAM; unset
+  keeps today's 2 vCPUs and 1G. A non-default size names its own cached booted
+  and baseline templates, since a saved snapshot only loads into the machine
+  shape it was taken on.
 - `YANET_VM_POOL_SIZE` sets the number of pool slots.
 - `YANET_VM_READY_TIMEOUT` overrides readiness timeout with a Go duration such
   as `5m`.
@@ -247,6 +314,7 @@ tests/functional/
 ├── main/             primary functional test package and TestMain reference
 ├── testdata/         YAML and packet fixtures
 ├── Makefile          image, test, debug, and cleanup targets
+├── test-makefile.sh  standalone fake-tool Makefile regression
 └── README.md         this document
 ```
 

@@ -12,9 +12,11 @@ import (
 	"github.com/siderolabs/grpc-proxy/proxy"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/encoding/gzip"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/test/bufconn"
+
+	"github.com/yanet-platform/yanet2/common/go/xgrpc"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth"
 )
 
 // memoryListenerBufferSize is the per-connection buffer of an in-memory
@@ -48,7 +50,7 @@ func newBackend(
 		}),
 		grpc.WithDefaultCallOptions(
 			grpc.ForceCodecV2(proxy.Codec()),
-			grpc.UseCompressor(gzip.Name),
+			grpc.UseCompressor(xgrpc.ZstdName),
 			grpc.MaxCallRecvMsgSize(int(256*datasize.MB)),
 			grpc.MaxCallSendMsgSize(int(256*datasize.MB)),
 		),
@@ -96,10 +98,9 @@ func serve(server *grpc.Server, listener net.Listener) error {
 // listener without a network hop.
 //
 // The transport credentials must match what the server behind the listener
-// expects: plaintext for a server without credentials, the pinned loopback
-// credentials for the gateway's own TLS server. The address is only the
-// label the registry tracks the backend by: where the proxied services are
-// reachable from outside, which is the gateway's own address.
+// expects. The address is only the label the registry tracks the backend
+// by: where the proxied services are reachable from outside, which is the
+// gateway's own address.
 func dialMemoryBackend(
 	endpoint string,
 	listener *bufconn.Listener,
@@ -118,11 +119,25 @@ func (m *backend) Endpoint() string {
 	return m.endpoint
 }
 
-// GetConnection returns the underlying gRPC connection, forwarding incoming
-// metadata as outgoing metadata.
+// GetConnection returns the underlying gRPC connection, forwarding the
+// incoming metadata but for the caller's token and admission.
+//
+// The gateway has authenticated the call by then: a backend registered under
+// the service's name would otherwise collect the token of every caller, and
+// an admission means something to the gateway alone. A caller without
+// incoming metadata, such as the HTTP surface, keeps the outgoing metadata it
+// attached itself, the admission the loopback server lets its call in by.
 func (m *backend) GetConnection(ctx context.Context, _ string) (context.Context, *grpc.ClientConn, error) {
-	md, _ := metadata.FromIncomingContext(ctx)
-	return metadata.NewOutgoingContext(ctx, md.Copy()), m.conn, nil
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return ctx, m.conn, nil
+	}
+
+	outgoing := md.Copy()
+	delete(outgoing, auth.TokenMetadataKey)
+	delete(outgoing, auth.AdmissionMetadataKey)
+
+	return metadata.NewOutgoingContext(ctx, outgoing), m.conn, nil
 }
 
 // AppendInfo passes the response bytes through unchanged.

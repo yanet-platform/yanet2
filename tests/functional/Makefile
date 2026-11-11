@@ -1,3 +1,9 @@
+# Exported image paths remain literal during parse-time host detection.
+ifneq ("$(value YANET_QEMU_IMAGE)","")
+override YANET_QEMU_IMAGE := $(value YANET_QEMU_IMAGE)
+export YANET_QEMU_IMAGE
+endif
+
 # Test configuration
 QEMU_IMAGE := yanet-test.qcow2
 BOOTED_TEMPLATE := yanet-test-booted-v3.qcow2
@@ -6,6 +12,7 @@ UBUNTU_IMAGE := ubuntu-24.04-minimal-cloudimg-amd64.img
 UBUNTU_URL := https://cloud-images.ubuntu.com/minimal/releases/noble/release/$(UBUNTU_IMAGE)
 CLOUD_INIT_AUTOLOGIN_ISO := cloud-init-autologin.iso
 QEMU_AUTOINIT := -drive file=$(CLOUD_INIT_AUTOLOGIN_ISO),if=virtio,format=raw
+
 # Detect OS
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
@@ -22,18 +29,29 @@ else
 	endif
 endif
 
-.PHONY: all test clean prepare-vm check-deps test-enhanced test-basic debug-vm debug-dry-run test-login
+.PHONY: all test test-main test-run clean clean-all prepare-vm check-deps check-image test-enhanced test-basic debug-vm debug-vm-ssh debug-dry-run test-login
 
 # Default target
 all: test
 
 
 
-# Prepare test environment: base image only.
-# The versioned booted template overlay is created automatically
-# on the first 'make test-main' run if it does not already exist.
-# To force recreation of snapshot templates: make clean
+# Preparation creates only the local base or validates an external input.
+#
+# Runtime tests create missing snapshot templates beside the selected image.
+# Local-mode cleanup forces local template recreation; Make retains shared caches.
+ifneq ("$(value YANET_QEMU_IMAGE)","")
+prepare-vm: check-image
+test-run: check-image
+
+check-image:
+	@case "$$YANET_QEMU_IMAGE" in /*) ;; *) echo "YANET_QEMU_IMAGE must be absolute" >&2; exit 1;; esac
+	@test -f "$$YANET_QEMU_IMAGE" && test -r "$$YANET_QEMU_IMAGE" || { echo "YANET_QEMU_IMAGE must be a readable regular file" >&2; exit 1; }
+else
 prepare-vm: check-deps $(QEMU_IMAGE)
+endif
+
+prepare-vm:
 	@echo "Test environment ready"
 
 # Install dependencies
@@ -67,6 +85,10 @@ ifdef TEST
 endif
 
 # Clean test artifacts
+ifneq ("$(value YANET_QEMU_IMAGE)","")
+clean clean-all:
+	@echo "Cleanup is disabled while YANET_QEMU_IMAGE is set; no files were removed" >&2; exit 1
+else
 clean:
 	@echo "Cleaning test artifacts..."
 	rm -f $(QEMU_IMAGE)
@@ -82,7 +104,9 @@ clean-all: clean
 	@echo "Cleaning all artifacts including downloaded images..."
 	rm -f $(UBUNTU_IMAGE)
 	@echo "Full clean completed"
+endif
 
+ifeq ("$(value YANET_QEMU_IMAGE)","")
 # Create QEMU image
 $(QEMU_IMAGE): $(UBUNTU_IMAGE) $(CLOUD_INIT_AUTOLOGIN_ISO)
 	@echo "Creating QEMU image..."
@@ -193,8 +217,13 @@ endif
 $(UBUNTU_IMAGE):
 	@echo "Downloading Ubuntu cloud image..."
 	wget -c $(UBUNTU_URL)
+endif
 
 # Debug targets
+ifneq ("$(value YANET_QEMU_IMAGE)","")
+debug-vm debug-vm-ssh:
+	@echo "Direct debug targets cannot use YANET_QEMU_IMAGE; unset it to use a local image" >&2; exit 1
+else
 debug-vm: $(QEMU_IMAGE)
 	@echo "Starting VM in debug mode with passwordless login..."
 	@echo "VM will start with serial console output and automatic login"
@@ -220,6 +249,7 @@ debug-vm-ssh: $(QEMU_IMAGE)
 
 	# Start QEMU in debug mode (no cloud-init)
 	$(call run_qemu_ssh,)
+endif
 
 # Show help
 help:
@@ -233,6 +263,9 @@ help:
 	@echo ""
 	@echo "  prepare-vm       - Prepare VM environment with autologin"
 	@echo "  check-deps       - Check and install dependencies"
+ifneq ("$(value YANET_QEMU_IMAGE)","")
+	@echo "  check-image      - Validate the existing shared input"
+endif
 	@echo ""
 	@echo "  clean            - Clean test artifacts"
 	@echo "  clean-all        - Clean everything including downloaded images"
@@ -245,4 +278,10 @@ help:
 	@echo "  QEMU_IMAGE: $(QEMU_IMAGE)"
 	@echo "  UBUNTU_IMAGE: $(UBUNTU_IMAGE)"
 	@echo "  CLOUD_INIT_AUTOLOGIN_ISO: $(CLOUD_INIT_AUTOLOGIN_ISO)"
+	@printf '  YANET_QEMU_IMAGE: %s\n' "$${YANET_QEMU_IMAGE-}"
+	@echo ""
+	@echo "Shared input: nonempty YANET_QEMU_IMAGE requires an absolute readable regular file."
+	@echo "  Preparation validates only; unset/empty keeps local image creation."
+	@echo "  Direct debug and cleanup targets reject shared mode without changing files."
+	@echo "Sandbox regression: bash test-makefile.sh (no real VM or Go execution)."
 	@echo ""

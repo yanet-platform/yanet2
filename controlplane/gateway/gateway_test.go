@@ -7,32 +7,44 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
-	"crypto/x509/pkix"
-	"encoding/pem"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
 	"io"
-	"math/big"
 	"net"
 	"net/http"
-	"os"
-	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
+	"golang.org/x/crypto/ssh"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
+	"gopkg.in/yaml.v3"
 
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/common/go/operator"
+	"github.com/yanet-platform/yanet2/common/go/testutils/tlscert"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
+	"github.com/yanet-platform/yanet2/common/go/xgrpc"
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/gateway"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/sshcert"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
@@ -135,65 +147,37 @@ func newFreeAddress(t *testing.T) string {
 	return address
 }
 
-// newTestServerTLS issues a throwaway self-signed certificate for 127.0.0.1,
-// writes the PEM pair under the test's temporary directory and returns the
-// file paths with a pool trusting that certificate.
+// newTestServerTLS issues a throwaway server certificate for 127.0.0.1 from
+// a private CA and returns its PEM files with a pool trusting that CA.
 func newTestServerTLS(t *testing.T) (certFile, keyFile string, pool *x509.CertPool) {
 	t.Helper()
 
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	require.NoError(t, err)
+	ca := tlscert.NewCA(t)
+	server := ca.IssueServer(t, "127.0.0.1")
 
-	template := &x509.Certificate{
-		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "gateway.test"},
-		NotBefore:             time.Now().Add(-time.Minute),
-		NotAfter:              time.Now().Add(time.Hour),
-		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		BasicConstraintsValid: true,
-		IsCA:                  true,
-		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1")},
-	}
-	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
-	require.NoError(t, err)
-
-	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
-	require.NoError(t, err)
-
-	dir := t.TempDir()
-	certFile = filepath.Join(dir, "server.pem")
-	keyFile = filepath.Join(dir, "server.key")
-	require.NoError(t, os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600))
-	require.NoError(t, os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}), 0o600))
-
-	leaf, err := x509.ParseCertificate(der)
-	require.NoError(t, err)
-	pool = x509.NewCertPool()
-	pool.AddCert(leaf)
-
-	return certFile, keyFile, pool
+	return server.CertFile, server.KeyFile, ca.Pool()
 }
 
 // Test_Gateway_HTTPProxy_ReachesBuiltinOverTLS verifies that with server TLS
 // configured the HTTP surface still reaches gateway-hosted services.
-//
-// Server credentials apply to every listener, the in-memory one included, so
-// the in-process loopback has to complete the handshake they impose.
 func Test_Gateway_HTTPProxy_ReachesBuiltinOverTLS(t *testing.T) {
 	t.Parallel()
 
 	certFile, keyFile, pool := newTestServerTLS(t)
 
+	httpListener := NewTestListener(t)
 	cfg := gateway.DefaultConfig()
-	cfg.Server.HTTPEndpoint = newFreeAddress(t)
+	cfg.Server.HTTPEndpoint = httpListener.Addr().String()
 	cfg.Server.TLS = &gateway.TLSConfig{
-		CertFile: xcfg.MustNonEmptyString(certFile),
-		KeyFile:  xcfg.MustNonEmptyString(keyFile),
+		KeyPairs: []xgrpc.KeyPairConfig{tlscert.FileKeyPair(t, certFile, keyFile)},
 	}
 
 	listener := NewTestListener(t)
-	gw, err := gateway.NewGateway(cfg, gateway.WithLog(zap.NewNop()), gateway.WithListener(listener))
+	gw, err := gateway.NewGateway(cfg,
+		gateway.WithLog(zap.NewNop()),
+		gateway.WithListener(listener),
+		gateway.WithHTTPListener(httpListener),
+	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = gw.Close() })
 
@@ -229,6 +213,558 @@ func Test_Gateway_HTTPProxy_ReachesBuiltinOverTLS(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, statusCode, string(body))
 	require.Contains(t, string(body), "controlplane.ynpb.v1.Gateway")
+}
+
+// newClientTLSCredentials returns client transport credentials trusting
+// only the certificates in pool.
+func newClientTLSCredentials(pool *x509.CertPool) credentials.TransportCredentials {
+	return credentials.NewTLS(&tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12})
+}
+
+// runGateway runs a gateway built from cfg and the given options until the
+// test ends, failing the test if the run ends with an error.
+//
+// A silent log applies before the given options, so they may replace it.
+func runGateway(t *testing.T, cfg gateway.Config, options ...gateway.GatewayOption) {
+	t.Helper()
+
+	defaults := []gateway.GatewayOption{gateway.WithLog(zap.NewNop())}
+	gw, err := gateway.NewGateway(cfg, append(defaults, options...)...)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = gw.Close() })
+
+	ctx, cancel := context.WithCancel(t.Context())
+	var group errgroup.Group
+	group.Go(func() error { return gw.Run(ctx) })
+	t.Cleanup(func() {
+		cancel()
+		require.NoError(t, group.Wait())
+	})
+}
+
+// newTLSListenerConfig returns a TLS listener config at endpoint serving the
+// given PEM pair.
+func newTLSListenerConfig(t *testing.T, endpoint, certFile, keyFile string) *gateway.TLSListenerConfig {
+	t.Helper()
+
+	return &gateway.TLSListenerConfig{
+		Endpoint: xcfg.MustNonEmptyString(endpoint),
+		KeyPairs: []xgrpc.KeyPairConfig{tlscert.FileKeyPair(t, certFile, keyFile)},
+	}
+}
+
+// startDedicatedTLSGateway runs a gateway whose gRPC section serves
+// plaintext on one listener and TLS with the given PEM pair on another until
+// the test ends, returning the plaintext listener and then the TLS one.
+//
+// Both listeners are pre-bound and injected in place of the section's
+// endpoints. The given options apply after the listeners and a silent log.
+func startDedicatedTLSGateway(
+	t *testing.T,
+	cfg gateway.Config,
+	certFile, keyFile string,
+	options ...gateway.GatewayOption,
+) (net.Listener, net.Listener) {
+	t.Helper()
+
+	plaintext := NewTestListener(t)
+	secure := NewTestListener(t)
+	cfg.Server.GRPC = &gateway.ListenerConfig{
+		Endpoint: plaintext.Addr().String(),
+		TLS:      newTLSListenerConfig(t, secure.Addr().String(), certFile, keyFile),
+	}
+
+	listeners := []gateway.GatewayOption{
+		gateway.WithListener(plaintext),
+		gateway.WithTLSListener(secure),
+	}
+	runGateway(t, cfg, append(listeners, options...)...)
+
+	return plaintext, secure
+}
+
+// dialGateway opens a client connection to address with the given transport
+// credentials, closed when the test ends.
+func dialGateway(t *testing.T, address string, transportCredentials credentials.TransportCredentials) *grpc.ClientConn {
+	t.Helper()
+
+	conn, err := grpc.NewClient(address, grpc.WithTransportCredentials(transportCredentials))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	return conn
+}
+
+// requireListServices fails the test unless conn reaches the gateway's own
+// service listing within a bounded wait.
+func requireListServices(t *testing.T, conn *grpc.ClientConn) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	_, err := ynpb.NewGatewayClient(conn).ListServices(ctx, &ynpb.ListServicesRequest{}, grpc.WaitForReady(true))
+	require.NoError(t, err)
+}
+
+// requireHTTPListServices fails the test unless the HTTP surface at baseURL
+// answers the gateway's own service listing within a bounded wait.
+func requireHTTPListServices(t *testing.T, client *http.Client, baseURL string) {
+	t.Helper()
+
+	url := baseURL + "/api/controlplane.ynpb.v1.Gateway/ListServices"
+
+	var body []byte
+	var statusCode int
+	require.Eventually(t, func() bool {
+		response, postErr := client.Post(url, "application/json", strings.NewReader("{}"))
+		if postErr != nil {
+			return false
+		}
+		defer func() { _ = response.Body.Close() }()
+
+		body, postErr = io.ReadAll(response.Body)
+		statusCode = response.StatusCode
+		return postErr == nil
+	}, 5*time.Second, 50*time.Millisecond, "HTTP proxy did not answer")
+
+	require.Equal(t, http.StatusOK, statusCode, string(body))
+	require.Contains(t, string(body), "controlplane.ynpb.v1.Gateway")
+}
+
+// Test_Gateway_DedicatedTLS_ServesEveryBackendKindOnBothListeners verifies
+// that with a gRPC section serving plaintext and TLS side by side, a
+// plaintext and a TLS client alike reach a built-in, an in-process and an
+// external service.
+func Test_Gateway_DedicatedTLS_ServesEveryBackendKindOnBothListeners(t *testing.T) {
+	t.Parallel()
+
+	certFile, keyFile, pool := newTestServerTLS(t)
+	plaintextListener, tlsListener := startDedicatedTLSGateway(
+		t, gateway.DefaultConfig(), certFile, keyFile, gateway.WithService(&healthService{}),
+	)
+
+	backendListener := NewTestListener(t)
+	backend := grpc.NewServer()
+	backend.RegisterService(&cancelProbeServiceDesc, &auditProbeServer{})
+	go func() { _ = backend.Serve(backendListener) }()
+	t.Cleanup(backend.Stop)
+
+	plaintext := dialGateway(t, plaintextListener.Addr().String(), insecure.NewCredentials())
+	secure := dialGateway(t, tlsListener.Addr().String(), newClientTLSCredentials(pool))
+
+	request := &ynpb.RegisterRequest{Backend: &ynpb.BackendDesc{
+		Name:     cancelProbeServiceName,
+		Endpoint: backendListener.Addr().String(),
+	}}
+	registerCtx, cancelRegister := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancelRegister()
+	_, err := ynpb.NewGatewayClient(plaintext).Register(registerCtx, request, grpc.WaitForReady(true))
+	require.NoError(t, err)
+
+	clients := []struct {
+		name string
+		conn *grpc.ClientConn
+	}{
+		{name: "plaintext", conn: plaintext},
+		{name: "TLS", conn: secure},
+	}
+	cases := []struct {
+		name  string
+		reach func(t *testing.T, conn *grpc.ClientConn)
+	}{
+		{
+			name:  "built-in",
+			reach: requireListServices,
+		},
+		{
+			name: "in-process",
+			reach: func(t *testing.T, conn *grpc.ClientConn) {
+				// The runner registers the module after Run starts, so the
+				// check is retried while the service is still unknown, each
+				// attempt under a deadline of its own.
+				var response *grpc_health_v1.HealthCheckResponse
+				require.Eventually(t, func() bool {
+					ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+					defer cancel()
+
+					var checkErr error
+					response, checkErr = grpc_health_v1.NewHealthClient(conn).Check(ctx, &grpc_health_v1.HealthCheckRequest{})
+					return checkErr == nil
+				}, 5*time.Second, 50*time.Millisecond, "in-process service did not answer")
+				require.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, response.GetStatus())
+			},
+		},
+		{
+			name: "external",
+			reach: func(t *testing.T, conn *grpc.ClientConn) {
+				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+				defer cancel()
+
+				err := conn.Invoke(ctx, cancelProbeFullMethod, &emptypb.Empty{}, &emptypb.Empty{})
+				require.Equal(t, codes.FailedPrecondition, status.Code(err), "backend rejection must come back: %v", err)
+			},
+		},
+	}
+
+	for _, client := range clients {
+		for _, tc := range cases {
+			t.Run(client.name+" client reaches "+tc.name+" service", func(t *testing.T) {
+				tc.reach(t, client.conn)
+			})
+		}
+	}
+}
+
+// Test_Gateway_DedicatedTLS_TLSListenerRefusesPlaintextClient verifies that
+// a plaintext client is not served on the dedicated TLS listener, so the TLS
+// port never serves plaintext.
+func Test_Gateway_DedicatedTLS_TLSListenerRefusesPlaintextClient(t *testing.T) {
+	t.Parallel()
+
+	certFile, keyFile, pool := newTestServerTLS(t)
+	plaintextListener, tlsListener := startDedicatedTLSGateway(t, gateway.DefaultConfig(), certFile, keyFile)
+	tlsAddress := tlsListener.Addr().String()
+
+	// Both listeners already serve their own protocol, so the refusal below
+	// comes from the mismatch rather than from a gateway still starting.
+	requireListServices(t, dialGateway(t, plaintextListener.Addr().String(), insecure.NewCredentials()))
+	requireListServices(t, dialGateway(t, tlsAddress, newClientTLSCredentials(pool)))
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	client := ynpb.NewGatewayClient(dialGateway(t, tlsAddress, insecure.NewCredentials()))
+	_, err := client.ListServices(ctx, &ynpb.ListServicesRequest{})
+	require.Equal(t, codes.Unavailable, status.Code(err), "%v", err)
+}
+
+// connectionAgeHealthService holds one unary call and a stream until released.
+//
+// Response headers identify the TCP connection serving each unary call.
+type connectionAgeHealthService struct {
+	grpc_health_v1.UnimplementedHealthServer
+	Started chan string
+	Release chan struct{}
+}
+
+func (m *connectionAgeHealthService) Name() string     { return "connection-age-health" }
+func (m *connectionAgeHealthService) Endpoint() string { return "" }
+
+func (m *connectionAgeHealthService) ServicesNames() []string {
+	return []string{grpc_health_v1.Health_ServiceDesc.ServiceName}
+}
+
+func (m *connectionAgeHealthService) RegisterService(server *grpc.Server) {
+	grpc_health_v1.RegisterHealthServer(server, m)
+}
+
+func (m *connectionAgeHealthService) Check(
+	ctx context.Context,
+	request *grpc_health_v1.HealthCheckRequest,
+) (*grpc_health_v1.HealthCheckResponse, error) {
+	remote, ok := peer.FromContext(ctx)
+	if !ok || remote.Addr == nil {
+		return nil, status.Error(codes.Internal, "missing transport peer")
+	}
+	// Committing headers prevents a held call from being transparently replayed.
+	if err := grpc.SendHeader(ctx, metadata.Pairs("test-peer", remote.Addr.String())); err != nil {
+		return nil, err
+	}
+	if request.GetService() == "hold" {
+		select {
+		case m.Started <- remote.Addr.String():
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		select {
+		case <-m.Release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return &grpc_health_v1.HealthCheckResponse{Status: grpc_health_v1.HealthCheckResponse_SERVING}, nil
+}
+
+func (m *connectionAgeHealthService) Watch(
+	request *grpc_health_v1.HealthCheckRequest,
+	stream grpc.ServerStreamingServer[grpc_health_v1.HealthCheckResponse],
+) error {
+	if err := stream.Send(&grpc_health_v1.HealthCheckResponse{Status: grpc_health_v1.HealthCheckResponse_SERVING}); err != nil {
+		return err
+	}
+	select {
+	case <-m.Release:
+	case <-stream.Context().Done():
+		return stream.Context().Err()
+	}
+	return stream.Send(&grpc_health_v1.HealthCheckResponse{Status: grpc_health_v1.HealthCheckResponse_NOT_SERVING})
+}
+
+// Test_Gateway_TLSConnectionAge_ReconnectsWithoutRPCFailures verifies that
+// repeated TLS retirement preserves active calls and keeps new RPCs successful.
+//
+// One client keeps issuing unary calls while a held call and a stream remain
+// open across reconnects.
+func Test_Gateway_TLSConnectionAge_ReconnectsWithoutRPCFailures(t *testing.T) {
+	t.Parallel()
+
+	ca := tlscert.NewCA(t)
+	server := ca.IssueServer(t, "127.0.0.1")
+	certificate := ca.IssueClient(t, "route-operator")
+	listener := NewTestListener(t)
+	config := gateway.DefaultConfig()
+	config.Auth = newX509AuthConfig(t, ca)
+	config.Server.GRPC = &gateway.ListenerConfig{
+		TLS: newTLSListenerConfig(t, listener.Addr().String(), server.CertFile, server.KeyFile),
+	}
+	config.Server.GRPC.TLS.MaxConnectionAge = time.Second
+	service := &connectionAgeHealthService{
+		Started: make(chan string, 1),
+		Release: make(chan struct{}),
+	}
+	runGateway(t, config,
+		gateway.WithTLSListener(listener),
+		gateway.WithBuiltinService(service),
+	)
+	connection, err := operator.DialGateway(
+		operator.GatewayConfig{
+			Name:     "connection-age",
+			Endpoint: xcfg.MustNonEmptyString(listener.Addr().String()),
+			TLS: &xgrpc.ClientTLSConfig{
+				CAFile: ca.BundleFile(),
+				KeyPairs: []xgrpc.KeyPairConfig{
+					tlscert.FileKeyPair(t, certificate.CertFile, certificate.KeyFile),
+				},
+			},
+		},
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, connection.Close()) })
+	client := grpc_health_v1.NewHealthClient(connection)
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	var wg errgroup.Group
+	heldDone := make(chan struct{})
+	defer func() {
+		cancel()
+		_ = wg.Wait()
+	}()
+	wg.Go(func() error {
+		defer close(heldDone)
+		response, err := client.Check(ctx, &grpc_health_v1.HealthCheckRequest{Service: "hold"})
+		if err != nil {
+			return err
+		}
+		if response.GetStatus() != grpc_health_v1.HealthCheckResponse_SERVING {
+			return fmt.Errorf("held call returned %s", response.GetStatus())
+		}
+		return nil
+	})
+	peers := map[string]struct{}{}
+	select {
+	case address := <-service.Started:
+		peers[address] = struct{}{}
+	case <-heldDone:
+		require.NoError(t, wg.Wait(), "held call failed before reaching the gateway")
+		t.Fatal("held call completed before release")
+	case <-ctx.Done():
+		t.Fatal("held call did not reach the gateway:", ctx.Err())
+	}
+	stream, err := client.Watch(ctx, &grpc_health_v1.HealthCheckRequest{})
+	require.NoError(t, err)
+	response, err := stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, response.GetStatus())
+
+	// Successful calls from four peers prove three usable replacement transports.
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for len(peers) < 4 {
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			t.Fatalf("expected three reconnects, saw %d peers: %v", len(peers), ctx.Err())
+		}
+		callContext, cancelCall := context.WithTimeout(ctx, 2*time.Second)
+		var headers metadata.MD
+		response, err := client.Check(callContext, &grpc_health_v1.HealthCheckRequest{}, grpc.Header(&headers))
+		cancelCall()
+		require.NoError(t, err, "unary call failed during TLS retirement")
+		require.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, response.GetStatus())
+		addresses := headers.Get("test-peer")
+		require.Len(t, addresses, 1)
+		peers[addresses[0]] = struct{}{}
+	}
+
+	close(service.Release)
+	require.NoError(t, wg.Wait(), "held unary call failed across TLS retirement")
+	response, err = stream.Recv()
+	require.NoError(t, err, "stream failed across TLS retirement")
+	require.Equal(t, grpc_health_v1.HealthCheckResponse_NOT_SERVING, response.GetStatus())
+	_, err = stream.Recv()
+	require.ErrorIs(t, err, io.EOF)
+}
+
+// Test_Gateway_SectionsFromYAML_ReplaceDeprecatedEndpoint verifies that Run
+// binds the gRPC and HTTP sections decoded from YAML, plaintext and TLS
+// alike, and ignores the deprecated endpoint beside them, which points at an
+// occupied address.
+func Test_Gateway_SectionsFromYAML_ReplaceDeprecatedEndpoint(t *testing.T) {
+	t.Parallel()
+
+	certFile, keyFile, pool := newTestServerTLS(t)
+	occupied := NewTestListener(t)
+	plaintextAddress := newFreeAddress(t)
+	tlsAddress := newFreeAddress(t)
+	httpAddress := newFreeAddress(t)
+
+	text := "endpoint: " + strconv.Quote(occupied.Addr().String()) + "\n" +
+		"grpc:\n" +
+		"  endpoint: " + strconv.Quote(plaintextAddress) + "\n" +
+		"  tls:\n" +
+		"    endpoint: " + strconv.Quote(tlsAddress) + "\n" +
+		"    key_pairs:\n" +
+		"      - type: file\n" +
+		"        config:\n" +
+		"          cert_file: " + strconv.Quote(certFile) + "\n" +
+		"          key_file: " + strconv.Quote(keyFile) + "\n" +
+		"http:\n" +
+		"  endpoint: " + strconv.Quote(httpAddress) + "\n"
+	cfg := gateway.DefaultConfig()
+	require.NoError(t, xcfg.Decode([]byte(text), &cfg.Server, xcfg.WithKnownFields()))
+
+	runGateway(t, cfg)
+
+	requireListServices(t, dialGateway(t, plaintextAddress, insecure.NewCredentials()))
+	requireListServices(t, dialGateway(t, tlsAddress, newClientTLSCredentials(pool)))
+	requireHTTPListServices(t, &http.Client{Timeout: 5 * time.Second}, "http://"+httpAddress)
+}
+
+// Test_Gateway_TLSOnly_HTTPSReachesBuiltin verifies that with gRPC served
+// over TLS alone, the HTTPS listener of the HTTP section still reaches a
+// built-in service through the in-memory loopback.
+func Test_Gateway_TLSOnly_HTTPSReachesBuiltin(t *testing.T) {
+	t.Parallel()
+
+	certFile, keyFile, pool := newTestServerTLS(t)
+	secure := NewTestListener(t)
+	httpsListener := NewTestListener(t)
+	httpsAddress := httpsListener.Addr().String()
+
+	cfg := gateway.DefaultConfig()
+	cfg.Server.GRPC = &gateway.ListenerConfig{
+		TLS: newTLSListenerConfig(t, secure.Addr().String(), certFile, keyFile),
+	}
+	cfg.Server.HTTP = &gateway.ListenerConfig{
+		TLS: newTLSListenerConfig(t, httpsAddress, certFile, keyFile),
+	}
+	runGateway(t, cfg, gateway.WithTLSListener(secure), gateway.WithHTTPSListener(httpsListener))
+
+	requireListServices(t, dialGateway(t, secure.Addr().String(), newClientTLSCredentials(pool)))
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12},
+		},
+		Timeout: 5 * time.Second,
+	}
+	requireHTTPListServices(t, client, "https://"+httpsAddress)
+}
+
+// countingHealthService is a Service whose health checker counts the checks
+// that reach it.
+type countingHealthService struct {
+	grpc_health_v1.UnimplementedHealthServer
+	checks atomic.Int32
+}
+
+func (m *countingHealthService) Name() string     { return "counting-health" }
+func (m *countingHealthService) Endpoint() string { return "" }
+
+func (m *countingHealthService) ServicesNames() []string {
+	return []string{grpc_health_v1.Health_ServiceDesc.ServiceName}
+}
+
+func (m *countingHealthService) RegisterService(server *grpc.Server) {
+	grpc_health_v1.RegisterHealthServer(server, m)
+}
+
+func (m *countingHealthService) Check(
+	ctx context.Context,
+	request *grpc_health_v1.HealthCheckRequest,
+) (*grpc_health_v1.HealthCheckResponse, error) {
+	m.checks.Add(1)
+	return &grpc_health_v1.HealthCheckResponse{Status: grpc_health_v1.HealthCheckResponse_SERVING}, nil
+}
+
+// Test_Gateway_HTTP_RejectsCrossOriginFromUntrustedOrigin verifies that a
+// cross-site browser POST that needs no preflight never reaches a backend,
+// while a same-origin page and a trusted origin are served.
+func Test_Gateway_HTTP_RejectsCrossOriginFromUntrustedOrigin(t *testing.T) {
+	t.Parallel()
+
+	const trustedOrigin = "https://ui.example"
+	grpcListener, httpListener := NewTestListener(t), NewTestListener(t)
+	httpAddress := httpListener.Addr().String()
+	health := &countingHealthService{}
+
+	cfg := gateway.DefaultConfig()
+	cfg.Server.GRPC = &gateway.ListenerConfig{Endpoint: grpcListener.Addr().String()}
+	cfg.Server.HTTP = &gateway.ListenerConfig{
+		Endpoint:       httpAddress,
+		TrustedOrigins: []string{trustedOrigin},
+	}
+	runGateway(t, cfg,
+		gateway.WithBuiltinService(health),
+		gateway.WithListener(grpcListener),
+		gateway.WithHTTPListener(httpListener),
+	)
+
+	url := "http://" + httpAddress + "/api/" + grpc_health_v1.Health_Check_FullMethodName[1:]
+	client := &http.Client{Timeout: 5 * time.Second}
+	post := func(site, origin string) (*http.Response, error) {
+		request, err := http.NewRequest(http.MethodPost, url, strings.NewReader("{}"))
+		require.NoError(t, err)
+		request.Header.Set("Content-Type", "text/plain")
+		request.Header.Set("Sec-Fetch-Site", site)
+		request.Header.Set("Origin", origin)
+		return client.Do(request)
+	}
+
+	cases := []struct {
+		name   string
+		site   string
+		origin string
+		status int
+		cors   string
+	}{
+		{name: "cross-site", site: "cross-site", origin: "https://evil.example", status: http.StatusForbidden},
+		{name: "same-origin", site: "same-origin", origin: "http://" + httpAddress, status: http.StatusOK},
+		{name: "trusted", site: "cross-site", origin: trustedOrigin, status: http.StatusOK, cors: trustedOrigin},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			before := health.checks.Load()
+
+			var response *http.Response
+			require.Eventually(t, func() bool {
+				var err error
+				response, err = post(tc.site, tc.origin)
+				return err == nil
+			}, 5*time.Second, 50*time.Millisecond, "HTTP server did not answer")
+			defer func() { _ = response.Body.Close() }()
+			body, err := io.ReadAll(response.Body)
+			require.NoError(t, err)
+
+			require.Equal(t, tc.status, response.StatusCode, string(body))
+			require.Equal(t, tc.cors, response.Header.Get("Access-Control-Allow-Origin"))
+			wantChecks := before
+			if tc.status == http.StatusOK {
+				wantChecks++
+			}
+			require.Equal(t, wantChecks, health.checks.Load())
+		})
+	}
 }
 
 // lifecycleService is a Service recording that its background job ran and
@@ -532,6 +1068,51 @@ func TestGateway_Run_BindsOwnListenerWhenNoneInjected(t *testing.T) {
 	require.ErrorContains(t, gw.Run(t.Context()), "failed to initialize gRPC listener")
 }
 
+// Test_Gateway_Run_BindsConfiguredHTTPListeners verifies that the gateway
+// binds every HTTP endpoint it was configured with and not handed.
+//
+// Each endpoint points at an address a held-open listener keeps occupied, so
+// the bind deterministically fails rather than racing another process for
+// the port.
+func Test_Gateway_Run_BindsConfiguredHTTPListeners(t *testing.T) {
+	t.Parallel()
+
+	certFile, keyFile, _ := newTestServerTLS(t)
+	for _, tc := range []struct {
+		name string
+		http func(endpoint string) *gateway.ListenerConfig
+	}{
+		{
+			name: "plaintext endpoint",
+			http: func(endpoint string) *gateway.ListenerConfig {
+				return &gateway.ListenerConfig{Endpoint: endpoint}
+			},
+		},
+		{
+			name: "tls endpoint",
+			http: func(endpoint string) *gateway.ListenerConfig {
+				return &gateway.ListenerConfig{TLS: newTLSListenerConfig(t, endpoint, certFile, keyFile)}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			occupied := NewTestListener(t)
+			cfg := gateway.DefaultConfig()
+			cfg.Server.HTTP = tc.http(occupied.Addr().String())
+
+			gw, err := gateway.NewGateway(cfg, gateway.WithLog(zap.NewNop()), gateway.WithListener(NewTestListener(t)))
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = gw.Close() })
+
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			require.ErrorContains(t, gw.Run(ctx), "address already in use")
+		})
+	}
+}
+
 // TestGateway_Director_RegistryMissCarriesReasonTrailer verifies that a
 // NotFound for a service the registry has no backend for keeps the exact
 // "unknown service" message and also carries the errorReasonMetadataKey
@@ -781,6 +1362,155 @@ func TestGateway_RunRegistrySweeper_ZeroTTLFallsBack(t *testing.T) {
 	require.NoError(t, group.Wait())
 }
 
+// findRegisteredService looks up a service by name in a ListServices
+// response, returning the entry and whether it was found.
+func findRegisteredService(response *ynpb.ListServicesResponse, name string) (*ynpb.RegisteredBackend, bool) {
+	for _, entry := range response.GetServices() {
+		if entry.GetBackend().GetName() == name {
+			return entry, true
+		}
+	}
+	return nil, false
+}
+
+// Test_Gateway_RunRegistrySweeper_SparesHeartbeatRegistration verifies that
+// a service kept registered by the operator registration heartbeat survives
+// many registry sweeps that evict a sibling registered only once.
+//
+// It reproduces a production outage where an operator that registered once
+// vanished from the gateway as soon as the sweeper's TTL elapsed. Both the
+// looped service and the one-shot control run against the same gateway, so
+// the contrast shares one sweeper and one clock.
+func Test_Gateway_RunRegistrySweeper_SparesHeartbeatRegistration(t *testing.T) {
+	t.Parallel()
+
+	cfg := gateway.DefaultConfig()
+	listener := NewTestListener(t)
+	cfg.Registry.TTL = xcfg.MustNonZero(time.Second)
+	cfg.Registry.SweepInterval = xcfg.MustNonZero(25 * time.Millisecond)
+
+	gw, err := gateway.NewGateway(cfg, gateway.WithLog(zap.NewNop()), gateway.WithListener(listener))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = gw.Close() })
+
+	ctx, cancel := context.WithCancel(t.Context())
+	wg, wgContext := errgroup.WithContext(ctx)
+	defer func() {
+		cancel()
+		require.ErrorIs(t, wg.Wait(), context.Canceled)
+	}()
+
+	wg.Go(func() error {
+		return gw.Run(wgContext)
+	})
+
+	connection, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = connection.Close() })
+
+	client := ynpb.NewGatewayClient(connection)
+
+	require.Eventually(t, func() bool {
+		_, listErr := client.ListServices(t.Context(), &ynpb.ListServicesRequest{})
+		return listErr == nil
+	}, 5*time.Second, 50*time.Millisecond, "failed to reach the gateway's ListServices RPC")
+
+	loopedServiceName := "test.LoopedService"
+	oneShotServiceName := "test.OneShotService"
+	// These are registry keys only: registration records the address
+	// without ever connecting to it, and nothing in this test calls a
+	// method that would dial either one. TEST-NET-1 (RFC 5737) addresses
+	// stand in as self-evidently unreachable values.
+	loopedBackendAddr := "192.0.2.1:0"
+	oneShotBackendAddr := "192.0.2.2:0"
+
+	_, err = client.Register(t.Context(), &ynpb.RegisterRequest{Backend: &ynpb.BackendDesc{
+		Name:     oneShotServiceName,
+		Endpoint: oneShotBackendAddr,
+	}})
+	require.NoError(t, err)
+
+	heartbeat := operator.NewGatewayRegRunner(
+		[]operator.GatewayConfig{{
+			Name:     "test",
+			Endpoint: xcfg.MustNonEmptyString(listener.Addr().String()),
+		}},
+		[]string{loopedServiceName},
+		loopedBackendAddr,
+		operator.WithGatewayRegInterval(100*time.Millisecond),
+	)
+	wg.Go(func() error {
+		return heartbeat.Run(wgContext)
+	})
+
+	// Vacuity guard: both services must actually reach the registry as
+	// sweeper-eligible external backends, otherwise the eviction and
+	// survival assertions below would trivially hold for entries the
+	// sweeper never considers.
+	var firstLoopedLastSeenAt time.Time
+	require.Eventually(t, func() bool {
+		response, listErr := client.ListServices(t.Context(), &ynpb.ListServicesRequest{})
+		if listErr != nil {
+			return false
+		}
+
+		loopedEntry, loopedFound := findRegisteredService(response, loopedServiceName)
+		oneShotEntry, oneShotFound := findRegisteredService(response, oneShotServiceName)
+		if !loopedFound || !oneShotFound {
+			return false
+		}
+		if loopedEntry.GetKind() != ynpb.BackendKind_BACKEND_KIND_EXTERNAL {
+			return false
+		}
+		if oneShotEntry.GetKind() != ynpb.BackendKind_BACKEND_KIND_EXTERNAL {
+			return false
+		}
+
+		firstLoopedLastSeenAt = loopedEntry.GetLastSeenAt().AsTime()
+		return true
+	}, 5*time.Second, 20*time.Millisecond, "both services must register as external backends before the eviction race begins")
+
+	// Negative control: the one-shot registration is never refreshed, so
+	// the sweeper must evict it once the TTL elapses. This also proves the
+	// sweeper is alive and that at least one TTL window has passed.
+	require.Eventually(t, func() bool {
+		response, listErr := client.ListServices(t.Context(), &ynpb.ListServicesRequest{})
+		if listErr != nil {
+			return false
+		}
+		_, found := findRegisteredService(response, oneShotServiceName)
+		return !found
+	}, 5*time.Second, 10*time.Millisecond, "sweeper must evict a one-shot registration once its TTL elapses")
+
+	// Positive case: from the moment the one-shot control is gone, the
+	// looped service must survive many further sweep ticks, because its
+	// registration heartbeat keeps refreshing the last-seen timestamp.
+	require.Never(t, func() bool {
+		response, listErr := client.ListServices(ctx, &ynpb.ListServicesRequest{})
+		if listErr != nil {
+			return true
+		}
+		_, found := findRegisteredService(response, loopedServiceName)
+		return !found
+	}, 1500*time.Millisecond, 5*time.Millisecond, "a service kept alive by the registration heartbeat must not be evicted by the sweeper")
+
+	finalResponse, err := client.ListServices(t.Context(), &ynpb.ListServicesRequest{})
+	require.NoError(t, err)
+
+	// Refresh, not a frozen entry: presence alone would also hold for an
+	// entry the sweeper simply never examined, so the timestamp itself
+	// must have advanced past the first observation.
+	loopedEntry, found := findRegisteredService(finalResponse, loopedServiceName)
+	require.True(t, found, "looped service must still be present at the end of the test")
+	require.True(t, loopedEntry.GetLastSeenAt().AsTime().After(firstLoopedLastSeenAt),
+		"looped service's last-seen timestamp must have advanced across sweeps, not stayed frozen")
+
+	// The control stays gone, so the earlier eviction assertion cannot be
+	// satisfied by a transient blip that later re-appears.
+	_, oneShotStillFound := findRegisteredService(finalResponse, oneShotServiceName)
+	require.False(t, oneShotStillFound, "one-shot registration must remain evicted")
+}
+
 func hasService(services []*ynpb.RegisteredBackend, name string) bool {
 	for _, service := range services {
 		if service.GetBackend().GetName() == name {
@@ -953,4 +1683,520 @@ func Test_GatewayService_Register_RejectsInvalidRequest(t *testing.T) {
 			require.Equal(t, tc.message, statusErr.Message())
 		})
 	}
+}
+
+// auditProbeServer returns a backend failure so proxy logs must retain its status.
+type auditProbeServer struct{}
+
+func (m *auditProbeServer) Probe(ctx context.Context, request *emptypb.Empty) (*emptypb.Empty, error) {
+	return nil, status.Error(codes.FailedPrecondition, "operation rejected")
+}
+
+// newAuditSigner returns an ephemeral P-256 signer usable for SSH certificates.
+func newAuditSigner(t *testing.T) ssh.Signer {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	signer, err := ssh.NewSignerFromKey(key)
+	require.NoError(t, err)
+	return signer
+}
+
+// signAuditToken binds a certificate identity to one RPC and timestamp.
+func signAuditToken(t *testing.T, authority, signer ssh.Signer, method string) string {
+	t.Helper()
+	certificate := &ssh.Certificate{
+		Key:             signer.PublicKey(),
+		CertType:        ssh.UserCert,
+		ValidPrincipals: []string{"verified-operator"},
+		ValidAfter:      uint64(time.Now().Add(-time.Hour).Unix()),
+		ValidBefore:     uint64(time.Now().Add(time.Hour).Unix()),
+	}
+	require.NoError(t, certificate.SignCert(rand.Reader, authority))
+	token := sshcert.Token{
+		Version:     1,
+		Certificate: base64.StdEncoding.EncodeToString(certificate.Marshal()),
+		Timestamp:   time.Now().UnixNano(),
+		Nonce:       "audit-test-nonce",
+		Method:      method,
+	}
+	signature, err := signer.Sign(rand.Reader, token.CanonicalSignedData())
+	require.NoError(t, err)
+	token.Signature = base64.StdEncoding.EncodeToString(ssh.Marshal(signature))
+	payload, err := json.Marshal(token)
+	require.NoError(t, err)
+	return "sshcert " + base64.StdEncoding.EncodeToString(payload)
+}
+
+// Test_Gateway_Audit_LogsVerifiedAndAnonymousRPCOutcomes verifies that audit logs
+// record verified or anonymous identities with the original RPC outcome.
+//
+// Account stores are absent and both built-in and proxy requests are exercised.
+func Test_Gateway_Audit_LogsVerifiedAndAnonymousRPCOutcomes(t *testing.T) {
+	authority := newAuditSigner(t)
+	signer := newAuditSigner(t)
+	trustPath := writeTestFile(t, "ssh-ca.pub", string(ssh.MarshalAuthorizedKey(authority.PublicKey())))
+	config := gateway.DefaultConfig()
+	require.NoError(t, yaml.Unmarshal([]byte("mode: audit\nauthenticators:\n  - type: sshcert\n    config:\n      ca_sources: ["+trustPath+"]\n"), &config.Auth))
+	logCore, logs := observer.New(zap.DebugLevel)
+	listener := NewTestListener(t)
+	gatewayServer, err := gateway.NewGateway(config, gateway.WithListener(listener), gateway.WithLog(zap.New(logCore)))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, gatewayServer.Close()) })
+	ctx, cancel := context.WithCancel(t.Context())
+	var group errgroup.Group
+	group.Go(func() error { return gatewayServer.Run(ctx) })
+	t.Cleanup(func() { cancel(); require.NoError(t, group.Wait()) })
+
+	backendListener := NewTestListener(t)
+	backend := grpc.NewServer()
+	backend.RegisterService(&cancelProbeServiceDesc, &auditProbeServer{})
+	go func() { _ = backend.Serve(backendListener) }()
+	t.Cleanup(backend.Stop)
+	connection, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, connection.Close()) })
+	client := ynpb.NewGatewayClient(connection)
+	_, err = client.Register(t.Context(), &ynpb.RegisterRequest{Backend: &ynpb.BackendDesc{Name: cancelProbeServiceName, Endpoint: backendListener.Addr().String()}}, grpc.WaitForReady(true))
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name     string
+		kind     string
+		verified bool
+	}{
+		{name: "signed trusted certificate", kind: "valid", verified: true},
+		{name: "missing credential", kind: "missing"},
+		{name: "unsupported credential", kind: "unsupported"},
+		{name: "malformed credential", kind: "malformed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, method := range []string{ynpb.Gateway_ListServices_FullMethodName, cancelProbeFullMethod} {
+				token := signAuditToken(t, authority, signer, method)
+				switch tc.kind {
+				case "missing":
+					token = ""
+				case "unsupported":
+					token = "unsupported secret-credential"
+				case "malformed":
+					token = "sshcert !!!secret-credential"
+				}
+				callContext := metadata.NewOutgoingContext(t.Context(), metadata.Pairs("x-yanet-authentication", token))
+				logs.TakeAll()
+				if method == cancelProbeFullMethod {
+					err = connection.Invoke(callContext, method, &emptypb.Empty{}, &emptypb.Empty{})
+					require.Equal(t, codes.FailedPrecondition, status.Code(err))
+				} else {
+					_, err = client.ListServices(callContext, &ynpb.ListServicesRequest{})
+					require.NoError(t, err)
+				}
+				require.Eventually(t, func() bool {
+					return logs.FilterField(zap.String("method", method)).FilterMessageSnippet("gRPC").FilterFieldKey("status").Len() == 1
+				}, time.Second, time.Millisecond)
+				entries := logs.FilterField(zap.String("method", method)).FilterFieldKey("status").All()
+				require.Len(t, entries, 1)
+				fields := entries[0].ContextMap()
+				user, authMethod := "anonymous", "none"
+				if tc.verified {
+					user, authMethod = "verified-operator", "sshcert"
+				}
+				require.Equal(t, user, fields["user"])
+				require.Equal(t, authMethod, fields["auth_method"])
+				require.Equal(t, !tc.verified, fields["is_anonymous"])
+				require.Contains(t, fields, "duration")
+				require.Equal(t, status.Code(err).String(), fields["status"])
+				for _, entry := range logs.All() {
+					rendered := fmt.Sprint(entry.ContextMap())
+					if token != "" {
+						require.NotContains(t, rendered, token)
+					}
+					require.NotContains(t, rendered, "secret-credential")
+				}
+			}
+		})
+	}
+
+	malformedCertificate := sshcert.Token{
+		Version:     1,
+		Certificate: base64.StdEncoding.EncodeToString(ssh.Marshal(struct{ Algorithm string }{"introspection-secret"})),
+		Timestamp:   time.Now().UnixNano(),
+		Nonce:       "audit-test-nonce",
+		Method:      ynpb.AuthService_IntrospectToken_FullMethodName,
+		Signature:   "unused",
+	}
+	malformedPayload, err := json.Marshal(malformedCertificate)
+	require.NoError(t, err)
+	authClient := ynpb.NewAuthServiceClient(connection)
+	for _, tc := range []struct {
+		token        string
+		parsingError bool
+	}{
+		{token: "sshcert !!!introspection-secret"},
+		{token: "unsupported introspection-secret"},
+		{token: "sshcert " + base64.StdEncoding.EncodeToString(malformedPayload), parsingError: true},
+	} {
+		logs.TakeAll()
+		_, err := authClient.IntrospectToken(t.Context(), &ynpb.IntrospectTokenRequest{Token: tc.token})
+		require.Equal(t, codes.Unauthenticated, status.Code(err))
+		if tc.parsingError {
+			require.ErrorContains(t, err, "ssh: unknown key algorithm: introspection-secret")
+		}
+		for _, entry := range logs.All() {
+			require.NotContains(t, fmt.Sprint(entry.ContextMap()), "introspection-secret")
+		}
+	}
+}
+
+// Test_Gateway_HTTPProxy_AuthenticatesHeaderToken verifies that
+// introspecting an HTTP call reports the principal of its token.
+func Test_Gateway_HTTPProxy_AuthenticatesHeaderToken(t *testing.T) {
+	t.Parallel()
+
+	authority := newAuditSigner(t)
+	signer := newAuditSigner(t)
+	trustPath := writeTestFile(t, "ssh-ca.pub", string(ssh.MarshalAuthorizedKey(authority.PublicKey())))
+	cfg := gateway.DefaultConfig()
+	require.NoError(t, yaml.Unmarshal([]byte("mode: audit\nauthenticators:\n  - type: sshcert\n    config:\n      ca_sources: ["+trustPath+"]\n"), &cfg.Auth))
+	httpListener := NewTestListener(t)
+	cfg.Server.HTTP = &gateway.ListenerConfig{Endpoint: httpListener.Addr().String()}
+	runGateway(t, cfg, gateway.WithListener(NewTestListener(t)), gateway.WithHTTPListener(httpListener))
+
+	method := ynpb.AuthService_IntrospectToken_FullMethodName
+	token := signAuditToken(t, authority, signer, method)
+	url := "http://" + cfg.Server.HTTP.Endpoint + "/api" + method
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	var body []byte
+	var statusCode int
+	require.Eventually(t, func() bool {
+		request, requestErr := http.NewRequest(http.MethodPost, url, strings.NewReader("{}"))
+		if requestErr != nil {
+			return false
+		}
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("X-Yanet-Authentication", token)
+
+		response, postErr := client.Do(request)
+		if postErr != nil {
+			return false
+		}
+		defer func() { _ = response.Body.Close() }()
+
+		body, postErr = io.ReadAll(response.Body)
+		statusCode = response.StatusCode
+		return postErr == nil
+	}, 5*time.Second, 50*time.Millisecond, "HTTP proxy did not answer")
+	require.Equal(t, http.StatusOK, statusCode, string(body))
+
+	var response ynpb.IntrospectTokenResponse
+	require.NoError(t, json.Unmarshal(body, &response))
+	require.Equal(t, "verified-operator", response.GetPrincipal().GetUser())
+	require.Equal(t, "sshcert", response.GetPrincipal().GetAuthMethod())
+}
+
+// Test_Gateway_HTTPProxy_AuthorizesEveryBackendKind verifies that a caller
+// the permissions do not cover never reaches a service over HTTP.
+func Test_Gateway_HTTPProxy_AuthorizesEveryBackendKind(t *testing.T) {
+	t.Parallel()
+
+	operatorToken := "basic " + base64.StdEncoding.EncodeToString([]byte("alice:s3cret"))
+	for _, kind := range []struct {
+		name string
+		kind gateway.BackendKind
+	}{
+		{name: "framework service", kind: gateway.BackendKindBuiltin},
+		{name: "in-process module", kind: gateway.BackendKindInProcess},
+		{name: "external operator", kind: gateway.BackendKindExternal},
+	} {
+		t.Run(kind.name, func(t *testing.T) {
+			t.Parallel()
+
+			ca := tlscert.NewCA(t)
+			server := ca.IssueServer(t, "127.0.0.1")
+			httpListener, httpsListener := NewTestListener(t), NewTestListener(t)
+			httpAddress, httpsAddress := httpListener.Addr().String(), httpsListener.Addr().String()
+			cfg := gateway.DefaultConfig()
+			cfg.Auth = newX509AuthConfig(t, ca)
+			cfg.Server.HTTP = &gateway.ListenerConfig{
+				Endpoint: httpAddress,
+				TLS:      newTLSListenerConfig(t, httpsAddress, server.CertFile, server.KeyFile),
+			}
+
+			health := &countingHealthService{}
+			listener := NewTestListener(t)
+			options := []gateway.GatewayOption{
+				gateway.WithListener(listener),
+				gateway.WithHTTPListener(httpListener),
+				gateway.WithHTTPSListener(httpsListener),
+			}
+			switch kind.kind {
+			case gateway.BackendKindBuiltin:
+				options = append(options, gateway.WithBuiltinService(health))
+			case gateway.BackendKindInProcess:
+				options = append(options, gateway.WithService(health))
+			}
+			runGateway(t, cfg, options...)
+
+			if kind.kind == gateway.BackendKindExternal {
+				backendListener := NewTestListener(t)
+				backend := grpc.NewServer()
+				grpc_health_v1.RegisterHealthServer(backend, health)
+				go func() { _ = backend.Serve(backendListener) }()
+				t.Cleanup(backend.Stop)
+
+				connection, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+				require.NoError(t, err)
+				t.Cleanup(func() { _ = connection.Close() })
+				registerContext := metadata.AppendToOutgoingContext(t.Context(), "x-yanet-authentication", operatorToken)
+				_, err = ynpb.NewGatewayClient(connection).Register(registerContext, &ynpb.RegisterRequest{
+					Backend: &ynpb.BackendDesc{
+						Name:     grpc_health_v1.Health_ServiceDesc.ServiceName,
+						Endpoint: backendListener.Addr().String(),
+					},
+				}, grpc.WaitForReady(true))
+				require.NoError(t, err)
+			}
+
+			method := "/api" + grpc_health_v1.Health_Check_FullMethodName
+			for _, tc := range []struct {
+				name         string
+				url          string
+				token        string
+				certificates []tls.Certificate
+				status       int
+			}{
+				{name: "anonymous over plaintext", url: "http://" + httpAddress + method, status: http.StatusForbidden},
+				{name: "operator token over plaintext", url: "http://" + httpAddress + method, token: operatorToken, status: http.StatusOK},
+				{
+					name:         "trusted certificate over https",
+					url:          "https://" + httpsAddress + method,
+					certificates: []tls.Certificate{ca.IssueClient(t, "route-operator").Certificate},
+					status:       http.StatusOK,
+				},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					client := &http.Client{
+						Transport: &http.Transport{
+							TLSClientConfig: &tls.Config{
+								RootCAs:      ca.Pool(),
+								Certificates: tc.certificates,
+								MinVersion:   tls.VersionTLS12,
+							},
+							ForceAttemptHTTP2: true,
+						},
+						Timeout: 5 * time.Second,
+					}
+					before := health.checks.Load()
+
+					var body []byte
+					var statusCode int
+					require.Eventually(t, func() bool {
+						request, requestErr := http.NewRequest(http.MethodPost, tc.url, strings.NewReader("{}"))
+						if requestErr != nil {
+							return false
+						}
+						request.Header.Set("Content-Type", "application/json")
+						if tc.token != "" {
+							request.Header.Set("X-Yanet-Authentication", tc.token)
+						}
+
+						response, postErr := client.Do(request)
+						if postErr != nil {
+							return false
+						}
+						defer func() { _ = response.Body.Close() }()
+
+						body, postErr = io.ReadAll(response.Body)
+						statusCode = response.StatusCode
+						return postErr == nil && statusCode != http.StatusServiceUnavailable
+					}, 5*time.Second, 50*time.Millisecond, "HTTP proxy did not reach the service")
+
+					require.Equal(t, tc.status, statusCode, string(body))
+					wantChecks := before
+					if tc.status == http.StatusOK {
+						wantChecks++
+					}
+					require.Equal(t, wantChecks, health.checks.Load())
+				})
+			}
+		})
+	}
+}
+
+// Test_Gateway_HTTPProxy_KeepsLoopbackWhenItsNamesAreTakenOver verifies that
+// the gateway's own services stay reachable over HTTP after such a takeover.
+func Test_Gateway_HTTPProxy_KeepsLoopbackWhenItsNamesAreTakenOver(t *testing.T) {
+	t.Parallel()
+
+	httpListener := NewTestListener(t)
+	httpAddress := httpListener.Addr().String()
+	cfg := gateway.DefaultConfig()
+	listener := NewTestListener(t)
+	runGateway(t, cfg, gateway.WithListener(listener), gateway.WithHTTPListener(httpListener))
+
+	connection, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = connection.Close() })
+	client := ynpb.NewGatewayClient(connection)
+	foreignEndpoint := NewTestListener(t).Addr().String()
+	for _, service := range []string{
+		ynpb.Gateway_ServiceDesc.ServiceName,
+		ynpb.AuthService_ServiceDesc.ServiceName,
+		ynpb.ReadinessService_ServiceDesc.ServiceName,
+		ynpb.MetricsService_ServiceDesc.ServiceName,
+		ynpb.PortMetricsService_ServiceDesc.ServiceName,
+	} {
+		_, err := client.Register(t.Context(), &ynpb.RegisterRequest{
+			Backend: &ynpb.BackendDesc{Name: service, Endpoint: foreignEndpoint},
+		}, grpc.WaitForReady(true))
+		require.NoError(t, err)
+	}
+
+	httpClient := &http.Client{Timeout: 5 * time.Second}
+	url := "http://" + httpAddress + "/api" + ynpb.Gateway_ListServices_FullMethodName
+
+	var body []byte
+	var statusCode int
+	require.Eventually(t, func() bool {
+		response, postErr := httpClient.Post(url, "application/json", strings.NewReader("{}"))
+		if postErr != nil {
+			return false
+		}
+		defer func() { _ = response.Body.Close() }()
+
+		body, postErr = io.ReadAll(response.Body)
+		statusCode = response.StatusCode
+		return postErr == nil
+	}, 5*time.Second, 50*time.Millisecond, "HTTP server did not answer")
+
+	require.Equal(t, http.StatusOK, statusCode, string(body))
+}
+
+// startEnforcingHTTPGateway runs a gateway enforcing the x509 test policy
+// and returns its HTTP base URL, once it answers, and its gRPC address.
+//
+// Both listeners are plaintext.
+func startEnforcingHTTPGateway(t *testing.T) (string, string) {
+	t.Helper()
+
+	ca := tlscert.NewCA(t)
+	server := ca.IssueServer(t, "127.0.0.1")
+	httpListener, httpsListener := NewTestListener(t), NewTestListener(t)
+	cfg := gateway.DefaultConfig()
+	cfg.Auth = newX509AuthConfig(t, ca)
+	cfg.Server.HTTP = &gateway.ListenerConfig{
+		Endpoint: httpListener.Addr().String(),
+		TLS:      newTLSListenerConfig(t, httpsListener.Addr().String(), server.CertFile, server.KeyFile),
+	}
+	grpcListener := NewTestListener(t)
+	runGateway(t, cfg,
+		gateway.WithListener(grpcListener),
+		gateway.WithHTTPListener(httpListener),
+		gateway.WithHTTPSListener(httpsListener),
+	)
+
+	url := "http://" + httpListener.Addr().String()
+	response, body := postUntilAnswered(t, &http.Client{Timeout: 5 * time.Second}, url+"/api"+ynpb.Gateway_ListServices_FullMethodName)
+	require.Equal(t, http.StatusOK, response.StatusCode, string(body))
+
+	return url, grpcListener.Addr().String()
+}
+
+// Test_Gateway_HTTPProxy_RefusesCallBeforeItsBody verifies that an HTTP call
+// its caller may not make is answered before its body arrives.
+func Test_Gateway_HTTPProxy_RefusesCallBeforeItsBody(t *testing.T) {
+	t.Parallel()
+
+	url, _ := startEnforcingHTTPGateway(t)
+
+	// The body never arrives; past the wait it fails, so a gateway that reads
+	// it first fails the call instead of hanging.
+	body, writer := io.Pipe()
+	t.Cleanup(func() { _ = writer.Close() })
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	stop := context.AfterFunc(ctx, func() { _ = writer.CloseWithError(ctx.Err()) })
+	defer stop()
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, url+"/api"+ynpb.Gateway_Register_FullMethodName, body)
+	require.NoError(t, err)
+
+	response, err := http.DefaultClient.Do(request)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = response.Body.Close() })
+	require.Equal(t, http.StatusForbidden, response.StatusCode)
+}
+
+// Test_Gateway_HTTPProxy_BoundsAnonymousBody verifies that an anonymous HTTP
+// call may send a body of a mebibyte at most, an authenticated one more.
+//
+// The bound holds while authentication is enforced.
+func Test_Gateway_HTTPProxy_BoundsAnonymousBody(t *testing.T) {
+	t.Parallel()
+
+	url, _ := startEnforcingHTTPGateway(t)
+	body := "{}" + strings.Repeat(" ", 1<<20)
+
+	for _, tc := range []struct {
+		name   string
+		token  string
+		status int
+	}{
+		{name: "anonymous caller", status: http.StatusRequestEntityTooLarge},
+		{name: "authenticated caller", token: "basic " + base64.StdEncoding.EncodeToString([]byte("alice:s3cret")), status: http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			request, err := http.NewRequest(http.MethodPost, url+"/api"+ynpb.Gateway_ListServices_FullMethodName, strings.NewReader(body))
+			require.NoError(t, err)
+			if tc.token != "" {
+				request.Header.Set("X-Yanet-Authentication", tc.token)
+			}
+
+			response, err := (&http.Client{Timeout: 10 * time.Second}).Do(request)
+			require.NoError(t, err)
+			_, err = io.Copy(io.Discard, response.Body)
+			require.NoError(t, err)
+			require.NoError(t, response.Body.Close())
+			require.Equal(t, tc.status, response.StatusCode)
+		})
+	}
+}
+
+// Test_Gateway_HTTPProxy_CountsRefusedCall verifies that an HTTP call refused
+// before its body is read is still counted as handled with its code.
+func Test_Gateway_HTTPProxy_CountsRefusedCall(t *testing.T) {
+	t.Parallel()
+
+	url, grpcAddress := startEnforcingHTTPGateway(t)
+	response, err := http.Post(url+"/api"+ynpb.Gateway_Register_FullMethodName, "application/json", strings.NewReader("{}"))
+	require.NoError(t, err)
+	_, err = io.Copy(io.Discard, response.Body)
+	require.NoError(t, err)
+	require.NoError(t, response.Body.Close())
+	require.Equal(t, http.StatusForbidden, response.StatusCode)
+
+	conn := dialGateway(t, grpcAddress, insecure.NewCredentials())
+	token := "basic " + base64.StdEncoding.EncodeToString([]byte("alice:s3cret"))
+	ctx := metadata.AppendToOutgoingContext(t.Context(), "x-yanet-authentication", token)
+	metrics, err := ynpb.NewMetricsServiceClient(conn).GetMetrics(ctx, &commonpb.GetMetricsRequest{})
+	require.NoError(t, err)
+
+	want := map[string]string{
+		"grpc_type":    "unary",
+		"grpc_service": ynpb.Gateway_ServiceDesc.ServiceName,
+		"grpc_method":  "Register",
+		"grpc_code":    codes.PermissionDenied.String(),
+	}
+	require.True(t, slices.ContainsFunc(metrics.GetMetrics(), func(metric *commonpb.Metric) bool {
+		if metric.GetName() != "grpc_server_handled_total" || len(metric.GetLabels()) != len(want) {
+			return false
+		}
+		for _, label := range metric.GetLabels() {
+			if want[label.GetName()] != label.GetValue() {
+				return false
+			}
+		}
+		return metric.GetCounter() == 1
+	}), "no handled series %v counting the refusal", want)
 }

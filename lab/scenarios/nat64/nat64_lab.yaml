@@ -1,0 +1,7 @@
+config:
+  prefixes:
+    - 2001:db8::/96
+  mappings:
+    - ipv4: 198.51.100.2
+      ipv6: 2001:db8::3
+      prefix_index: 0

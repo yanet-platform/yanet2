@@ -1,0 +1,123 @@
+name: Rust Miri
+
+# Miri over the unsafe, provenance and shared-memory suites of the Rust
+# module SDK workspace (bindings/rust): strict provenance under Stacked and Tree
+# Borrows.
+#
+# The bindings crate's build script runs bindgen and compiles both C shims, of
+# common/ and of the dataplane, into one shim library over the repository's C
+# headers with the compiler and flags of a meson configuration's compilation
+# database. The job runs in the CI image (ci/README.md) and configures meson
+# (no compilation) before Miri.
+#
+# Miri interprets only Rust: no C runs under it, so C changes reach the suites
+# only through bindgen layouts and signatures, which the Rust SDK workflow
+# builds and tests on every such change. The job therefore runs on Rust
+# changes only.
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "bindings/rust/**"
+      - ".cargo/config.toml"
+      - ".github/workflows/rust-miri.yml"
+  pull_request:
+    # A stacked pull request has a non-main base, so a main-only filter would skip it.
+    branches: ["**"]
+    paths:
+      - "bindings/rust/**"
+      - ".cargo/config.toml"
+      - ".github/workflows/rust-miri.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    # The runner's default shell, which container jobs would replace with sh.
+    shell: bash -e {0}
+
+permissions:
+  contents: read
+
+jobs:
+  miri:
+    name: miri (${{ matrix.model }} borrows)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    container: ghcr.io/yanet-platform/yanet2-ci@sha256:3cbb2aae05beb4efc16f160cfa4d5307deba5d3110005d6557fdb49e5e2ee7a1
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - model: stacked
+            miriflags: -Zmiri-strict-provenance
+          - model: tree
+            miriflags: -Zmiri-strict-provenance -Zmiri-tree-borrows
+    env:
+      # bindgen needs a libclang and a clang of the same LLVM major.
+      CLANG_PATH: /usr/bin/clang-23
+      LIBCLANG_PATH: /usr/lib/llvm-23/lib
+      MIRI_TOOLCHAIN: nightly-2026-10-22
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: true
+      # Pinned with the rustfmt nightly, so Miri moves only with a deliberate bump.
+      - uses: dtolnay/rust-toolchain@2c76c034f9e32a5d6e2c104dc4df23a22476db04 # nightly
+        with:
+          toolchain: ${{ env.MIRI_TOOLCHAIN }}
+          components: miri, rust-src
+      # One nextest run per model executes every suite, one process per test.
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        with:
+          tool: cargo-nextest@0.9.148
+      # The borrow model is an interpreter flag (MIRIFLAGS), so both models
+      # build the same artefacts and share one cache that one of them writes.
+      - name: Cache cargo registry and target directory
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: bindings/rust
+          shared-key: rust-miri
+          save-if: ${{ github.ref == 'refs/heads/main' && matrix.model == 'stacked' }}
+      # The standard library Miri interprets, cached per pinned toolchain.
+      #
+      # cargo miri setup fingerprints the rust-src file times, which a fresh
+      # toolchain install resets, so it would rebuild a restored sysroot; on an
+      # exact hit MIRI_SYSROOT points Miri at the restored one and setup is
+      # skipped. The key names the CI image: a sysroot saved outside the
+      # container lies under another home and would restore to no use.
+      - name: Restore the Miri sysroot
+        id: miri-sysroot
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/miri
+          key: miri-sysroot-ci-image-${{ runner.os }}-${{ runner.arch }}-${{ env.MIRI_TOOLCHAIN }}
+      - name: Use the restored Miri sysroot
+        if: steps.miri-sysroot.outputs.cache-hit == 'true'
+        run: echo "MIRI_SYSROOT=$HOME/.cache/miri" >> "$GITHUB_ENV"
+      - name: Build the Miri sysroot
+        if: steps.miri-sysroot.outputs.cache-hit != 'true'
+        run: cargo "+$MIRI_TOOLCHAIN" miri setup
+      - name: Save the Miri sysroot
+        if: success() && github.ref == 'refs/heads/main' && matrix.model == 'stacked' && steps.miri-sysroot.outputs.cache-hit != 'true' && !env.ACT
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/miri
+          key: ${{ steps.miri-sysroot.outputs.cache-primary-key }}
+      # The build script reads the C flags from the compilation database and the
+      # generated DPDK configuration header; nothing is compiled.
+      - name: Configure meson
+        run: |
+          meson setup build -Ddataplane_only=true
+      # yanet-packet forbids unsafe code and its zerocopy casts are sound by
+      # construction, so Miri has nothing to check there, while its header
+      # tests took over 90% of the interpreted time.
+      - name: Miri
+        working-directory: bindings/rust
+        env:
+          MIRIFLAGS: ${{ matrix.miriflags }}
+        run: cargo "+$MIRI_TOOLCHAIN" miri nextest run --workspace --exclude yanet-packet --locked --no-fail-fast

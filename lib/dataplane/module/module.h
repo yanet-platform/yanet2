@@ -13,7 +13,40 @@
 // not match this constant.
 //
 // 32: struct packet dropped the module_device_id field (56 -> 48 bytes).
-#define YANET_MODULE_ABI_VERSION 32
+// 33: struct module_ectx replaced the device index tables with the
+// per-device routing targets and the module device id.
+// 34: struct object_ectx gained the object's private per-context
+// prepared buffer fields and the owning worker index.
+// 35: struct device_entry_ectx took the padding after the direction
+// field for the device index routing stamps onto packets.
+// 36: struct config_gen_ectx gained the egress backing table with its
+// absolute copy and the worker's receive device slot; struct
+// device_ectx gained its registry device index.
+// 37: struct config_gen_ectx gained the per-physical-device transmit
+// buckets the output-entry terminals fill and the write stage drains.
+// 38: struct packet dropped the unused receive device field.
+// 39: struct dp_worker replaced its single device_id/queue_id pair with
+// an assignment list (device, queue per polled queue), and struct
+// config_gen_ectx replaced the worker's receive device slot with the
+// reverse backing table and its absolute copy.
+// 40: struct packet dropped its device field — the executing device is
+// derived from the pipeline context, and struct module_ectx gained the
+// registry device of its placement.
+// 41: struct dp_config gained the last committed generation pointer.
+// 42: struct module and struct dp_module gained config_layout.
+// 43: struct registry_item lost the destroying flag, changing the layout
+// of every module, device and object embedding it.
+// 44: struct module and struct dp_module lost config_layout.
+// 45: the acl filter structs carry interned first-match rule tables
+// in place of the path joints with their decoders.
+// 46: struct cp_module, cp_device and cp_object gained the embedded
+// cp_entity base holding the registry item, the agent pointer and the
+// memory context; the former config_item, agent and memory_context
+// members are reached through the base now.
+// 47: struct dp_port gained rss_queue_count.
+// 48: struct dp_worker_assignment gained the assignment's rx service
+// weight; the list stays part of dp_worker's plugin-visible contract.
+#define YANET_MODULE_ABI_VERSION 49
 
 // Symbol name a module .so exports carrying its compiled-against
 // YANET_MODULE_ABI_VERSION, as a uint32_t global.
@@ -45,20 +78,20 @@ typedef void (*module_handler)(
 	struct packet_front *packet_front
 );
 
-// Commit handler: a preparation hook, run exactly once per published
-// generation per shared module config.
+// Commit handler: a preparation hook, run exactly once per config
+// item, before any worker can see it.
 //
 // Runs inside the dataplane address space, from exactly one thread,
-// before the generation's contexts reach the workers. Only
+// when the item first appears in a published generation; a later
+// generation carrying the same item does not run it again. Only
 // generation-invariant derivation — from the item's own content
 // alone, like absolutizing its own internal pointers — may be
-// written; the item is shared with older generations whose workers
-// read it concurrently and observe the write. Controlplane-owned
-// relative fields stay authoritative, and anything per-worker or
-// referencing generation-owned memory belongs in the ectx layer
-// instead. The thread holds no control-plane lock in production and
-// is the installer holding the control-plane configuration lock in
-// the harness; taking that lock self-deadlocks.
+// written. Controlplane-owned relative fields stay authoritative,
+// and anything per-worker or referencing generation-owned memory
+// belongs in the ectx layer instead. The thread holds no
+// control-plane lock in production and is the installer holding the
+// control-plane configuration lock in the harness; taking that lock
+// self-deadlocks.
 typedef void (*module_commit_handler)(
 	struct dp_config *dp_config, struct cp_module *cp_module
 );

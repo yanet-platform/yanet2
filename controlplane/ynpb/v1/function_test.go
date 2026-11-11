@@ -3,6 +3,7 @@ package ynpb_test
 import (
 	"fmt"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -26,7 +27,7 @@ func Test_Function_Validate(t *testing.T) {
 		{name: "sum at limit", function: functionWithWeights(0, 65534, 1)},
 		{
 			name: "individual above limit", function: functionWithWeights(65536),
-			message: "chains[0].weight 65536 must be in range 0..65535",
+			message: "chains[0]: weight 65536 must be in range 0..65535",
 		},
 		{
 			name: "sum above limit", function: functionWithWeights(65535, 1),
@@ -34,7 +35,7 @@ func Test_Function_Validate(t *testing.T) {
 		},
 		{
 			name: "overflowing sum", function: functionWithWeights(1, math.MaxUint64),
-			message: "chains[1].weight 18446744073709551615 must be in range 0..65535",
+			message: "chains[1]: weight 18446744073709551615 must be in range 0..65535",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -63,7 +64,7 @@ func Test_GetFunctionRequest_Validate(t *testing.T) {
 		{
 			name:    "missing id name",
 			request: &ynpb.GetFunctionRequest{Id: &commonpb.FunctionId{}},
-			message: "id.name is required",
+			message: "id: name is required",
 		},
 		{
 			name:    "named id",
@@ -103,7 +104,7 @@ func Test_UpdateFunctionRequest_Validate(t *testing.T) {
 			request: &ynpb.UpdateFunctionRequest{Function: &ynpb.Function{
 				Id: &commonpb.FunctionId{},
 			}},
-			message: "function: id.name is required",
+			message: "function: id: name is required",
 		},
 		{
 			name: "missing chain",
@@ -111,35 +112,42 @@ func Test_UpdateFunctionRequest_Validate(t *testing.T) {
 				Id:     &commonpb.FunctionId{Name: "function0"},
 				Chains: []*ynpb.FunctionChain{{}},
 			}},
-			message: "function: chains[0].chain is required",
+			message: "function: chains[0]: chain is required",
+		},
+		{
+			name: "function id at the buffer size",
+			request: &ynpb.UpdateFunctionRequest{Function: &ynpb.Function{
+				Id: &commonpb.FunctionId{Name: strings.Repeat("f", commonpb.MaxFunctionNameLen)},
+			}},
+			message: "function: id: name must be shorter than 80 bytes",
 		},
 		{
 			name: "nil module identifier",
 			request: &ynpb.UpdateFunctionRequest{Function: &ynpb.Function{
 				Id: &commonpb.FunctionId{Name: "function0"},
 				Chains: []*ynpb.FunctionChain{{
-					Chain: &ynpb.Chain{Modules: []*commonpb.ModuleId{nil}},
+					Chain: &ynpb.Chain{Name: "chain0", Modules: []*commonpb.ModuleId{nil}},
 				}},
 			}},
-			message: "function: chains[0].chain.modules[0] is required",
+			message: "function: chains[0]: chain: modules[0] is required",
 		},
 		{
 			name: "module name with NUL",
 			request: &ynpb.UpdateFunctionRequest{Function: &ynpb.Function{
 				Id: &commonpb.FunctionId{Name: "function0"},
 				Chains: []*ynpb.FunctionChain{{
-					Chain: &ynpb.Chain{Modules: []*commonpb.ModuleId{{Type: "forward", Name: "fwd0\x00fwd1"}}},
+					Chain: &ynpb.Chain{Name: "chain0", Modules: []*commonpb.ModuleId{{Type: "forward", Name: "fwd0\x00fwd1"}}},
 				}},
 			}},
-			message: "function: chains[0].chain.modules[0]: name must not contain NUL",
+			message: "function: chains[0]: chain: modules[0]: name must not contain NUL",
 		},
 		{
 			name: "invalid chain weight",
 			request: &ynpb.UpdateFunctionRequest{Function: &ynpb.Function{
 				Id:     &commonpb.FunctionId{Name: "function0"},
-				Chains: []*ynpb.FunctionChain{{Weight: 65536, Chain: &ynpb.Chain{}}},
+				Chains: []*ynpb.FunctionChain{{Weight: 65536, Chain: &ynpb.Chain{Name: "chain0"}}},
 			}},
-			message: "function: chains[0].weight 65536 must be in range 0..65535",
+			message: "function: chains[0]: weight 65536 must be in range 0..65535",
 		},
 		{
 			name:    "valid function",
@@ -172,11 +180,16 @@ func Test_DeleteFunctionRequest_Validate(t *testing.T) {
 		{
 			name:    "missing id name",
 			request: &ynpb.DeleteFunctionRequest{Id: &commonpb.FunctionId{}},
-			message: "id.name is required",
+			message: "id: name is required",
 		},
 		{
 			name:    "named id",
 			request: &ynpb.DeleteFunctionRequest{Id: &commonpb.FunctionId{Name: "function0"}},
+		},
+		{
+			name:    "id name with NUL",
+			request: &ynpb.DeleteFunctionRequest{Id: &commonpb.FunctionId{Name: "foo\x00bar"}},
+			message: "id: name must not contain NUL",
 		},
 	}
 

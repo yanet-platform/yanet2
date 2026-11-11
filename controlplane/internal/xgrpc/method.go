@@ -15,12 +15,10 @@ func ParseFullMethod(fullMethod string) (string, string, error) {
 		return "", "", fmt.Errorf("method name must be in format `/package.service/method`")
 	}
 
-	name := fullMethod[1:]
-	pos := strings.LastIndex(name, "/")
-	if pos < 0 {
+	service, method, ok := strings.CutLast(fullMethod[1:], "/")
+	if !ok {
 		return "", "", fmt.Errorf("method name must be in format `/package.service/method`")
 	}
 
-	service, method := name[:pos], name[pos+1:]
 	return service, method, nil
 }

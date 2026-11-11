@@ -39,7 +39,8 @@ pub mod operatorpb {
 
 fn client(channel: LayeredChannel) -> NeighbourServiceClient<LayeredChannel> {
     NeighbourServiceClient::new(channel)
-        .send_compressed(CompressionEncoding::Gzip)
+        .send_compressed(CompressionEncoding::Zstd)
+        .accept_compressed(CompressionEncoding::Zstd)
         .accept_compressed(CompressionEncoding::Gzip)
 }
 
@@ -120,7 +121,7 @@ pub struct AddCmd {
     pub hardware_addr: MacAddr,
     /// Network interface name.
     #[arg(long, short = 'd')]
-    pub device: Option<String>,
+    pub device: String,
     /// Neighbour table name. Defaults to "static".
     #[arg(long, add = ArgValueCandidates::new(table_candidates))]
     pub table: Option<String>,
@@ -241,15 +242,18 @@ async fn update_neighbour(service: &mut NeighbourService, cmd: AddCmd) -> Result
             link_addr: Some(MacAddress::from(cmd.link_addr)),
             hardware_addr: Some(MacAddress::from(cmd.hardware_addr)),
             priority: cmd.priority.unwrap_or_default(),
-            device: cmd.device.clone().unwrap_or_default(),
+            device: cmd.device.clone(),
             ..Default::default()
         }],
     };
 
     service
-        .unary("add", request, async |client, request| {
-            client.update_neighbours(request).await
-        })
+        .unary_with(
+            "add",
+            request,
+            service.not_found("add", &format!("table '{table}'")),
+            async |client, request| client.update_neighbours(request).await,
+        )
         .await?;
 
     output::success(
@@ -272,9 +276,12 @@ async fn remove_neighbours(service: &mut NeighbourService, cmd: RemoveCmd) -> Re
     };
 
     service
-        .unary("remove", request, async |client, request| {
-            client.remove_neighbours(request).await
-        })
+        .unary_with(
+            "remove",
+            request,
+            service.not_found("remove", &format!("table '{table}'")),
+            async |client, request| client.remove_neighbours(request).await,
+        )
         .await?;
 
     let next_hops = cmd
@@ -340,9 +347,12 @@ async fn update_table(service: &mut NeighbourService, cmd: UpdateTableCmd) -> Re
     };
 
     service
-        .unary("update table", request, async |client, request| {
-            client.update_table(request).await
-        })
+        .unary_with(
+            "update table",
+            request,
+            service.not_found("update table", &format!("table '{}'", cmd.name)),
+            async |client, request| client.update_table(request).await,
+        )
         .await?;
 
     output::success(

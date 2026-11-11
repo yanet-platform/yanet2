@@ -131,9 +131,7 @@ func TestMetricMapConcurrent(t *testing.T) {
 	var createCalls atomic.Int64
 
 	for range n {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for _, id := range ids {
 				c := m.GetOrCreate(id, func() *metrics.Counter {
 					createCalls.Add(1)
@@ -141,7 +139,7 @@ func TestMetricMapConcurrent(t *testing.T) {
 				})
 				c.Inc()
 			}
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -269,10 +267,12 @@ func TestMetricMapDeleteWhere(t *testing.T) {
 
 func BenchmarkGetOrCreate(b *testing.B) {
 	b.Run("New", func(b *testing.B) {
-		for i := range b.N {
+		idx := 0
+		for b.Loop() {
 			m := metrics.NewMetricMap[*metrics.Counter]()
-			id := metrics.MetricID{Name: fmt.Sprintf("metric%d", i)}
+			id := metrics.MetricID{Name: fmt.Sprintf("metric%d", idx)}
 			m.GetOrCreate(id, func() *metrics.Counter { return &metrics.Counter{} })
+			idx++
 		}
 	})
 
@@ -281,8 +281,7 @@ func BenchmarkGetOrCreate(b *testing.B) {
 		id := metrics.MetricID{Name: "metric", Labels: metrics.Labels{"a": "1"}}
 		m.GetOrCreate(id, func() *metrics.Counter { return &metrics.Counter{} })
 
-		b.ResetTimer()
-		for range b.N {
+		for b.Loop() {
 			m.GetOrCreate(id, func() *metrics.Counter { return &metrics.Counter{} })
 		}
 	})
@@ -315,8 +314,7 @@ func BenchmarkMetrics(b *testing.B) {
 				m.GetOrCreate(id, func() *metrics.Counter { return &metrics.Counter{} })
 			}
 
-			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				_ = m.Metrics()
 			}
 		})

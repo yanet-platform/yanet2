@@ -1,0 +1,175 @@
+name: Publish Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag (vX.Y.Z)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-release-${{ inputs.tag && format('refs/tags/{0}', inputs.tag) || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release-branch-updater
+    permissions:
+      contents: read
+    outputs:
+      source_sha: ${{ steps.check.outputs.source_sha }}
+      package_version: ${{ steps.check.outputs.package_version }}
+      image_tag: ${{ steps.check.outputs.image_tag }}
+      stage_tag: ${{ steps.check.outputs.stage_tag }}
+      release_tag: ${{ steps.check.outputs.release_tag }}
+    steps:
+      - name: Validate manual release tag
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          REQUESTED_TAG: ${{ inputs.tag }}
+        run: |
+          [[ $GITHUB_REF == refs/heads/main ]] ||
+            { echo "Run manual releases from main" >&2; exit 1; }
+          [[ $REQUESTED_TAG =~ ^v(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$ ]] ||
+            { echo "Invalid release tag: $REQUESTED_TAG" >&2; exit 1; }
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag && format('refs/tags/{0}', inputs.tag) || github.ref }}
+          fetch-depth: 0
+          ssh-key: ${{ secrets.RELEASE_BRANCH_DEPLOY_KEY }}
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          ref: ${{ github.sha }}
+          path: release-tools
+
+      - name: Check release tag and patch order
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          release_ref=$GITHUB_REF
+          release_helper=.github/scripts/release-ref.sh
+          if [[ $GITHUB_EVENT_NAME == workflow_dispatch ]]; then
+            release_ref="refs/tags/$REQUESTED_TAG"
+            release_helper=release-tools/.github/scripts/release-ref.sh
+          fi
+          bash "$release_helper" prepare \
+            "$release_ref" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+
+  neighbour-sidecar:
+    needs: preflight
+    uses: ./.github/workflows/build-push-neighbour-sidecar.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      source_sha: ${{ needs.preflight.outputs.source_sha }}
+      image_tag: ${{ needs.preflight.outputs.stage_tag }}
+
+  packages:
+    needs: preflight
+    uses: ./.github/workflows/build-deb.yml
+    with:
+      source_sha: ${{ needs.preflight.outputs.source_sha }}
+      pkg_version: ${{ needs.preflight.outputs.package_version }}
+
+  images:
+    needs: [preflight, packages, neighbour-sidecar]
+    uses: ./.github/workflows/build-push-images.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      source_sha: ${{ needs.preflight.outputs.source_sha }}
+      image_tag: ${{ needs.preflight.outputs.stage_tag }}
+      stable: true
+      release_tag: ${{ needs.preflight.outputs.image_tag }}
+      neighbour_sidecar_prebuilt: true
+
+  release:
+    needs: [preflight, images]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ needs.preflight.outputs.release_tag }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: verified-debs
+          path: outdeb
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-images
+          path: image-metadata
+
+      - name: Check existing release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          assets=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate \
+            --jq '.[] | select(.tag_name == env.RELEASE_TAG) | .assets[] | [.name, .digest] | @tsv')
+          while IFS=$'\t' read -r name digest; do
+            [[ -n $name ]] || continue
+            [[ $name != */ && -f outdeb/$name ]] || { echo "Unexpected release asset: $name" >&2; exit 1; }
+            expected="sha256:$(sha256sum "outdeb/$name" | cut -d' ' -f1)"
+            [[ $digest == "$expected" ]] || { echo "Release asset differs: $name" >&2; exit 1; }
+          done <<< "$assets"
+
+      - name: Write release description
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ needs.preflight.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          # The message of an annotated tag opens the description as release notes.
+          notes=
+          ref=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" \
+            --jq '"\(.object.type) \(.object.sha)"')
+          read -r ref_type ref_sha <<< "$ref"
+          if [[ $ref_type == tag ]]; then
+            notes=$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$ref_sha" --jq '.message' |
+              sed '/^-----BEGIN [A-Z ]*SIGNATURE-----$/,$d')
+          fi
+          {
+            [[ -z $notes ]] || printf '%s\n\n' "$notes"
+            printf 'Release %s from commit %s.\n\n## Docker images\n\n' "$RELEASE_TAG" "$SOURCE_SHA"
+            while IFS=$'\t' read -r image digest manifest_size; do
+              printf -- '- `%s` (digest: `%s`; manifest: %s bytes)\n' \
+                "$image" "$digest" "$manifest_size"
+            done < image-metadata/images.tsv
+            printf '\n## Verification\n\n```bash\n'
+            while IFS=$'\t' read -r image _; do
+              printf 'docker pull %s\n' "$image"
+            done < image-metadata/images.tsv
+            printf '```\n'
+          } > release-body.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
+        with:
+          tag_name: ${{ needs.preflight.outputs.release_tag }}
+          name: ${{ needs.preflight.outputs.release_tag }}
+          body_path: release-body.md
+          fail_on_unmatched_files: true
+          overwrite_files: false
+          files: |
+            outdeb/*.deb
+            outdeb/*.ddeb

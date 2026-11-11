@@ -18,9 +18,10 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
+	cplain "github.com/yanet-platform/yanet2/devices/plain/bindings/go/cplain"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
+	"github.com/yanet-platform/yanet2/modules/nat64/bindings/go/cnat64"
 	nat64 "github.com/yanet-platform/yanet2/modules/nat64/controlplane"
 	nat64pb "github.com/yanet-platform/yanet2/modules/nat64/controlplane/nat64pb/v1"
 )
@@ -52,7 +53,7 @@ func setupNAT64Harness(t *testing.T) (*dataplaneut.Harness, *nat64.NAT64Service)
 	t.Cleanup(func() { _ = agent.CleanUp() })
 
 	svc := nat64.NewNAT64Service(nat64.NewBackend(agent))
-	mustSetDropUnknown(t, svc, "nat64-test", false, false)
+	mustUpdateConfig(t, svc, "nat64-test", &nat64pb.Config{})
 	wireNAT64Pipeline(t, agent, "nat64-test")
 	return h, svc
 }
@@ -77,7 +78,7 @@ func wireNAT64Pipeline(t *testing.T, agent *ffi.Agent, name string) {
 			Dst6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 		},
 	}
-	sinkHandle, err := forward.NewBackend(agent).UpdateModule(sinkName, sinkRules)
+	sinkHandle, err := forward.NewBackend(agent).Update(sinkName, forward.RuleSet{Compiled: sinkRules})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sinkHandle.Free() })
 
@@ -96,7 +97,7 @@ func wireNAT64Pipeline(t *testing.T, agent *ffi.Agent, name string) {
 	}))
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: name, Functions: []string{name}}))
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy"}))
-	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	_, err = cplain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: name, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
@@ -104,36 +105,36 @@ func wireNAT64Pipeline(t *testing.T, agent *ffi.Agent, name string) {
 	require.NoError(t, err)
 }
 
-func mustAddPrefix(t *testing.T, svc *nat64.NAT64Service, name string, prefix netip.Prefix) {
+// nat64Config returns a config of the test /96 prefix and the given
+// mappings into it, every other field left to its default.
+func nat64Config(t *testing.T, mappings ...*nat64pb.Mapping) *nat64pb.Config {
 	t.Helper()
 
-	wirePrefix, err := commonpb.NewIPv6PrefixFromPrefix(prefix)
+	prefix, err := commonpb.NewIPv6PrefixFromPrefix(nat64Prefix96)
 	require.NoError(t, err)
 
-	_, err = svc.AddPrefix(t.Context(), &nat64pb.AddPrefixRequest{
+	return &nat64pb.Config{
+		Prefixes: []*commonpb.IPv6Prefix{prefix},
+		Mappings: mappings,
+	}
+}
+
+// nat64Mapping returns the mapping of valid address text through the first
+// prefix of the config.
+func nat64Mapping(ip4, ip6 string) *nat64pb.Mapping {
+	return &nat64pb.Mapping{
+		Ipv4: commonpb.NewIPv4Address(netip.MustParseAddr(ip4).As4()),
+		Ipv6: commonpb.NewIPv6Address(netip.MustParseAddr(ip6).As16()),
+	}
+}
+
+// mustUpdateConfig replaces the whole named config with the given one.
+func mustUpdateConfig(t *testing.T, svc *nat64.NAT64Service, name string, config *nat64pb.Config) {
+	t.Helper()
+
+	_, err := svc.UpdateConfig(t.Context(), &nat64pb.UpdateConfigRequest{
 		Name:   name,
-		Prefix: wirePrefix,
-	})
-	require.NoError(t, err)
-}
-
-func mustAddMapping(t *testing.T, svc *nat64.NAT64Service, name string, ip4, ip6 string, prefixIdx uint32) {
-	t.Helper()
-	_, err := svc.AddMapping(t.Context(), &nat64pb.AddMappingRequest{
-		Name:        name,
-		Ipv4:        commonpb.NewIPv4Address(netip.MustParseAddr(ip4).As4()),
-		Ipv6:        commonpb.NewIPv6Address(netip.MustParseAddr(ip6).As16()),
-		PrefixIndex: prefixIdx,
-	})
-	require.NoError(t, err)
-}
-
-func mustSetDropUnknown(t *testing.T, svc *nat64.NAT64Service, name string, dropPrefix, dropMapping bool) {
-	t.Helper()
-	_, err := svc.SetDropUnknown(t.Context(), &nat64pb.SetDropUnknownRequest{
-		Name:               name,
-		DropUnknownPrefix:  dropPrefix,
-		DropUnknownMapping: dropMapping,
+		Config: config,
 	})
 	require.NoError(t, err)
 }
@@ -210,24 +211,11 @@ func packetWithIPv4RawPayload(
 	return gopacket.NewPacket(buf.Bytes(), layers.LayerTypeEthernet, gopacket.Default)
 }
 
-func mustSetMTU(t *testing.T, svc *nat64.NAT64Service, name string, v4, v6 uint32) {
-	t.Helper()
-	_, err := svc.SetMTU(t.Context(), &nat64pb.SetMTURequest{
-		Name: name,
-		Mtu: &nat64pb.MTUConfig{
-			Ipv4Mtu: v4,
-			Ipv6Mtu: v6,
-		},
-	})
-	require.NoError(t, err)
-}
-
 // TestNAT64_ICMPv6ToIPv4Echo verifies ICMP echo request translation from IPv6
 // to IPv4 using service-driven NAT64 configuration.
 func TestNAT64_ICMPv6ToIPv4Echo(t *testing.T) {
 	h, svc := setupNAT64Harness(t)
-	mustAddPrefix(t, svc, "nat64-test", nat64Prefix96)
-	mustAddMapping(t, svc, "nat64-test", "192.0.2.10", "2001:db8::10", 0)
+	mustUpdateConfig(t, svc, "nat64-test", nat64Config(t, nat64Mapping("192.0.2.10", "2001:db8::10")))
 
 	ip6 := layers.IPv6{
 		Version:    6,
@@ -275,8 +263,7 @@ func TestNAT64_ICMPv6ToIPv4Echo(t *testing.T) {
 // to IPv6 using NAT64 prefix synthesis and mapping lookup.
 func TestNAT64_ICMPv4ToIPv6Echo(t *testing.T) {
 	h, svc := setupNAT64Harness(t)
-	mustAddPrefix(t, svc, "nat64-test", nat64Prefix96)
-	mustAddMapping(t, svc, "nat64-test", "192.0.2.30", "2001:db8::30", 0)
+	mustUpdateConfig(t, svc, "nat64-test", nat64Config(t, nat64Mapping("192.0.2.30", "2001:db8::30")))
 
 	ip4 := layers.IPv4{Version: 4, TTL: 64, Protocol: layers.IPProtocolICMPv4, SrcIP: net.ParseIP("192.0.2.20"), DstIP: net.ParseIP("192.0.2.30")}
 	icmp4 := layers.ICMPv4{TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoRequest, 0), Id: 7, Seq: 9}
@@ -305,8 +292,7 @@ func TestNAT64_ICMPv4ToIPv6Echo(t *testing.T) {
 // TestNAT64_UDPv6ToIPv4 verifies UDP translation from IPv6 to IPv4.
 func TestNAT64_UDPv6ToIPv4(t *testing.T) {
 	h, svc := setupNAT64Harness(t)
-	mustAddPrefix(t, svc, "nat64-test", nat64Prefix96)
-	mustAddMapping(t, svc, "nat64-test", "192.0.2.10", "2001:db8::10", 0)
+	mustUpdateConfig(t, svc, "nat64-test", nat64Config(t, nat64Mapping("192.0.2.10", "2001:db8::10")))
 
 	ip6 := layers.IPv6{
 		Version:    6,
@@ -343,8 +329,7 @@ func TestNAT64_UDPv6ToIPv4(t *testing.T) {
 // are translated without transport-layer rewrites.
 func TestNAT64_UDPv6NonFirstFragmentToIPv4(t *testing.T) {
 	h, svc := setupNAT64Harness(t)
-	mustAddPrefix(t, svc, "nat64-test", nat64Prefix96)
-	mustAddMapping(t, svc, "nat64-test", "192.0.2.10", "2001:db8::10", 0)
+	mustUpdateConfig(t, svc, "nat64-test", nat64Config(t, nat64Mapping("192.0.2.10", "2001:db8::10")))
 
 	ip6 := layers.IPv6{
 		Version:    6,
@@ -390,8 +375,7 @@ func TestNAT64_UDPv6NonFirstFragmentToIPv4(t *testing.T) {
 // destination options header before UDP are translated to IPv4 UDP.
 func TestNAT64_IPv6DestinationOptionsBeforeUDP(t *testing.T) {
 	h, svc := setupNAT64Harness(t)
-	mustAddPrefix(t, svc, "nat64-test", nat64Prefix96)
-	mustAddMapping(t, svc, "nat64-test", "192.0.2.10", "2001:db8::10", 0)
+	mustUpdateConfig(t, svc, "nat64-test", nat64Config(t, nat64Mapping("192.0.2.10", "2001:db8::10")))
 
 	srcIP := net.ParseIP("2001:db8::10")
 	dstIP := net.ParseIP("2001:db8::198.51.100.2")
@@ -444,8 +428,7 @@ func TestNAT64_IPv6DestinationOptionsBeforeUDP(t *testing.T) {
 // TestNAT64_TCPv4ToIPv6 verifies TCP translation from IPv4 to IPv6.
 func TestNAT64_TCPv4ToIPv6(t *testing.T) {
 	h, svc := setupNAT64Harness(t)
-	mustAddPrefix(t, svc, "nat64-test", nat64Prefix96)
-	mustAddMapping(t, svc, "nat64-test", "198.51.100.9", "2001:db8::9", 0)
+	mustUpdateConfig(t, svc, "nat64-test", nat64Config(t, nat64Mapping("198.51.100.9", "2001:db8::9")))
 
 	ip4 := layers.IPv4{Version: 4, TTL: 64, Protocol: layers.IPProtocolTCP, SrcIP: net.ParseIP("203.0.113.4"), DstIP: net.ParseIP("198.51.100.9")}
 	tcp := layers.TCP{SrcPort: 40000, DstPort: 443, SYN: true, Seq: 100}
@@ -476,8 +459,7 @@ func TestNAT64_TCPv4ToIPv6(t *testing.T) {
 // TestNAT64_TCPv6ToIPv4 verifies TCP translation from IPv6 to IPv4.
 func TestNAT64_TCPv6ToIPv4(t *testing.T) {
 	h, svc := setupNAT64Harness(t)
-	mustAddPrefix(t, svc, "nat64-test", nat64Prefix96)
-	mustAddMapping(t, svc, "nat64-test", "192.0.2.10", "2001:db8::10", 0)
+	mustUpdateConfig(t, svc, "nat64-test", nat64Config(t, nat64Mapping("192.0.2.10", "2001:db8::10")))
 
 	ip6 := layers.IPv6{
 		Version:    6,
@@ -516,8 +498,7 @@ func TestNAT64_TCPv6ToIPv4(t *testing.T) {
 // TestNAT64_UDPv4ToIPv6 verifies UDP translation from IPv4 to IPv6.
 func TestNAT64_UDPv4ToIPv6(t *testing.T) {
 	h, svc := setupNAT64Harness(t)
-	mustAddPrefix(t, svc, "nat64-test", nat64Prefix96)
-	mustAddMapping(t, svc, "nat64-test", "198.51.100.9", "2001:db8::9", 0)
+	mustUpdateConfig(t, svc, "nat64-test", nat64Config(t, nat64Mapping("198.51.100.9", "2001:db8::9")))
 
 	ip4 := layers.IPv4{Version: 4, TTL: 64, Protocol: layers.IPProtocolUDP, SrcIP: net.ParseIP("203.0.113.4"), DstIP: net.ParseIP("198.51.100.9")}
 	udp := layers.UDP{SrcPort: 12000, DstPort: 5353}
@@ -550,7 +531,7 @@ func TestNAT64_UDPv4ToIPv6(t *testing.T) {
 // drop_unknown_mapping is disabled.
 func TestNAT64_UnknownMappingPassThrough(t *testing.T) {
 	h, svc := setupNAT64Harness(t)
-	mustAddPrefix(t, svc, "nat64-test", nat64Prefix96)
+	mustUpdateConfig(t, svc, "nat64-test", nat64Config(t))
 
 	ip6 := layers.IPv6{
 		Version:    6,
@@ -570,7 +551,6 @@ func TestNAT64_UnknownMappingPassThrough(t *testing.T) {
 		&ip6, &udp,
 	)
 
-	mustSetDropUnknown(t, svc, "nat64-test", false, false)
 	passRes, err := h.HandlePackets(pkt)
 	require.NoError(t, err)
 	out := parseOneOutput(t, passRes)
@@ -586,8 +566,9 @@ func TestNAT64_UnknownMappingPassThrough(t *testing.T) {
 // drop_unknown_mapping is enabled.
 func TestNAT64_UnknownMappingDrop(t *testing.T) {
 	h, svc := setupNAT64Harness(t)
-	mustAddPrefix(t, svc, "nat64-test", nat64Prefix96)
-	mustSetDropUnknown(t, svc, "nat64-test", false, true)
+	config := nat64Config(t)
+	config.DropUnknownMapping = true
+	mustUpdateConfig(t, svc, "nat64-test", config)
 
 	ip6 := layers.IPv6{
 		Version:    6,
@@ -617,8 +598,9 @@ func TestNAT64_UnknownMappingDrop(t *testing.T) {
 // IPv6 prefix when source mapping is missing in v6->v4 processing.
 func TestNAT64_DropUnknownPrefix(t *testing.T) {
 	h, svc := setupNAT64Harness(t)
-	mustAddPrefix(t, svc, "nat64-test", nat64Prefix96)
-	mustSetDropUnknown(t, svc, "nat64-test", true, false)
+	config := nat64Config(t)
+	config.DropUnknownPrefix = true
+	mustUpdateConfig(t, svc, "nat64-test", config)
 
 	ip6 := layers.IPv6{
 		Version:    6,
@@ -648,8 +630,7 @@ func TestNAT64_DropUnknownPrefix(t *testing.T) {
 // source-route packets hit NAT64 drop paths.
 func TestNAT64_RepresentativeDropPaths(t *testing.T) {
 	h, svc := setupNAT64Harness(t)
-	mustAddPrefix(t, svc, "nat64-test", nat64Prefix96)
-	mustAddMapping(t, svc, "nat64-test", "192.0.2.30", "2001:db8::30", 0)
+	mustUpdateConfig(t, svc, "nat64-test", nat64Config(t, nat64Mapping("192.0.2.30", "2001:db8::30")))
 
 	nonIP := xpacket.LayersToPacket(t,
 		&layers.Ethernet{
@@ -707,8 +688,7 @@ func TestNAT64_RepresentativeDropPaths(t *testing.T) {
 // header are dropped in IPv6 extension-header handling.
 func TestNAT64_IPv6ESPHeader_Dropped(t *testing.T) {
 	h, svc := setupNAT64Harness(t)
-	mustAddPrefix(t, svc, "nat64-test", nat64Prefix96)
-	mustAddMapping(t, svc, "nat64-test", "192.0.2.10", "2001:db8::10", 0)
+	mustUpdateConfig(t, svc, "nat64-test", nat64Config(t, nat64Mapping("192.0.2.10", "2001:db8::10")))
 
 	srcIP := net.ParseIP("2001:db8::10")
 	dstIP := net.ParseIP("2001:db8::198.51.100.2")
@@ -730,8 +710,7 @@ func TestNAT64_IPv6ESPHeader_Dropped(t *testing.T) {
 // rejected by IPv6 extension-header processing.
 func TestNAT64_IPv6RoutingHeaderType0_Dropped(t *testing.T) {
 	h, svc := setupNAT64Harness(t)
-	mustAddPrefix(t, svc, "nat64-test", nat64Prefix96)
-	mustAddMapping(t, svc, "nat64-test", "192.0.2.10", "2001:db8::10", 0)
+	mustUpdateConfig(t, svc, "nat64-test", nat64Config(t, nat64Mapping("192.0.2.10", "2001:db8::10")))
 
 	srcIP := net.ParseIP("2001:db8::10")
 	dstIP := net.ParseIP("2001:db8::198.51.100.2")
@@ -774,9 +753,9 @@ func TestNAT64_IPv6RoutingHeaderType0_Dropped(t *testing.T) {
 // Fragmentation Needed is translated to ICMPv6 Packet Too Big.
 func TestNAT64_ICMPv4FragNeededToICMPv6PacketTooBig(t *testing.T) {
 	h, svc := setupNAT64Harness(t)
-	mustAddPrefix(t, svc, "nat64-test", nat64Prefix96)
-	mustAddMapping(t, svc, "nat64-test", "192.0.2.30", "2001:db8::30", 0)
-	mustSetMTU(t, svc, "nat64-test", 1400, 1500)
+	config := nat64Config(t, nat64Mapping("192.0.2.30", "2001:db8::30"))
+	config.Mtu = &nat64pb.MTUConfig{Ipv4Mtu: 1400, Ipv6Mtu: 1500}
+	mustUpdateConfig(t, svc, "nat64-test", config)
 
 	innerIP4 := layers.IPv4{
 		Version:  4,
@@ -828,9 +807,9 @@ func TestNAT64_ICMPv4FragNeededToICMPv6PacketTooBig(t *testing.T) {
 // Big is translated to ICMPv4 Fragmentation Needed.
 func TestNAT64_ICMPv6PacketTooBigToICMPv4FragNeeded(t *testing.T) {
 	h, svc := setupNAT64Harness(t)
-	mustAddPrefix(t, svc, "nat64-test", nat64Prefix96)
-	mustAddMapping(t, svc, "nat64-test", "192.0.2.30", "2001:db8::30", 0)
-	mustSetMTU(t, svc, "nat64-test", 1450, 1280)
+	config := nat64Config(t, nat64Mapping("192.0.2.30", "2001:db8::30"))
+	config.Mtu = &nat64pb.MTUConfig{Ipv4Mtu: 1450, Ipv6Mtu: 1280}
+	mustUpdateConfig(t, svc, "nat64-test", config)
 
 	innerIP6 := layers.IPv6{
 		Version:    6,
@@ -907,9 +886,9 @@ func TestNAT64_ICMPv6PacketTooBigMTUFloor(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h, svc := setupNAT64Harness(t)
-			mustAddPrefix(t, svc, "nat64-test", nat64Prefix96)
-			mustAddMapping(t, svc, "nat64-test", "192.0.2.30", "2001:db8::30", 0)
-			mustSetMTU(t, svc, "nat64-test", tt.cfg4, tt.cfg6)
+			config := nat64Config(t, nat64Mapping("192.0.2.30", "2001:db8::30"))
+			config.Mtu = &nat64pb.MTUConfig{Ipv4Mtu: tt.cfg4, Ipv6Mtu: tt.cfg6}
+			mustUpdateConfig(t, svc, "nat64-test", config)
 
 			innerIP6 := layers.IPv6{
 				Version:    6,
@@ -959,4 +938,296 @@ func TestNAT64_ICMPv6PacketTooBigMTUFloor(t *testing.T) {
 			require.Equal(t, tt.want, binary.BigEndian.Uint16(l4[6:8]))
 		})
 	}
+}
+
+const (
+	ipv6ProtocolHopOptions              = 0
+	ipv6ProtocolFragment                = 44
+	ipv6ProtocolNone                    = 59
+	ipProtocolICMPv6                    = 58
+	ipProtocolUDP                       = 17
+	ipProtocolTCP                       = 6
+	icmpv6DestinationUnreachable        = 1
+	icmpv6DestinationUnreachableNoRoute = 0
+	icmpv6EchoRequest                   = 128
+	etherTypeIPv6                       = 0x86dd
+)
+
+var (
+	nat64EmbeddedOuterIPv4 = [4]byte{192, 0, 2, 34}
+	nat64EmbeddedMappings  = []struct {
+		IPv4 netip.Addr
+		IPv6 netip.Addr
+	}{
+		{netip.MustParseAddr("198.51.100.1"), netip.MustParseAddr("2001:db8::4")},
+		{netip.MustParseAddr("198.51.100.2"), netip.MustParseAddr("2001:db8::3")},
+		{netip.MustParseAddr("198.51.100.3"), netip.MustParseAddr("2001:db8::2")},
+		{netip.MustParseAddr("198.51.100.4"), netip.MustParseAddr("2001:db8::1")},
+		{netip.MustParseAddr("198.51.100.5"), netip.MustParseAddr("2001:db8::8")},
+		{netip.MustParseAddr("198.51.100.6"), netip.MustParseAddr("2001:db8::7")},
+		{netip.MustParseAddr("198.51.100.7"), netip.MustParseAddr("2001:db8::6")},
+		{netip.MustParseAddr("198.51.100.8"), netip.MustParseAddr("2001:db8::5")},
+	}
+)
+
+// setupNAT64EmbeddedHarness publishes eight mappings under a documentation prefix.
+func setupNAT64EmbeddedHarness(t *testing.T) (*dataplaneut.Harness, *nat64.NAT64Service) {
+	t.Helper()
+	harness, service := setupNAT64Harness(t)
+	mustUpdateConfig(t, service, "nat64-test", nat64EmbeddedConfig(t))
+	return harness, service
+}
+
+// nat64EmbeddedConfig returns the documentation prefix with the eight
+// embedded-test mappings into it.
+func nat64EmbeddedConfig(t *testing.T) *nat64pb.Config {
+	t.Helper()
+	config := nat64Config(t)
+	for _, mapping := range nat64EmbeddedMappings {
+		config.Mappings = append(config.Mappings, nat64Mapping(mapping.IPv4.String(), mapping.IPv6.String()))
+	}
+	return config
+}
+
+// nat64EmbeddedOuterDestination embeds the external IPv4 address in the prefix.
+func nat64EmbeddedOuterDestination() [16]byte {
+	address := nat64Prefix96.Addr().As16()
+	copy(address[12:], nat64EmbeddedOuterIPv4[:])
+	return address
+}
+
+// runNAT64EmbeddedPacket preserves raw bytes and checks native pool ownership.
+func runNAT64EmbeddedPacket(t *testing.T, harness *dataplaneut.Harness, packet []byte) *dataplaneut.RawResult {
+	t.Helper()
+	outstanding := harness.OutstandingMbufs()
+	result, err := harness.HandleSegmentedPackets([][]byte{packet})
+	require.NoError(t, err)
+	require.Equal(t, outstanding, harness.OutstandingMbufs())
+	return result
+}
+
+// readNAT64MalformedPackets reads the active module's malformed diagnostic.
+func readNAT64MalformedPackets(t *testing.T, harness *dataplaneut.Harness) uint64 {
+	t.Helper()
+	value, err := cnat64.MalformedPackets(harness.SharedMemory(), 0, "nat64-test")
+	require.NoError(t, err)
+	return value
+}
+
+// putEther appends a broadcast IPv6 frame header with a fixed source address.
+func putEther(buffer []byte) []byte {
+	buffer = append(buffer, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff)
+	buffer = append(buffer, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00)
+	return binary.BigEndian.AppendUint16(buffer, etherTypeIPv6)
+}
+
+// putIPv6 appends a fixed-hop-limit header with the declared payload length.
+func putIPv6(buffer []byte, payloadLength uint16, protocol uint8, source, destination [16]byte) []byte {
+	buffer = binary.BigEndian.AppendUint32(buffer, 0x60000000)
+	buffer = binary.BigEndian.AppendUint16(buffer, payloadLength)
+	buffer = append(buffer, protocol, 64)
+	buffer = append(buffer, source[:]...)
+	buffer = append(buffer, destination[:]...)
+	return buffer
+}
+
+// putICMPv6Header appends eight bytes with zero checksum and reserved fields.
+//
+// Packet parsing accepts the unchecked checksum, preserving malformed payloads.
+func putICMPv6Header(buffer []byte, icmpType, code uint8) []byte {
+	buffer = append(buffer, icmpType, code)
+	buffer = binary.BigEndian.AppendUint16(buffer, 0)
+	return binary.BigEndian.AppendUint32(buffer, 0)
+}
+
+// putICMPv6Error wraps an unchanged embedded packet in an IPv6 error frame.
+func putICMPv6Error(buffer, embedded []byte) []byte {
+	buffer = putEther(buffer)
+	buffer = putIPv6(buffer, uint16(8+len(embedded)), ipProtocolICMPv6, nat64EmbeddedMappings[0].IPv6.As16(), nat64EmbeddedOuterDestination())
+	buffer = putICMPv6Header(buffer, icmpv6DestinationUnreachable, icmpv6DestinationUnreachableNoRoute)
+	return append(buffer, embedded...)
+}
+
+// Test_NAT64_ICMPv6EmbeddedFragTruncatedDropped verifies that a one-byte
+// embedded Fragment header is dropped and counted as malformed.
+func Test_NAT64_ICMPv6EmbeddedFragTruncatedDropped(t *testing.T) {
+	harness, _ := setupNAT64EmbeddedHarness(t)
+
+	// Embedded original packet: an IPv6 header announcing a Fragment
+	// header, followed by exactly one byte of it.
+	embedded := putIPv6(nil, 1, ipv6ProtocolFragment, nat64EmbeddedMappings[0].IPv6.As16(), nat64EmbeddedMappings[1].IPv6.As16())
+	embedded = append(embedded, ipv6ProtocolNone)
+	require.Len(t, embedded, 41)
+
+	packet := putEther(nil)
+	packet = putIPv6(packet, uint16(8+len(embedded)), ipProtocolICMPv6, nat64EmbeddedMappings[0].IPv6.As16(), nat64EmbeddedOuterDestination())
+	packet = putICMPv6Header(packet, icmpv6DestinationUnreachable, icmpv6DestinationUnreachableNoRoute)
+	packet = append(packet, embedded...)
+
+	result := runNAT64EmbeddedPacket(t, harness, packet)
+
+	require.Empty(t, result.Output, "truncated embedded Fragment header must not be forwarded")
+	require.Len(t, result.Drop, 1, "expected a drop for the truncated embedded Fragment header")
+	require.EqualValues(t, 1, readNAT64MalformedPackets(t, harness))
+}
+
+// Test_NAT64_ICMPv6EmbeddedExtTruncatedCountedMalformed verifies that a
+// one-byte embedded Hop-by-Hop header is dropped and counted as malformed.
+//
+// Dropping alone does not prove that the bounds guard rejected the short header.
+func Test_NAT64_ICMPv6EmbeddedExtTruncatedCountedMalformed(t *testing.T) {
+	harness, _ := setupNAT64EmbeddedHarness(t)
+
+	embedded := putIPv6(nil, 1, ipv6ProtocolHopOptions, nat64EmbeddedMappings[0].IPv6.As16(), nat64EmbeddedMappings[1].IPv6.As16())
+	embedded = append(embedded, 0)
+	require.Len(t, embedded, 41)
+
+	packet := putEther(nil)
+	packet = putIPv6(packet, uint16(8+len(embedded)), ipProtocolICMPv6, nat64EmbeddedMappings[0].IPv6.As16(), nat64EmbeddedOuterDestination())
+	packet = putICMPv6Header(packet, icmpv6DestinationUnreachable, icmpv6DestinationUnreachableNoRoute)
+	packet = append(packet, embedded...)
+
+	result := runNAT64EmbeddedPacket(t, harness, packet)
+
+	require.Empty(t, result.Output, "truncated embedded extension header must not be forwarded")
+	require.Len(t, result.Drop, 1, "expected a drop for the truncated embedded extension header")
+	require.EqualValues(t, 1, readNAT64MalformedPackets(t, harness))
+}
+
+// Test_NAT64_ICMPv6EmbeddedICMPv6TruncatedCountedMalformed verifies that
+// a complete Hop-by-Hop header followed by four ICMPv6 bytes is malformed.
+func Test_NAT64_ICMPv6EmbeddedICMPv6TruncatedCountedMalformed(t *testing.T) {
+	harness, _ := setupNAT64EmbeddedHarness(t)
+
+	// A complete Hop-by-Hop header reaches the embedded ICMPv6 guard.
+	embedded := putIPv6(nil, 12, ipv6ProtocolHopOptions, nat64EmbeddedMappings[0].IPv6.As16(), nat64EmbeddedMappings[1].IPv6.As16())
+	embedded = append(embedded, ipProtocolICMPv6, 0, 0, 0, 0, 0, 0, 0)
+	embedded = append(embedded, icmpv6EchoRequest, 0, 0, 0)
+	require.Len(t, embedded, 52)
+
+	packet := putICMPv6Error(nil, embedded)
+	result := runNAT64EmbeddedPacket(t, harness, packet)
+
+	require.Empty(t, result.Output, "truncated embedded ICMPv6 header must not be forwarded")
+	require.Len(t, result.Drop, 1, "expected a drop for the truncated embedded ICMPv6 header")
+	require.EqualValues(t, 1, readNAT64MalformedPackets(t, harness))
+}
+
+// Test_NAT64_ICMPv6EmbeddedUDPTruncatedCountedMalformed verifies that
+// a four-byte embedded UDP header is dropped and counted as malformed.
+func Test_NAT64_ICMPv6EmbeddedUDPTruncatedCountedMalformed(t *testing.T) {
+	harness, _ := setupNAT64EmbeddedHarness(t)
+
+	embedded := putIPv6(nil, 4, ipProtocolUDP, nat64EmbeddedMappings[0].IPv6.As16(), nat64EmbeddedMappings[1].IPv6.As16())
+	embedded = append(embedded, 0, 0, 0, 0)
+	require.Len(t, embedded, 44)
+
+	packet := putICMPv6Error(nil, embedded)
+	result := runNAT64EmbeddedPacket(t, harness, packet)
+
+	require.Empty(t, result.Output, "truncated embedded UDP header must not be forwarded")
+	require.Len(t, result.Drop, 1, "expected a drop for the truncated embedded UDP header")
+	require.EqualValues(t, 1, readNAT64MalformedPackets(t, harness))
+}
+
+// Test_NAT64_ICMPv6EmbeddedTCPTruncatedCountedMalformed verifies that
+// a twelve-byte embedded TCP header is dropped and counted as malformed.
+func Test_NAT64_ICMPv6EmbeddedTCPTruncatedCountedMalformed(t *testing.T) {
+	harness, _ := setupNAT64EmbeddedHarness(t)
+
+	embedded := putIPv6(nil, 12, ipProtocolTCP, nat64EmbeddedMappings[0].IPv6.As16(), nat64EmbeddedMappings[1].IPv6.As16())
+	embedded = append(embedded, make([]byte, 12)...)
+	require.Len(t, embedded, 52)
+
+	packet := putICMPv6Error(nil, embedded)
+	result := runNAT64EmbeddedPacket(t, harness, packet)
+
+	require.Empty(t, result.Output, "truncated embedded TCP header must not be forwarded")
+	require.Len(t, result.Drop, 1, "expected a drop for the truncated embedded TCP header")
+	require.EqualValues(t, 1, readNAT64MalformedPackets(t, harness))
+}
+
+// Test_NAT64_ICMPv6EmbeddedExtFragTranslated verifies that complete
+// embedded extensions preserve translated addresses and fragment fields.
+func Test_NAT64_ICMPv6EmbeddedExtFragTranslated(t *testing.T) {
+	harness, _ := setupNAT64EmbeddedHarness(t)
+
+	// Six option bytes complete an eight-byte Hop-by-Hop header.
+	hopOptions := []byte{ipv6ProtocolFragment, 0, 0, 0, 0, 0, 0, 0}
+
+	fragment := []byte{ipProtocolICMPv6, 0}
+	fragment = binary.BigEndian.AppendUint16(fragment, (2<<3)|1)
+	fragment = binary.BigEndian.AppendUint32(fragment, 0x12345678)
+
+	embeddedICMPv6 := putICMPv6Header(nil, icmpv6EchoRequest, 0)
+
+	embeddedPayload := append(append([]byte{}, hopOptions...), fragment...)
+	embeddedPayload = append(embeddedPayload, embeddedICMPv6...)
+
+	embedded := putIPv6(nil, uint16(len(embeddedPayload)), ipv6ProtocolHopOptions, nat64EmbeddedMappings[0].IPv6.As16(), nat64EmbeddedMappings[1].IPv6.As16())
+	embedded = append(embedded, embeddedPayload...)
+
+	packet := putEther(nil)
+	packet = putIPv6(packet, uint16(8+len(embedded)), ipProtocolICMPv6, nat64EmbeddedMappings[0].IPv6.As16(), nat64EmbeddedOuterDestination())
+	packet = putICMPv6Header(packet, icmpv6DestinationUnreachable, icmpv6DestinationUnreachableNoRoute)
+	packet = append(packet, embedded...)
+
+	result := runNAT64EmbeddedPacket(t, harness, packet)
+
+	require.Len(t, result.Output, 1, "expected the translated ICMPv6 error to be forwarded")
+	require.Empty(t, result.Drop, "well-formed embedded extension and Fragment headers must not drop")
+	require.EqualValues(t, 0, readNAT64MalformedPackets(t, harness))
+
+	output := result.Output[0]
+	require.GreaterOrEqual(t, len(output), 14+20)
+
+	// The outer translated IPv4 header follows the 14-byte Ethernet header;
+	// its source and destination are its last 8 bytes.
+	outerIPv4 := output[14 : 14+20]
+	require.Equal(t, []byte{198, 51, 100, 1}, outerIPv4[12:16], "translated outer IPv4 source is wrong")
+	require.Equal(t, nat64EmbeddedOuterIPv4[:], outerIPv4[16:20], "translated outer IPv4 destination is wrong")
+
+	// The translated embedded IPv4 header follows ether(14) + ipv4(20) +
+	// icmp(8) in the output packet.
+	const embeddedIPv4Offset = 14 + 20 + 8
+	require.GreaterOrEqual(t, len(output), embeddedIPv4Offset+20)
+
+	embeddedIPv4 := output[embeddedIPv4Offset : embeddedIPv4Offset+20]
+	packetID := binary.BigEndian.Uint16(embeddedIPv4[4:6])
+	fragmentOffset := binary.BigEndian.Uint16(embeddedIPv4[6:8])
+
+	// These expectations preserve existing fragment-encoding deviations during
+	// the harness migration.
+	//
+	// Identification narrowing retains the high-order half, and the offset uses
+	// bytes instead of eight-octet units. Correcting either protocol deviation is
+	// a separate behavior change and must update these expectations.
+	require.EqualValues(t, 0x1234, packetID, "translated embedded Fragment identification is wrong")
+	require.EqualValues(t, (2<<3)|0x2000, fragmentOffset, "translated embedded Fragment offset is wrong")
+}
+
+// Test_NAT64_MalformedDiagnosticFollowsPublishedConfig verifies that replacing
+// a module resets its diagnostic and subsequent packets count on the new config.
+func Test_NAT64_MalformedDiagnosticFollowsPublishedConfig(t *testing.T) {
+	harness, service := setupNAT64EmbeddedHarness(t)
+	embedded := putIPv6(nil, 4, ipProtocolUDP, nat64EmbeddedMappings[0].IPv6.As16(), nat64EmbeddedMappings[1].IPv6.As16())
+	embedded = append(embedded, 0, 0, 0, 0)
+	packet := putICMPv6Error(nil, embedded)
+
+	result := runNAT64EmbeddedPacket(t, harness, packet)
+	require.Empty(t, result.Output)
+	require.Len(t, result.Drop, 1)
+	require.EqualValues(t, 1, readNAT64MalformedPackets(t, harness))
+
+	generation := harness.PublishedGeneration()
+	config := nat64EmbeddedConfig(t)
+	config.Mtu = &nat64pb.MTUConfig{Ipv4Mtu: 1500, Ipv6Mtu: 1500}
+	mustUpdateConfig(t, service, "nat64-test", config)
+	require.Greater(t, harness.PublishedGeneration(), generation)
+	require.Zero(t, readNAT64MalformedPackets(t, harness))
+
+	result = runNAT64EmbeddedPacket(t, harness, packet)
+	require.Empty(t, result.Output)
+	require.Len(t, result.Drop, 1)
+	require.EqualValues(t, 1, readNAT64MalformedPackets(t, harness))
 }

@@ -64,22 +64,6 @@ func (r *bootedRunner) RunBooted(name string, fn func(fw *framework.TestFramewor
 	})
 }
 
-// testFramework is kept for backward compatibility. New tests should use
-// withBootedVM or newBootedRunner instead.
-func testFramework(t *testing.T) *framework.TestFramework {
-	t.Helper()
-	if globalPool == nil {
-		t.Fatal("test pool is not initialized")
-	}
-	base := globalPool.Acquire()
-	t.Cleanup(func() {
-		globalPool.Release(base)
-	})
-	fw := base.ForTest(t)
-	restoreBooted(t, fw)
-	return fw
-}
-
 // restoreBooted restores the VM to a working YANET state.
 //
 // It tries the fast path (baseline snapshot with YANET already running)

@@ -2,41 +2,22 @@ package operator
 
 import (
 	"sync"
-	"time"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
-	"github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/operators/route/neigh"
 )
 
-// applyDurationBounds are the histogram bucket upper bounds, in seconds,
-// used for per-gateway apply latency.
-var applyDurationBounds = []float64{
-	0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10,
-}
-
-var reconcilerStateNames = map[operator.ReconcilerState]string{
-	operator.ReconcilerStateIdle:     "idle",
-	operator.ReconcilerStateApplying: "applying",
-	operator.ReconcilerStateSleeping: "sleeping",
-}
-
-// Metrics is the single observability sink for the route operator.
+// Metrics is the route operator's own observability sink; the reconcile
+// and gateway apply families come from the operator framework.
 //
-// It combines three collection styles: reconcile-loop and gateway-apply
-// counters are updated by tee-ing existing callbacks, RIB gauges are
-// pulled from thread-safe snapshots at Collect time, and gateway sinks
-// are created on demand by Gateway.
+// RIB gauges are pulled from thread-safe snapshots on every collection,
+// feed and neighbour events are counted from their callbacks, and the FIB
+// gauges of each gateway are created on its first build.
 type Metrics struct {
 	ribs                  *RIBStore
 	neighTable            *neigh.NeighTable
 	netlinkMonitorEnabled bool
-
-	reconcileTotal  metrics.Counter
-	reconcileErrors metrics.Counter
-	states          map[operator.ReconcilerState]*metrics.Gauge
-	backoffSeconds  metrics.Gauge
 
 	ribSessionStarts *metrics.MetricMap[*metrics.Counter]
 	ribSessionEnds   *metrics.MetricMap[*metrics.Counter]
@@ -58,16 +39,10 @@ func NewMetrics(ribs *RIBStore, neighTable *neigh.NeighTable, options ...Metrics
 		o(opts)
 	}
 
-	states := make(map[operator.ReconcilerState]*metrics.Gauge, len(reconcilerStateNames))
-	for state := range reconcilerStateNames {
-		states[state] = &metrics.Gauge{}
-	}
-
 	return &Metrics{
 		ribs:                  ribs,
 		neighTable:            neighTable,
 		netlinkMonitorEnabled: opts.NetlinkMonitorEnabled,
-		states:                states,
 		ribSessionStarts:      metrics.NewMetricMap[*metrics.Counter](),
 		ribSessionEnds:        metrics.NewMetricMap[*metrics.Counter](),
 		gateways:              map[string]*GatewayMetrics{},
@@ -105,35 +80,6 @@ type MetricsOption func(*metricsOptions)
 func WithNetlinkMonitorMetrics() MetricsOption {
 	return func(o *metricsOptions) {
 		o.NetlinkMonitorEnabled = true
-	}
-}
-
-// OnReconcileCompleted records the outcome of one reconcile pass.
-func (m *Metrics) OnReconcileCompleted(err error) {
-	m.reconcileTotal.Inc()
-	if err != nil {
-		m.reconcileErrors.Inc()
-	}
-}
-
-// OnBackoffScheduled records the delay before the next retry.
-func (m *Metrics) OnBackoffScheduled(delay time.Duration) {
-	m.backoffSeconds.Store(delay.Seconds())
-}
-
-// OnBackoffReset clears the backoff gauge after a successful apply.
-func (m *Metrics) OnBackoffReset() {
-	m.backoffSeconds.Store(0)
-}
-
-// OnStateChanged records the reconcile loop's current state.
-func (m *Metrics) OnStateChanged(state operator.ReconcilerState) {
-	for k, g := range m.states {
-		if k == state {
-			g.Store(1)
-		} else {
-			g.Store(0)
-		}
 	}
 }
 
@@ -207,20 +153,7 @@ func (m *Metrics) ribSessionCounter(sessions *metrics.MetricMap[*metrics.Counter
 // Collect renders the current state of every metric as a slice of
 // commonpb.Metric values.
 func (m *Metrics) Collect() []*commonpb.Metric {
-	out := make([]*commonpb.Metric, 0)
-
-	out = append(out,
-		commonpb.NewMetricCounter("route_operator_reconcile_total", m.reconcileTotal.Load()),
-		commonpb.NewMetricCounter("route_operator_reconcile_errors_total", m.reconcileErrors.Load()),
-		commonpb.NewMetricGauge("route_operator_backoff_seconds", m.backoffSeconds.Load()),
-	)
-	for state, g := range m.states {
-		out = append(out, commonpb.NewMetricGauge(
-			"route_operator_state",
-			g.Load(),
-			commonpb.NewLabel("state", reconcilerStateNames[state]),
-		))
-	}
+	out := []*commonpb.Metric{}
 
 	for name, ribRef := range m.ribs.Snapshot() {
 		stats := ribRef.Stats()
@@ -243,7 +176,7 @@ func (m *Metrics) Collect() []*commonpb.Metric {
 			commonpb.NewLabel("table", src.Name),
 		))
 	}
-	_, nexthops := m.neighTable.View().Entries()
+	nexthops := m.neighTable.View().Len()
 	out = append(out, commonpb.NewMetricGauge("route_operator_neighbour_nexthops", float64(nexthops)))
 
 	for _, entry := range m.ribSessionStarts.Metrics() {
@@ -291,9 +224,15 @@ type fibGauges struct {
 	Entries metrics.Gauge
 	// Routes is the total number of routes seen by the last build.
 	Routes metrics.Gauge
-	// UnresolvedNexthops is the number of routes dropped for lack of a
-	// resolved neighbour.
+	// UnresolvedNexthops counts route records whose neighbours were missing
+	// in the last build's full snapshot; device ownership is unknown.
+	//
+	// Each gateway counts these records independently, so summing gateways
+	// does not give a unique-neighbour loss count.
 	UnresolvedNexthops metrics.Gauge
+	// DeviceExcludedRoutes counts resolved route records excluded by the
+	// gateway's device restriction in the last build.
+	DeviceExcludedRoutes metrics.Gauge
 	// SkippedPrefixes is the number of prefixes with no routes at all in
 	// the last build.
 	SkippedPrefixes metrics.Gauge
@@ -307,19 +246,14 @@ func (m *fibGauges) Store(stats FIBBuildStats) {
 	m.Entries.Store(float64(stats.PrefixesAdded))
 	m.Routes.Store(float64(stats.TotalRoutes))
 	m.UnresolvedNexthops.Store(float64(stats.NeighbourNotFound))
+	m.DeviceExcludedRoutes.Store(float64(stats.DeviceExcludedRoutes))
 	m.SkippedPrefixes.Store(float64(stats.SkippedPrefixes))
 	m.FilteredRoutes.Store(float64(stats.FilteredRoutes))
 }
 
-// GatewayMetrics is the per-gateway observability sink, fed by
-// meteredActuator (apply outcomes) and GatewayActuator (FIB build
-// stats).
+// GatewayMetrics holds the FIB build gauges of one gateway.
 type GatewayMetrics struct {
 	name string
-
-	apply         metrics.Counter
-	applyErrors   metrics.Counter
-	applyDuration *metrics.Histogram
 
 	fibMu sync.Mutex
 	fib   map[string]*fibGauges
@@ -328,19 +262,9 @@ type GatewayMetrics struct {
 // newGatewayMetrics constructs the metrics sink for a single gateway.
 func newGatewayMetrics(name string) *GatewayMetrics {
 	return &GatewayMetrics{
-		name:          name,
-		applyDuration: metrics.NewHistogram(applyDurationBounds),
-		fib:           map[string]*fibGauges{},
+		name: name,
+		fib:  map[string]*fibGauges{},
 	}
-}
-
-// ObserveApply records the outcome and duration of one Apply call.
-func (m *GatewayMetrics) ObserveApply(d time.Duration, err error) {
-	m.apply.Inc()
-	if err != nil {
-		m.applyErrors.Inc()
-	}
-	m.applyDuration.Observe(d.Seconds())
 }
 
 // OnFIBBuilt records the outcome of one FIB build for module.
@@ -362,12 +286,6 @@ func (m *GatewayMetrics) Collect() []*commonpb.Metric {
 	gateway := commonpb.NewLabel("gateway", m.name)
 	out := make([]*commonpb.Metric, 0)
 
-	out = append(out,
-		commonpb.NewMetricCounter("route_operator_gateway_apply_total", m.apply.Load(), gateway),
-		commonpb.NewMetricCounter("route_operator_gateway_apply_errors_total", m.applyErrors.Load(), gateway),
-		makeHistogram("route_operator_gateway_apply_duration_seconds", m.applyDuration, gateway),
-	)
-
 	m.fibMu.Lock()
 	defer m.fibMu.Unlock()
 
@@ -377,18 +295,11 @@ func (m *GatewayMetrics) Collect() []*commonpb.Metric {
 			commonpb.NewMetricGauge("route_operator_fib_entries", g.Entries.Load(), labels...),
 			commonpb.NewMetricGauge("route_operator_fib_routes", g.Routes.Load(), labels...),
 			commonpb.NewMetricGauge("route_operator_fib_unresolved_nexthops", g.UnresolvedNexthops.Load(), labels...),
+			commonpb.NewMetricGauge("route_operator_fib_device_excluded_routes", g.DeviceExcludedRoutes.Load(), labels...),
 			commonpb.NewMetricGauge("route_operator_fib_skipped_prefixes", g.SkippedPrefixes.Load(), labels...),
 			commonpb.NewMetricGauge("route_operator_fib_filtered_routes", g.FilteredRoutes.Load(), labels...),
 		)
 	}
 
 	return out
-}
-
-func makeHistogram(name string, h *metrics.Histogram, labels ...*commonpb.Label) *commonpb.Metric {
-	return &commonpb.Metric{
-		Name:   name,
-		Labels: labels,
-		Value:  commonpb.MetricValueToProto(h),
-	}
 }

@@ -14,7 +14,13 @@ import (
 )
 
 type Updater func(context.Context, []rib.Route) error
-type Notifier func() error
+
+// Notifier is called after each dumped batch, with the same context the
+// batch was dumped with.
+type Notifier func(context.Context) error
+
+// Dialer connects to the BIRD export socket at path.
+type Dialer func(ctx context.Context, path string) (net.Conn, error)
 
 type exportSocket struct {
 	Path    string
@@ -26,19 +32,62 @@ type Export struct {
 	cfg      *Config
 	updater  Updater
 	notifier Notifier
-	log      *zap.Logger
+	onIdle   func(context.Context)
+	// idleInterval is how often the idle callback runs, the dump timeout
+	// when zero.
+	idleInterval time.Duration
+	dial         Dialer
+	log          *zap.Logger
 }
 
 // ExportReaderOption configures the Export constructor.
 type ExportReaderOption func(*exportReaderOptions)
 
 type exportReaderOptions struct {
-	Log *zap.Logger
+	OnIdle       func(context.Context)
+	IdleInterval time.Duration
+	Dial         Dialer
+	Log          *zap.Logger
 }
 
 func newExportReaderOptions() *exportReaderOptions {
 	return &exportReaderOptions{
-		Log: zap.NewNop(),
+		OnIdle: func(context.Context) {},
+		Dial:   dialUnix,
+		Log:    zap.NewNop(),
+	}
+}
+
+// dialUnix connects to a Unix socket.
+func dialUnix(ctx context.Context, path string) (net.Conn, error) {
+	var dialer net.Dialer
+	return dialer.DialContext(ctx, "unix", path)
+}
+
+// WithExportReaderIdle sets the callback the reader runs on every idle tick,
+// whether or not routes wait for their dump, so the consumer can retry what
+// an earlier update failed to deliver without waiting for new routes.
+func WithExportReaderIdle(onIdle func(context.Context)) ExportReaderOption {
+	return func(o *exportReaderOptions) {
+		o.OnIdle = onIdle
+	}
+}
+
+// WithExportReaderIdleInterval sets how often the idle callback runs, the
+// dump timeout by default.
+func WithExportReaderIdleInterval(interval time.Duration) ExportReaderOption {
+	return func(o *exportReaderOptions) {
+		o.IdleInterval = interval
+	}
+}
+
+// WithExportReaderDialer sets the function that connects to every export
+// socket, a Unix socket dialer by default.
+//
+// Another dialer lets the reader run over an in-memory transport.
+func WithExportReaderDialer(dial Dialer) ExportReaderOption {
+	return func(o *exportReaderOptions) {
+		o.Dial = dial
 	}
 }
 
@@ -63,11 +112,14 @@ func NewExportReader(cfg *Config, onUpdate Updater, onFlush Notifier, options ..
 		})
 	}
 	return &Export{
-		sockets:  sockets,
-		cfg:      cfg,
-		updater:  onUpdate,
-		notifier: onFlush,
-		log:      opts.Log,
+		sockets:      sockets,
+		cfg:          cfg,
+		updater:      onUpdate,
+		notifier:     onFlush,
+		onIdle:       opts.OnIdle,
+		idleInterval: opts.IdleInterval,
+		dial:         opts.Dial,
+		log:          opts.Log,
 	}
 }
 
@@ -77,11 +129,8 @@ func (m *Export) Run(ctx context.Context) error {
 		return nil
 	}
 
-	// Any value greater then zero will be sufficient for the channel capacity.
-	// A buffered channel will reduce concurrency pressure, but it seems that
-	// the reading part can easily keep up with the parsing part.
-	// On the other hand, if RIBUpdater.BulkUpdate cannot catch up with the
-	// parser's speed, there is no reason to hold too many routes in memory.
+	// Any capacity above zero works; a small one keeps parsed routes from
+	// piling up in memory when the batch processor falls behind.
 	updates := make(chan *rib.Route, 10)
 	defer close(updates)
 
@@ -95,16 +144,28 @@ func (m *Export) Run(ctx context.Context) error {
 			m.log.Info("starting bird export reader",
 				zap.String("path", socket.Path))
 
-			c, err := net.Dial("unix", socket.Path)
+			c, err := m.dial(ctx, socket.Path)
 			if err != nil {
 				return fmt.Errorf("failed to dial bird export socket '%s': %w", socket.Path, err)
 			}
+			// Closing the socket on cancellation unblocks the read below; the
+			// reader waits for that close, so it leaves no goroutine behind.
+			closed := make(chan struct{})
+			defer func() {
+				cancel(nil)
+				<-closed
+			}()
 			go func() {
+				defer close(closed)
 				<-ctx.Done()
 				if err := c.Close(); err != nil {
-					m.log.Warn("bird socket closed with an error", zap.Error(err), zap.Any("ctx_err", ctx.Err()))
+					m.log.Warn("bird socket closed with an error",
+						zap.Error(err),
+						zap.NamedError("cause", context.Cause(ctx)),
+					)
 				}
 			}()
+
 			reader := bufio.NewReader(c)
 			parser := NewParser(reader, socket.BufSize, WithParserLog(m.log))
 			for {
@@ -126,7 +187,7 @@ func (m *Export) Run(ctx context.Context) error {
 
 				select {
 				case <-ctx.Done():
-					return ctx.Err()
+					return context.Cause(ctx)
 				case updates <- route:
 				}
 			}
@@ -138,19 +199,33 @@ func (m *Export) Run(ctx context.Context) error {
 		m.log.Info("starting batch processor for bird route updates")
 		batch := make([]rib.Route, 0, m.cfg.DumpThreshold)
 		tick := time.NewTicker(m.cfg.DumpTimeout)
+		defer tick.Stop()
+		idleInterval := m.idleInterval
+		if idleInterval <= 0 {
+			idleInterval = m.cfg.DumpTimeout
+		}
+		idle := time.NewTicker(idleInterval)
+		defer idle.Stop()
 		timeout := false
 		for {
 			select {
 			case <-ctx.Done():
-				return ctx.Err()
+				return context.Cause(ctx)
 			case route := <-updates:
 				batch = append(batch, *route)
-				tick.Reset(m.cfg.DumpTimeout)
+				// A batch waits at most one timeout after its first route:
+				// routes that follow join it without postponing the dump.
+				if len(batch) == 1 {
+					tick.Reset(m.cfg.DumpTimeout)
+				}
 			case <-tick.C:
 				if len(batch) == 0 {
 					continue
 				}
 				timeout = true
+			case <-idle.C:
+				m.onIdle(ctx)
+				continue
 			}
 
 			if timeout || len(batch) >= m.cfg.DumpThreshold {
@@ -161,7 +236,7 @@ func (m *Export) Run(ctx context.Context) error {
 				}
 				batch = batch[:0]
 
-				if err := m.notifier(); err != nil {
+				if err := m.notifier(ctx); err != nil {
 					return fmt.Errorf("failed to call notifier: %w", err)
 				}
 			}

@@ -3,7 +3,11 @@ package x509
 import (
 	"context"
 	"crypto/x509"
+	"maps"
 	"slices"
+	"strconv"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -11,6 +15,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
 )
 
@@ -20,7 +25,28 @@ const (
 	defaultRefreshInterval = 5 * time.Minute
 	// spiffeScheme is the URI scheme of a SPIFFE identity.
 	spiffeScheme = "spiffe"
+	// metricClientCertificateNotAfter is the unix time the earliest expiring
+	// certificate a user recently presented expires at.
+	metricClientCertificateNotAfter = "auth_x509_client_certificate_not_after_seconds"
+	// labelUser names the account a metric is about.
+	labelUser = "user"
+	// labelNotAfter keys a presented certificate by its expiry beside its
+	// user; no reported series carries it.
+	labelNotAfter = "not_after"
+	// presentedRetention is how long a presented certificate counts toward
+	// its user's expiry after its last use.
+	presentedRetention = time.Hour
 )
+
+// presentedCertificate is a certificate expiry one user presented, with
+// when that last happened.
+type presentedCertificate struct {
+	// NotAfter is when the presented certificate expires.
+	NotAfter time.Time
+	// LastSeen is the unix time in nanoseconds of the latest call that
+	// presented it.
+	LastSeen atomic.Int64
+}
 
 // Authenticator identifies a caller by the client certificate its TLS
 // connection presented.
@@ -32,8 +58,13 @@ const (
 type Authenticator struct {
 	store           *Store
 	refreshInterval time.Duration
-	stopCh          chan struct{}
-	log             *zap.Logger
+	// presentedMu makes recording a presented certificate and evicting
+	// stale ones exclusive, so a recording never stamps an entry that an
+	// eviction has already removed.
+	presentedMu sync.RWMutex
+	presented   *metrics.MetricMap[*presentedCertificate]
+	stopCh      chan struct{}
+	log         *zap.Logger
 }
 
 type authenticatorOptions struct {
@@ -76,6 +107,7 @@ func NewAuthenticator(store *Store, options ...Option) *Authenticator {
 	m := &Authenticator{
 		store:           store,
 		refreshInterval: opts.RefreshInterval,
+		presented:       metrics.NewMetricMap[*presentedCertificate](),
 		stopCh:          make(chan struct{}),
 		log:             opts.Log,
 	}
@@ -135,6 +167,7 @@ func (m *Authenticator) Authenticate(
 			"failed to extract principal: %v", err,
 		)
 	}
+	m.recordPresented(login, leaf, now)
 
 	m.log.Debug("x509 authentication successful",
 		zap.String("login", login),
@@ -156,9 +189,10 @@ func (m *Authenticator) ClientCAs() *x509.CertPool {
 	return m.store.Pool()
 }
 
-// Collect reports the revocation list and refresh metrics of the store.
+// Collect reports the revocation list and refresh metrics of the store and
+// the expiry of the certificates each user recently presented.
 func (m *Authenticator) Collect() []*commonpb.Metric {
-	return m.store.Collect()
+	return append(m.store.Collect(), m.collectPresented(time.Now())...)
 }
 
 // Close stops the periodic refresh.
@@ -197,6 +231,69 @@ func (m *Authenticator) refresh() {
 			)
 		}
 	}
+}
+
+// recordPresented notes that the user presented the certificate at the
+// given time.
+func (m *Authenticator) recordPresented(user string, leaf *x509.Certificate, now time.Time) {
+	id := metrics.MetricID{
+		Name: metricClientCertificateNotAfter,
+		Labels: metrics.Labels{
+			labelUser:     user,
+			labelNotAfter: strconv.FormatInt(leaf.NotAfter.Unix(), 10),
+		},
+	}
+
+	// Recordings share the lock, and an eviction waits for every one in
+	// flight to have stamped its entry.
+	m.presentedMu.RLock()
+	defer m.presentedMu.RUnlock()
+
+	presented := m.presented.GetOrCreate(id, func() *presentedCertificate {
+		return &presentedCertificate{NotAfter: leaf.NotAfter}
+	})
+	presented.LastSeen.Store(now.UnixNano())
+}
+
+// collectPresented reports for every user the earliest expiry among the
+// certificates the user presented within the retention window.
+//
+// A certificate unused for longer is dropped first, so a user whose every
+// connection presents a renewed certificate moves on to its expiry once
+// the window has passed.
+func (m *Authenticator) collectPresented(now time.Time) []*commonpb.Metric {
+	m.evictPresented(now.Add(-presentedRetention))
+
+	earliest := map[string]time.Time{}
+	for _, entry := range m.presented.Metrics() {
+		user := entry.ID.Labels[labelUser]
+		if notAfter, ok := earliest[user]; !ok || entry.Value.NotAfter.Before(notAfter) {
+			earliest[user] = entry.Value.NotAfter
+		}
+	}
+
+	out := make([]*commonpb.Metric, 0, len(earliest))
+	for _, user := range slices.Sorted(maps.Keys(earliest)) {
+		out = append(out, commonpb.NewMetricGauge(
+			metricClientCertificateNotAfter,
+			float64(earliest[user].Unix()),
+			commonpb.NewLabel(labelUser, user),
+		))
+	}
+
+	return out
+}
+
+// evictPresented drops the certificates last presented before the cutoff,
+// excluding every recording while it does.
+func (m *Authenticator) evictPresented(cutoff time.Time) {
+	m.presentedMu.Lock()
+	defer m.presentedMu.Unlock()
+
+	before := cutoff.UnixNano()
+	m.presented.DeleteWhere(func(_ metrics.MetricID, presented *presentedCertificate) bool {
+		return presented.LastSeen.Load() < before
+	})
 }
 
 // verifiedChain returns the chain the handshake verified, the client

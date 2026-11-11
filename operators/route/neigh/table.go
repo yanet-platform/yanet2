@@ -1,8 +1,10 @@
 package neigh
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/netip"
 	"sync"
 
@@ -69,9 +71,9 @@ func newTableOptions() *tableOptions {
 
 // NeighTable merges multiple neighbour sources by per-entry priority.
 //
-// All mutations are serialized under mu. After every mutation the merged
-// cache is rebuilt and atomically swapped so that readers (via View)
-// never block.
+// All mutations are serialized under the table lock and replace published
+// maps instead of modifying them, so readers of the merged and per-source
+// views never block and keep a consistent snapshot.
 type NeighTable struct {
 	mu sync.Mutex
 	// sources maps source name to its NeighSource.
@@ -176,12 +178,10 @@ func (m *NeighTable) ListSources() []SourceInfo {
 
 	result := make([]SourceInfo, 0, len(m.sources))
 	for _, src := range m.sources {
-		view := src.Cache.View()
-		_, count := view.Entries()
 		result = append(result, SourceInfo{
 			Name:            src.Name,
 			DefaultPriority: src.DefaultPriority,
-			EntryCount:      count,
+			EntryCount:      src.Cache.View().Len(),
 			BuiltIn:         src.BuiltIn,
 		})
 	}
@@ -206,12 +206,14 @@ func (m *NeighTable) Add(table string, entries []NeighbourEntry) error {
 			return fmt.Errorf("%w: %q", ErrSourceNotFound, table)
 		}
 
+		next := maps.Collect(src.Cache.View().Iter())
 		for _, entry := range entries {
 			if entry.Priority == 0 {
 				entry.Priority = src.DefaultPriority
 			}
-			src.Cache.Set(entry.NextHop, entry)
+			next[entry.NextHop] = entry
 		}
+		src.Cache.Swap(next)
 		return nil
 	})
 }
@@ -225,9 +227,11 @@ func (m *NeighTable) Remove(table string, addrs []netip.Addr) error {
 			return fmt.Errorf("%w: %q", ErrSourceNotFound, table)
 		}
 
+		next := maps.Collect(src.Cache.View().Iter())
 		for _, addr := range addrs {
-			src.Cache.Delete(addr)
+			delete(next, addr)
 		}
+		src.Cache.Swap(next)
 		return nil
 	})
 }
@@ -237,7 +241,19 @@ func (m *NeighTable) Remove(table string, addrs []netip.Addr) error {
 //
 // Entries with zero priority inherit the source's default priority.
 func (m *NeighTable) SwapSource(name string, entries map[netip.Addr]NeighbourEntry) error {
+	return m.SwapSourceContext(context.Background(), name, entries)
+}
+
+// SwapSourceContext replaces a complete observation unless cancelled before
+// its serialized commit begins.
+func (m *NeighTable) SwapSourceContext(ctx context.Context, name string, entries map[netip.Addr]NeighbourEntry) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	return m.update(func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		src, ok := m.sources[name]
 		if !ok {
 			return fmt.Errorf("%w: %q", ErrSourceNotFound, name)
@@ -291,10 +307,7 @@ func (m *NeighTable) rebuildMergedCacheLocked() bool {
 	merged := map[netip.Addr]NeighbourEntry{}
 
 	for _, src := range m.sources {
-		view := src.Cache.View()
-		entries, _ := view.Entries()
-
-		for entry := range entries {
+		for entry := range src.Cache.View().Entries() {
 			entry.Source = src.Name
 			existing, ok := merged[entry.NextHop]
 			if !ok || entry.Priority < existing.Priority {
@@ -311,7 +324,7 @@ func (m *NeighTable) rebuildMergedCacheLocked() bool {
 // sameHardwareRoutes compares the only projection a forwarding table is
 // built from: which nexthops resolve, and to what hardware route.
 func sameHardwareRoutes(before NexthopCacheView, after map[netip.Addr]NeighbourEntry) bool {
-	if _, n := before.Entries(); n != len(after) {
+	if before.Len() != len(after) {
 		return false
 	}
 

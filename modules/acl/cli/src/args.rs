@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use clap::{Parser, ValueEnum};
 use clap_complete::engine::ArgValueCandidates;
 
-#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Parser)]
 pub enum ModeCmd {
     /// List all ACL configs.

@@ -315,7 +315,8 @@ fn client(channel: LayeredChannel) -> AclServiceClient<LayeredChannel> {
     AclServiceClient::new(channel)
         .max_decoding_message_size(256 * 1024 * 1024)
         .max_encoding_message_size(256 * 1024 * 1024)
-        .send_compressed(CompressionEncoding::Gzip)
+        .send_compressed(CompressionEncoding::Zstd)
+        .accept_compressed(CompressionEncoding::Zstd)
         .accept_compressed(CompressionEncoding::Gzip)
 }
 
@@ -323,7 +324,8 @@ fn metrics_client(channel: LayeredChannel) -> MetricsServiceClient<LayeredChanne
     MetricsServiceClient::new(channel)
         .max_decoding_message_size(256 * 1024 * 1024)
         .max_encoding_message_size(256 * 1024 * 1024)
-        .send_compressed(CompressionEncoding::Gzip)
+        .send_compressed(CompressionEncoding::Zstd)
+        .accept_compressed(CompressionEncoding::Zstd)
         .accept_compressed(CompressionEncoding::Gzip)
 }
 
@@ -463,7 +465,6 @@ impl ACLService {
             rules: config.rules,
             fwtable_name_v4,
             fwtable_name_v6,
-            ..Default::default()
         };
         self.service
             .unary("update", request, async |client, request| {
@@ -483,11 +484,16 @@ impl ACLService {
         let request = GetRulesCountersRequest {
             name: cmd.config_name.clone().unwrap_or_default(),
         };
+        let resource = cmd.config_name.as_ref().map(|name| format!("config '{name}'"));
         let response = self
             .service
-            .unary("rule-counters", request, async |client, request| {
-                client.get_rules_counters(request).await
-            })
+            .unary_with(
+                "rule-counters",
+                request,
+                self.service
+                    .not_found("rule-counters", resource.as_deref().unwrap_or("requested config")),
+                async |client, request| client.get_rules_counters(request).await,
+            )
             .await?;
 
         output::data(

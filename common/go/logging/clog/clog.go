@@ -7,8 +7,7 @@
 package clog
 
 /*
-#cgo CFLAGS: -I../../../.. -I../../../../build
-#cgo LDFLAGS: -L../../../../build/lib/logging/ -llogging
+#cgo CFLAGS: -I../../../..
 
 #include "sink.h"
 */

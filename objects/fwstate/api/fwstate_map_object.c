@@ -11,7 +11,6 @@
 #include "lib/controlplane/config/cp_object.h"
 #include "lib/controlplane/config/zone.h"
 #include "lib/dataplane/object/object.h"
-#include "lib/fwstate/config.h"
 #include "lib/fwstate/ops.h"
 #include "lib/fwstate/stash.h"
 #include "lib/fwstate/types.h"
@@ -257,7 +256,7 @@ fwstate_map_v4_object_destroy(struct cp_object *cp_object) {
 		cp_object, struct fwstate_map_v4_object, cp_object
 	);
 
-	struct agent *agent = ADDR_OF(&cp_object->agent);
+	struct agent *agent = ADDR_OF(&cp_object->entity.agent);
 
 	fwstate_map_v4_object_fini(self);
 	fwstate_map_v4_object_free(self, agent);
@@ -294,12 +293,16 @@ fwstate_map_v4_object_fini(struct fwstate_map_v4_object *self) {
 		return;
 	}
 
-	struct agent *agent = ADDR_OF(&self->cp_object.agent);
+	struct agent *agent = ADDR_OF(&self->cp_object.entity.agent);
 	if (agent != NULL) {
 		// Runs before the common teardown zeroes the object's memory
 		// context, which the table free must still charge.
-		map_free_table(&self->table, &self->cp_object.memory_context);
-		map_stash_free(&self->stash, &self->cp_object.memory_context);
+		map_free_table(
+			&self->table, &self->cp_object.entity.memory_context
+		);
+		map_stash_free(
+			&self->stash, &self->cp_object.entity.memory_context
+		);
 	}
 	cp_object_fini(&self->cp_object);
 }
@@ -347,7 +350,10 @@ fwstate_map_v4_object_config_free(
 		return -1;
 	}
 
+	struct agent *owner = ADDR_OF(&cp_object->entity.agent);
+
 	fwstate_map_v4_object_destroy(cp_object);
+	agent_destroy_released(owner);
 	return 0;
 }
 
@@ -377,7 +383,7 @@ fwstate_map_v4_object_create(
 	int rc = map_create(
 		&self->table,
 		&self->stash,
-		&self->cp_object.memory_context,
+		&self->cp_object.entity.memory_context,
 		map_v4_init_keys,
 		config
 	);
@@ -434,7 +440,7 @@ fwstate_map_v4_object_insert_layer(
 ) {
 	int rc = map_insert_layer(
 		&self->table,
-		&self->cp_object.memory_context,
+		&self->cp_object.entity.memory_context,
 		map_v4_init_keys,
 		index_size,
 		extra_bucket_count,
@@ -459,7 +465,9 @@ fwstate_map_v4_object_unlink_stale_layers(
 
 void
 fwstate_map_v4_object_free_stale_layers(struct fwstate_map_v4_object *self) {
-	fwtable_free_stale(&self->table, &self->cp_object.memory_context);
+	fwtable_free_stale(
+		&self->table, &self->cp_object.entity.memory_context
+	);
 }
 
 uint32_t
@@ -486,7 +494,7 @@ fwstate_map_v6_object_destroy(struct cp_object *cp_object) {
 		cp_object, struct fwstate_map_v6_object, cp_object
 	);
 
-	struct agent *agent = ADDR_OF(&cp_object->agent);
+	struct agent *agent = ADDR_OF(&cp_object->entity.agent);
 
 	fwstate_map_v6_object_fini(self);
 	fwstate_map_v6_object_free(self, agent);
@@ -521,12 +529,16 @@ fwstate_map_v6_object_fini(struct fwstate_map_v6_object *self) {
 		return;
 	}
 
-	struct agent *agent = ADDR_OF(&self->cp_object.agent);
+	struct agent *agent = ADDR_OF(&self->cp_object.entity.agent);
 	if (agent != NULL) {
 		// Runs before the common teardown zeroes the object's memory
 		// context, which the table free must still charge.
-		map_free_table(&self->table, &self->cp_object.memory_context);
-		map_stash_free(&self->stash, &self->cp_object.memory_context);
+		map_free_table(
+			&self->table, &self->cp_object.entity.memory_context
+		);
+		map_stash_free(
+			&self->stash, &self->cp_object.entity.memory_context
+		);
 	}
 	cp_object_fini(&self->cp_object);
 }
@@ -574,7 +586,10 @@ fwstate_map_v6_object_config_free(
 		return -1;
 	}
 
+	struct agent *owner = ADDR_OF(&cp_object->entity.agent);
+
 	fwstate_map_v6_object_destroy(cp_object);
+	agent_destroy_released(owner);
 	return 0;
 }
 
@@ -604,7 +619,7 @@ fwstate_map_v6_object_create(
 	int rc = map_create(
 		&self->table,
 		&self->stash,
-		&self->cp_object.memory_context,
+		&self->cp_object.entity.memory_context,
 		map_v6_init_keys,
 		config
 	);
@@ -661,7 +676,7 @@ fwstate_map_v6_object_insert_layer(
 ) {
 	int rc = map_insert_layer(
 		&self->table,
-		&self->cp_object.memory_context,
+		&self->cp_object.entity.memory_context,
 		map_v6_init_keys,
 		index_size,
 		extra_bucket_count,
@@ -686,7 +701,9 @@ fwstate_map_v6_object_unlink_stale_layers(
 
 void
 fwstate_map_v6_object_free_stale_layers(struct fwstate_map_v6_object *self) {
-	fwtable_free_stale(&self->table, &self->cp_object.memory_context);
+	fwtable_free_stale(
+		&self->table, &self->cp_object.entity.memory_context
+	);
 }
 
 uint32_t
@@ -706,7 +723,8 @@ fwstate_map_v6_object_has_reclaimable(
 
 struct object *
 new_object_fwstate_map_v4() {
-	struct object *object = (struct object *)malloc(sizeof(struct object));
+	struct object *object =
+		(struct object *)calloc(1, sizeof(struct object));
 	if (object == NULL) {
 		return NULL;
 	}
@@ -716,7 +734,8 @@ new_object_fwstate_map_v4() {
 
 struct object *
 new_object_fwstate_map_v6() {
-	struct object *object = (struct object *)malloc(sizeof(struct object));
+	struct object *object =
+		(struct object *)calloc(1, sizeof(struct object));
 	if (object == NULL) {
 		return NULL;
 	}

@@ -1,11 +1,17 @@
 CARGO ?= cargo
-RULESYNC ?= npx --yes rulesync@16.8.0
-RULESYNC_GENERATE_ARGS := generate --targets claudecode,codexcli,opencode --features subagents
 
 # Compile database consumed by lint/clang-syntax.
 COMPILE_DB ?= build/compile_commands.json
-RTE_CONFIG ?= build/subprojects/dpdk/rte_build_config.h
-YANET_CACHE_LINE_CPPFLAG = -DYANET_CACHE_LINE_SIZE=$$(awk '$$2 == "RTE_CACHE_LINE_SIZE" { print $$3; exit }' "$(RTE_CONFIG)")
+# The cgo preprocessor flags meson builds Go with, which go test needs as well.
+YANET_CGO_CPPFLAGS = $$(cat build/yanet_cgo_cppflags)
+# The Go tests of the Rust SDK fixtures build only where the configured build/
+# defines their targets (meson option sdk_rust_fixtures).
+GO_FIXTURE_TAGS = $$(grep -qs '^build sdk-rust-fixtures:' build/build.ninja && echo -tags=sdk_rust_fixtures)
+
+# The Go packages the test targets run, every one when empty.
+#
+# A job that tests part of the tree sets it, and the meson tests are left out.
+GO_TEST_PACKAGES ?=
 
 # Default PREFIX for debian packaging
 PREFIX ?= /usr
@@ -14,8 +20,7 @@ BINDIR ?= $(PREFIX)/bin
 TARGET_DIR ?= target
 RELEASE_DIR := $(TARGET_DIR)/release
 
-# Keep inherited flags as data when make exports them to recipes and submakes.
-# Leave GOFLAGS undefined otherwise so Go can use persisted GOENV settings.
+# Preserve literal inherited defaults; leave absent defaults to Go's environment.
 ifneq ($(origin GOFLAGS), undefined)
 override GOFLAGS := $(value GOFLAGS)
 export GOFLAGS
@@ -46,6 +51,7 @@ CLI_MODULES := \
 	decap \
 	device-plain \
 	device-vlan \
+	device-vxlan \
 	device-trafgen \
 	dscp \
 	fwstate \
@@ -57,29 +63,17 @@ CLI_MODULES := \
 	forward \
 	nat64 \
 	pdump \
+	ring \
 	unrdup \
 	operator-neighbour \
 	operator-pipeline \
 	operator-route
 
-# Public module directories, whitelisted in .gitignore under /modules/*.
+# Public module directories: the ones modules/meson.build names.
 #
-# Anything under modules/ that is not listed here is a private, gitignored
-# module (see modules/meson.build's extra_modules option).
-PUBLIC_MODULES := \
-	acl \
-	blackhole \
-	decap \
-	dscp \
-	forward \
-	fwstate \
-	l3b \
-	mirror \
-	nat64 \
-	pdump \
-	route \
-	route-mpls \
-	unrdup
+# Anything else under modules/ is a private, gitignored module (see
+# modules/meson.build's extra_modules option).
+PUBLIC_MODULES := $(shell sed -n "s/^[[:space:]\#]*subdir('\([^']*\)').*/\1/p" modules/meson.build)
 
 # All directories under modules/, public and private alike.
 MODULE_DIRS := $(notdir $(patsubst %/,%,$(wildcard modules/*/)))
@@ -120,9 +114,11 @@ CLI_RELEASE_BINARIES := $(addprefix $(RELEASE_DIR)/,$(CLI_BINARIES))
 	setup \
 	setup-debug \
 	setup-asan \
+	setup-asan-clang \
+	build \
 	dataplane \
+	go-test-prepare \
 	install \
-	install1 \
 	clean \
 	go-cache-clean \
 	proto-lint \
@@ -131,8 +127,7 @@ CLI_RELEASE_BINARIES := $(addprefix $(RELEASE_DIR)/,$(CLI_BINARIES))
 	lint-go \
 	lint/clang-syntax \
 	lint-commit \
-	ai/agents \
-	lint/agents \
+	gate \
 	hooks \
 	test \
 	test-only \
@@ -145,7 +140,6 @@ CLI_RELEASE_BINARIES := $(addprefix $(RELEASE_DIR)/,$(CLI_BINARIES))
 	cli \
 	cli-build \
 	cli-install \
-	cli-core-install \
 	cli-clean
 
 # cli/% is a chained prerequisite of cli-install/%.
@@ -154,7 +148,7 @@ CLI_RELEASE_BINARIES := $(addprefix $(RELEASE_DIR)/,$(CLI_BINARIES))
 # intermediate file once cli-install/% depends on it.
 .PRECIOUS: cli/%
 
-all: dataplane cli
+all: build cli
 
 proto-lint:
 	@if command -v buf >/dev/null 2>&1; then \
@@ -181,7 +175,7 @@ proto-go:
 		-o -name '*.proto' -print \
 		| sort); \
 		test -n "$$protos"; \
-		protoc -I . \
+		protoc --experimental_allow_proto3_optional -I . \
 			--go_out=paths=source_relative:. \
 			--go-grpc_out=paths=source_relative:. \
 			$$protos
@@ -198,10 +192,11 @@ lint-go:
 
 # Reparses the configured build's compile database with clang -fsyntax-only.
 #
-# Every C job in CI builds with gcc, so a construct gcc accepts and clang
-# rejects otherwise only surfaces overnight in the fuzzing workflow. This
-# is front-end only, no codegen, so replaying it here costs seconds and
-# needs no extra toolchain beyond the clang already on the job's image.
+# The release build compiles with gcc, and clang sees the tree only in the
+# asan job and the overnight fuzzing build, under other flags; a construct gcc
+# accepts and clang rejects under the release flags surfaces here instead.
+# This is front-end only, no codegen, so replaying it costs seconds and needs
+# no extra toolchain beyond the clang already on the job's image.
 lint/clang-syntax:
 	@command -v clang >/dev/null 2>&1 || { echo "ERROR: clang not found (install: apt install clang)"; exit 1; }
 	@command -v jq >/dev/null 2>&1 || { echo "ERROR: jq not found (install: apt install jq)"; exit 1; }
@@ -233,33 +228,10 @@ lint-commit:
 	lint/commit/commitlint_test.sh
 	lint/commit/commitlint.sh --range origin/main..HEAD
 
-# Generate .claude/agents/*.md, .codex/agents/*.toml, and .opencode/agents/*.md from the tracked
-# source of truth, .rulesync/subagents/*.md.
-#
-# Refuses when the source roster is empty: rulesync's delete:true wipes
-# every already-generated charter and still exits success, and neither
-# tree is tracked in git to restore from. Also refuses when a source
-# charter is unloadable: a mutating generate silently deletes its output
-# and still exits 0, so a '--check' preflight (a real dry run) is scanned
-# for the diagnostic first.
-ai/agents:
-	@set -e; sources=$$(find .rulesync/subagents -maxdepth 1 -name '*.md'); \
-		test -n "$$sources" || { echo "ERROR: .rulesync/subagents/*.md is empty; refusing to run 'rulesync generate', which would delete every generated charter" >&2; exit 1; }
-	@out=$$($(RULESYNC) $(RULESYNC_GENERATE_ARGS) --check 2>&1); \
-		echo "$$out"; \
-		if echo "$$out" | grep -q 'Failed to load subagent file'; then \
-			echo "ERROR: rulesync failed to load a source charter; refusing to run the mutating generate (see diagnostic above)" >&2; \
-			exit 1; \
-		fi
-	$(RULESYNC) $(RULESYNC_GENERATE_ARGS)
-
-# Reports whether .claude/agents/, .codex/agents/, and .opencode/agents/ have drifted from
-# .rulesync/subagents/*.md, without writing to the filesystem.
-#
-# Run by .githooks/post-merge after a pull to warn about stale charters.
-# Run 'make ai/agents' to refresh the generated trees.
-lint/agents:
-	$(RULESYNC) $(RULESYNC_GENERATE_ARGS) --check
+# Runs the CI checks for the layers changed since origin/main and prints
+# only what fails.
+gate:
+	@scripts/gate.sh
 
 hooks:
 	git config core.hooksPath .githooks
@@ -268,25 +240,46 @@ go-cache-clean:
 	go clean -cache
 
 setup:
-	meson setup $(EXTRA_MODULES_FLAG) build
+	@if [ -f build/build.ninja ]; then \
+		meson configure $(MESON_SETUP_FLAGS) $(EXTRA_MODULES_FLAG) build && meson setup --reconfigure build; \
+	else \
+		meson setup $(MESON_SETUP_FLAGS) $(EXTRA_MODULES_FLAG) build; \
+	fi
 
 setup-debug:
 	@if [ ! -d "build" ]; then \
 		meson setup -Dbuildtype=debug -Doptimization=0 $(EXTRA_MODULES_FLAG) build; \
 	else \
-		meson configure -Dbuildtype=debug -Doptimization=0 -Db_sanitize="" $(EXTRA_MODULES_FLAG) build; \
+		meson configure -Dbuildtype=debug -Doptimization=0 -Db_sanitize=none -Dfuzzing=disabled $(EXTRA_MODULES_FLAG) build; \
 	fi
 
 setup-asan:
 	meson setup -Dbuildtype=debug -Doptimization=0 -Db_sanitize=address,undefined $(EXTRA_MODULES_FLAG) build
 
-dataplane:
+# Everything meson builds: the dataplane, the Go binaries, the cgo link flags and
+# the C tests.
+build:
 	meson compile -C build
+
+# The older name of build.
+dataplane: build
+
+go-test-prepare:
+	meson compile -C build go-test-prepare
+	@test -f build/yanet_cgo_cppflags || { echo "ERROR: build/yanet_cgo_cppflags not found: go tests need this checkout's own build/, not a link to another one (remove it and run 'meson setup build')"; exit 1; }
 
 cli: cli-build
 
+# Cargo profile of the workspace CLI build; CI passes `ci`.
+#
+# The ci profile puts the workspace binaries in $(TARGET_DIR)/ci, where
+# cli-install does not look; private module CLIs always build with release.
+CLI_PROFILE ?= release
+
+# Binaries only: the build scripts compile their helper for the host, so it
+# needs no second, target-side build.
 cli-build:
-	$(CARGO) build --release --workspace
+	$(CARGO) build --profile $(CLI_PROFILE) --workspace --bins
 	@set -eu; \
 	for m in $(EXTRA_CLI_MODULES); do \
 		CARGO_TARGET_DIR=$(abspath $(TARGET_DIR)) $(CARGO) build --release --manifest-path modules/$$m/cli/Cargo.toml; \
@@ -313,9 +306,6 @@ cli-install:
 		install -m 755 "$$src" "$$dst"; \
 	done
 
-# Backward-compatible name.
-cli-core-install: cli-install
-
 # Installs one module CLI binary:
 #   make cli-install/acl
 #
@@ -330,44 +320,71 @@ cli-install/%: cli/%
 cli-clean:
 	$(CARGO) clean
 
-# Cargo does not have per-package clean on stable in a useful universal form,
-# so keep this as a compatibility target.
-cli-clean/%:
-	$(CARGO) clean || true
-
-# Wipes the Go build cache first: a stale entry can link a stale C archive.
-#
-# The clean is a recipe step rather than a prerequisite so that -j cannot run
-# it concurrently with the build. A caller that has already cleaned once, such
-# as a CI job, invokes the -only target instead.
 test:
-	$(MAKE) go-cache-clean
 	$(MAKE) test-only
 
-test-only: dataplane
-	CGO_CPPFLAGS="$(strip $(CGO_CPPFLAGS) $(YANET_CACHE_LINE_CPPFLAG))" go test -count=1 $$(go list ./... | grep -v '^github.com/yanet-platform/yanet2/tests/functional/main')
-	meson test -C build
+# A failed package listing must not turn into an empty successful test run.
+test-only: go-test-prepare
+	@set -eu; set -f; \
+	export CGO_CPPFLAGS="$(strip $(CGO_CPPFLAGS) $(YANET_CGO_CPPFLAGS))"; \
+	packages="$(GO_TEST_PACKAGES)"; \
+	if [ -z "$$packages" ]; then \
+		packages=$$(go list $(GO_FIXTURE_TAGS) -f '{{.ImportPath}}' -json=false ./...); \
+		packages=$$(printf '%s\n' "$$packages" | grep -v '^github.com/yanet-platform/yanet2/tests/functional/main' || test "$$?" -eq 1); \
+	fi; \
+	if [ -z "$$packages" ]; then \
+		printf '%s\n' 'ERROR: no Go test packages selected' >&2; exit 1; \
+	fi; \
+	go test $(GO_FIXTURE_TAGS) -count=1 $$packages
+	$(if $(GO_TEST_PACKAGES),,meson test -C build)
 
 test-asan:
-	$(MAKE) go-cache-clean
 	$(MAKE) test-asan-only
 
+# The compilers of the asan suite: clang 19 or newer.
+#
+# Go test binaries built with -asan register their globals during package
+# init while threads already start, which the runtimes of gcc 14 and clang 18
+# race (llvm/llvm-project#87324); a test of the suite fails on such a runtime.
+ASAN_CC ?= clang
+ASAN_CXX ?= clang++
+CCACHE ?= $(if $(shell command -v ccache 2>/dev/null),ccache)
+
+# Sets up build/ for the asan suite with its compilers.
+#
+# Meson adds ccache only to a compiler it picks itself, so the compilers name
+# it here. clang links its sanitizer runtime only into executables, so shared
+# libraries link with the runtime's symbols left undefined.
+setup-asan-clang:
+	@version=$$($(ASAN_CC) -dumpversion 2>/dev/null | cut -d. -f1); \
+	if [ -z "$$version" ] || [ "$$version" -lt 19 ] || ! $(ASAN_CC) --version 2>/dev/null | grep -q clang; then \
+		echo "ERROR: the asan suite needs clang 19 or newer, but ASAN_CC=$(ASAN_CC) is not one (install e.g. clang-23 and libclang-rt-23-dev from apt.llvm.org and set ASAN_CC=clang-23 ASAN_CXX=clang++-23)"; \
+		exit 1; \
+	fi
+	CC="$(strip $(CCACHE) $(ASAN_CC))" CXX="$(strip $(CCACHE) $(ASAN_CXX))" meson setup -Dbuildtype=debug -Doptimization=0 -Db_sanitize=address,undefined -Db_lundef=false $(EXTRA_MODULES_FLAG) build
+
 # Set a default sanitizer policy while preserving inherited Go flags and tags.
+#
+# -asan instruments the Go side too, so a Go access through unsafe past a C
+# allocation, or into a block the C allocator freed, aborts the test. It also
+# turns on the leak check at exit, so C memory a test never frees fails it.
 test-asan-only:
 	@if [ ! -d "build" ]; then \
-		$(MAKE) setup-asan; \
+		$(MAKE) setup-asan-clang; \
 	else \
-		meson configure -Dbuildtype=debug -Doptimization=0 -Dfuzzing=disabled -Db_sanitize=address,undefined $(EXTRA_MODULES_FLAG) build; \
+		python3 -c 'import json, sys; sys.exit(json.load(open(sys.argv[1]))["host"]["c"]["exelist"][-1] != sys.argv[2])' build/meson-info/intro-compilers.json '$(ASAN_CC)' \
+			|| { echo "ERROR: build/ compiles C with another compiler than $(ASAN_CC); remove it and run 'make test-asan' again"; exit 1; }; \
+		meson configure -Dbuildtype=debug -Doptimization=0 -Dfuzzing=disabled -Db_sanitize=address,undefined -Db_lundef=false $(EXTRA_MODULES_FLAG) build; \
 	fi
-	meson compile -C build
+	$(MAKE) go-test-prepare
 	@set -eu; \
-	export GOFLAGS="$$(sh scripts/go-flags.sh yanet_asan)"; \
-	export CGO_CPPFLAGS="$(strip $(CGO_CPPFLAGS) $(YANET_CACHE_LINE_CPPFLAG))"; \
+	export CGO_CPPFLAGS="$(strip $(CGO_CPPFLAGS) $(YANET_CGO_CPPFLAGS))"; \
 	export CGO_CFLAGS="-fsanitize=address,undefined"; \
 	export CGO_LDFLAGS="-fsanitize=address,undefined"; \
 	export UBSAN_OPTIONS="$${UBSAN_OPTIONS:-halt_on_error=1:abort_on_error=1:print_summary=1:print_stacktrace=1}"; \
-	go test -count=1 $$(go list ./... | grep -v '^github.com/yanet-platform/yanet2/tests/functional/main')
-	meson test -C build
+	export CC="$(ASAN_CC)" CXX="$(ASAN_CXX)"; \
+	go test -asan $(GO_FIXTURE_TAGS) -count=1 $(or $(GO_TEST_PACKAGES),$$(go list $(GO_FIXTURE_TAGS) ./... | grep -v '^github.com/yanet-platform/yanet2/tests/functional/main'))
+	$(if $(GO_TEST_PACKAGES),,meson test -C build)
 
 test-tsan:
 	@if [ ! -d "build-tsan" ]; then \
@@ -375,7 +392,7 @@ test-tsan:
 	else \
 		meson configure -Dbuildtype=debug -Doptimization=0 -Db_sanitize=thread $(EXTRA_MODULES_FLAG) build-tsan; \
 	fi
-	meson test -C build-tsan --suite common --suit fwstate --no-suite large
+	meson test -C build-tsan --suite common --suite fwstate
 
 test-functional:
 	@echo "Running functional tests..."
@@ -387,9 +404,8 @@ test-functional:
 #   go test -run='^$$' -bench=. -benchmem -count=6 ./bindings/go/dataplane_ut/... > new.txt
 #   benchstat old.txt new.txt
 bench:
-	$(MAKE) go-cache-clean
-	$(MAKE) dataplane
-	CGO_CPPFLAGS="$(strip $(CGO_CPPFLAGS) $(YANET_CACHE_LINE_CPPFLAG))" go test -run='^$$' -bench=. -benchmem ./bindings/go/dataplane_ut/... ./modules/acl/tests/functional/...
+	$(MAKE) go-test-prepare
+	CGO_CPPFLAGS="$(strip $(CGO_CPPFLAGS) $(YANET_CGO_CPPFLAGS))" go test -run='^$$' -bench=. -benchmem ./bindings/go/dataplane_ut/... ./modules/acl/tests/functional/...
 
 # Reconfigure an existing fuzz build so its Go targets keep current flags.
 fuzz:
@@ -410,15 +426,10 @@ fuzz:
 		./build/tests/fuzzing/$(MODULE) corpus/; \
 	fi
 
-install1:
-	cp build/dataplane/yanet-dataplane /usr/bin
-	cp build/controlplane/yanet-controlplane /usr/bin
-	$(MAKE) cli-install PREFIX=/usr
-
-install: dataplane cli-install
+install: build cli-install
 	meson install -C build --skip-subprojects
 
 clean: go-cache-clean cli-clean
 	@echo "Cleaning build directories..."
 	rm -rf build/
-	rm -rf buildfuzz/
+	rm -rf build-tsan/

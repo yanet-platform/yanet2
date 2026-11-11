@@ -3,6 +3,7 @@ package blackhole
 import (
 	"fmt"
 
+	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/blackhole/bindings/go/cblackhole"
 )
@@ -19,24 +20,19 @@ func NewBackend(agent *ffi.Agent) Backend {
 	}
 }
 
-func (m *backend) UpdateModule(name string) (ModuleHandle, error) {
-	mod, err := cblackhole.NewModuleConfig(m.agent, name)
+func (m *backend) Update(name string, _ struct{}) (crud.Handle, error) {
+	module, err := cblackhole.NewModuleConfig(m.agent, name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create module config: %w", err)
 	}
 
-	if err := m.agent.UpdateModules(
-		[]ffi.ModuleConfig{mod.AsFFIModule()},
-	); err != nil {
-		if err := mod.Free(); err != nil {
-			return nil, fmt.Errorf("failed to free abandoned config: %w", err)
-		}
-		return nil, fmt.Errorf("failed to update module %q: %w", name, err)
+	if err := crud.PublishModule(m.agent, module, nil); err != nil {
+		return nil, err
 	}
 
-	return mod, nil
+	return module, nil
 }
 
-func (m *backend) DeleteModule(name string) error {
+func (m *backend) Delete(name string) error {
 	return m.agent.DeleteModuleConfig(moduleName, name)
 }

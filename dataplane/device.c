@@ -2,10 +2,12 @@
 #include "dataplane.h"
 
 #include <pthread.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "common/strutils.h"
 #include "dpdk.h"
+#include "flow.h"
 #include "lib/dataplane/config/topology.h"
 #include "lib/logging/log.h"
 
@@ -61,14 +63,61 @@ dataplane_device_start_query_rss(
 	}
 }
 
+// Apply the queue roles to a started port: the RSS table over the RSS
+// queues only, then the rte_flow rules for the steered classes.
+//
+// The table is rewritten only when the port hashes and some queue is left
+// out of it. Without RSS nothing is hashed: unmatched traffic lands on
+// queue 0, which validation keeps an RSS queue. A rule the driver rejects
+// fails the start, as does a driver with no flow API.
+static int
+dataplane_device_steer(struct dataplane_device *device) {
+	uint16_t rss_queues[device->queue_count];
+	uint16_t rss_queue_count = 0;
+	for (uint32_t idx = 0; idx < device->queue_count; ++idx) {
+		if (device->queue_roles[idx].rss) {
+			rss_queues[rss_queue_count++] = (uint16_t)idx;
+		}
+	}
+	if (device->rss_hash != 0 && rss_queue_count < device->queue_count &&
+	    dpdk_port_set_rss_reta(
+		    device->port_id, rss_queues, rss_queue_count
+	    ) != 0) {
+		LOG(ERROR,
+		    "device %s: failed to keep RSS off the steering queues",
+		    device->port_name);
+		return -1;
+	}
+
+	int rc = dataplane_flow_steer(
+		device->port_id,
+		device->rss_hash,
+		device->queue_roles,
+		(uint16_t)device->queue_count
+	);
+	if (rc != 0) {
+		LOG(ERROR,
+		    "device %s: failed to install the steering rules",
+		    device->port_name);
+		return -1;
+	}
+	LOG(INFO,
+	    "device %s: queue roles applied, %u of %u queues are RSS "
+	    "queues",
+	    device->port_name,
+	    rss_queue_count,
+	    device->queue_count);
+	return 0;
+}
+
 int
 dataplane_device_start(
 	struct dataplane *dataplane, struct dataplane_device *device
 ) {
 	LOG(INFO,
-	    "start dataplane device id=%u with %d workers",
+	    "start dataplane device id=%u with %u queues",
 	    device->device_id,
-	    device->worker_count);
+	    device->queue_count);
 	int rc = dpdk_port_start(device->port_id);
 	if (rc) {
 		LOG(ERROR,
@@ -79,6 +128,11 @@ dataplane_device_start(
 		return -1;
 	}
 
+	if (device->queue_roles != NULL &&
+	    dataplane_device_steer(device) != 0) {
+		return -1;
+	}
+
 	// Query the NIC's RSS hash key and redirection table for later use by
 	// RSS-aware worker-affinity lookups. This is a best-effort query: no
 	// RSS state (unsupported driver, RSS disabled, un-negotiated virtio
@@ -86,22 +140,7 @@ dataplane_device_start(
 	// fall back to their non-RSS-aware path.
 	dataplane_device_start_query_rss(dataplane, device);
 
-	for (uint32_t wrk_idx = 0; wrk_idx < device->worker_count; ++wrk_idx) {
-		struct dataplane_worker *worker = device->workers + wrk_idx;
-		if (dataplane_worker_start(worker)) {
-			return -1;
-		}
-	}
-
 	return 0;
-}
-
-void
-dataplane_device_stop(struct dataplane_device *device) {
-	for (uint32_t wrk_idx = 0; wrk_idx < device->worker_count; ++wrk_idx) {
-		struct dataplane_worker *worker = device->workers + wrk_idx;
-		dataplane_worker_stop(worker);
-	}
 }
 
 int
@@ -111,49 +150,45 @@ dataplane_device_init(
 	uint32_t device_id,
 	struct dataplane_device_config *config
 ) {
+	(void)dataplane;
+
 	device->device_id = device_id;
-	device->worker_count = 0;
+	device->queue_count = config->queue_count;
+	device->queues = config->queues;
+	device->rss_hash = config->rss_hash;
+	device->queue_roles = NULL;
+	strtcpy(device->port_name, config->port_name, 80);
+
+	if (dataplane_device_config_has_roles(config)) {
+		device->queue_roles = (struct dataplane_queue_role *)malloc(
+			sizeof(struct dataplane_queue_role) *
+			config->queue_count
+		);
+		if (device->queue_roles == NULL) {
+			return -1;
+		}
+		for (uint32_t idx = 0; idx < config->queue_count; ++idx) {
+			device->queue_roles[idx] = config->queues[idx].role;
+		}
+	}
+	device->rss_queue_count = 0;
+	for (uint32_t idx = 0; idx < device->queue_count; ++idx) {
+		device->rss_queue_count +=
+			!dataplane_device_queue_is_steering(device, idx);
+	}
 
 	if (dpdk_port_init(
 		    config->port_name,
 		    &device->port_id,
 		    config->rss_hash,
-		    config->worker_count,
-		    config->worker_count,
+		    config->queue_count,
+		    config->queue_count,
 		    config->mtu,
 		    config->max_lro_packet_size
 	    )) {
 
 		LOG(ERROR, "failed to init dpdk port %s", config->port_name);
 		return -1;
-	}
-
-	strtcpy(device->port_name, config->port_name, 80);
-
-	device->workers = (struct dataplane_worker *)malloc(
-		sizeof(struct dataplane_worker) * config->worker_count
-	);
-	if (device->workers == NULL) {
-		LOG(ERROR, "failed to allocate memory for device workers");
-		errno = ENOMEM;
-		return -1;
-	}
-	memset(device->workers,
-	       0,
-	       sizeof(struct dataplane_worker) * config->worker_count);
-
-	for (device->worker_count = 0;
-	     device->worker_count < config->worker_count;
-	     ++device->worker_count) {
-		if (dataplane_worker_init(
-			    dataplane,
-			    device,
-			    device->workers + device->worker_count,
-			    device->worker_count,
-			    config->workers + device->worker_count
-		    )) {
-			return -1;
-		}
 	}
 
 	return 0;

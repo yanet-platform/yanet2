@@ -1,15 +1,12 @@
 package cfwstate
 
 //#cgo CFLAGS: -I../../../../../
-//#cgo LDFLAGS: -L../../../../../build/objects/fwstate/api -lfwstate_objects
-//#cgo LDFLAGS: -L../../../../../build/lib/statemap -lstatemap
-//#cgo LDFLAGS: -L../../../../../build/lib/counters -lcounters
 //
 //#include "api/agent.h"
 //#include "common/container_of.h"
 //#include "common/numutils.h"
 //#include "lib/errors/errors.h"
-//#include "lib/fwstate/config.h"
+//#include "lib/fwstate/types.h"
 //#include "lib/statemap/fwmap.h"
 //#include "lib/fwstate/fwstate_cursor.h"
 //#include "lib/fwstate/stash.h"
@@ -76,6 +73,7 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	"runtime"
 	"syscall"
 	"unsafe"
 
@@ -246,6 +244,10 @@ func (m *MapObjectConfig) insertLayer(
 	return nil
 }
 
+// MaxIndexSize is the largest raw index size whose upward power-of-two
+// rounding stays below half the uint32 address space.
+const MaxIndexSize uint32 = (C.UINT32_MAX/2 + 1) / 2
+
 // Per-worker stash buffer bounds in bytes, matching the C
 // FWSTATE_STASH_DEFAULT_SIZE, FWSTATE_STASH_MIN_SIZE and
 // FWSTATE_STASH_MAX_SIZE.
@@ -285,6 +287,9 @@ func (m *MapObjectConfig) CreateMap(config MapConfig) error {
 		worker_count:       C.uint16_t(config.WorkerCount),
 		stash_size:         C.uint64_t(config.StashSize),
 	}
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+	pinner.Pin(&cConfig)
 	var rc C.int
 	var errno error
 	if m.kind == KindV6 {
@@ -297,10 +302,23 @@ func (m *MapObjectConfig) CreateMap(config MapConfig) error {
 		)
 	}
 	if rc != 0 {
-		return fmt.Errorf("failed to create fwstate-map: %w", errno)
+		return &CreateMapError{Status: int(rc), Errno: errno}
 	}
 	return nil
 }
+
+// CreateMapError retains the native failure status and its errno cause.
+type CreateMapError struct {
+	Status int
+	Errno  error
+}
+
+func (m *CreateMapError) Error() string {
+	return fmt.Sprintf("failed to create fwstate-map: %v", m.Errno)
+}
+
+// Unwrap preserves errno matching through the native failure details.
+func (m *CreateMapError) Unwrap() error { return m.Errno }
 
 // SyncFrameSize is the wire size of one sync frame.
 const SyncFrameSize = int(C.sizeof_struct_fw_state_sync_frame)
@@ -312,10 +330,6 @@ const StashRecordSize = int(C.sizeof_struct_fwstate_sync_record)
 type StashRecord struct {
 	// Frame is the wire form of the sync frame.
 	Frame []byte
-	// RxDeviceID and TxDeviceID are the device ids captured from the
-	// original packet.
-	RxDeviceID uint16
-	TxDeviceID uint16
 	// Status is the decision state: StashRecordPending, StashRecordApplied
 	// or StashRecordSuppressed.
 	Status uint8
@@ -363,10 +377,9 @@ func (m *MapObjectConfig) StashRecords(workerIdx uint16) ([]StashRecord, error) 
 				unsafe.Pointer(&record.frame),
 				C.int(C.sizeof_struct_fw_state_sync_frame),
 			),
-			RxDeviceID: uint16(record.rx_device_id),
-			TxDeviceID: uint16(record.tx_device_id),
-			Status:     uint8(record.status),
-		})
+			Status: uint8(record.status),
+		},
+		)
 	}
 	return records, nil
 }
@@ -436,11 +449,13 @@ func (m *MapObjectConfig) StaleLayerCount() uint32 {
 	if m.kind == KindV6 {
 		return uint32(C.fwstate_map_v6_object_stale_layer_count(
 			C.fwstate_map_v6_from_cp_object(m.asRawPtr()),
-		))
+		),
+		)
 	}
 	return uint32(C.fwstate_map_v4_object_stale_layer_count(
 		C.fwstate_map_v4_from_cp_object(m.asRawPtr()),
-	))
+	),
+	)
 }
 
 // HasReclaimable reports whether a reclamation round would do anything,
@@ -450,12 +465,14 @@ func (m *MapObjectConfig) HasReclaimable(now uint64) bool {
 		return bool(C.fwstate_map_v6_object_has_reclaimable(
 			C.fwstate_map_v6_from_cp_object(m.asRawPtr()),
 			C.uint64_t(now),
-		))
+		),
+		)
 	}
 	return bool(C.fwstate_map_v4_object_has_reclaimable(
 		C.fwstate_map_v4_from_cp_object(m.asRawPtr()),
 		C.uint64_t(now),
-	))
+	),
+	)
 }
 
 // FreeStaleLayers releases the layers parked by UnlinkStaleLayers.
@@ -639,7 +656,8 @@ func (m *MapObjectConfig) readEntries(
 			Value:   stateValueFromC(val),
 			Idx:     uint32(entry.idx),
 			Expired: bool(entry.expired),
-		})
+		},
+		)
 	}
 
 	newIndex := int64(cursor.key_pos)

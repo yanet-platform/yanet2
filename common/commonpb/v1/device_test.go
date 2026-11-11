@@ -87,3 +87,20 @@ func Test_Device_Validate(t *testing.T) {
 		})
 	}
 }
+
+// Test_PipelinesFromProto_ConvertsAssignments verifies that wire
+// pipeline assignments convert name and weight pairwise, skipping nil
+// entries by their zero values.
+func Test_PipelinesFromProto_ConvertsAssignments(t *testing.T) {
+	got := commonpb.PipelinesFromProto([]*commonpb.DevicePipeline{
+		{Name: "p-in", Weight: 3},
+		nil,
+		{Name: "p-out", Weight: 1},
+	})
+
+	require.Equal(t, []commonpb.Pipeline{
+		{Name: "p-in", Weight: 3},
+		{},
+		{Name: "p-out", Weight: 1},
+	}, got)
+}

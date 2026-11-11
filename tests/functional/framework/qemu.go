@@ -202,6 +202,11 @@ func (q *QEMUManager) Start() (bool, error) {
 		return false, fmt.Errorf("QEMU image %s not found: %w", q.ImagePath, err)
 	}
 
+	size, err := VMSizeFromEnv()
+	if err != nil {
+		return false, err
+	}
+
 	// Create working directories
 	q.log.Debug("Creating logs directory...")
 	if err := os.MkdirAll(q.LogsDir, 0755); err != nil {
@@ -268,17 +273,7 @@ func (q *QEMUManager) Start() (bool, error) {
 		q.log.Debugf("Created QCOW2 overlay: %s -> %s", overlayPath, absImagePath)
 	}
 
-	// Base arguments
-	args := []string{
-		"-name", vmName,
-		"-smp", "2",
-		"-m", "1G",
-		"-machine", "q35,kernel-irqchip=split",
-		"-cpu", "max",
-		"-device", "intel-iommu,intremap=on,device-iotlb=on",
-		"-device", "ioh3420,id=pcie.1,chassis=1",
-		"-device", "ioh3420,id=pcie.2,chassis=2",
-	}
+	args := machineArgs(vmName, size)
 
 	// OS-specific configuration
 	if osType == "linux" {
@@ -287,10 +282,7 @@ func (q *QEMUManager) Start() (bool, error) {
 		}
 	}
 
-	// Drive configuration.
-	args = append(args,
-		"-drive", fmt.Sprintf("file=%s,if=virtio,format=qcow2", overlayPath),
-	)
+	args = append(args, overlayDriveArgs(overlayPath)...)
 
 	// When booting from a template overlay, restore VM state instantly via -loadvm.
 	if fromSnapshot {
@@ -459,6 +451,22 @@ func (q *QEMUManager) Start() (bool, error) {
 	}
 
 	return fromSnapshot, nil
+}
+
+// overlayDriveArgs attaches the VM's writable overlay as its disk, with host
+// flushes turned off.
+//
+// The overlay is scratch state that is deleted with its VM, so durability
+// across a host crash buys nothing. Flushes are not free: the first snapshot
+// saved after a restore copies the restored snapshot's clusters on write, and
+// with flushes on, each metadata update in that copy waits for the host disk,
+// which on a busy shared disk took over two minutes. Pausing the VM still
+// hands QEMU's own caches to the host, so a paused VM's overlay copies
+// consistently.
+func overlayDriveArgs(overlayPath string) []string {
+	return []string{
+		"-drive", fmt.Sprintf("file=%s,if=virtio,format=qcow2,cache=unsafe", overlayPath),
+	}
 }
 
 func (q *QEMUManager) stopAfterStartupError(startErr error) error {
@@ -761,8 +769,8 @@ func (q *QEMUManager) discardSerialThrough(marker string) {
 	if len(data) > scanSize {
 		data = data[len(data)-scanSize:]
 	}
-	if index := bytes.LastIndex(data, []byte(marker)); index >= 0 {
-		remainder := append([]byte(nil), data[index+len(marker):]...)
+	if _, after, ok := bytes.CutLast(data, []byte(marker)); ok {
+		remainder := append([]byte(nil), after...)
 		remainder = bytes.TrimPrefix(remainder, []byte{'\n'})
 		q.serialBuffer.Reset()
 		q.serialBuffer.Write(remainder)
@@ -1001,17 +1009,16 @@ func (q *QEMUManager) readUntilMonitorPrompt() (string, error) {
 	}
 
 	cleaned := stripMonitorEscapes(raw.String())
-	first := strings.Index(cleaned, "(qemu)")
-	last := strings.LastIndex(cleaned, "(qemu)")
-	if first >= 0 && last > first {
+	before, after, ok := strings.Cut(cleaned, "(qemu)")
+	if !ok {
+		return strings.TrimSpace(cleaned), nil
+	}
+	if content, _, ok := strings.CutLast(after, "(qemu)"); ok {
 		// Two prompts: content is between them, command echo + output.
-		return stripEchoLine(cleaned[first+len("(qemu)") : last]), nil
+		return stripEchoLine(content), nil
 	}
-	if first >= 0 {
-		// One prompt, at the end: content is what precedes it.
-		return stripEchoLine(cleaned[:first]), nil
-	}
-	return strings.TrimSpace(cleaned), nil
+	// One prompt, at the end: content is what precedes it.
+	return stripEchoLine(before), nil
 }
 
 // stripEchoLine drops the first line of s, the readline echo of the typed
@@ -1258,6 +1265,28 @@ func (q *QEMUManager) setVMReady(ready bool) {
 	q.isReady = ready
 }
 
+const (
+	// snapshotMonitorTimeout bounds saving or loading a VM snapshot.
+	//
+	// Their duration follows the host disk rather than the command: a
+	// snapshot moves the whole guest memory through the overlay, and a busy
+	// shared disk stretched one save past two minutes.
+	snapshotMonitorTimeout = 10 * time.Minute
+	// defaultMonitorTimeout bounds every other monitor command.
+	defaultMonitorTimeout = 120 * time.Second
+)
+
+// monitorTimeout returns how long the monitor may take to answer command.
+func monitorTimeout(command string) time.Duration {
+	verb, _, _ := strings.Cut(command, " ")
+	switch verb {
+	case "savevm", "loadvm":
+		return snapshotMonitorTimeout
+	default:
+		return defaultMonitorTimeout
+	}
+}
+
 // SendMonitorCommand sends a command to the QEMU monitor (HMP) and returns
 // the response. The monitor socket must already be connected via Start().
 // Commands are terminated with a newline; the method waits for the next
@@ -1279,8 +1308,7 @@ func (q *QEMUManager) SendMonitorCommand(cmd string) (string, error) {
 		}
 	}
 
-	// Set a generous timeout for monitor operations (snapshots can be slow).
-	if err := q.monitorConn.SetDeadline(time.Now().Add(120 * time.Second)); err != nil {
+	if err := q.monitorConn.SetDeadline(time.Now().Add(monitorTimeout(cmd))); err != nil {
 		return "", fmt.Errorf("failed to set monitor deadline: %w", err)
 	}
 	defer func() {
@@ -1431,9 +1459,19 @@ func (q *QEMUManager) SaveBootedOverlay() (string, error) {
 	return q.SaveSnapshotOverlay(BootedSnapshotName)
 }
 
-// BootedImagePath returns the versioned path to the booted snapshot image.
+// BootedImagePath returns the versioned path to the booted snapshot image
+// of a VM of the default size.
 func BootedImagePath(baseImagePath string) string {
-	return SnapshotImagePath(baseImagePath, BootedSnapshotName+"-"+bootedTemplateVersion)
+	return BootedImagePathFor(baseImagePath, DefaultVMSize())
+}
+
+// BootedImagePathFor returns the versioned path to the booted snapshot
+// image of a VM of size.
+//
+// Other vCPUs or RAM name a template of their own: a saved snapshot loads
+// only into a machine of the shape it was taken on.
+func BootedImagePathFor(baseImagePath string, size VMSize) string {
+	return SnapshotImagePath(baseImagePath, BootedSnapshotName+"-"+bootedTemplateVersion+size.machineSuffix())
 }
 
 // BaselineImagePath returns the versioned path to the cached baseline snapshot.
@@ -1517,8 +1555,7 @@ type pgrepRunner func(pattern string) (string, error)
 // of silently passing the duplicate-VM check.
 func realPgrepRunner(pattern string) (string, error) {
 	out, err := exec.Command("pgrep", "-f", pattern).Output()
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok && exitErr.ExitCode() == 1 {
 		return "", nil
 	}
 	if err != nil {

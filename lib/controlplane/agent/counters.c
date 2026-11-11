@@ -413,7 +413,7 @@ worker_counter_group_list_build(
 				strtcpy(dst->name, src->name, sizeof(dst->name)
 				);
 				dst->size = src->size;
-				dst->gen = src->gen;
+				dst->gen = src->age;
 				counter_handle_fill_values(
 					dst, &cursor, storage, idx
 				);
@@ -464,11 +464,12 @@ counter_worker_set_list_build(
 // Match the tag and name predicates against every worker's own counter
 // storage registry and return each worker's matched counters separately.
 //
-// The config lock is held only long enough to acquire the generation pin
-// at the start and to drop it again at the end. The pin itself stays held
-// for the whole call: matching, allocation and the value copy all run
-// unlocked against the pinned generation, so a concurrent config update
-// can retire and replace it mid-call without disturbing this read.
+// The generation is pinned through the publication lock at the start
+// and the pin dropped at the end, both without the configuration lock.
+// The pin itself stays held for the whole call: matching, allocation and
+// the value copy all run unlocked against the pinned generation, so a
+// concurrent config update can retire and replace it mid-call without
+// disturbing this read.
 struct counter_worker_set_list *
 yanet_get_counters_by_tags_per_worker(
 	struct dp_config *dp_config,
@@ -484,10 +485,8 @@ yanet_get_counters_by_tags_per_worker(
 	const struct counter_pattern_set *names =
 		query != NULL ? &query->patterns : &any;
 
-	cp_config_lock(cp_config);
 	uint64_t worker_count = dp_config->worker_count;
 	struct cp_config_gen *config_gen = cp_config_gen_acquire(cp_config);
-	cp_config_unlock(cp_config);
 
 	struct worker_counter_matches matches = {
 		.by_worker = NULL,
@@ -506,9 +505,7 @@ yanet_get_counters_by_tags_per_worker(
 out:
 	worker_counter_matches_free(&matches);
 
-	cp_config_lock(cp_config);
 	cp_config_gen_release(cp_config, config_gen);
-	cp_config_unlock(cp_config);
 
 	return sets;
 }
@@ -620,7 +617,7 @@ counter_handle_list_build(
 		struct counter_handle *dst = &handlers[idx];
 		strtcpy(dst->name, counters[idx].name, sizeof(dst->name));
 		dst->size = counters[idx].size;
-		dst->gen = counters[idx].gen;
+		dst->gen = counters[idx].age;
 		counter_handle_fill_values(dst, &cursor, storage, idx);
 	}
 
@@ -663,12 +660,62 @@ yanet_get_worker_counter_metadata(
 		return -1;
 	}
 
+	struct dp_worker_assignment *assignments =
+		ADDR_OF(&worker->assignments);
+
 	metadata->core_id = worker->core_id;
-	metadata->device_id = worker->device_id;
-	metadata->queue_id = worker->queue_id;
 	metadata->rx_burst_size = worker->rx_burst_size;
+	metadata->assignment_count = worker->assignment_count;
+	if (worker->assignment_count > 0 && assignments != NULL) {
+		metadata->device_id = assignments[0].device_id;
+		metadata->queue_id = assignments[0].queue_id;
+	} else {
+		metadata->device_id = 0;
+		metadata->queue_id = 0;
+	}
 
 	return 0;
+}
+
+int
+yanet_get_worker_assignments(
+	struct dp_config *dp_config,
+	uint64_t worker_idx,
+	struct worker_assignment_metadata *assignments,
+	uint32_t max_count
+) {
+	if (dp_config == NULL) {
+		return -1;
+	}
+
+	struct dp_worker **workers = ADDR_OF(&dp_config->workers);
+	if (workers == NULL || worker_idx >= dp_config->worker_count) {
+		return -1;
+	}
+
+	struct dp_worker *worker = ADDR_OF(&workers[worker_idx]);
+	if (worker == NULL) {
+		return -1;
+	}
+
+	struct dp_worker_assignment *source = ADDR_OF(&worker->assignments);
+	uint32_t count = worker->assignment_count;
+	if (count > max_count) {
+		count = max_count;
+	}
+	if (source == NULL) {
+		count = 0;
+	}
+
+	for (uint32_t idx = 0; idx < count; ++idx) {
+		assignments[idx] = (struct worker_assignment_metadata){
+			.device_id = source[idx].device_id,
+			.queue_id = source[idx].queue_id,
+			.weight = source[idx].weight,
+		};
+	}
+
+	return (int)count;
 }
 
 struct port_counter_group_list *

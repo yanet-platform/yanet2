@@ -12,7 +12,7 @@ import (
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
+	cplain "github.com/yanet-platform/yanet2/devices/plain/bindings/go/cplain"
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
 	fwstate "github.com/yanet-platform/yanet2/modules/fwstate/controlplane"
 	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
@@ -168,7 +168,7 @@ func TestFWStateDeleteReferencedConfigRefused(t *testing.T) {
 		Name:      "pipeline0",
 		Functions: []string{"function0"},
 	}))
-	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	_, err = cplain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:  "port0",
 		Input: []ffi.DevicePipelineConfig{{Name: "pipeline0", Weight: 1}},
 	}})
@@ -191,7 +191,7 @@ func TestFWStateUpdateUnknownMapNameRejected(t *testing.T) {
 	service := fwstate.NewFWStateService(agent)
 
 	request := validDeleteTestUpdateRequest(configName, maps.v4Name(), maps.v6Name())
-	request.MapNameV6 = proto.String("no-such-map")
+	request.MapNameV6 = new("no-such-map")
 
 	_, err := service.UpdateConfig(t.Context(), request)
 	require.Equal(t, codes.FailedPrecondition, status.Code(err))
@@ -224,15 +224,19 @@ func TestDeleteModuleConfigUsesRegisteredType(t *testing.T) {
 }
 
 func validDeleteTestUpdateRequest(name, fw4MapName, fw6MapName string) *fwstatepb.UpdateConfigRequest {
+	addr := func() *commonpb.IPv6Address {
+		return commonpb.NewIPv6Address([16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16})
+	}
 	return &fwstatepb.UpdateConfigRequest{
 		Name:      name,
-		MapNameV4: proto.String(fw4MapName),
-		MapNameV6: proto.String(fw6MapName),
+		MapNameV4: new(fw4MapName),
+		MapNameV6: new(fw6MapName),
 		SyncConfig: &fwstatepb.SyncConfig{
-			SrcAddr:          &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}},
-			DstEther:         &commonpb.MACAddress{Addr: 0x333300000001},
-			DstAddrMulticast: &commonpb.IPAddress{Addr: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}},
-			PortMulticast:    proto.Uint32(9999),
+			Endpoints: []*fwstatepb.SyncEndpoint{{
+				SrcAddr: addr(),
+				DstAddr: addr(),
+				Port:    proto.Uint32(9999),
+			}},
 		},
 	}
 }

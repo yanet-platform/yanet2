@@ -26,6 +26,13 @@ export class ApiError extends Error {
 
 let apiBase = '';
 
+/** Credentials mode of every API call.
+ *
+ * A gateway on another origin receives the browser's client certificate
+ * only with a credentialed request.
+ */
+const apiCredentials: RequestCredentials = 'include';
+
 /** Set the base URL prefix for all API calls. An empty string means same-origin. */
 export const setApiBase = (base: string): void => {
     apiBase = base;
@@ -70,9 +77,9 @@ const callGRPCServiceWithBody = async <T>(
 
     let requestBody: string | Blob = jsonBody;
 
-    // Only compress for same-origin requests; cross-origin gateways don't allow
-    // Content-Encoding in CORS preflight, so skip compression when apiBase is set.
-    if (options?.compress && !apiBase) {
+    // An older gateway on another origin refuses a compressed call at its
+    // CORS preflight, since it does not allow Content-Encoding.
+    if (options?.compress) {
         requestBody = await compressGzip(jsonBody);
         headers['Content-Encoding'] = 'gzip';
     }
@@ -82,6 +89,7 @@ const callGRPCServiceWithBody = async <T>(
         headers,
         body: requestBody,
         signal: options?.signal,
+        credentials: apiCredentials,
     });
 
     if (!response.ok) {
@@ -221,6 +229,7 @@ const streamGRPCService = async <T>(
             },
             body: JSON.stringify(body),
             signal,
+            credentials: apiCredentials,
         });
 
         if (!response.ok) {

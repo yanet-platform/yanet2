@@ -1,14 +1,6 @@
 package ffi
 
 //#cgo CFLAGS: -I../../
-//#cgo LDFLAGS: -L../../build/lib/controlplane/agent -lagent
-//#cgo LDFLAGS: -L../../build/lib/controlplane/config -lconfig_cp
-//#cgo LDFLAGS: -L../../build/lib/counters/ -lcounters
-//#cgo LDFLAGS: -L../../build/lib/dataplane/config -lconfig_dp
-//#cgo LDFLAGS: -L../../build/lib/dataplane/pipeline -lpipeline
-//#cgo LDFLAGS: -L../../build/devices/plain/api -ldev_plain_api
-//#cgo LDFLAGS: -L../../build/devices/vlan/api -ldev_vlan_api
-//#cgo LDFLAGS: -L../../build/lib/logging/ -llogging
 //
 //#include "api/agent.h"
 //#include "api/config.h"
@@ -157,9 +149,24 @@ const MaxDeviceNameLen = C.CP_DEVICE_NAME_LEN
 // terminating NUL.
 const MaxAgentNameLen = C.AGENT_NAME_LEN
 
+// AgentSizeAlignment is the C allocator's extension-size granularity.
+const AgentSizeAlignment = C.MEMORY_BLOCK_ALLOCATOR_MIN_SIZE
+
 // MaxPipelineNameLen is the size of the C-side pipeline name buffer, including
 // the terminating NUL.
 const MaxPipelineNameLen = C.CP_PIPELINE_NAME_LEN
+
+// MaxFunctionNameLen is the size of the C-side function name buffer, including
+// the terminating NUL.
+const MaxFunctionNameLen = C.CP_FUNCTION_NAME_LEN
+
+// MaxChainNameLen is the size of the C-side chain name buffer, including the
+// terminating NUL.
+const MaxChainNameLen = C.CP_CHAIN_NAME_LEN
+
+// MaxModuleTypeLen is the size of the C-side module type buffer, including
+// the terminating NUL.
+const MaxModuleTypeLen = C.CP_MODULE_TYPE_LEN
 
 // MaxObjectNameLen is the size of the C-side object name buffer, including
 // the terminating NUL.
@@ -202,7 +209,7 @@ func (m *Agent) Close() error {
 }
 
 func (m *Agent) CleanUp() error {
-	_, err := C.agent_cleanup(m.ptr)
+	_, err := C.agent_destroy(m.ptr)
 	return err
 }
 

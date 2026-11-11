@@ -1,0 +1,53 @@
+name: CI image pins
+
+# Fails when the workflows reference the CI image by anything but one digest.
+#
+# Every native job names the CI image by digest, and a bump has to replace
+# the old digest in all of them at once; a missed reference would keep that
+# job on the previous toolchain without anything else noticing. The run on
+# main catches two pull requests that each pass alone but disagree once both
+# have merged.
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+      - ".github/actions/**"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/**"
+      - ".github/actions/**"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pins:
+    name: CI image pins agree
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Compare the image references of the workflows
+        run: |
+          set -euo pipefail
+          refs=$(grep -rnoE 'ghcr\.io/yanet-platform/yanet2-ci[:@][A-Za-z0-9_.:@-]+' .github/workflows .github/actions || true)
+          if [[ -z $refs ]]; then
+            echo "::error::no workflow references the CI image"
+            exit 1
+          fi
+          undigested=$(grep -vE '@sha256:[0-9a-f]{64}$' <<<"$refs" || true)
+          digests=$(grep -oE '@sha256:[0-9a-f]{64}$' <<<"$refs" | sort -u || true)
+          if [[ -n $undigested || $(wc -l <<<"$digests") -ne 1 ]]; then
+            echo "::error::the workflows must pin the CI image by one digest everywhere:"
+            printf '%s\n' "$refs"
+            exit 1
+          fi
+          echo "every native job runs ghcr.io/yanet-platform/yanet2-ci$digests"

@@ -1,31 +1,30 @@
 [package]
 name = "yanet-cli-pdump"
-version = "0.1.0"
-edition = "2024"
-publish = false
-
-rust-version = "1.88"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+rust-version.workspace = true
 
 [lints]
 workspace = true
 
 [dependencies]
-clap = { version = "4.5", features = ["derive", "wrap_help"] }
-clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
-log = "0.4"
-serde = { version = "1", features = ["derive"] }
-tokio = { version = "1", features = ["rt", "macros", "signal"] }
-tonic = { version = "0.14", features = ["gzip"] }
-tonic-prost = "0.14"
-prost = "0.14"
-ync = { path = "../../../cli/core", version = "0.1", package = "yanet-cli" }
-bytesize = "2"
-# Pinned exactly: semver sorts rc.2 below rc1, so a caret requirement
-# resolves back to rc1, and rc.3 needs Rust 1.93 above the 1.88 MSRV.
-pcap-file = "=3.0.0-rc.2"
+clap = { workspace = true, features = ["wrap_help"] }
+clap_complete.workspace = true
+log.workspace = true
+serde = { workspace = true, features = ["derive"] }
+tokio = { workspace = true, features = ["macros", "rt", "signal"] }
+tonic.workspace = true
+prost.workspace = true
+ync.workspace = true
+# Pinned exactly: semver sorts rc.N below rc1, so a caret requirement
+# resolves back to rc1.
+pcap-file = "=3.0.0-rc.3"
 tokio-util = "0.7"
 pnet_packet = "0.35"
 
+[dev-dependencies]
+tempfile.workspace = true
+
 [build-dependencies]
-ync-build = { path = "../../../cli/ync-build", version = "0.1", package = "yanet-cli-build" }
-bindgen = "0.72"
+ync-build.workspace = true

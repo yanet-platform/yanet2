@@ -12,60 +12,79 @@ on:
     branches: ["main"]
     paths:
       - "**.rs"
+      # Crate build scripts compile the protobuf definitions.
+      - "**.proto"
       - "**/Cargo.toml"
       - "**/Cargo.lock"
       - ".cargo/config.toml"
       - ".github/workflows/rust-check.yml"
-      - ".github/actions/apt-packages/**"
-      - ".github/actions/apt-failover/**"
+      - ".github/actions/protoc/**"
+      # The Rust module SDK is a workspace of its own that neither meson nor
+      # the CLI builds; its own workflows check it.
+      #
+      # A negation applies only to the patterns above it, so it stays last.
+      - "!bindings/rust/**"
   pull_request:
     # A stacked pull request has a non-main base, so a main-only filter would skip it.
     branches: ["**"]
     paths:
       - "**.rs"
+      # Crate build scripts compile the protobuf definitions.
+      - "**.proto"
       - "**/Cargo.toml"
       - "**/Cargo.lock"
       - ".cargo/config.toml"
       - ".github/workflows/rust-check.yml"
-      - ".github/actions/apt-packages/**"
-      - ".github/actions/apt-failover/**"
+      - ".github/actions/protoc/**"
+      # The Rust module SDK is a workspace of its own that neither meson nor
+      # the CLI builds; its own workflows check it.
+      #
+      # A negation applies only to the patterns above it, so it stays last.
+      - "!bindings/rust/**"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   fmt:
     name: cargo fmt
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       # Pinned: a floating nightly rewraps comments differently from one
       # day to the next and turns untouched files red.
       #
       # Bump the date together with a reformat of the workspace, so the
       # toolchain and the checked-in formatting move in one change.
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@2c76c034f9e32a5d6e2c104dc4df23a22476db04 # nightly
         with:
-          toolchain: nightly-2026-08-28
+          toolchain: nightly-2026-10-22
           components: rustfmt
       - run: cargo fmt --all -- --check
 
   test:
     name: cargo test
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
       - name: Cache cargo registry and target directory
-        uses: Swatinem/rust-cache@v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: rust-test
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: ./.github/actions/apt-packages
-        timeout-minutes: 10
-        with:
-          packages: cmake protobuf-compiler
+      - uses: ./.github/actions/protoc
+        timeout-minutes: 5
       # --locked: a manifest change passes only with its regenerated Cargo.lock.
       - run: cargo test --workspace --locked
 
@@ -75,18 +94,24 @@ jobs:
   clippy:
     name: cargo clippy
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@1.97.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
         with:
           components: clippy
       - name: Cache cargo registry and target directory
-        uses: Swatinem/rust-cache@v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: rust-check
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: ./.github/actions/apt-packages
-        timeout-minutes: 10
-        with:
-          packages: cmake protobuf-compiler
-      - run: cargo clippy --workspace --locked -- -D warnings
+      - uses: ./.github/actions/protoc
+        timeout-minutes: 5
+      # With CARGO_BUILD_WARNINGS=deny a crate that only warns still builds, so
+      # --keep-going checks its dependents too and the run lists every warning
+      # before it fails.
+      - run: cargo clippy --workspace --all-targets --locked --keep-going
+        env:
+          CARGO_BUILD_WARNINGS: deny

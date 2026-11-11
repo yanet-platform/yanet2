@@ -6,6 +6,7 @@ on:
     paths:
       - "**/*.go"
       - "go.mod"
+      - "ci/go-version"
       - ".github/workflows/go-formatting.yml"
   pull_request:
     # A stacked pull request has a non-main base, so a main-only filter would skip it.
@@ -13,25 +14,32 @@ on:
     paths:
       - "**/*.go"
       - "go.mod"
+      - "ci/go-version"
       - ".github/workflows/go-formatting.yml"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   gofmt:
     name: Check Go Formatting
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # gofmt only reformats source text. It resolves no imports and never
       # touches GOMODCACHE, so this job needs no module cache.
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version-file: ci/go-version
           cache: false
 
       - name: Check gofmt

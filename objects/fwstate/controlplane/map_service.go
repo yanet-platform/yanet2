@@ -28,10 +28,6 @@ import (
 	fwstatemappb "github.com/yanet-platform/yanet2/objects/fwstate/controlplane/fwstatemappb/v1"
 )
 
-// maxWorkerCount is the highest value accepted for worker_count, matching
-// the width of the C-side uint16 parameter of fwstate_map insert_layer.
-const maxWorkerCount uint32 = 65535
-
 const (
 	// DefaultListEntriesBatchSize is the batch size used when the caller
 	// sends zero in the request.
@@ -154,10 +150,12 @@ type FWStateMapService struct {
 	fwstatemappb.UnimplementedFWStateMapServiceServer
 
 	mu sync.Mutex
-	// deferred holds superseded map objects whose free was refused
-	// because a live configuration generation still referenced them.
-	// This service is their owner: it retries them on its next update,
-	// through ReclaimDeferred, and nothing else remembers them.
+	// deferred holds deleted map objects whose free a live configuration
+	// generation refused.
+	//
+	// This service is their owner and nothing else remembers them: it
+	// retries them before every create, delete and layer insert, after a
+	// successful delete and on every stale-layer sweep.
 	deferred []*cfwstate.MapObjectConfig
 	agent    *ffi.Agent
 	maps     map[string]*FWStateMap
@@ -331,6 +329,10 @@ func (m *FWStateMapService) CreateMap(
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// Releasing the drained deferred objects first leaves their memory to
+	// the new map, and a failing create cannot keep them.
+	m.reclaimDeferred()
+
 	if _, exists := m.maps[name]; exists {
 		return nil, status.Errorf(codes.AlreadyExists, "fwstate-map %q already exists", name)
 	}
@@ -392,6 +394,8 @@ func (m *FWStateMapService) DeleteMap(
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	m.reclaimDeferred()
 
 	fwMap, ok := m.maps[name]
 	if !ok {
@@ -499,6 +503,8 @@ func (m *FWStateMapService) InsertLayer(
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	m.reclaimDeferred()
 
 	fwMap, ok := m.maps[name]
 	if !ok {
@@ -610,7 +616,7 @@ func (m *FWStateMapService) ListEntries(
 
 	pbEntries := make([]*fwstatemappb.FwStateEntry, 0, len(entries))
 	for idx := range entries {
-		pbEntries = append(pbEntries, fwstatemappb.FromCursorEntry(entries[idx]))
+		pbEntries = append(pbEntries, fromCursorEntry(entries[idx]))
 	}
 
 	return &fwstatemappb.ListEntriesResponse{
@@ -775,8 +781,8 @@ func (m *FWStateMapService) SweepMap(
 	)
 }
 
-// RunStaleLayerSweeper reclaims stale layers until the context is
-// cancelled.
+// RunStaleLayerSweeper reclaims stale layers and retries the deferred map
+// objects until the context is cancelled.
 func (m *FWStateMapService) RunStaleLayerSweeper(
 	ctx context.Context, interval time.Duration,
 ) {
@@ -797,6 +803,7 @@ func (m *FWStateMapService) RunStaleLayerSweeper(
 			return
 		case <-ticker.C:
 			m.SweepStaleLayers(ctx)
+			m.ReclaimDeferred()
 		}
 	}
 }
@@ -806,8 +813,12 @@ func ValidateWorkerCount(workerCount uint32) error {
 	if workerCount == 0 {
 		return status.Error(codes.InvalidArgument, "worker_count must be greater than zero")
 	}
-	if workerCount > maxWorkerCount {
-		return status.Errorf(codes.InvalidArgument, "worker_count %d exceeds maximum %d", workerCount, maxWorkerCount)
+	if workerCount > fwstatemappb.MaxWorkerCount {
+		return status.Errorf(
+			codes.InvalidArgument,
+			"worker_count %d exceeds maximum %d",
+			workerCount, fwstatemappb.MaxWorkerCount,
+		)
 	}
 	return nil
 }
@@ -908,10 +919,11 @@ func NewFWStateMapServiceForTest(
 }
 
 // ReclaimDeferred retries every deferred map object, dropping the ones
-// whose generations have drained and keeping the rest deferred. It is
-// the reclamation handler for this service's superseded objects; the
-// service itself runs it after each successful delete, and anything else
-// may call it at any time.
+// whose generations have drained and keeping the rest deferred.
+//
+// The service runs it before every create, delete and layer insert, after
+// a successful delete and on every stale-layer sweep; anything else may
+// call it at any time.
 func (m *FWStateMapService) ReclaimDeferred() {
 	m.mu.Lock()
 	defer m.mu.Unlock()

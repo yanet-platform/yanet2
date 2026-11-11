@@ -18,7 +18,8 @@ use ynpb::pb::{
 
 fn client(channel: LayeredChannel) -> FunctionServiceClient<LayeredChannel> {
     FunctionServiceClient::new(channel)
-        .send_compressed(CompressionEncoding::Gzip)
+        .send_compressed(CompressionEncoding::Zstd)
+        .accept_compressed(CompressionEncoding::Zstd)
         .accept_compressed(CompressionEncoding::Gzip)
 }
 

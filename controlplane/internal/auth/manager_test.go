@@ -20,7 +20,7 @@ import (
 
 func TestManager_Authenticate(t *testing.T) {
 	config := &auth.Config{
-		Disabled: true,
+		Mode: auth.ModeDisabled,
 	}
 	m, err := auth.NewManager(config)
 	if err != nil {
@@ -73,7 +73,7 @@ func TestManager_Authenticate(t *testing.T) {
 func TestManager_Authorize(t *testing.T) {
 	log := zap.NewNop()
 	m, err := auth.NewManager(&auth.Config{
-		Disabled: true,
+		Mode: auth.ModeDisabled,
 	}, auth.WithLog(log))
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
@@ -184,7 +184,7 @@ func buildEnabledConfig(t *testing.T) auth.Config {
 	permissionsPath := writePermissionsFile(t)
 	credentialsPath := writeBasicCredentialsFile(t)
 
-	text := "disabled: false\n" +
+	text := "mode: enabled\n" +
 		"identity_providers:\n" +
 		"  - type: file\n" +
 		"    path: " + identitiesPath + "\n" +

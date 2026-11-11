@@ -28,8 +28,6 @@
 #define LPM_CHUNK_SIZE 16
 // Max LPM key size in bytes (IPv6 address).
 #define LPM_KEY_SIZE_MAX 16
-// Lanes processed per chunk by lpm_lookup_batch().
-#define LPM_LOOKUP_BATCH_LANES 32
 
 struct lpm_page;
 
@@ -160,35 +158,69 @@ lpm_free(struct lpm *lpm) {
 	memory_context_fini(memory_context);
 }
 
+// A range insert as every page of its walk reads it.
+struct lpm_insert_range {
+	struct lpm *lpm;
+	uint8_t key_size;
+	const uint8_t *from;
+	const uint8_t *to;
+	// The length of the start up to its last nonzero byte, 0 if none.
+	uint8_t from_len;
+	// The length of the end up to its last byte other than 0xff, 0 if none.
+	uint8_t to_len;
+	uint64_t leaf;
+};
+
+/*
+ * Writes the value into the slots of one page the range covers, in key order.
+ *
+ * The flags tell whether the key prefix leading to the page equals the
+ * prefix of the range start and of the range end: only then does the page
+ * bound the walk, and only its slot on that boundary can cover a subtree in
+ * part. Such a slot splits its leaf into a page of the old value and the
+ * walk goes down; any other leaf takes the value. An existing child page
+ * is always walked and never collapsed, so the tree only grows.
+ */
 static inline int
-lpm_check_range_lo(
-	uint8_t key_size, const uint8_t *key, const uint8_t *from, uint8_t hop
+lpm_insert_page(
+	const struct lpm_insert_range *range,
+	struct lpm_page *page,
+	uint8_t hop,
+	bool on_from,
+	bool on_to
 ) {
-	uint8_t check[key_size];
-	memcpy(check, key, hop + 1);
+	uint32_t first = on_from ? range->from[hop] : 0x00;
+	uint32_t last = on_to ? range->to[hop] : 0xff;
+	bool last_hop = hop + 1 == range->key_size;
 
-	if (hop + 1 < key_size) {
-		memset(check + hop + 1, 0x00, key_size - hop - 1);
-	}
-	if (filter_key_cmp(key_size, check, from) < 0) {
-		return -1;
-	}
+	for (uint32_t key = first; key <= last; ++key) {
+		union lpm_value *stored_value = page->values + key;
+		bool key_from = on_from && key == first;
+		bool key_to = on_to && key == last;
 
-	return 0;
-}
+		if (stored_value->value & LPM_VALUE_FLAG) {
+			bool partial =
+				!last_hop &&
+				((key_from && range->from_len > hop + 1) ||
+				 (key_to && range->to_len > hop + 1));
+			if (!partial) {
+				stored_value->value = range->leaf;
+				continue;
+			}
+			if (lpm_new_page(range->lpm, stored_value)) {
+				return -1;
+			}
+		}
 
-static inline int
-lpm_check_range_hi(
-	uint8_t key_size, const uint8_t *key, const uint8_t *to, uint8_t hop
-) {
-	uint8_t check[key_size];
-	memcpy(check, key, key_size);
-
-	if (hop + 1 < key_size) {
-		memset(check + hop + 1, 0xff, key_size - hop - 1);
-	}
-	if (filter_key_cmp(key_size, check, to) > 0) {
-		return -1;
+		if (lpm_insert_page(
+			    range,
+			    ADDR_OF(&stored_value->page),
+			    hop + 1,
+			    key_from,
+			    key_to
+		    )) {
+			return -1;
+		}
 	}
 
 	return 0;
@@ -201,9 +233,12 @@ lpm_check_range_hi(
  * @param to     The ending point of the range (inclusive).
  * @param value  The value to which the range is mapped.
  *
- * @note Keys are big-endian encoded.
+ * @note Keys are big-endian encoded. A range whose start is past its end is
+ *       empty: it maps nothing and leaves the tree as it was.
  *
- * @return On success, returns 0. If an error occurs, sets errno and returns -1.
+ * @return On success, returns 0. If an error occurs, sets errno and returns -1:
+ *         EINVAL for a key size of 0, which leaves the tree untouched,
+ *         ENOMEM when a page cannot be allocated.
  */
 static inline int
 lpm_insert(
@@ -213,69 +248,32 @@ lpm_insert(
 	const uint8_t *to,
 	uint32_t value
 ) {
-	uint8_t key[key_size];
-	struct lpm_page *pages[key_size];
-
-	int8_t hop = 0;
-	key[hop] = from[hop];
-	pages[hop] = lpm_page(lpm, 0);
-	int8_t max_hop = 0;
-
-	while (1) {
-		union lpm_value *stored_value = pages[hop]->values + key[hop];
-		if (stored_value->value & LPM_VALUE_FLAG) {
-			/*
-			 * Assume there is only invalid values, in the opposite
-			 * one have to propagate the value deeper.
-			 */
-			if (hop < key_size - 1 &&
-			    (lpm_check_range_lo(key_size, key, from, hop) ||
-			     lpm_check_range_hi(key_size, key, to, hop))) {
-				if (lpm_new_page(lpm, stored_value)) {
-					return -1;
-				}
-				++hop;
-				if (hop > max_hop) {
-					key[hop] = from[hop];
-					max_hop = hop;
-				} else {
-					key[hop] = 0;
-				}
-				pages[hop] = ADDR_OF(&stored_value->page);
-				continue;
-			} else {
-				stored_value->value = LPM_VALUE_SET(value);
-			}
-		} else {
-			++hop;
-			if (hop > max_hop) {
-				key[hop] = from[hop];
-				max_hop = hop;
-			} else {
-				key[hop] = 0;
-			}
-			pages[hop] = ADDR_OF(&stored_value->page);
-			continue;
-		}
-
-		do {
-			key[hop]++;
-			uint8_t upper_bound = 0xff;
-			if (lpm_check_range_hi(key_size, key, to, hop)) {
-				upper_bound = to[hop];
-			}
-			if (key[hop] == (uint8_t)(upper_bound + 1)) {
-				if (hop == 0) {
-					return 0;
-				}
-				--hop;
-			} else {
-				break;
-			}
-		} while (1);
+	if (key_size == 0) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (filter_key_cmp(key_size, from, to) > 0) {
+		return 0;
 	}
 
-	return 0;
+	struct lpm_insert_range range = {
+		.lpm = lpm,
+		.key_size = key_size,
+		.from = from,
+		.to = to,
+		.leaf = LPM_VALUE_SET(value),
+	};
+
+	for (uint8_t len = key_size; len > 0; --len) {
+		if (range.from_len == 0 && from[len - 1] != 0x00) {
+			range.from_len = len;
+		}
+		if (range.to_len == 0 && to[len - 1] != 0xff) {
+			range.to_len = len;
+		}
+	}
+
+	return lpm_insert_page(&range, lpm_page(lpm, 0), 0, true, true);
 }
 
 static inline uint32_t
@@ -294,88 +292,6 @@ lpm_lookup(const struct lpm *lpm, uint8_t key_size, const uint8_t *key) {
 	}
 
 	return LPM_VALUE_GET(value->value);
-}
-
-/*
- * Batched variant of lpm_lookup.
- *
- * The single-key walk is a serially dependent chain: the address of the
- * next hop's slot is only known once the current hop's load returns, so
- * one lookup alone cannot hide its latency. This routine walks hop-major
- * — all keys advance one hop per step — which lets the out-of-order
- * engine overlap the chains of independent keys. Explicit prefetching
- * does not help here (measured: it only adds overhead), so none is done.
- *
- * @param keys    count consecutive keys, key_size bytes each
- * @param results count consecutive result slots
- */
-static inline void
-lpm_lookup_batch(
-	const struct lpm *lpm,
-	uint8_t key_size,
-	const uint8_t *keys,
-	uint32_t *results,
-	size_t count
-) {
-	while (count > 0) {
-		size_t lane_count = count < LPM_LOOKUP_BATCH_LANES
-					    ? count
-					    : LPM_LOOKUP_BATCH_LANES;
-
-		struct lpm_page *pages[LPM_LOOKUP_BATCH_LANES];
-		uint64_t values[LPM_LOOKUP_BATCH_LANES];
-		bool done[LPM_LOOKUP_BATCH_LANES];
-		size_t remaining = lane_count;
-
-		for (size_t lane = 0; lane < lane_count; ++lane) {
-			pages[lane] = lpm_page(lpm, 0);
-			done[lane] = false;
-		}
-
-		for (uint8_t hop = 0; hop < key_size && remaining > 0; ++hop) {
-			for (size_t lane = 0; lane < lane_count; ++lane) {
-				if (done[lane]) {
-					continue;
-				}
-
-				union lpm_value *value =
-					pages[lane]->values +
-					keys[lane * key_size + hop];
-				if (value->value & LPM_VALUE_FLAG) {
-					values[lane] = value->value;
-					done[lane] = true;
-					--remaining;
-				} else if (hop + 1 < key_size) {
-					// An intermediate node (flag clear)
-					// always has a child page, so the
-					// relative pointer is never NULL here —
-					// same contract as lpm_lookup.
-					pages[lane] =
-						ADDR_OF_NONNULL(&value->page);
-				} else {
-					// No deeper hop is possible, so a clear
-					// flag at the last key byte still
-					// terminates the walk — the raw value
-					// is returned as lpm_lookup() would.
-					values[lane] = value->value;
-					done[lane] = true;
-					--remaining;
-				}
-			}
-		}
-
-		for (size_t lane = 0; lane < lane_count; ++lane) {
-			// The shift runs on the full 64-bit slot and only the
-			// result is narrowed, matching the single-key walk
-			// bit-for-bit — the empty sentinel must narrow to the
-			// same value.
-			results[lane] = (uint32_t)LPM_VALUE_GET(values[lane]);
-		}
-
-		keys += lane_count * key_size;
-		results += lane_count;
-		count -= lane_count;
-	}
 }
 
 static inline size_t
@@ -531,113 +447,6 @@ out:
 		return true;
 	}
 	return false;
-}
-
-typedef int (*lpm_walk_func)(
-	uint8_t key_size,
-	const uint8_t *from,
-	const uint8_t *to,
-	uint32_t value,
-	void *data
-);
-
-static inline int
-lpm_walk(
-	const struct lpm *lpm,
-	uint8_t key_size,
-	const uint8_t *from,
-	const uint8_t *to,
-	lpm_walk_func walk_func,
-	void *walk_func_data
-) {
-	uint8_t key[key_size];
-	memset(key, 0, key_size);
-	struct lpm_page *pages[key_size];
-
-	int8_t hop = 0;
-	int8_t hi_limit = 0;
-
-	key[hop] = from[hop];
-	pages[hop] = lpm_page(lpm, 0);
-	int8_t max_hop = 0;
-
-	uint32_t prev_value = LPM_VALUE_INVALID;
-	uint8_t prev_from[key_size];
-	memcpy(prev_from, from, key_size);
-	uint8_t prev_to[key_size];
-
-	while (1) {
-		union lpm_value *value = pages[hop]->values + key[hop];
-		if (value->value & LPM_VALUE_FLAG) {
-			if (prev_value != LPM_VALUE_GET(value->value)) {
-				if (prev_value != LPM_VALUE_INVALID) {
-					if (walk_func(
-						    key_size,
-						    prev_from,
-						    prev_to,
-						    prev_value,
-						    walk_func_data
-					    )) {
-						return -1;
-					}
-				}
-
-				prev_value = LPM_VALUE_GET(value->value);
-				memcpy(prev_from, key, key_size);
-				memset(prev_from + hop + 1,
-				       0x00,
-				       key_size - hop - 1);
-			}
-			memcpy(prev_to, key, key_size);
-			memset(prev_to + hop + 1, 0xff, key_size - hop - 1);
-		} else {
-			if (key[hop] == to[hop] && hop == hi_limit) {
-				++hi_limit;
-			}
-
-			++hop;
-			if (hop > max_hop) {
-				key[hop] = from[hop];
-				max_hop = hop;
-			} else {
-				key[hop] = 0;
-			}
-			pages[hop] = ADDR_OF(&value->page);
-			continue;
-		}
-
-		do {
-			key[hop]++;
-			uint8_t upper_bound = 0xff;
-			if (hop == hi_limit) {
-				upper_bound = to[hop];
-			}
-			if (key[hop] == (uint8_t)(upper_bound + 1)) {
-				if (hop == hi_limit) {
-					goto out;
-				}
-				--hop;
-			} else {
-				break;
-			}
-		} while (1);
-	}
-
-out:
-
-	if (prev_value != LPM_VALUE_INVALID) {
-		if (walk_func(
-			    key_size,
-			    prev_from,
-			    prev_to,
-			    prev_value,
-			    walk_func_data
-		    )) {
-			return -1;
-		}
-	}
-
-	return 0;
 }
 
 /*
@@ -828,16 +637,6 @@ lpm8_lookup(const struct lpm *lpm8, const uint8_t *key) {
 	return lpm_lookup(lpm8, 8, key);
 }
 
-static inline void
-lpm8_lookup_batch(
-	const struct lpm *lpm8,
-	const uint8_t *keys,
-	uint32_t *results,
-	size_t count
-) {
-	lpm_lookup_batch(lpm8, 8, keys, results, count);
-}
-
 static inline int
 lpm8_collect_values(
 	const struct lpm *lpm8,
@@ -849,17 +648,6 @@ lpm8_collect_values(
 	return lpm_collect_values(
 		lpm8, 8, from, to, collect_func, collect_func_data
 	);
-}
-
-static inline int
-lpm8_walk(
-	const struct lpm *lpm8,
-	const uint8_t *from,
-	const uint8_t *to,
-	lpm_walk_func walk_func,
-	void *walk_func_data
-) {
-	return lpm_walk(lpm8, 8, from, to, walk_func, walk_func_data);
 }
 
 static inline void
@@ -884,16 +672,6 @@ lpm4_lookup(const struct lpm *lpm4, const uint8_t *key) {
 	return lpm_lookup(lpm4, 4, key);
 }
 
-static inline void
-lpm4_lookup_batch(
-	const struct lpm *lpm4,
-	const uint8_t *keys,
-	uint32_t *results,
-	size_t count
-) {
-	lpm_lookup_batch(lpm4, 4, keys, results, count);
-}
-
 static inline int
 lpm4_collect_values(
 	const struct lpm *lpm4,
@@ -905,17 +683,6 @@ lpm4_collect_values(
 	return lpm_collect_values(
 		lpm4, 4, from, to, collect_func, collect_func_data
 	);
-}
-
-static inline int
-lpm4_walk(
-	const struct lpm *lpm4,
-	const uint8_t *from,
-	const uint8_t *to,
-	lpm_walk_func walk_func,
-	void *walk_func_data
-) {
-	return lpm_walk(lpm4, 4, from, to, walk_func, walk_func_data);
 }
 
 static inline void

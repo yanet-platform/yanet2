@@ -2,9 +2,11 @@ package operator
 
 import (
 	"errors"
+	"fmt"
 
 	"go.uber.org/zap/zapcore"
 
+	"github.com/yanet-platform/yanet2/common/go/debugserver"
 	"github.com/yanet-platform/yanet2/common/go/logging"
 	"github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
@@ -13,6 +15,7 @@ import (
 // Config is the top-level YAML configuration for yanet-pipeline-operator.
 type Config struct {
 	Logging   logging.Config            `yaml:"logging"`
+	Debug     debugserver.Config        `yaml:"debug"`
 	Server    operator.GRPCServerConfig `yaml:"server"`
 	Gateways  []operator.GatewayConfig  `yaml:"gateways"`
 	Register  operator.RegisterConfig   `yaml:"register"`
@@ -30,9 +33,25 @@ func (m *Config) LoggingConfig() *logging.Config {
 	return &m.Logging
 }
 
+// DebugConfig exposes the debug server configuration to the common
+// command lifecycle.
+func (m *Config) DebugConfig() *debugserver.Config {
+	return &m.Debug
+}
+
 func (m *Config) Validate() error {
 	if len(m.Gateways) == 0 {
 		return errors.New("at least one gateway must be configured")
+	}
+
+	// Stages move on once every gateway applied them, telling the gateways
+	// apart by name.
+	gatewayNames := map[string]struct{}{}
+	for idx, gw := range m.Gateways {
+		if _, dup := gatewayNames[gw.Name]; dup {
+			return fmt.Errorf("duplicate gateway name %q at index %d", gw.Name, idx)
+		}
+		gatewayNames[gw.Name] = struct{}{}
 	}
 
 	return nil

@@ -11,15 +11,17 @@
 
 #include "hacks.h"
 
+#include "api/agent.h"
 #include "common/memory_address.h"
 #include "lib/errors/errors.h"
 
 #include "lib/controlplane/agent/agent.h"
+#include "lib/controlplane/config/cp_module.h"
 #include "lib/dataplane/config/zone.h"
+#include "objects/ring/api/ring_object.h"
 
 const uint32_t default_snaplen = MBUF_MAX_SIZE;
-const uint32_t max_ring_size = MEMORY_BLOCK_ALLOCATOR_MAX_SIZE;
-const uint32_t ring_msg_magic = RING_MSG_MAGIC;
+const uint32_t pdump_record_magic = PDUMP_RECORD_MAGIC;
 
 #define pdump_log(level, fmt_, ...) rte_log(level, 0, fmt_, ##__VA_ARGS__)
 
@@ -61,7 +63,7 @@ static int
 pdump_module_config_update_filter_str(struct cp_module *module, char *filter) {
 	struct pdump_module_config *config =
 		container_of(module, struct pdump_module_config, cp_module);
-	struct agent *agent = ADDR_OF(&config->cp_module.agent);
+	struct agent *agent = ADDR_OF(&config->cp_module.entity.agent);
 
 	char *old_filter = ADDR_OF(&config->filter);
 	if (old_filter != filter) {
@@ -97,7 +99,10 @@ pdump_module_config_data_init(
 	config->ebpf_program = NULL;
 	config->mode = PDUMP_INPUT;
 	config->snaplen = default_snaplen;
-	config->rings = NULL;
+	config->ring_link_idx = PDUMP_RING_LINK_NONE;
+	config->rate_bucket = NULL;
+	config->rate_bucket_raw = NULL;
+	config->rate_skipped_counter_id = COUNTER_INVALID;
 	return 0;
 }
 
@@ -106,7 +111,15 @@ pdump_module_config_destroy(struct cp_module *module) {
 	struct pdump_module_config *config =
 		container_of(module, struct pdump_module_config, cp_module);
 
-	struct agent *agent = ADDR_OF(&module->agent);
+	struct agent *agent = ADDR_OF(&module->entity.agent);
+	void *rate_bucket_raw = ADDR_OF(&config->rate_bucket_raw);
+	if (rate_bucket_raw != NULL) {
+		memory_bfree(
+			&agent->memory_context,
+			rate_bucket_raw,
+			pdump_rate_bucket_raw_size()
+		);
+	}
 	char *filter = ADDR_OF(&config->filter);
 	if (filter != NULL) {
 		memory_bfree(
@@ -117,27 +130,6 @@ pdump_module_config_destroy(struct cp_module *module) {
 	struct rte_bpf *ebpf = ADDR_OF(&config->ebpf_program);
 	if (ebpf != NULL) {
 		memory_bfree(&agent->memory_context, ebpf, ebpf->sz);
-	}
-
-	struct ring_buffer *rings = ADDR_OF(&config->rings);
-	if (rings != NULL) {
-		struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
-		uint32_t wc = dp_config->worker_count;
-
-		for (uint32_t idx = 0; idx < wc; idx++) {
-			struct ring_buffer *ring = rings + idx;
-			uint8_t *data = ADDR_OF(&ring->data);
-			if (data != NULL) {
-				memory_bfree(
-					&agent->memory_context, data, ring->size
-				);
-			}
-		}
-		memory_bfree(
-			&agent->memory_context,
-			rings,
-			sizeof(struct ring_buffer) * wc
-		);
 	}
 
 	cp_module_fini(module);
@@ -175,7 +167,7 @@ pdump_module_config_new(
 
 	// Initialize the module data
 	if (pdump_module_config_data_init(
-		    config, &config->cp_module.memory_context
+		    config, &config->cp_module.entity.memory_context
 	    )) {
 		yanet_error_add(err, "failed to init config data");
 		// Frees directly instead of going through the type destructor.
@@ -194,6 +186,18 @@ pdump_module_config_new(
 		return NULL;
 	}
 
+	config->rate_skipped_counter_id = counter_registry_register(
+		&config->cp_module.counter_registry,
+		"pdump_rate_skipped",
+		1,
+		err
+	);
+	if (config->rate_skipped_counter_id == COUNTER_INVALID) {
+		yanet_error_add(err, "failed to register capture rate counter");
+		pdump_module_config_destroy(&config->cp_module);
+		return NULL;
+	}
+
 	return &config->cp_module;
 }
 
@@ -203,7 +207,10 @@ pdump_module_config_free(struct cp_module *module, yanet_error **err) {
 		return -1;
 	}
 
+	struct agent *owner = ADDR_OF(&module->entity.agent);
+
 	pdump_module_config_destroy(module);
+	agent_destroy_released(owner);
 	return 0;
 }
 
@@ -214,7 +221,7 @@ pdump_module_config_set_filter(
 	callback_handle = cb;
 	struct pdump_module_config *config =
 		container_of(module, struct pdump_module_config, cp_module);
-	struct agent *agent = ADDR_OF(&config->cp_module.agent);
+	struct agent *agent = ADDR_OF(&config->cp_module.entity.agent);
 
 	size_t snaplen =
 		config->snaplen > 0 ? config->snaplen : default_snaplen;
@@ -314,6 +321,45 @@ pdump_module_config_set_mode(struct cp_module *module, enum pdump_mode mode) {
 }
 
 int
+pdump_module_config_set_rate(struct cp_module *module, uint64_t rate_pps) {
+	if (rate_pps > PDUMP_RATE_PPS_MAX) {
+		errno = EINVAL;
+		return -1;
+	}
+	struct pdump_module_config *config =
+		container_of(module, struct pdump_module_config, cp_module);
+	if (rate_pps != 0) {
+		struct agent *agent = ADDR_OF(&module->entity.agent);
+		struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
+		uint64_t timestamp;
+		if (dataplane_instance_current_time(dp_config, &timestamp) !=
+		    0) {
+			errno = EAGAIN;
+			return -1;
+		}
+		void *raw = ADDR_OF(&config->rate_bucket_raw);
+		if (raw == NULL) {
+			raw = memory_balloc(
+				&agent->memory_context,
+				pdump_rate_bucket_raw_size()
+			);
+			if (raw == NULL) {
+				errno = ENOMEM;
+				return -1;
+			}
+			memset(raw, 0, pdump_rate_bucket_raw_size());
+			SET_OFFSET_OF(&config->rate_bucket_raw, raw);
+		}
+		struct token_bucket *bucket = pdump_rate_bucket_align(raw);
+		pdump_rate_init(bucket, rate_pps, timestamp);
+		SET_OFFSET_OF(&config->rate_bucket, bucket);
+	} else {
+		config->rate_bucket = NULL;
+	}
+	return 0;
+}
+
+int
 pdump_module_config_set_snaplen(
 	struct cp_module *module, uint32_t snaplen, uintptr_t cb
 ) {
@@ -334,98 +380,14 @@ pdump_module_config_set_snaplen(
 	return 0;
 }
 
-struct ring_buffer *
-pdump_module_config_set_per_worker_ring(
-	struct cp_module *module,
-	uint32_t size,
-	uint64_t *worker_count,
-	uintptr_t cb
+int
+pdump_module_config_link_ring(
+	struct cp_module *module, const char *ring_name, yanet_error **err
 ) {
-	callback_handle = cb;
-
-	if (__builtin_popcount(size) > 1) {
-		pdump_log(RTE_LOG_ERR, "ring size must be a power of two");
-		errno = EINVAL;
-		return NULL;
-	}
-	if (size > max_ring_size) {
-		pdump_log(
-			RTE_LOG_ERR,
-			"ring size exceeds maximum: %u > %u",
-			size,
-			max_ring_size
-		);
-		errno = E2BIG;
-		return NULL;
-	}
-
 	struct pdump_module_config *config =
 		container_of(module, struct pdump_module_config, cp_module);
 
-	if (config->rings != NULL) {
-		// The config should be new, so there should be no rings, or it
-		// is an error.
-		errno = EEXIST;
-		return NULL;
-	}
-
-	struct agent *agent = ADDR_OF(&config->cp_module.agent);
-	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
-
-	uint64_t rings_meta_size =
-		sizeof(struct ring_buffer) * dp_config->worker_count;
-
-	struct ring_buffer *rings =
-		memory_balloc(&agent->memory_context, rings_meta_size);
-	if (rings == NULL) {
-		pdump_log(
-			RTE_LOG_ERR,
-			"failed to ballocate %lu bytes for rings metadata",
-			rings_meta_size
-		);
-		errno = ENOMEM;
-		return NULL;
-	}
-	memset(rings, 0, rings_meta_size);
-
-	for (size_t idx = 0; idx < dp_config->worker_count; idx++) {
-		struct ring_buffer *ring = rings + idx;
-		uint8_t *ring_data =
-			memory_balloc(&agent->memory_context, size);
-		if (ring_data == NULL) {
-			pdump_log(
-				RTE_LOG_ERR,
-				"failed to ballocate data for ring %lu",
-				idx
-			);
-
-			for (size_t j = 0; j < idx; j++) {
-				ring = rings + j;
-				ring_data = ADDR_OF(&ring->data);
-				memory_bfree(
-					&agent->memory_context,
-					ring_data,
-					ring->size
-				);
-			}
-			memory_bfree(
-				&agent->memory_context, rings, rings_meta_size
-			);
-			errno = ENOMEM;
-			return NULL;
-		}
-		ring->size = size;
-		ring->mask = size - 1;
-		SET_OFFSET_OF(&ring->data, ring_data);
-	}
-
-	*worker_count = dp_config->worker_count;
-	SET_OFFSET_OF(&config->rings, rings);
-
-	return rings;
-}
-
-uint8_t *
-pdump_module_config_addr_of(uint8_t **offset) {
-	return ADDR_OF(offset);
+	return cp_module_link_object(
+		module, RING_OBJECT_TYPE, ring_name, &config->ring_link_idx, err
+	);
 }

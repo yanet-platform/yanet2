@@ -64,8 +64,13 @@ impl Display for ErrorKind {
 }
 
 /// A structured CLI error ready to be rendered via `output::failure`.
+///
+/// The payload is boxed to keep every `Result` carrying the error small.
 #[derive(Debug)]
-pub struct Error {
+pub struct Error(pub(crate) Box<Details>);
+
+#[derive(Debug)]
+pub(crate) struct Details {
     /// The user-facing action being attempted (e.g. `"insert"`, `"show"`).
     pub(crate) action: String,
     /// Categorised error kind.
@@ -99,9 +104,13 @@ impl Error {
         endpoint: impl Into<String>,
         service: impl Into<String>,
     ) -> Self {
-        let action = action.into();
-        let endpoint = endpoint.into();
-        let service = service.into();
+        Self::status_parts(status, action.into(), endpoint.into(), service.into())
+    }
+
+    // Each constructor converts its arguments and forwards to a non-generic
+    // body, which then compiles once here instead of in every binary.
+
+    fn status_parts(status: tonic::Status, action: String, endpoint: String, service: String) -> Self {
         let raw_message = status.message().to_owned();
         let message = match (raw_message.as_str(), core::error::Error::source(&status)) {
             ("transport error", Some(source)) => root_cause(source).to_string(),
@@ -112,7 +121,7 @@ impl Error {
         let kind = map_code(&status);
         let hint = default_hint(kind);
 
-        Self {
+        Self(Box::new(Details {
             action,
             kind,
             message: message.clone(),
@@ -121,13 +130,15 @@ impl Error {
             hint,
             raw_code: Some(format!("{code:?}")),
             raw_message: Some(raw_message),
-        }
+        }))
     }
 
     /// Build an [`Error`] from a [`ConnectionError`].
     pub fn from_connection(err: ConnectionError, action: impl Into<String>, endpoint: impl Into<String>) -> Self {
-        let action = action.into();
-        let endpoint = endpoint.into();
+        Self::connection_parts(err, action.into(), endpoint.into())
+    }
+
+    fn connection_parts(err: ConnectionError, action: String, endpoint: String) -> Self {
         let message = err.to_string();
 
         let (kind, hint) = match err {
@@ -154,7 +165,7 @@ impl Error {
             ConnectionError::Config(ref config_err) => (ErrorKind::InvalidArgument, config_error_hint(config_err)),
         };
 
-        Self {
+        Self(Box::new(Details {
             action,
             kind,
             message,
@@ -163,7 +174,7 @@ impl Error {
             hint,
             raw_code: None,
             raw_message: None,
-        }
+        }))
     }
 
     /// Build an [`Error`] straight from a [`config::Error`], without the
@@ -173,11 +184,14 @@ impl Error {
     /// unreadable or malformed file. Pass `args.endpoint.clone()` otherwise,
     /// since even an alias that turned out unknown is worth showing.
     pub fn from_config(err: config::Error, action: impl Into<String>, endpoint: Option<String>) -> Self {
-        let action = action.into();
+        Self::config_parts(err, action.into(), endpoint)
+    }
+
+    fn config_parts(err: config::Error, action: String, endpoint: Option<String>) -> Self {
         let message = err.to_string();
         let hint = config_error_hint(&err);
 
-        Self {
+        Self(Box::new(Details {
             action,
             kind: ErrorKind::InvalidArgument,
             message,
@@ -186,7 +200,7 @@ impl Error {
             hint,
             raw_code: None,
             raw_message: None,
-        }
+        }))
     }
 
     /// Build an [`Error`] the CLI decided on itself, carrying an explicit
@@ -204,16 +218,20 @@ impl Error {
         endpoint: impl Into<String>,
         message: impl Into<String>,
     ) -> Self {
-        Self {
-            action: action.into(),
+        Self::parts(kind, action.into(), endpoint.into(), message.into())
+    }
+
+    fn parts(kind: ErrorKind, action: String, endpoint: String, message: String) -> Self {
+        Self(Box::new(Details {
+            action,
             kind,
-            message: message.into(),
-            endpoint: Some(endpoint.into()),
+            message,
+            endpoint: Some(endpoint),
             service: None,
             hint: default_hint(kind),
             raw_code: None,
             raw_message: None,
-        }
+        }))
     }
 
     /// Build an [`Error`] for input the CLI rejected before issuing any RPC.
@@ -235,28 +253,28 @@ impl Error {
     /// — the readiness CLI, say, which can name the services the gateway
     /// actually has. A multi-line hint renders as aligned continuation lines.
     pub fn with_hint(mut self, hint: impl Into<String>) -> Self {
-        self.hint = Some(hint.into());
+        self.0.hint = Some(hint.into());
 
         self
     }
 
     /// The category this error was mapped to.
     pub fn kind(&self) -> ErrorKind {
-        self.kind
+        self.0.kind
     }
 
     /// The human-readable message from the RPC or transport layer.
     pub fn message(&self) -> &str {
-        &self.message
+        &self.0.message
     }
 
     pub fn hint(&self) -> Option<&str> {
-        self.hint.as_deref()
+        self.0.hint.as_deref()
     }
 
     /// Process exit code for this error.
     pub fn exit_code(&self) -> i32 {
-        self.kind.exit_code()
+        self.0.kind.exit_code()
     }
 }
 
@@ -356,41 +374,11 @@ fn default_hint(kind: ErrorKind) -> Option<String> {
     }
 }
 
-/// Maps a gRPC status to a resource-specific not-found error for one service.
-pub struct NotFoundMapper {
-    service: &'static str,
-    default_resource: &'static str,
-}
-
-impl NotFoundMapper {
-    /// Creates a mapper for the given service and default resource label.
-    pub const fn new(service: &'static str, default_resource: &'static str) -> Self {
-        Self { service, default_resource }
-    }
-
-    /// Maps `status` to an [`Error`], rewriting a genuine resource `NotFound`
-    /// into a friendly `"<resource> not found"` message and passing everything
-    /// else (including a registry-miss `NotFound`, whether recognised by
-    /// trailer or by the compatibility fallback) through unchanged.
-    pub fn map(
-        &self,
-        status: Status,
-        action: impl Into<String>,
-        endpoint: impl Into<String>,
-        resource: Option<&str>,
-    ) -> Error {
-        map_not_found(
-            status,
-            action,
-            endpoint,
-            self.service,
-            resource.unwrap_or(self.default_resource),
-        )
-    }
-}
-
 /// Maps `status` to an [`Error`] for `service`, rewriting a genuine resource
-/// `NotFound` into `<resource> not found` and passing the rest through.
+/// `NotFound` into `<resource> not found`.
+///
+/// Everything else passes through unchanged, including a registry-miss
+/// `NotFound`, whether recognised by trailer or by the compatibility fallback.
 pub fn map_not_found(
     status: Status,
     action: impl Into<String>,
@@ -398,6 +386,10 @@ pub fn map_not_found(
     service: &'static str,
     resource: &str,
 ) -> Error {
+    not_found_parts(status, action.into(), endpoint.into(), service, resource)
+}
+
+fn not_found_parts(status: Status, action: String, endpoint: String, service: &'static str, resource: &str) -> Error {
     if status.code() == Code::NotFound && !is_unknown_service_status(&status) {
         return Error::from_status(
             Status::not_found(format!("{resource} not found")),
@@ -416,9 +408,7 @@ mod test {
 
     use tonic::{Code, Status, metadata::MetadataMap};
 
-    use super::{Error, ErrorKind, NotFoundMapper};
-
-    const MAPPER: NotFoundMapper = NotFoundMapper::new("test.Service", "requested item");
+    use super::{Error, ErrorKind, map_not_found};
 
     /// Builds a `NotFound` `Status` carrying the gateway's registry-miss
     /// trailer, pinned to the literal wire values rather than the
@@ -428,6 +418,17 @@ mod test {
         metadata.insert("x-yanet-error-reason", "service-unregistered".parse().unwrap());
 
         Status::with_metadata(Code::NotFound, message, metadata)
+    }
+
+    /// Maps a status the way a command addressing item 'x' does.
+    fn map_item(status: Status) -> Error {
+        map_not_found(
+            status,
+            "show item",
+            "http://localhost:50051",
+            "test.Service",
+            "item 'x'",
+        )
     }
 
     #[test]
@@ -452,45 +453,36 @@ mod test {
     }
 
     #[test]
-    fn not_found_resource_is_rewritten() {
+    fn test_not_found_resource_is_rewritten() {
         let status = Status::not_found("some resource missing");
-        let err = MAPPER.map(status, "show item", "http://localhost:50051", Some("item 'x'"));
+        let err = map_item(status);
 
-        assert_eq!(ErrorKind::NotFound, err.kind);
-        assert_eq!("item 'x' not found", err.message);
+        assert_eq!(ErrorKind::NotFound, err.0.kind);
+        assert_eq!("item 'x' not found", err.0.message);
     }
 
     #[test]
-    fn not_found_uses_default_resource_when_none_given() {
-        let status = Status::not_found("some resource missing");
-        let err = MAPPER.map(status, "show item", "http://localhost:50051", None);
-
-        assert_eq!(ErrorKind::NotFound, err.kind);
-        assert_eq!("requested item not found", err.message);
-    }
-
-    #[test]
-    fn unknown_service_not_found_passes_through_as_service_unregistered() {
+    fn test_unknown_service_not_found_passes_through_as_service_unregistered() {
         let status = unregistered_status("unknown service test.Service");
-        let err = MAPPER.map(status, "show item", "http://localhost:50051", None);
+        let err = map_item(status);
 
-        assert_eq!(ErrorKind::ServiceUnregistered, err.kind);
+        assert_eq!(ErrorKind::ServiceUnregistered, err.0.kind);
     }
 
     #[test]
-    fn unknown_service_message_without_the_trailer_is_the_compatibility_fallback() {
+    fn test_unknown_service_message_without_the_trailer_is_the_compatibility_fallback() {
         let status = Status::not_found("unknown service");
-        let err = MAPPER.map(status, "show item", "http://localhost:50051", None);
+        let err = map_item(status);
 
-        assert_eq!(ErrorKind::ServiceUnregistered, err.kind);
+        assert_eq!(ErrorKind::ServiceUnregistered, err.0.kind);
     }
 
     #[test]
-    fn trailer_is_service_unregistered_even_with_a_config_name_message() {
+    fn test_trailer_is_service_unregistered_even_with_a_config_name_message() {
         let status = unregistered_status(r#"config "unknown service" not found"#);
-        let err = MAPPER.map(status, "show item", "http://localhost:50051", Some("item 'x'"));
+        let err = map_item(status);
 
-        assert_eq!(ErrorKind::ServiceUnregistered, err.kind);
+        assert_eq!(ErrorKind::ServiceUnregistered, err.0.kind);
     }
 
     #[test]
@@ -502,20 +494,20 @@ mod test {
     }
 
     #[test]
-    fn config_name_containing_the_marker_is_rewritten_by_the_mapper() {
+    fn test_config_name_containing_the_marker_is_rewritten_by_the_mapper() {
         let status = Status::not_found(r#"config "unknown service" not found"#);
-        let err = MAPPER.map(status, "show item", "http://localhost:50051", Some("item 'x'"));
+        let err = map_item(status);
 
-        assert_eq!(ErrorKind::NotFound, err.kind);
-        assert_eq!("item 'x' not found", err.message);
+        assert_eq!(ErrorKind::NotFound, err.0.kind);
+        assert_eq!("item 'x' not found", err.0.message);
     }
 
     #[test]
-    fn non_not_found_status_passes_through_unchanged() {
+    fn test_non_not_found_status_passes_through_unchanged() {
         let status = Status::unavailable("backend down");
-        let err = MAPPER.map(status, "show item", "http://localhost:50051", None);
+        let err = map_item(status);
 
-        assert_eq!(ErrorKind::Unavailable, err.kind);
+        assert_eq!(ErrorKind::Unavailable, err.0.kind);
     }
 
     #[test]
@@ -527,8 +519,8 @@ mod test {
 
         let err = Error::from_status(status, "check", "grpcs://gateway.test", "test.Service");
 
-        assert_eq!("received fatal alert: CertificateRequired", err.message);
-        assert_eq!(Some("transport error".to_owned()), err.raw_message);
+        assert_eq!("received fatal alert: CertificateRequired", err.0.message);
+        assert_eq!(Some("transport error".to_owned()), err.0.raw_message);
     }
 
     #[test]
@@ -538,7 +530,7 @@ mod test {
 
         let err = Error::from_status(status, "check", "grpcs://gateway.test", "test.Service");
 
-        assert_eq!("h2 protocol error", err.message);
-        assert_eq!(Some("h2 protocol error".to_owned()), err.raw_message);
+        assert_eq!("h2 protocol error", err.0.message);
+        assert_eq!(Some("h2 protocol error".to_owned()), err.0.raw_message);
     }
 }

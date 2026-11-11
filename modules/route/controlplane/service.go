@@ -17,6 +17,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/controlplane/configstore"
+	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/route/bindings/go/croute"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1"
@@ -253,31 +254,43 @@ func (m *RouteService) DeleteConfig(
 ) (*routepb.DeleteConfigResponse, error) {
 	name := req.GetName()
 
-	// The module goes first: it links the object, and a linked object
-	// refuses deletion. Either half may already be gone after a failed
-	// earlier attempt.
-	err := m.configs.Delete(name, func(current *configEntry) error {
-		if err := m.backend.DeleteModule(name); err != nil && !errors.Is(err, ffi.ErrNotFound) {
-			return fmt.Errorf("failed to delete module config: %w", err)
-		}
-		if err := m.backend.DeleteFIB(name); err != nil && !errors.Is(err, ffi.ErrNotFound) {
-			return fmt.Errorf("failed to delete fib object: %w", err)
-		}
-		return nil
-	})
-	if errors.Is(err, configstore.ErrNotFound) {
-		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
-	}
+	err := m.configs.DeleteOr(name,
+		func(*configEntry) error {
+			_, err := m.deleteFromDataplane(name)
+			return err
+		},
+		func() error {
+			// Nothing this process published: remove what an earlier
+			// process left running before a restart.
+			found, err := m.deleteFromDataplane(name)
+			if err == nil && !found {
+				return configstore.ErrNotFound
+			}
+			return err
+		},
+	)
 	if err != nil {
-		code := codes.Internal
-		if errors.Is(err, ffi.ErrFailedPrecondition) {
-			// A chain still references the config.
-			code = codes.FailedPrecondition
-		}
-		return nil, status.Errorf(code, "failed to delete config %q: %v", name, err)
+		return nil, crud.DeleteError(name, err)
 	}
 
 	return &routepb.DeleteConfigResponse{}, nil
+}
+
+// deleteFromDataplane removes the module config and then the FIB object
+// published under the name, reporting whether the dataplane ran either.
+//
+// The module goes first: it links the object, and a linked object refuses
+// deletion. Either half may already be gone after a failed earlier attempt.
+func (m *RouteService) deleteFromDataplane(name string) (bool, error) {
+	moduleErr := m.backend.DeleteModule(name)
+	if moduleErr != nil && !errors.Is(moduleErr, ffi.ErrNotFound) {
+		return true, fmt.Errorf("failed to delete module config: %w", moduleErr)
+	}
+	fibErr := m.backend.DeleteFIB(name)
+	if fibErr != nil && !errors.Is(fibErr, ffi.ErrNotFound) {
+		return true, fmt.Errorf("failed to delete fib object: %w", fibErr)
+	}
+	return moduleErr == nil || fibErr == nil, nil
 }
 
 // nexthopCounterPrefix keeps a nexthop counter name from colliding with a
@@ -321,10 +334,7 @@ func (m *RouteService) resolveNexthopCounters(entries []*routepb.FIBEntry) error
 				nh.Counter = counter
 			}
 
-			hardwareRoute, err := newHardwareRoute(nh)
-			if err != nil {
-				continue
-			}
+			hardwareRoute := newHardwareRoute(nh)
 			if prior, ok := identityCounters[hardwareRoute]; ok && prior != counter {
 				return status.Errorf(
 					codes.InvalidArgument,
@@ -639,8 +649,8 @@ func (m *RouteService) collectConfigMetrics() []*commonpb.Metric {
 
 // ReclaimDeferred retries every retired config whose free was refused,
 // dropping the ones whose generations have drained. The store runs it
-// after each successful mutation, and anything else may call it at any
-// time.
+// before every mutation and after each successful one, and anything else
+// may call it at any time.
 func (m *RouteService) ReclaimDeferred() {
 	m.configs.ReclaimDeferred()
 }

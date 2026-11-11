@@ -4,75 +4,33 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/modulebase"
 	"github.com/yanet-platform/yanet2/modules/unrdup/controlplane/unrduppb/v1"
 )
 
 // Option configures the UnrdupModule constructor.
-type Option func(*moduleOptions)
-
-type moduleOptions struct {
-	Log *zap.Logger
-}
-
-func newModuleOptions() *moduleOptions {
-	return &moduleOptions{
-		Log: zap.NewNop(),
-	}
-}
+type Option = modulebase.Option
 
 // WithLog sets the logger for the unrdup module.
 func WithLog(log *zap.Logger) Option {
-	return func(o *moduleOptions) {
-		o.Log = log
-	}
+	return modulebase.WithLog(log)
 }
 
 // UnrdupModule is the control-plane component of the unrdup module.
 type UnrdupModule struct {
-	cfg           *Config
-	attachment    *ffi.Attachment
-	unrdupService *UnrdupService
+	*modulebase.Base
 }
 
 func NewUnrdupModule(cfg *Config, options ...Option) (*UnrdupModule, error) {
-	opts := newModuleOptions()
-	for _, o := range options {
-		o(opts)
-	}
-
-	log := opts.Log.With(zap.String("module", "unrdup"))
-
-	attachment, err := ffi.Attach(cfg.AttachConfig, "unrdup", log)
+	base, err := modulebase.NewBase(cfg.AttachConfig, moduleType, cfg.Endpoint.Unwrap(), options...)
 	if err != nil {
 		return nil, err
 	}
-	agent := attachment.Agent
 
-	return &UnrdupModule{
-		cfg:           cfg,
-		attachment:    attachment,
-		unrdupService: NewUnrdupService(newBackend(agent)),
-	}, nil
-}
+	unrdupService := NewUnrdupService(newBackend(base.Agent()))
+	base.AddService(unrduppb.UnrdupService_ServiceDesc.ServiceName, func(server *grpc.Server) {
+		unrduppb.RegisterUnrdupServiceServer(server, unrdupService)
+	})
 
-func (m *UnrdupModule) Name() string {
-	return "unrdup"
-}
-
-func (m *UnrdupModule) Endpoint() string {
-	return m.cfg.Endpoint.Unwrap()
-}
-
-func (m *UnrdupModule) ServicesNames() []string {
-	return []string{unrduppb.UnrdupService_ServiceDesc.ServiceName}
-}
-
-func (m *UnrdupModule) RegisterService(server *grpc.Server) {
-	unrduppb.RegisterUnrdupServiceServer(server, m.unrdupService)
-}
-
-// Close closes the module.
-func (m *UnrdupModule) Close() error {
-	return m.attachment.Close()
+	return &UnrdupModule{Base: base}, nil
 }

@@ -51,9 +51,6 @@ struct packet {
 
 	uint32_t hash;
 
-	uint16_t rx_device_id;
-	uint16_t tx_device_id;
-
 	uint16_t flags;
 	uint16_t vlan;
 
@@ -81,6 +78,15 @@ struct packet {
 static inline uint8_t
 packet_transport_protocol(const struct packet *packet) {
 	return (uint8_t)(packet->transport_header.type & UINT8_C(0xff));
+}
+
+// Reports whether the unavailable transport-header tag is absent.
+//
+// A true result does not guarantee readable bytes; callers must check lengths.
+static inline bool
+packet_transport_header_available(const struct packet *packet) {
+	return (packet->transport_header.type &
+		PACKET_TRANSPORT_HEADER_UNAVAILABLE) == 0;
 }
 
 // Initialize a packet lineage's redirect credits once. Lazy because packets
@@ -201,33 +207,6 @@ parse_ipv6_header(struct packet *packet, uint16_t *type, uint16_t *offset);
 
 int
 parse_packet(struct packet *packet);
-
-void
-packet_list_print(struct packet_list *list);
-
-/**
- * @brief Print contents of an rte_mbuf packet in a detailed format if
- * ENABLE_TRACE_LOG is defined
- *
- * Prints detailed information about DPDK mbuf packet contents using LOG_TRACE
- * including:
- * - Ethernet header fields (MAC addresses, ether type)
- * - ARP header fields (if packet is ARP)
- * - IP header fields (v4 or v6, including addresses, protocol, TTL/hop limit)
- * - Protocol header fields:
- *   - UDP (ports, length, checksum)
- *   - TCP (ports, sequence numbers, flags, window)
- *   - ICMP (type, code, checksum)
- *   - ICMPv6 (type, code, checksum)
- * - Final packet data length
- *
- * Used for detailed packet inspection during debugging, development and
- * verification of packet processing.
- *
- * @param mbuf Pointer to the DPDK mbuf structure containing packet to print
- */
-void
-logtrace_rte_mbuf(struct rte_mbuf *mbuf);
 
 struct yanet_ipv6_ext_2byte {
 	uint8_t next_header;

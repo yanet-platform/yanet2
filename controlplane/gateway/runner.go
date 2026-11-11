@@ -31,9 +31,9 @@ type UnaryInterceptedService interface {
 // behind an in-memory listener and registers it with the registry directly.
 //
 // The service never touches the network: its server is reachable only
-// through the connection the runner hands to the registry, so no transport
-// security and no authentication apply on that hop. The gateway's own
-// listeners stay the only entry points from outside.
+// through the connection the runner hands to the registry, and every call
+// on it has first passed the interceptors of a gateway server, so no
+// transport security and no authentication apply on that hop.
 type InProcessServiceRunner struct {
 	module   Service
 	registry *BackendRegistry
@@ -88,7 +88,7 @@ func NewInProcessServiceRunner(
 		)
 	}
 
-	interceptors := []grpc.UnaryServerInterceptor{xgrpc.AccessLogInterceptor(log)}
+	interceptors := []grpc.UnaryServerInterceptor{commonxgrpc.ResponseCompressionUnaryInterceptor(), xgrpc.AccessLogInterceptor(log)}
 	if provider, ok := module.(UnaryInterceptedService); ok {
 		interceptors = append(interceptors, provider.UnaryServerInterceptors()...)
 	}
@@ -100,7 +100,7 @@ func NewInProcessServiceRunner(
 		endpoint: endpoint,
 		server: grpc.NewServer(
 			grpc.ChainUnaryInterceptor(interceptors...),
-			grpc.ChainStreamInterceptor(commonxgrpc.ValidateStreamInterceptor()),
+			grpc.ChainStreamInterceptor(commonxgrpc.ResponseCompressionStreamInterceptor(), commonxgrpc.ValidateStreamInterceptor()),
 			grpc.MaxRecvMsgSize(1024*1024*256), grpc.MaxSendMsgSize(1024*1024*256),
 		),
 		ready: make(chan struct{}),

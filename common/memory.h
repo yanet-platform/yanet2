@@ -8,6 +8,9 @@
 #include "memory_block.h"
 #include "strutils.h"
 
+// Title capacity of a context, counting the terminating zero.
+#define MEMORY_CONTEXT_NAME_SIZE 64
+
 struct memory_context {
 	struct block_allocator *block_allocator;
 	size_t balloc_count;
@@ -15,7 +18,7 @@ struct memory_context {
 	size_t balloc_size;
 	size_t bfree_size;
 
-	char name[64];
+	char name[MEMORY_CONTEXT_NAME_SIZE];
 
 	// Tree links for per-subsystem memory diagnostics.
 	//

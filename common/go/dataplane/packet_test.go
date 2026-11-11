@@ -50,27 +50,14 @@ func TestPacket(t *testing.T) {
 	pinner.Pin(&gopacketData[0])
 
 	data := PacketData{
-		Payload:    gopacketData,
-		TxDeviceId: 1,
-		RxDeviceId: 2,
+		Payload: gopacketData,
 	}
 	packet, err := NewPacketFromData(data)
 	require.NoError(t, err, "failed to create new packet from data")
 
 	packetData := packet.Data()
 	assert.Equal(t, data, packetData)
-
-	packetInfo := packet.Info()
-	clear(packetData.Payload)
 	packet.Free()
-	assert.Equal(t, gopacketData, packetInfo.RawData)
-	assert.Equal(t, packetInfo.DstIP, ip.DstIP)
-	assert.Equal(t, packetInfo.SrcIP, ip.SrcIP)
-	assert.Equal(t, packetInfo.SrcPort, uint16(tcp.SrcPort))
-	assert.Equal(t, packetInfo.DstPort, uint16(tcp.DstPort))
-	assert.Equal(t, []byte("hello"), packetInfo.Payload)
-	assert.Equal(t, packetInfo.SrcMAC, eth.SrcMAC)
-	assert.Equal(t, packetInfo.DstMAC, eth.DstMAC)
 }
 
 func genPackets(t *testing.T, pinner *runtime.Pinner, count uint64) []*Packet {
@@ -112,9 +99,7 @@ func genPackets(t *testing.T, pinner *runtime.Pinner, count uint64) []*Packet {
 		pinner.Pin(&data[0])
 
 		packet, err := NewPacketFromData(PacketData{
-			Payload:    data,
-			TxDeviceId: uint16(idx % 1000),
-			RxDeviceId: uint16(idx * 13 % 1000),
+			Payload: data,
 		})
 
 		require.NoError(t, err)
@@ -252,7 +237,7 @@ func TestPacket_NonInitialFragmentSegmented(t *testing.T) {
 	require.Equal(t, 70, len(frame))
 
 	packet, err := NewPacketFromSegments(
-		[][]byte{frame[:64], frame[64:]}, 0, 0,
+		[][]byte{frame[:64], frame[64:]},
 	)
 	require.NoError(t, err, "the segmented fragment must parse")
 	t.Cleanup(packet.Free)

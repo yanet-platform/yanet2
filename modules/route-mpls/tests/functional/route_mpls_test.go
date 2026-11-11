@@ -16,7 +16,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
+	cplain "github.com/yanet-platform/yanet2/devices/plain/bindings/go/cplain"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	"github.com/yanet-platform/yanet2/modules/route-mpls/bindings/go/croutempls"
@@ -461,14 +461,9 @@ func deployLoop(t *testing.T, rules []croutempls.Rule, recircLimit uint16) *data
 	return deployChain(t, rules, loopForwardRules(mplsDevice), recircLimit)
 }
 
-// deployChain builds the harness behind deployRules and deployLoop with the
-// given forward rules as the chain's second stage.
-func deployChain(
-	t *testing.T,
-	rules []croutempls.Rule,
-	sinkRules []cforward.ForwardRule,
-	recircLimit uint16,
-) *dataplaneut.Harness {
+// newAgent builds a one-device harness with route-mpls and forward loaded
+// and attaches an agent to it, both released through t.Cleanup.
+func newAgent(t *testing.T, recircLimit uint16) (*dataplaneut.Harness, *ffi.Agent) {
 	t.Helper()
 
 	config := dataplaneut.Config{
@@ -488,12 +483,27 @@ func deployChain(
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = agent.CleanUp() })
 
+	return harness, agent
+}
+
+// deployChain builds the harness behind deployRules and deployLoop with the
+// given forward rules as the chain's second stage.
+func deployChain(
+	t *testing.T,
+	rules []croutempls.Rule,
+	sinkRules []cforward.ForwardRule,
+	recircLimit uint16,
+) *dataplaneut.Harness {
+	t.Helper()
+
+	harness, agent := newAgent(t, recircLimit)
+
 	handle, err := routempls.NewBackend(agent).UpdateModule(mplsConfigName, rules)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = handle.Free() })
 
 	sinkName := mplsConfigName + "-sink"
-	sinkHandle, err := forward.NewBackend(agent).UpdateModule(sinkName, sinkRules)
+	sinkHandle, err := forward.NewBackend(agent).Update(sinkName, forward.RuleSet{Compiled: sinkRules})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sinkHandle.Free() })
 
@@ -518,7 +528,7 @@ func deployChain(
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
 		Name: "dummy",
 	}))
-	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	_, err = cplain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   mplsDevice,
 		Input:  []ffi.DevicePipelineConfig{{Name: mplsConfigName, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
@@ -747,6 +757,34 @@ func Test_RouteMPLS_ZeroWeightNexthops_PassThrough(t *testing.T) {
 	requirePassthrough(t, result.Output[0].RawData, frame.packet)
 	requireNexthopCounter(t, harness, tunnel4.counter, 0, 0)
 	requireNexthopCounter(t, harness, tunnel4Alt.counter, 0, 0)
+}
+
+// Test_RouteMPLS_WrappingWeights_Refused verifies that a rule whose nexthop
+// weights sum past 64 bits is refused and its config freed without a crash.
+//
+// The selection map takes one slot per unit of weight, so a wrapped sum
+// would size it at no slots while the fill wrote every slot of the real sum.
+// The refused update finalizes the config, and freeing it finalizes it again.
+func Test_RouteMPLS_WrappingWeights_Refused(t *testing.T) {
+	_, agent := newAgent(t, 0)
+
+	_, err := routempls.NewBackend(agent).UpdateModule(mplsConfigName, []croutempls.Rule{
+		rule4("10.0.0.0/8", tunnel4.nexthop(1<<63), tunnel4Alt.nexthop(1<<63)),
+	})
+	require.ErrorIs(t, err, ffi.ErrInvalidArgument)
+}
+
+// Test_RouteMPLS_OversizedSelectionMap_ResourceExhausted verifies that a
+// selection map larger than the agent's memory is refused as exhausted.
+func Test_RouteMPLS_OversizedSelectionMap_ResourceExhausted(t *testing.T) {
+	_, agent := newAgent(t, 0)
+
+	// Three million slots take 24 MB, above the 16 MB agent but within one
+	// allocator block.
+	_, err := routempls.NewBackend(agent).UpdateModule(mplsConfigName, []croutempls.Rule{
+		rule4("10.0.0.0/8", tunnel4.nexthop(3_000_000)),
+	})
+	require.ErrorIs(t, err, ffi.ErrResourceExhausted)
 }
 
 // Test_RouteMPLS_ECMP_SelectsByWeightedHash verifies that the packet hash

@@ -1,3 +1,0 @@
-#pragma once
-
-#define __TTLMAP_MAX_CHUNKS 64

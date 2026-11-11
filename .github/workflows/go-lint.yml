@@ -5,8 +5,10 @@ on:
     branches: [main]
     paths:
       - '**/*.go'
+      - '**/*.proto'
       - 'lint/style/**'
       - '.golangci.yml'
+      - 'ci/go-version'
       - '.github/workflows/go-lint.yml'
       - '.github/actions/apt-packages/**'
       - '.github/actions/apt-failover/**'
@@ -14,8 +16,10 @@ on:
   pull_request:
     paths:
       - '**/*.go'
+      - '**/*.proto'
       - 'lint/style/**'
       - '.golangci.yml'
+      - 'ci/go-version'
       - '.github/workflows/go-lint.yml'
       - '.github/actions/apt-packages/**'
       - '.github/actions/apt-failover/**'
@@ -25,16 +29,22 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   stylelint:
     name: Custom stylelint linter
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          go-version-file: go.mod
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: ci/go-version
 
       - name: Run tests
         run: go test ./lint/style/cmd/stylelint/
@@ -45,19 +55,22 @@ jobs:
   modernize:
     name: golangci-lint modernize
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
+          submodules: true
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version-file: ci/go-version
 
       - uses: ./.github/actions/apt-packages
         timeout-minutes: 10
         with:
-          packages: protobuf-compiler libpcap-dev
+          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler
 
       - name: Install Go Protobuf Plugins
         uses: ./.github/actions/protoc-plugins
@@ -65,8 +78,18 @@ jobs:
       - name: Generate protobuf Go sources
         run: make proto-go
 
+      # External clients import the generated API packages, so they must
+      # build without a C toolchain.
+      - name: Build protobuf packages without cgo
+        run: CGO_ENABLED=0 go build $(git ls-files '*.proto' | xargs -n1 dirname | sort -u | sed 's|^|./|')
+
+      # CGO test packages compile production translation units whose headers
+      # reach DPDK, so typechecking needs a configured (not built) tree.
+      - name: Configure build tree
+        run: meson setup build -Dbuildtype=debug -Doptimization=0
+
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v9
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
-          version: v2.12.2
+          version: v2.15.0
           args: --timeout 5m

@@ -1,12 +1,20 @@
 dependencies = [lib_common_dep, lib_logging_dep]
 thread_dep = dependency('threads')
 
+token_bucket_test = executable(
+  'token_bucket_test',
+  ['token_bucket_test.c'],
+  c_args: yanet_test_c_args,
+  dependencies: [thread_dep],
+  include_directories: yanet_rootdir,
+)
+test('token_bucket', token_bucket_test, suite: ['common'])
+
 numutils_test = executable(
   'numutils_test',
   ['numutils_test.c'],
   c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
-  dependencies: dependencies,
+  dependencies: lib_common_dep,
 )
 test('numutils', numutils_test, suite: ['common'])
 
@@ -14,26 +22,15 @@ lpm_test = executable(
   'lpm_test',
   ['lpm_test.c',],
   c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
-  dependencies: dependencies,
+  dependencies: lib_common_dep,
 )
 test('lpm', lpm_test, suite: ['common'])
-
-lpm_wide_test = executable(
-  'lpm_wide_test',
-  ['lpm_wide_test.c',],
-  c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
-  dependencies: dependencies,
-)
-test('lpm_wide', lpm_wide_test, suite: ['common'])
 
 radix_test = executable(
   'radix_test',
   ['radix_test.c',],
   c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
-  dependencies: dependencies,
+  dependencies: lib_common_dep,
 )
 test('radix', radix_test, suite: ['common'])
 
@@ -41,8 +38,7 @@ table_test = executable(
   'table_test',
   ['value_table.c'],
   c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
-  dependencies: dependencies
+  dependencies: lib_common_dep
 )
 test('value_table', table_test, suite: ['common'])
 
@@ -50,43 +46,14 @@ registry_rebase_test = executable(
   'registry_rebase_test',
   ['registry_rebase_test.c'],
   c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
   dependencies: dependencies,
 )
 test('registry_rebase', registry_rebase_test, suite: ['common'])
-
-ttlmap_test = executable(
-  'ttlmap_test',
-  ['ttlmap_test.c'],
-  c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
-  dependencies: dependencies + [libdpdk_dep, lib_logging_dep],
-  include_directories: yanet_rootdir
-)
-test('ttlmap', ttlmap_test, suite: ['common'])
-
-rcu_test = executable(
-  'rcu_test',
-  ['rcu_test.c'],
-  c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
-  dependencies: dependencies
-)
-test('rcu', rcu_test, suite: ['common'])
-
-executable(
-  'rcu_bench',
-  ['rcu_bench.c'],
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
-  dependencies: dependencies
-)
 
 balloc_test = executable(
   'balloc_test',
   ['balloc_test.c'],
   c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
   dependencies: dependencies
 )
 test('balloc', balloc_test, suite: ['common'])
@@ -95,7 +62,6 @@ memory_context_tree_test = executable(
   'memory_context_tree_test',
   ['memory_context_tree_test.c'],
   c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
   dependencies: dependencies,
 )
 test('memory_context_tree', memory_context_tree_test, suite: ['common'])
@@ -104,24 +70,21 @@ balloc_thread_stress_test = executable(
   'balloc_thread_stress_test',
   ['balloc_thread_stress_test.c'],
   c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
   dependencies: dependencies + [thread_dep],
 )
 test('balloc_thread_stress', balloc_thread_stress_test, suite: ['common'])
 
-executable(
+balloc_bench = executable(
   'balloc_bench',
   ['balloc_bench.c'],
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
   dependencies: dependencies
 )
+benchmark('balloc_bench', balloc_bench, timeout: 300)
 
 big_array_test = executable(
   'big_array_test',
   ['big_array_test.c'],
   c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
   dependencies: dependencies
 )
 test('big_array', big_array_test, suite: ['common'])
@@ -130,7 +93,6 @@ hash_index_test = executable(
   'hash_index_test',
   ['hash_index_test.c',],
   c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
   dependencies: dependencies,
 )
 test('hash_index', hash_index_test, suite: ['common'])
@@ -139,27 +101,15 @@ data_pipe_test = executable(
   'data_pipe_test',
   ['data_pipe_tsan.c'],
   c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
   dependencies: [lib_common_dep, thread_dep],
   include_directories: yanet_rootdir,
 )
 test('data_pipe', data_pipe_test, suite: ['common'])
 
-flatmap_test = executable(
-  'flatmap_test',
-  ['flatmap_test.c'],
-  c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
-  dependencies: [lib_common_dep, lib_logging_dep, lib_errors_dep],
-  include_directories: yanet_rootdir,
-)
-test('flatmap', flatmap_test, suite: ['common'])
-
 thash_test = executable(
   'thash_test',
   ['thash_test.c'],
   c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
   dependencies: dependencies,
   include_directories: yanet_rootdir,
 )
@@ -169,9 +119,33 @@ crc32_test = executable(
   'crc32_test',
   ['crc32_test.c'],
   c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
   dependencies: dependencies,
   include_directories: yanet_rootdir,
 )
 test('crc32', crc32_test, suite: ['common'])
 
+
+ring_test = executable(
+  'ring_test',
+  ['ring_test.c'],
+  c_args: yanet_test_c_args,
+  dependencies: dependencies,
+  include_directories: yanet_rootdir,
+)
+test('ring', ring_test, suite: ['common'])
+
+ring_bench = executable(
+  'ring_bench',
+  ['ring_bench.c'],
+  dependencies: [lib_common_dep, thread_dep],
+  include_directories: yanet_rootdir,
+)
+benchmark('ring_bench', ring_bench, timeout: 300)
+
+# Register the LPM fuzzing target: the range insert against its lookups.
+fuzzing_targets += {
+  'lpm': {
+    'source': files('lpm_fuzz.c'),
+    'deps': [lib_common_dep],
+  }
+}

@@ -1,8 +1,7 @@
-use core::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use core::net::IpAddr;
 use std::path::{Path, PathBuf};
 
-use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::CompleteEnv;
+use clap::{ArgAction, Parser};
 use l3bpb::{
     CreateServiceRequest, DeleteServiceRequest, GetServiceRequest, ListModuleConfigsRequest, ListServicesRequest,
     ListSessionsRequest, ModuleConfig, UpdateModuleConfigRequest, UpdateRealServerStateRequest,
@@ -18,6 +17,15 @@ use ync::{
     errors::Error,
     output::{self, CommonFormat},
 };
+
+mod document;
+
+#[cfg(test)]
+mod test;
+
+// These dependencies are exercised by the public-command integration tests.
+#[cfg(test)]
+use {serde_json as _, tokio as _};
 
 #[allow(clippy::std_instead_of_core, non_snake_case)]
 pub mod l3bpb {
@@ -54,6 +62,10 @@ pub enum ModeCmd {
     ListServices,
     /// Install a named module configuration.
     UpdateModuleConfig(ModuleConfigCmd),
+    /// Strictly validate a service document without contacting a Gateway.
+    ValidateService(ValidateCmd),
+    /// Strictly validate a module document without contacting a Gateway.
+    ValidateModuleConfig(ValidateCmd),
     /// List module configuration names.
     ListModuleConfigs,
     /// Enable or disable a real server within a named virtual service.
@@ -74,6 +86,8 @@ impl ModeCmd {
             Self::DeleteService(..) => "delete-service",
             Self::ListServices => "list-services",
             Self::UpdateModuleConfig(..) => "update-module-config",
+            Self::ValidateService(..) => "validate-service",
+            Self::ValidateModuleConfig(..) => "validate-module-config",
             Self::ListModuleConfigs => "list-module-configs",
             Self::UpdateRealServerState(..) => "update-real-server-state",
             Self::UpdateRealServerWeight(..) => "update-real-server-weight",
@@ -81,6 +95,12 @@ impl ModeCmd {
             Self::ShowService(..) => "show-service",
         }
     }
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct ValidateCmd {
+    /// YAML document to validate against this binary's schema.
+    pub path: PathBuf,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -170,15 +190,15 @@ struct ServiceDocument {
     source_filter_rules: Vec<SourceFilterRuleDoc>,
     /// Hash index size of the service's session table; the default when
     /// omitted.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "document::scalar")]
     session_index_size: u32,
     /// Scheduling mode bits; 1 selects one-packet scheduling from the
     /// module link packet counter.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "document::scalar")]
     scheduler_flags: u32,
     /// Service behavior flags; 1 clamps the TCP MSS option of SYN packets
     /// and 2 selects pure L3 balancing.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "document::scalar")]
     flags: u32,
     /// Outer-header DSCP marking: never, onlyDefault or always with a
     /// 6-bit value.
@@ -198,6 +218,7 @@ struct DSCPMarkingDoc {
     /// always marks unconditionally.
     mode: DSCPMarkMode,
     /// The 6-bit DSCP value to mark with.
+    #[serde(deserialize_with = "document::scalar")]
     value: u8,
 }
 
@@ -214,22 +235,22 @@ enum DSCPMarkMode {
 #[derive(Debug, Default, Deserialize)]
 struct SessionTimeoutsDoc {
     /// Established TCP flows.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "document::scalar")]
     tcp: u32,
     /// A SYN alone.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "document::scalar")]
     tcp_syn: u32,
     /// A SYN+ACK.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "document::scalar")]
     tcp_syn_ack: u32,
     /// A flow whose FIN was seen.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "document::scalar")]
     tcp_fin: u32,
     /// UDP flows.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "document::scalar")]
     udp: u32,
     /// Everything else.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "document::scalar")]
     other: u32,
 }
 
@@ -256,7 +277,9 @@ struct SourceFilterRuleDoc {
 /// An inclusive numeric range.
 #[derive(Debug, Deserialize)]
 struct RangeDoc {
+    #[serde(deserialize_with = "document::scalar")]
     from: u16,
+    #[serde(deserialize_with = "document::scalar")]
     to: u16,
 }
 
@@ -302,6 +325,7 @@ struct DestinationRuleDoc {
     /// Transport protocol ranges the rule matches.
     proto_ranges: Vec<ProtoRangeDoc>,
     /// Name of the virtual service matched traffic is routed to.
+    #[serde(deserialize_with = "document::scalar")]
     service: String,
 }
 
@@ -314,10 +338,10 @@ struct ProtoRangeDoc {
     /// The transport protocol.
     proto: ProtocolDoc,
     /// First matched subtype byte; defaults to 0.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "document::scalar")]
     subtype_from: Option<u8>,
     /// Last matched subtype byte; defaults to 255.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "document::scalar")]
     subtype_to: Option<u8>,
 }
 
@@ -389,12 +413,8 @@ impl TryFrom<&ProtoRangeDoc> for filterpb::pb::ProtoRange {
 
 impl From<&RealServerDoc> for l3bpb::RealServer {
     fn from(server: &RealServerDoc) -> Self {
-        let address = match server.destination_address {
-            IpAddr::V4(address) => address.octets().to_vec(),
-            IpAddr::V6(address) => address.octets().to_vec(),
-        };
         Self {
-            destination_address: address,
+            destination_address: commonpb::ip_octets(server.destination_address),
             source_network: Some(server.source_network),
         }
     }
@@ -427,189 +447,30 @@ impl TryFrom<&DestinationRuleDoc> for l3bpb::DestinationFilterRule {
     }
 }
 
-/// Reads and parses a YAML document from a file, attributing failures to the
-/// given verb as invalid input.
-#[allow(clippy::result_large_err)]
-fn load_document<T: for<'de> Deserialize<'de>>(
-    path: &Path,
-    verb: &'static str,
-    service: &L3BService,
-) -> Result<T, Error> {
-    let file = std::fs::File::open(path)
-        .map_err(|err| service.invalid(verb, format!("failed to open {}: {err}", path.display())))?;
-    serde_yaml::from_reader(file)
-        .map_err(|err| service.invalid(verb, format!("invalid document {}: {err}", path.display())))
+/// Retains the source file in errors and emits value-free warnings on stderr.
+fn load_document<T: for<'de> Deserialize<'de>>(path: &Path, strict: bool) -> Result<T, String> {
+    let content = std::fs::read_to_string(path).map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+    let (document, warnings) =
+        document::parse(&content, strict).map_err(|err| format!("invalid document {}: {err}", path.display()))?;
+    for warning in warnings {
+        log::warn!("{warning}");
+    }
+    Ok(document)
 }
 
-/// One rendered session row: the client flow and its pinned backend.
-#[derive(Tabled)]
-struct SessionRow {
-    #[tabled(rename = "SOURCE")]
-    source: String,
-    #[tabled(rename = "REAL")]
-    real: String,
-    #[tabled(rename = "EXPIRES IN")]
-    expires_in: String,
-}
-
-impl SessionRow {
-    /// Render a record against the response's dataplane time.
-    fn of(record: &l3bpb::SessionRecord, now_ns: u64) -> Self {
-        let source = match ip_address(&record.source_address) {
-            Some(address) => format!("[{address}]:{}", record.source_port),
-            None => format!("[?]:{}", record.source_port),
-        };
-        let real = ip_address(&record.real_address)
-            .map(|address| address.to_string())
-            .unwrap_or_else(|| "?".to_string());
-
-        let remaining = record.expires_at.saturating_sub(now_ns);
-        let expires_in = if remaining == 0 {
-            "now".to_string()
-        } else {
-            format!("{}s", remaining / 1_000_000_000)
-        };
-
-        Self { source, real, expires_in }
-    }
-}
-
-/// Decode a 4- or 16-byte wire address.
-fn ip_address(bytes: &[u8]) -> Option<IpAddr> {
-    match bytes.len() {
-        4 => {
-            let octets: [u8; 4] = bytes.try_into().expect("length checked");
-            Some(IpAddr::V4(Ipv4Addr::from(octets)))
-        }
-        16 => {
-            let octets: [u8; 16] = bytes.try_into().expect("length checked");
-            Some(IpAddr::V6(Ipv6Addr::from(octets)))
-        }
-        _ => None,
-    }
-}
-
-/// One rendered real-server row of a service inspection.
-#[derive(Tabled)]
-struct RealServerRow {
-    #[tabled(rename = "DESTINATION")]
-    destination: String,
-    #[tabled(rename = "SOURCE NET")]
-    source_net: String,
-    #[tabled(rename = "WEIGHT")]
-    weight: String,
-    #[tabled(rename = "STATE")]
-    state: String,
-}
-
-impl From<&l3bpb::RealServerState> for RealServerRow {
-    fn from(real: &l3bpb::RealServerState) -> Self {
-        let destination = ip_address(&real.destination_address)
-            .map(|address| address.to_string())
-            .unwrap_or_else(|| "?".to_string());
-        let source_net = real
-            .source_network
-            .as_ref()
-            .map_or_else(|| "-".to_string(), ToString::to_string);
-
-        Self {
-            destination,
-            source_net,
-            weight: real.weight.to_string(),
-            state: if real.enabled { "enabled" } else { "disabled" }.to_string(),
-        }
-    }
-}
-
-#[tokio::main(flavor = "current_thread")]
-pub async fn main() {
-    CompleteEnv::with_factory(Cmd::command).complete();
-    let cmd = Cmd::parse();
-    ync::init(cmd.verbose, cmd.format);
-
-    if let Err(err) = run(cmd).await {
-        output::failure(&err);
-        std::process::exit(err.exit_code());
-    }
-}
-
-async fn run(cmd: Cmd) -> Result<(), Error> {
-    let action = cmd.mode.action();
-    let mut service = L3BService::new(&cmd.connection, action).await?;
-
-    match cmd.mode {
-        ModeCmd::CreateService(cmd) => service.create_service(cmd).await,
-        ModeCmd::UpdateService(cmd) => service.update_service(cmd).await,
-        ModeCmd::DeleteService(cmd) => service.delete_service(cmd).await,
-        ModeCmd::ListServices => service.list_services().await,
-        ModeCmd::UpdateModuleConfig(cmd) => service.update_module_config(cmd).await,
-        ModeCmd::ListModuleConfigs => service.list_module_configs().await,
-        ModeCmd::UpdateRealServerState(cmd) => service.update_real_server_state(cmd).await,
-        ModeCmd::UpdateRealServerWeight(cmd) => service.update_real_server_weight(cmd).await,
-        ModeCmd::ListSessions(cmd) => service.list_sessions(cmd).await,
-        ModeCmd::ShowService(cmd) => service.show_service(cmd).await,
-    }
-}
-
-pub struct L3BService {
-    service: Service<L3bServiceClient<LayeredChannel>>,
-}
-
-impl L3BService {
-    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let service = Service::connect_for(connection, action, SERVICE_NAME, |channel| {
-            L3bServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip)
-        })
-        .await?;
-
-        Ok(Self { service })
-    }
-
-    fn invalid(&self, verb: &'static str, message: String) -> Error {
-        self.service.invalid(verb, message)
-    }
-
-    pub async fn create_service(&mut self, cmd: ServiceCmd) -> Result<(), Error> {
-        let service = self.virtual_service(&cmd, "create-service").await?;
-        let request = CreateServiceRequest { service: Some(service) };
-        log::trace!("create service request: {request:?}");
-        self.service
-            .client()
-            .create_service(request)
-            .await
-            .map_err(self.service.status("create-service"))?;
-        output::success("create-service", format_args!("Created service {}.", cmd.name));
-        Ok(())
-    }
-
-    pub async fn update_service(&mut self, cmd: ServiceCmd) -> Result<(), Error> {
-        let service = self.virtual_service(&cmd, "update-service").await?;
-        let request = UpdateServiceRequest { service: Some(service) };
-        log::trace!("update service request: {request:?}");
-        self.service
-            .client()
-            .update_service(request)
-            .await
-            .map_err(self.service.status("update-service"))?;
-        output::success("update-service", format_args!("Updated service {}.", cmd.name));
-        Ok(())
-    }
-
-    /// Builds a virtual service request from the flags, populating the real
-    /// servers and source filter rules from the document when one is given.
-    /// Errors attribute to the given verb.
-    async fn virtual_service(&mut self, cmd: &ServiceCmd, verb: &'static str) -> Result<VirtualService, Error> {
+impl ServiceCmd {
+    /// Builds the wire configuration from command flags and an optional
+    /// document.
+    pub fn load(&self, strict: bool) -> Result<VirtualService, String> {
         let mut service = VirtualService {
-            name: cmd.name.clone(),
-            hash_mask: cmd.hash_mask,
-            index_mask: cmd.index_mask,
+            name: self.name.clone(),
+            hash_mask: self.hash_mask,
+            index_mask: self.index_mask,
             ..Default::default()
         };
 
-        if let Some(path) = &cmd.file {
-            let document: ServiceDocument = load_document(path, verb, self)?;
+        if let Some(path) = &self.file {
+            let document: ServiceDocument = load_document(path, strict)?;
             service.real_servers = document.real_servers.iter().map(Into::into).collect();
             service.source_filter_rules = document.source_filter_rules.iter().map(Into::into).collect();
             service.session_index_size = document.session_index_size;
@@ -629,6 +490,182 @@ impl L3BService {
         }
 
         Ok(service)
+    }
+}
+
+impl ModuleConfigCmd {
+    /// Builds destination rules without issuing a mutation.
+    pub fn load(&self, strict: bool) -> Result<ModuleConfig, String> {
+        let mut config = ModuleConfig {
+            name: self.name.clone(),
+            ..Default::default()
+        };
+        if let Some(path) = &self.file {
+            let document: ModuleConfigDocument = load_document(path, strict)?;
+            config.destination_filter_rules = document
+                .try_rules()
+                .map_err(|err| format!("invalid document {}: destination_filter_rules: {err}", path.display()))?;
+        }
+        Ok(config)
+    }
+}
+
+/// One rendered session row: the client flow and its pinned backend.
+#[derive(Tabled)]
+struct SessionRow {
+    #[tabled(rename = "SOURCE")]
+    source: String,
+    #[tabled(rename = "REAL")]
+    real: String,
+    #[tabled(rename = "EXPIRES IN")]
+    expires_in: String,
+}
+
+impl SessionRow {
+    /// Render a record against the response's dataplane time.
+    fn of(record: &l3bpb::SessionRecord, now_ns: u64) -> Self {
+        let source = match commonpb::ip_from_octets(&record.source_address) {
+            Ok(address) => format!("[{address}]:{}", record.source_port),
+            Err(_) => format!("[?]:{}", record.source_port),
+        };
+        let real = commonpb::ip_from_octets(&record.real_address)
+            .map_or_else(|_| "?".to_string(), |address| address.to_string());
+
+        let remaining = record.expires_at.saturating_sub(now_ns);
+        let expires_in = if remaining == 0 {
+            "now".to_string()
+        } else {
+            format!("{}s", remaining / 1_000_000_000)
+        };
+
+        Self { source, real, expires_in }
+    }
+}
+
+/// One rendered real-server row of a service inspection.
+#[derive(Tabled)]
+struct RealServerRow {
+    #[tabled(rename = "DESTINATION")]
+    destination: String,
+    #[tabled(rename = "SOURCE NET")]
+    source_net: String,
+    #[tabled(rename = "WEIGHT")]
+    weight: String,
+    #[tabled(rename = "STATE")]
+    state: String,
+}
+
+impl From<&l3bpb::RealServerState> for RealServerRow {
+    fn from(real: &l3bpb::RealServerState) -> Self {
+        let destination = commonpb::ip_from_octets(&real.destination_address)
+            .map_or_else(|_| "?".to_string(), |address| address.to_string());
+        let source_net = real
+            .source_network
+            .as_ref()
+            .map_or_else(|| "-".to_string(), ToString::to_string);
+
+        Self {
+            destination,
+            source_net,
+            weight: real.weight.to_string(),
+            state: if real.enabled { "enabled" } else { "disabled" }.to_string(),
+        }
+    }
+}
+
+fn main() -> std::process::ExitCode {
+    ync::entrypoint(|cmd: &Cmd| (cmd.verbose, cmd.format), run)
+}
+
+async fn run(cmd: Cmd) -> Result<(), Error> {
+    let action = cmd.mode.action();
+    match &cmd.mode {
+        ModeCmd::ValidateService(validation) => {
+            ServiceCmd {
+                name: String::new(),
+                hash_mask: 0,
+                index_mask: 0,
+                file: Some(validation.path.clone()),
+            }
+            .load(true)
+            .map_err(|err| Error::invalid_argument(action, "local", err))?;
+            output::success(action, format_args!("Service document is valid."));
+            return Ok(());
+        }
+        ModeCmd::ValidateModuleConfig(validation) => {
+            ModuleConfigCmd {
+                name: String::new(),
+                file: Some(validation.path.clone()),
+            }
+            .load(true)
+            .map_err(|err| Error::invalid_argument(action, "local", err))?;
+            output::success(action, format_args!("Module document is valid."));
+            return Ok(());
+        }
+        _ => {}
+    }
+    let mut service = L3BService::new(&cmd.connection, action).await?;
+
+    match cmd.mode {
+        ModeCmd::CreateService(cmd) => service.create_service(cmd).await,
+        ModeCmd::UpdateService(cmd) => service.update_service(cmd).await,
+        ModeCmd::DeleteService(cmd) => service.delete_service(cmd).await,
+        ModeCmd::ListServices => service.list_services().await,
+        ModeCmd::UpdateModuleConfig(cmd) => service.update_module_config(cmd).await,
+        ModeCmd::ListModuleConfigs => service.list_module_configs().await,
+        ModeCmd::UpdateRealServerState(cmd) => service.update_real_server_state(cmd).await,
+        ModeCmd::UpdateRealServerWeight(cmd) => service.update_real_server_weight(cmd).await,
+        ModeCmd::ListSessions(cmd) => service.list_sessions(cmd).await,
+        ModeCmd::ShowService(cmd) => service.show_service(cmd).await,
+        ModeCmd::ValidateService(..) | ModeCmd::ValidateModuleConfig(..) => unreachable!(),
+    }
+}
+
+pub struct L3BService {
+    service: Service<L3bServiceClient<LayeredChannel>>,
+}
+
+impl L3BService {
+    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
+        let service = Service::connect_for(connection, action, SERVICE_NAME, |channel| {
+            L3bServiceClient::new(channel)
+                .send_compressed(CompressionEncoding::Zstd)
+                .accept_compressed(CompressionEncoding::Zstd)
+                .accept_compressed(CompressionEncoding::Gzip)
+        })
+        .await?;
+
+        Ok(Self { service })
+    }
+
+    fn invalid(&self, verb: &'static str, message: String) -> Error {
+        self.service.invalid(verb, message)
+    }
+
+    pub async fn create_service(&mut self, cmd: ServiceCmd) -> Result<(), Error> {
+        let service = cmd.load(false).map_err(|err| self.invalid("create-service", err))?;
+        let request = CreateServiceRequest { service: Some(service) };
+        log::trace!("create service request: {request:?}");
+        self.service
+            .client()
+            .create_service(request)
+            .await
+            .map_err(self.service.status("create-service"))?;
+        output::success("create-service", format_args!("Created service {}.", cmd.name));
+        Ok(())
+    }
+
+    pub async fn update_service(&mut self, cmd: ServiceCmd) -> Result<(), Error> {
+        let service = cmd.load(false).map_err(|err| self.invalid("update-service", err))?;
+        let request = UpdateServiceRequest { service: Some(service) };
+        log::trace!("update service request: {request:?}");
+        self.service
+            .client()
+            .update_service(request)
+            .await
+            .map_err(self.service.status("update-service"))?;
+        output::success("update-service", format_args!("Updated service {}.", cmd.name));
+        Ok(())
     }
 
     pub async fn delete_service(&mut self, cmd: NameCmd) -> Result<(), Error> {
@@ -701,18 +738,9 @@ impl L3BService {
     }
 
     pub async fn update_module_config(&mut self, cmd: ModuleConfigCmd) -> Result<(), Error> {
-        let mut config = ModuleConfig {
-            name: cmd.name.clone(),
-            ..Default::default()
-        };
-
-        if let Some(path) = &cmd.file {
-            let document: ModuleConfigDocument = load_document(path, "update-module-config", self)?;
-            config.destination_filter_rules = document
-                .try_rules()
-                .map_err(|err| self.invalid("update-module-config", err))?;
-        }
-
+        let config = cmd
+            .load(false)
+            .map_err(|err| self.invalid("update-module-config", err))?;
         let request = UpdateModuleConfigRequest { config: Some(config) };
         log::trace!("update module config request: {request:?}");
         self.service

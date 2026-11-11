@@ -5,7 +5,7 @@
 foreach target_name, target_info : fuzzing_targets
   nofuzz_sources = []
   fuzz_args = []
-  
+
   if get_option('fuzzing').enabled()
     # Full fuzzing mode with libFuzzer
     fuzz_args = ['-fsanitize=fuzzer,address']
@@ -13,17 +13,16 @@ foreach target_name, target_info : fuzzing_targets
     # Reproducer mode - add reproducer main()
     nofuzz_sources += lib_fuzzing_reproducer
   endif
-  
+
   exe = executable(
     target_name,
-    c_args: yanet_c_args + fuzz_args,
-    link_args: yanet_link_args + fuzz_args,
+    c_args: fuzz_args,
+    link_args: fuzz_args,
     sources: [target_info['source']] + nofuzz_sources,
-    dependencies: [libdpdk_dep] + target_info['deps'],
-    include_directories: [yanet_rootdir, target_info['module_dir']],
-    link_language: 'c',
+    dependencies: [libdpdk_test_dep] + target_info['deps'] + [lib_logging_dep],
+    include_directories: yanet_rootdir,
   )
-  
+
   # Create a test for the fuzzing target
   # Pass the binary path as argument and set FUZZING_SPLIT_INPUT=1
   test(
@@ -33,5 +32,8 @@ foreach target_name, target_info : fuzzing_targets
     env: {'FUZZING_SPLIT_INPUT': '1'},
     suite: ['fuzzing'],
     timeout: 30,
+    # Large self-binary corpora need exclusive access to the runner's
+    # memory, I/O and exit-time sanitizer checks.
+    is_parallel: false,
   )
 endforeach

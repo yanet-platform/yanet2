@@ -50,8 +50,8 @@ func NewGRPCServer(
 	}
 
 	server := grpc.NewServer(
-		grpc.ChainUnaryInterceptor(xgrpc.ValidateUnaryInterceptor()),
-		grpc.ChainStreamInterceptor(xgrpc.ValidateStreamInterceptor()),
+		grpc.ChainUnaryInterceptor(xgrpc.ResponseCompressionUnaryInterceptor(), xgrpc.ValidateUnaryInterceptor()),
+		grpc.ChainStreamInterceptor(xgrpc.ResponseCompressionStreamInterceptor(), xgrpc.ValidateStreamInterceptor()),
 	)
 	serviceNames := make([]string, len(services))
 	for idx, register := range services {

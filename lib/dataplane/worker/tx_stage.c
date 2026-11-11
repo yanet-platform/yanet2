@@ -33,17 +33,17 @@ worker_tx_stage(
 	uint32_t device_count,
 	struct dp_worker *dp_worker,
 	struct packet *packet,
+	uint16_t device_id,
 	struct packet_list *failed
 ) {
 	// A device this worker has no connections for is not a transmit
 	// failure, so it joins the failures without counting one.
-	if (packet->tx_device_id >= device_count) {
+	if (device_id >= device_count) {
 		packet_list_add(failed, packet);
 		return;
 	}
 
-	struct worker_tx_connection *connection =
-		connections + packet->tx_device_id;
+	struct worker_tx_connection *connection = connections + device_id;
 	if (!connection->count) {
 		*(dp_worker->remote_tx_drops) += 1;
 		packet_list_add(failed, packet);

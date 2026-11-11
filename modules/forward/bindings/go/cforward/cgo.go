@@ -1,8 +1,6 @@
 package cforward
 
 //#cgo CFLAGS: -I../../../../../
-//#cgo LDFLAGS: -L../../../../../build/modules/forward/api -lforward_cp
-//#cgo LDFLAGS: -L../../../../../build/lib/classify -lclassify_compiler
 //
 //#include "api/agent.h"
 //#include "modules/forward/api/controlplane.h"

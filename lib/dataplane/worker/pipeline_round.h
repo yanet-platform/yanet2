@@ -1,8 +1,26 @@
 #pragma once
 
+#include <stdint.h>
+
 struct dp_worker;
 struct cp_config_gen;
 struct config_gen_ectx;
+struct device_entry_ectx;
+struct packet_front;
+
+// Decide the egress of the packets that finished an output entry.
+//
+// The entry's device resolves through the backing table once, and every
+// finisher lands in that port's transmit bucket. A device with no port
+// has its finishers join the front's drop list, counted against the
+// entry's drop counter, instead of travelling namelessly to the write
+// stage.
+void
+worker_entry_terminal_egress(
+	struct config_gen_ectx *config_gen_ectx,
+	struct device_entry_ectx *entry_ectx,
+	struct packet_front *packet_front
+);
 
 // Drain the device entry schedules through the pipeline.
 //

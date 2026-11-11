@@ -206,16 +206,27 @@ run_scenario(
 	memset(&rule_map, 0, sizeof(rule_map));
 
 	assert(classify_fragment_device_compile(
-		       &mctx, rules, 2, &dev_attr, &stage_dev
+		       &mctx, "fragment_device", rules, 2, &dev_attr, &stage_dev
 	       ) == 0);
 	assert(classify_fragment_net4_src_compile(
-		       &mctx, rules, 2, &src_attr, &stage_n4_src
+		       &mctx,
+		       "fragment_net4_src",
+		       rules,
+		       2,
+		       &src_attr,
+		       &stage_n4_src
 	       ) == 0);
 	assert(classify_fragment_net4_dst_compile(
-		       &mctx, rules, 2, &dst_attr, &stage_n4_dst
+		       &mctx,
+		       "fragment_net4_dst",
+		       rules,
+		       2,
+		       &dst_attr,
+		       &stage_n4_dst
 	       ) == 0);
 	assert(classify_join(
 		       &mctx,
+		       "nets_joint",
 		       &stage_n4_src,
 		       &stage_n4_dst,
 		       2,
@@ -223,13 +234,25 @@ run_scenario(
 		       &stage_nets
 	       ) == 0);
 	assert(classify_join(
-		       &mctx, &stage_dev, &stage_nets, 2, &mid_joint, &stage_mid
+		       &mctx,
+		       "mid_joint",
+		       &stage_dev,
+		       &stage_nets,
+		       2,
+		       &mid_joint,
+		       &stage_mid
 	       ) == 0);
 	assert(classify_fragment_ipproto_compile(
-		       &mctx, rules, 2, &ipproto_attr, &stage_ipproto
+		       &mctx,
+		       "fragment_ipproto",
+		       rules,
+		       2,
+		       &ipproto_attr,
+		       &stage_ipproto
 	       ) == 0);
 	assert(classify_join(
 		       &mctx,
+		       "proto_joint",
 		       &stage_mid,
 		       &stage_ipproto,
 		       2,
@@ -237,17 +260,25 @@ run_scenario(
 		       &core_stage
 	       ) == 0);
 	assert(classify_fragment_ipfrag_compile(
-		       &mctx, rules, 2, &frag_attr, &stage_frag
+		       &mctx,
+		       "fragment_ipfrag",
+		       rules,
+		       2,
+		       &frag_attr,
+		       &stage_frag
 	       ) == 0);
 	assert(classify_join(
 		       &mctx,
+		       "root_joint",
 		       &core_stage,
 		       &stage_frag,
 		       2,
 		       &root_joint,
 		       &plain_stage
 	       ) == 0);
-	assert(classify_decode(&mctx, &plain_stage, rules, 2, &rule_map) == 0);
+	assert(classify_decode(
+		       &mctx, "rule_map", &plain_stage, rules, 2, &rule_map
+	       ) == 0);
 
 	uint32_t mid_class = value_table_get(&mid_joint, 0, 0);
 

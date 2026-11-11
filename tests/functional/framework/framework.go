@@ -46,6 +46,8 @@ const (
 	CLIDevicePlain = CLIBasePath + "/yanet-cli-device-plain"
 	CLIDecap       = CLIBasePath + "/yanet-cli-decap"
 	CLIForward     = CLIBasePath + "/yanet-cli-forward"
+	CLIRing        = CLIBasePath + "/yanet-cli-ring"
+	CLIPdump       = CLIBasePath + "/yanet-cli-pdump"
 	CLIGeneric     = CLIBasePath + "/yanet-cli"
 
 	globalName = "global"
@@ -59,7 +61,8 @@ var CLIBinaryNames = []string{
 	"yanet-cli",
 	"yanet-cli-route", "yanet-cli-route-mpls",
 	"yanet-cli-nat64", "yanet-cli-acl", "yanet-cli-blackhole",
-	"yanet-cli-fwstate", "yanet-cli-fwstatemap", "yanet-cli-pipeline", "yanet-cli-function",
+	"yanet-cli-fwstate", "yanet-cli-fwstatemap", "yanet-cli-ring",
+	"yanet-cli-pipeline", "yanet-cli-function",
 	"yanet-cli-device-plain", "yanet-cli-device-vlan",
 	"yanet-cli-decap", "yanet-cli-forward",
 	"yanet-cli-common", "yanet-cli-dscp", "yanet-cli-counters",
@@ -73,7 +76,7 @@ var CLIBinaryNames = []string{
 type GuestPaths struct {
 	CLIBase        string // directory with yanet-cli-* binaries
 	BuildDir       string // directory with yanet-dataplane, yanet-controlplane
-	PluginDir      string // directory with dataplane module .so plugins
+	PluginDir      string // directory with dataplane .so plugins (modules, object types)
 	ConfigDir      string // directory for config files
 	LogDir         string // directory for log files
 	DPDKDevbindDir string // directory containing dpdk-devbind.py
@@ -180,10 +183,6 @@ func (f *TestFramework) CommonConfigCommands() []string {
 		p.CLI("yanet-cli-device-plain") + " update --name=virtio_user_kni0 --input bootstrap:1 --output dummy:1",
 	}
 }
-
-// CommonConfigCommands is the package-level variable for backward compatibility.
-// Uses default 9P paths. In pool mode tests use fw.CommonConfigCommands() instead.
-var CommonConfigCommands = (&TestFramework{Paths: DefaultGuestPaths()}).CommonConfigCommands()
 
 // MustParseMAC parses a MAC address string and panics if parsing fails.
 // This utility function is designed for use with known-good MAC address constants
@@ -1451,14 +1450,21 @@ func (f *TestFramework) thawRootFilesystem() error {
 	return nil
 }
 
+// localStorageTimeout bounds mirroring a whole build into guest-local
+// storage, which reads every binary over 9P on a cold copy.
+const localStorageTimeout = 10 * time.Minute
+
 // PrepareLocalStorage copies all YANET binaries, CLI tools, configs and
 // scripts from 9P mounts to /tmp/yanet/ inside the guest. After this
 // call, YANET can be started from local tmpfs paths so that no process
 // holds open fids on 9P mounts, making savevm/loadvm work cleanly.
 //
-// This also switches f.Paths to LocalGuestPaths().
+// Calling it again, as after restoring a snapshot that already holds local
+// copies, refreshes every copy that differs from the 9P mounts. This also
+// switches f.Paths to LocalGuestPaths().
 func (f *TestFramework) PrepareLocalStorage() error {
 	f.log.Info("Copying YANET files from 9P mounts to local tmpfs...")
+	started := time.Now()
 
 	// Ensure 9P mounts are available (they may be unmounted after a
 	// snapshot restore from a booted overlay).
@@ -1469,50 +1475,66 @@ func (f *TestFramework) PrepareLocalStorage() error {
 		}
 	}
 
-	// Copy files step by step to avoid serial terminal line-length limits.
-	// Each command is kept short enough for reliable serial transmission.
-	//
-	// Dataplane module .so plugins are copied onto local tmpfs too: a
-	// dataplane that loads a plugin keeps its .so mmap'd, which would block
-	// unmounting the 9P share before savevm, so the plugin must not live on
-	// 9P once YANET is running.
-	//
-	// The build's plugin directory holds host symlinks that dangle inside
-	// the guest, so copy the real plugin objects from their module build
-	// directories, renaming each from lib<name>_dp_plugin.so to the
-	// lib<name>_dp.so form the dataplane's plugin loader recognizes.
-	copyCommands := []string{
-		"mkdir -p /tmp/yanet/build/dataplane /tmp/yanet/build/controlplane /tmp/yanet/build/plugins /tmp/yanet/cli /tmp/yanet/config /tmp/yanet/logs /tmp/yanet/tools",
-		"cp /mnt/build/dataplane/yanet-dataplane /tmp/yanet/build/dataplane/",
-		"cp /mnt/build/controlplane/yanet-controlplane /tmp/yanet/build/controlplane/",
-		// A sanitizer-built binary carries an $ORIGIN rpath and ships its
-		// runtime libraries beside it; a release build stages none and the
-		// loop copies nothing.
-		"for f in /mnt/build/dataplane/*.so.* /mnt/build/controlplane/*.so.*; do [ -e \"$f\" ] || continue; d=/tmp/yanet/build/$(basename $(dirname \"$f\")); cp \"$f\" \"$d\"/; done",
-		"cp /mnt/yanet2/subprojects/dpdk/usertools/dpdk-devbind.py /tmp/yanet/tools/",
-		"for f in /mnt/build/modules/*/dataplane/*_dp_plugin.so; do [ -e \"$f\" ] || continue; b=$(basename \"$f\"); cp \"$f\" /tmp/yanet/build/plugins/${b%_plugin.so}.so; done",
-	}
-
-	// Copy CLI binaries individually -- serial terminals truncate long lines.
-	for _, name := range CLIBinaryNames {
-		copyCommands = append(copyCommands,
-			"cp /mnt/target/release/"+name+" /tmp/yanet/cli/")
-	}
-	copyCommands = append(copyCommands,
-		"chmod +x /tmp/yanet/cli/* /tmp/yanet/build/dataplane/* /tmp/yanet/build/controlplane/*",
-	)
-
-	for _, cmd := range copyCommands {
-		if _, err := f.ExecuteCommandWithTimeout(cmd, 60*time.Second); err != nil {
-			return fmt.Errorf("PrepareLocalStorage failed on %q: %w", cmd, err)
-		}
+	// The copy goes to the guest unchanged: local mode points the CLI paths
+	// of every other command at the local copies, which would turn each CLI
+	// copy into one from the local file onto itself.
+	command := localStorageCommand(DefaultGuestPaths(), LocalGuestPaths(), CLIBinaryNames)
+	if output, err := f.cli.ExecuteCommandWithTimeout(command, localStorageTimeout); err != nil {
+		return fmt.Errorf("PrepareLocalStorage failed to copy from 9P mounts: %w (output: %s)", err, output)
 	}
 
 	f.Paths = LocalGuestPaths()
 	// 9P shares are still mounted (we just copied from them).
 	f.qemu.Ninepmounted.Store(true)
-	f.log.Info("Local storage prepared, switched to local paths")
+	f.log.Infof("Local storage prepared in %v, switched to local paths", time.Since(started).Round(time.Millisecond))
 	return nil
+}
+
+// localStorageCommand returns one guest command that mirrors the YANET
+// binaries, plugins, CLIs and tools from the shared paths into the local ones.
+//
+// A copy that already has its source's size and modification time is kept,
+// so mirroring an unchanged build costs one metadata pass, while a copy left
+// by another build is replaced. A missing source or a failed copy fails the
+// command. It runs in a subshell, so its helper and its early exit stay out
+// of the guest's login shell.
+//
+// Module plugins are copied too: a running dataplane keeps its plugins
+// mapped, which would block unmounting the 9P share before a snapshot. The
+// build's plugin directory holds host symlinks that dangle in the guest, so
+// each plugin comes from its module build directory, renamed from
+// lib<name>_dp_plugin.so to the lib<name>_dp.so the plugin loader expects.
+func localStorageCommand(shared GuestPaths, local GuestPaths, cliNames []string) string {
+	directories := []string{
+		local.BuildDir + "/dataplane",
+		local.BuildDir + "/controlplane",
+		local.PluginDir,
+		local.CLIBase,
+		local.ConfigDir,
+		local.LogDir,
+		local.DPDKDevbindDir,
+	}
+	steps := []string{
+		`mirror() { stamp=$(stat -c %s.%.9Y "$1") || exit 1; ` +
+			`[ "$stamp" = "$(stat -c %s.%.9Y "$2" 2>/dev/null)" ] || ` +
+			`cp --preserve=timestamps "$1" "$2" || exit 1; }`,
+		"mkdir -p " + strings.Join(directories, " ") + " || exit 1",
+		"mirror " + shared.BuildDir + "/dataplane/yanet-dataplane " + local.BuildDir + "/dataplane/yanet-dataplane",
+		"mirror " + shared.BuildDir + "/controlplane/yanet-controlplane " + local.BuildDir + "/controlplane/yanet-controlplane",
+		// A sanitizer build ships its runtime libraries beside each binary,
+		// which finds them through an $ORIGIN rpath; a release build has none.
+		"for file in " + shared.BuildDir + "/dataplane/*.so.* " + shared.BuildDir + "/controlplane/*.so.*; do " +
+			`[ -e "$file" ] || continue; ` +
+			`mirror "$file" "` + local.BuildDir + `/$(basename "$(dirname "$file")")/$(basename "$file")"; done`,
+		"mirror " + shared.DPDKDevbindDir + "/dpdk-devbind.py " + local.DPDKDevbindDir + "/dpdk-devbind.py",
+		"for file in " + shared.BuildDir + "/modules/*/dataplane/*_dp_plugin.so; do " +
+			`[ -e "$file" ] || continue; name=$(basename "$file"); ` +
+			`mirror "$file" "` + local.PluginDir + `/${name%_plugin.so}.so"; done`,
+		"for name in " + strings.Join(cliNames, " ") + "; do " +
+			`mirror "` + shared.CLIBase + `/$name" "` + local.CLIBase + `/$name"; done`,
+		"chmod +x " + local.CLIBase + "/* " + local.BuildDir + "/dataplane/* " + local.BuildDir + "/controlplane/*",
+	}
+	return "( " + strings.Join(steps, "; ") + " )"
 }
 
 // StartLogTailers starts background processes that tail YANET log files

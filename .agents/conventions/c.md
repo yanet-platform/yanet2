@@ -1,6 +1,12 @@
+---
+paths:
+  - "**/*.c"
+  - "**/*.h"
+---
+
 # C conventions
 
-Loaded on demand by the agent writing or reviewing C; this is the single source for these rules.
+Loaded by path in Claude Code and on demand elsewhere, for the agent writing or reviewing C; this is the single source for these rules.
 
 - Always use braces for `if`/`else`/`for`/`while`, even single-line bodies. `clang-format` (`InsertBraces: true`) inserts them automatically, but it silently skips some cases, among them a body inside a macro definition, a body split from its condition by a preprocessor directive, and an empty `;` body.
 - Format with `clang-format`, restricted to the exact `.c`/`.h` paths you changed. Never pass a `.go` or `meson.build` path (alone or batched with C files) — clang-format has no concept of Go or meson grammar and silently mangles it with no warning (breaks `:=`, `for range`, `key:` syntax). Format Go separately with `gofmt`.
@@ -17,3 +23,5 @@ Loaded on demand by the agent writing or reviewing C; this is the single source 
 - **`memory_balloc` MUST have a corresponding `memory_bfree` in cleanup paths.**
 - **`dataplane_ut` `Bench`/`run_rounds` recycles fixed packets**: neutralise allocating or emitting actions (for example ACL `CREATE_STATE` sync) so mbufs do not leak or distort results.
 - **Tests**: follow `.agents/conventions/tests.md` (one-brief `verifies that` doc comment, self-describing scenario names). A `dataplane_ut` file uses one `run_<what>_test(...)` entry per scenario dispatched from `main`, plus a file-level header comment in the brief + blank + detailed shape. Reference: `lib/controlplane/tests/loaded_counts_test.c`.
+- **Hot path**: no allocation, minimal branches and memory touches, prefetch across batches, shared structs cache-line aware; publish live-visible structures with the atomic pair the code already uses. Read a reference module (`decap`, `forward`, `dscp`) before adding a pattern.
+- **Done when**: the fuzz target follows any input-parsing change and `meson.build` lists new sources. New C behavior tests use Go tests (`dataplane_ut`); shared-library tests requiring direct ASan/TSan may run directly. Dataplane-module behavior must always use the shared `dataplane_ut` Go or C harness, including direct sanitizer runs, per `.agents/conventions/tests.md`; extend the harness for missing capabilities. A public API, another repository or a shared struct layout (`YANET_MODULE_ABI_VERSION`) is a stop-and-ask point.

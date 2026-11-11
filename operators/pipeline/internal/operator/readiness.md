@@ -4,8 +4,10 @@ The pipeline operator exposes one readiness scope per configured gateway,
 covering all stages pushed to that gateway.
 
 - gRPC FQN: `operators.pipeline.operatorpb.v1.ReadinessService`
-- Service implementation: `readiness_service.go` (`ReadinessService`).
-- Scope logic: `operator.go` (the observed actuator wiring).
+- Service implementation: the operator framework (`common/go/operator`)
+  serves the shared readiness contract under the operator's name.
+- Scope logic: `operator.go` names a scope for each gateway target; the
+  framework records every apply outcome in it.
 
 ## Scopes
 
@@ -16,23 +18,23 @@ covering all stages pushed to that gateway.
 One scope per entry in `gateways`, named `pipeline:<gateway.name>`. Each scope
 starts at `STATE_UNKNOWN`.
 
-State is driven by the apply outcome recorded through `Observe` (via
-`NewObservedActuator`):
+State is driven by the apply outcome the framework records for the gateway's
+target:
 
 - Apply succeeded: `STATE_READY`.
 - Apply failed, scope previously READY or DEGRADED: `STATE_DEGRADED`, reason
   `APPLY_FAILED`.
 - Apply failed, scope never applied: `STATE_NOT_READY`, reason `APPLY_FAILED`.
 
-On shutdown `Drain` flips every scope to `STATE_NOT_READY` (`SHUTTING_DOWN`).
-This is best-effort: operator trackers are not drain-latched, so an apply in
-flight when shutdown begins can overwrite the `SHUTTING_DOWN` value before the
-reconciler stops.
+On shutdown `Drain` flips every scope to `STATE_NOT_READY` (`SHUTTING_DOWN`)
+before the reconciler stops, while the service still answers. The tracker is
+drain-latched, so an apply cut off by the shutdown leaves `SHUTTING_DOWN` in
+place.
 
 ## `observed_at` freshness
 
 `observed_at` advances on every reconcile apply attempt, regardless of
-success, because `Observe` fires inside each `Apply`. Advancing `observed_at`
+success, because the framework records every apply. Advancing `observed_at`
 means the reconcile loop is alive — it does **not** mean the stages applied
 correctly (read `state` for that).
 
@@ -55,8 +57,8 @@ the service stays fresh.
 Unlike the other operators, the pipeline source has no work to apply until
 stages are queued. When `stages` is empty at startup (which `Validate`
 permits — only `gateways` is required), no stages are seeded, the reconcile
-source reports no target, and the reconciler idles without ever calling
-`Apply`/`Observe`. The `pipeline:<gateway>` scopes stay at `STATE_UNKNOWN` and
+source reports no target, and the reconciler idles without ever applying or
+recording an outcome. The `pipeline:<gateway>` scopes stay at `STATE_UNKNOWN` and
 `observed_at` is never set (the field is omitted from the response).
 
 This is a healthy idle state, not a stalled loop. An external checker must not

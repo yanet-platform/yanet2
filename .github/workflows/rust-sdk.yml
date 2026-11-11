@@ -1,0 +1,196 @@
+name: Rust SDK
+
+# Checks of the Rust module SDK workspace (bindings/rust): formatting, lints, the
+# test suite, std-freedom of the SDK crates and the extractable packet.
+# Clippy with the bare-metal check and the tests also run on arm64, where
+# the C bindings and the layouts they check can differ; the rest does not
+# depend on the architecture and runs on x86_64 only.
+#
+# The bindings crate's build script runs bindgen and compiles the C shims of
+# common/ and of the dataplane, built into one library, over the repository's
+# C headers with the flags of a meson configuration's compilation database.
+# C header and meson changes therefore re-run the jobs, and every job that
+# compiles the SDK runs in the CI image (ci/README.md) and configures meson
+# first (nothing is compiled).
+#
+# Each cargo cache family has exactly one job per architecture that writes it
+# (the cache key names the host), from main only, since a cache written on a
+# pull-request ref is readable only from that pull request.
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "bindings/rust/**"
+      - ".cargo/config.toml"
+      - ".rustfmt.toml"
+      - "common/**.h"
+      - "lib/**.h"
+      # The dataplane shim compiles these C sources into the plugin.
+      - "lib/dataplane/packet/**.c"
+      - "subprojects/dpdk"
+      - "**/meson.build"
+      - "meson_options.txt"
+      - ".github/workflows/rust-sdk.yml"
+  pull_request:
+    # A stacked pull request has a non-main base, so a main-only filter would skip it.
+    branches: ["**"]
+    paths:
+      - "bindings/rust/**"
+      - ".cargo/config.toml"
+      - ".rustfmt.toml"
+      - "common/**.h"
+      - "lib/**.h"
+      # The dataplane shim compiles these C sources into the plugin.
+      - "lib/dataplane/packet/**.c"
+      - "subprojects/dpdk"
+      - "**/meson.build"
+      - "meson_options.txt"
+      - ".github/workflows/rust-sdk.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  # bindgen needs a clang and a libclang of the same LLVM major, both in the
+  # CI image.
+  CLANG_PATH: /usr/bin/clang-23
+  LIBCLANG_PATH: /usr/lib/llvm-23/lib
+
+defaults:
+  run:
+    # The runner's default shell, which container jobs would replace with sh.
+    shell: bash -e {0}
+
+permissions:
+  contents: read
+
+jobs:
+  fmt:
+    name: cargo fmt
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Pinned with the root workspace's formatter, see rust-check.yml.
+      - uses: dtolnay/rust-toolchain@2c76c034f9e32a5d6e2c104dc4df23a22476db04 # nightly
+        with:
+          toolchain: nightly-2026-10-22
+          components: rustfmt
+      - working-directory: bindings/rust
+        run: cargo fmt -- --check
+
+  # Every check on this toolchain runs in this one job, which owns the
+  # rust-sdk cache family for the host and bare-metal builds.
+  clippy:
+    name: cargo clippy and std-free crates (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {arch: x86_64, runner: ubuntu-24.04, target: x86_64-unknown-none}
+          - {arch: arm64, runner: ubuntu-24.04-arm, target: aarch64-unknown-none}
+    container: ghcr.io/yanet-platform/yanet2-ci@sha256:3cbb2aae05beb4efc16f160cfa4d5307deba5d3110005d6557fdb49e5e2ee7a1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: true
+      - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
+        with:
+          components: clippy
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: bindings/rust
+          shared-key: rust-sdk
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # Configuring is enough: the bindings crate reads the C flags from the
+      # compilation database; the dataplane-only build needs no protobuf
+      # tooling.
+      - run: |
+          meson setup build -Ddataplane_only=true
+      # The workspace lints (bindings/rust/Cargo.toml) are deny-level, from
+      # undocumented unsafe blocks to missing docs.
+      #
+      # With CARGO_BUILD_WARNINGS=deny a crate that only warns still builds, so
+      # --keep-going checks its dependents too and the run lists every warning
+      # before it fails.
+      - working-directory: bindings/rust
+        run: cargo clippy --workspace --all-targets --locked --keep-going
+        env:
+          CARGO_BUILD_WARNINGS: deny
+      # The plugin examples need the `plugin` feature and the plugin profile
+      # (a `no_std` cdylib cannot unwind), so the run above never sees them.
+      - working-directory: bindings/rust
+        run: cargo clippy --profile plugin -p yanet-sdk-fixture --features plugin --examples --locked --keep-going
+        env:
+          CARGO_BUILD_WARNINGS: deny
+      # Clippy runs no rustdoc, so the rustdoc lints of the workspace, such as
+      # broken intra-doc links, fail only here.
+      #
+      # The control-plane test owner of the testing crate is built only for
+      # the tests of other crates, so its feature is named here; the fixture's
+      # no_std plugin feature cannot be documented with std and stays out.
+      - working-directory: bindings/rust
+        run: cargo doc --workspace --no-deps --locked --features yanet-sdk-testing/cp
+        env:
+          RUSTDOCFLAGS: -D warnings
+      # A bare-metal target has no std: the crates compile only if nothing
+      # pulls std or alloc in. The bindings follow the meson configuration of
+      # the machine, so an arm64 row on a runner that is not arm64 skips it.
+      - if: matrix.arch != 'arm64' || runner.arch == 'ARM64'
+        working-directory: bindings/rust
+        run: cargo check --locked --target ${{ matrix.target }} -p yanet-shm -p yanet-sys -p yanet-sdk -p yanet-sdk-plugin -p yanet-packet
+
+  test:
+    name: cargo test (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {arch: x86_64, runner: ubuntu-24.04}
+          - {arch: arm64, runner: ubuntu-24.04-arm}
+    container: ghcr.io/yanet-platform/yanet2-ci@sha256:3cbb2aae05beb4efc16f160cfa4d5307deba5d3110005d6557fdb49e5e2ee7a1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: true
+      - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: bindings/rust
+          shared-key: rust-sdk-test
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: |
+          meson setup build -Ddataplane_only=true
+      - working-directory: bindings/rust
+        run: cargo test --workspace --locked
+
+  packet:
+    name: yanet-packet standalone
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
+        with:
+          targets: x86_64-unknown-none
+      # Built outside the workspace, as its own repository would be: a path
+      # dependency or workspace inheritance fails this build.
+      - name: Test outside the workspace
+        run: |
+          cp -r bindings/rust/yanet-packet "$RUNNER_TEMP/yanet-packet"
+          cd "$RUNNER_TEMP/yanet-packet"
+          cargo test
+          cargo check --target x86_64-unknown-none

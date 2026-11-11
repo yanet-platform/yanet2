@@ -1,0 +1,24 @@
+[package]
+name = "yanet-cli-device-vxlan"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+commonpb.workspace = true
+ynpb.workspace = true
+ync.workspace = true
+clap = { workspace = true, features = ["wrap_help"] }
+clap_complete.workspace = true
+netip.workspace = true
+prost.workspace = true
+serde = { workspace = true, features = ["derive"] }
+tabled.workspace = true
+tonic.workspace = true
+
+[build-dependencies]
+ync-build.workspace = true

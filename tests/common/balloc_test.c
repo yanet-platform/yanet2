@@ -454,9 +454,72 @@ test_reduction_loop_small_region(void) {
 	return 0;
 }
 
+static int
+test_stats_empty_and_fragmented_capacity(void) {
+	struct block_allocator allocator;
+	block_allocator_init(&allocator);
+	struct block_allocator_stats stats;
+	memset(&stats, 0xFF, sizeof(stats));
+	block_allocator_get_stats(&allocator, &stats);
+	TEST_ASSERT(stats.free_bytes == 0, "empty allocator has free bytes");
+	TEST_ASSERT(
+		stats.largest_free_block_bytes == 0,
+		"empty allocator has a largest block"
+	);
+	for (size_t idx = 0; idx < MEMORY_BLOCK_ALLOCATOR_EXP; ++idx) {
+		TEST_ASSERT(
+			stats.free_blocks[idx] == 0, "empty pool is not zero"
+		);
+	}
+
+	void *raw = NULL;
+	void *arena = NULL;
+	size_t arena_size = 0;
+	TEST_ASSERT(
+		make_2mb_aligned_arena(&raw, &arena, &arena_size) == 0,
+		"arena preparation failed"
+	);
+	block_allocator_put_arena(&allocator, arena, arena_size);
+	block_allocator_get_stats(&allocator, &stats);
+	TEST_ASSERT(stats.free_bytes == arena_size, "wrong initial free size");
+	TEST_ASSERT(
+		stats.largest_free_block_bytes == arena_size,
+		"initial arena must be a single block"
+	);
+
+	size_t half_size = arena_size / 2;
+	size_t request_size = half_size - 2 * ASAN_RED_ZONE;
+	void *block = block_allocator_balloc(&allocator, request_size);
+	TEST_ASSERT_NOT_NULL(block, "half-arena allocation failed");
+	block_allocator_bfree(&allocator, block, request_size);
+	block_allocator_get_stats(&allocator, &stats);
+	size_t half_pool = block_allocator_pool_index(&allocator, half_size);
+	TEST_ASSERT(
+		stats.free_bytes == arena_size,
+		"freeing must restore the total free size"
+	);
+	TEST_ASSERT(
+		stats.largest_free_block_bytes == half_size,
+		"freeing must expose the unmerged halves"
+	);
+	TEST_ASSERT(
+		stats.free_blocks[half_pool] == 2,
+		"both half-arena blocks must be visible"
+	);
+	TEST_ASSERT(
+		stats.free_blocks[half_pool + 1] == 0,
+		"the original size class must remain empty"
+	);
+	free(raw);
+	return 0;
+}
+
 int
 main(void) {
 	log_enable_name("info");
+	if (test_stats_empty_and_fragmented_capacity() != 0) {
+		return -1;
+	}
 
 	if (test_init_and_empty_alloc() != 0) {
 		LOG(ERROR, "test_init_and_empty_alloc failed");

@@ -21,7 +21,8 @@ use ynpb::pb::{
 
 fn memory_client(channel: LayeredChannel) -> MemoryServiceClient<LayeredChannel> {
     MemoryServiceClient::new(channel)
-        .send_compressed(CompressionEncoding::Gzip)
+        .send_compressed(CompressionEncoding::Zstd)
+        .accept_compressed(CompressionEncoding::Zstd)
         .accept_compressed(CompressionEncoding::Gzip)
 }
 
@@ -138,7 +139,8 @@ async fn run_logging(connection: &ConnectionArgs, mode: LoggingCmd) -> Result<()
     let action = mode.action();
     let mut service = Service::connect_for(connection, action, LOGGING_SERVICE, |channel| {
         LoggingClient::new(channel)
-            .send_compressed(CompressionEncoding::Gzip)
+            .send_compressed(CompressionEncoding::Zstd)
+            .accept_compressed(CompressionEncoding::Zstd)
             .accept_compressed(CompressionEncoding::Gzip)
     })
     .await?;

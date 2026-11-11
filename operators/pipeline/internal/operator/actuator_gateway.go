@@ -8,6 +8,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/common/go/operator"
+	"github.com/yanet-platform/yanet2/common/go/xgrpc"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 	"github.com/yanet-platform/yanet2/devices/plain/controlplane/plainpb/v1"
 	"github.com/yanet-platform/yanet2/devices/vlan/controlplane/vlanpb/v1"
@@ -16,9 +17,15 @@ import (
 // GatewayActuatorMetricsObserver receives semantic events from a
 // single gateway actuator and translates them into metrics.
 type GatewayActuatorMetricsObserver interface {
-	OnApplyCompleted(err error)
 	OnResourceUpdated(kind string, err error)
 	OnGC(deleted, failed int, err error)
+}
+
+// GatewayActuatorStageObserver learns when a gateway starts applying a
+// stage and how the apply ended.
+type GatewayActuatorStageObserver interface {
+	OnStageApplying(gateway string, stage *StageConfig)
+	OnStageApplied(gateway string, stage *StageConfig, err error)
 }
 
 // GatewayActuator applies a StageConfig to a single Gateway and prunes
@@ -31,6 +38,7 @@ type GatewayActuator struct {
 	vlan      vlanpb.DeviceVlanServiceClient
 
 	metrics GatewayActuatorMetricsObserver
+	stages  GatewayActuatorStageObserver
 	log     *zap.Logger
 }
 
@@ -45,7 +53,8 @@ func NewGatewayActuator(
 		o(opts)
 	}
 
-	conn, err := operator.DialGateway(cfg)
+	log := opts.Log.With(zap.String("gateway", cfg.Name))
+	conn, err := operator.DialGateway(cfg, xgrpc.WithCertificateStoreLog(log))
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +66,8 @@ func NewGatewayActuator(
 		plain:     plainpb.NewDevicePlainServiceClient(conn),
 		vlan:      vlanpb.NewDeviceVlanServiceClient(conn),
 		metrics:   opts.Metrics,
-		log:       opts.Log.With(zap.String("gateway", cfg.Name)),
+		stages:    opts.Stages,
+		log:       log,
 	}, nil
 }
 
@@ -69,10 +79,13 @@ func (m *GatewayActuator) Close() error {
 // pipelines.
 //
 // Garbage collection failures are logged as warnings and never propagate.
+// The stage observer hears when the apply starts and how it ended: a
+// failure right away, a success once stale pipelines are pruned.
 func (m *GatewayActuator) Apply(ctx context.Context, stage *StageConfig) error {
+	m.stages.OnStageApplying(m.name, stage)
 	err := m.applyStage(ctx, stage)
-	m.metrics.OnApplyCompleted(err)
 	if err != nil {
+		m.stages.OnStageApplied(m.name, stage, err)
 		return fmt.Errorf("failed to apply stage to gateway %q: %w", m.name, err)
 	}
 
@@ -84,6 +97,7 @@ func (m *GatewayActuator) Apply(ctx context.Context, stage *StageConfig) error {
 		m.log.Warn("garbage collection failed", zap.Error(err))
 	}
 
+	m.stages.OnStageApplied(m.name, stage, nil)
 	return nil
 }
 

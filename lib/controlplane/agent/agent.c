@@ -82,13 +82,24 @@ yanet_shm_dp_config(struct yanet_shm *shm, uint32_t instance_idx) {
 
 int
 agent_dp_config_ready(struct yanet_shm *shm, uint32_t instance_idx) {
-	uint32_t count = __atomic_load_n(
-		&((struct dp_config *)shm->base)->instance_count,
-		__ATOMIC_ACQUIRE
-	);
+	// Acquire the first publication before consulting the shared instance
+	// count.
+	struct dp_config *first = (struct dp_config *)shm->base;
+	uint64_t first_magic =
+		__atomic_load_n(&first->ready_magic, __ATOMIC_ACQUIRE);
+	if (first_magic != DP_CONFIG_READY_MAGIC) {
+		return 0;
+	}
+
+	uint32_t count =
+		__atomic_load_n(&first->instance_count, __ATOMIC_ACQUIRE);
 	if (instance_idx >= count) {
 		return 0;
 	}
+	if (instance_idx == 0) {
+		return 1;
+	}
+
 	struct dp_config *dp_config = yanet_shm_dp_config(shm, instance_idx);
 	return __atomic_load_n(&dp_config->ready_magic, __ATOMIC_ACQUIRE) ==
 	       DP_CONFIG_READY_MAGIC;
@@ -237,11 +248,11 @@ agent_attach(
 
 	// Guard against attaching before the dataplane finishes initialising
 	// the shared memory instance. A zeroed segment has ready_magic == 0,
-	// so ADDR_OF(&dp_config->cp_config) would yield NULL and the subsequent
-	// cp_config_lock call would fault. Acquire ordering pairs with the
-	// release store in dp_config_mark_ready, published once the dataplane
-	// has released cp_config, guaranteeing the cp_config offset pointer is
-	// fully visible once we pass this check.
+	// so ADDR_OF(&dp_config->cp_config) would yield NULL and the
+	// subsequent dereferences would fault. Acquire ordering pairs with
+	// the release store in dp_config_mark_ready, published once the
+	// dataplane has released cp_config, guaranteeing the cp_config
+	// offset pointer is fully visible once we pass this check.
 	uint64_t magic =
 		__atomic_load_n(&dp_config->ready_magic, __ATOMIC_ACQUIRE);
 	if (magic != DP_CONFIG_READY_MAGIC) {
@@ -256,8 +267,11 @@ agent_attach(
 
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
 
-	cp_config_lock(cp_config);
-
+	// Agent maintenance runs under the agent lock alone: the pool
+	// draws below are allocator-locked, the stamp is pinned, and the
+	// registry structure belongs to the agent lock. Nothing here reads
+	// or writes configuration content, so nothing waits for a
+	// configuration update to finish.
 	struct agent *new_agent = (struct agent *)memory_balloc(
 		&cp_config->memory_context, sizeof(struct agent)
 	);
@@ -272,9 +286,6 @@ agent_attach(
 	SET_OFFSET_OF(&new_agent->dp_config, dp_config);
 	SET_OFFSET_OF(&new_agent->cp_config, cp_config);
 	new_agent->pid = getpid();
-
-	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
-	new_agent->gen = config_gen->gen;
 
 	block_allocator_init(&new_agent->block_allocator);
 	memory_context_init(
@@ -325,6 +336,20 @@ agent_attach(
 		);
 	}
 
+	// The registry structure and the predecessor chains belong to the
+	// agent lock: the listing walks them without the configuration
+	// lock, so the splice below must exclude it.
+	spinlock_lock(&cp_config->agent_lock);
+
+	// The stamp is taken under the same lock as the splice, so a
+	// stalled attach cannot register an older generation's stamp
+	// above a successor stamped later. The pin keeps the read off a
+	// generation some other path retires, and is released outside
+	// this section: a last-drop release tears the generation down
+	// under the agent lock, which this holder must not re-acquire.
+	struct cp_config_gen *config_gen = cp_config_gen_acquire(cp_config);
+	new_agent->gen = config_gen->gen;
+
 	struct cp_agent_registry *old_registry =
 		ADDR_OF(&cp_config->agent_registry);
 	bool found = false;
@@ -356,6 +381,8 @@ agent_attach(
 				err,
 				"failed to allocate memory for agent registry"
 			);
+			spinlock_unlock(&cp_config->agent_lock);
+			cp_config_gen_release(cp_config, config_gen);
 			agent_cleanup(new_agent);
 			new_agent = NULL;
 			goto unlock;
@@ -384,23 +411,27 @@ agent_attach(
 		SET_OFFSET_OF(&cp_config->agent_registry, new_registry);
 	}
 
-	cp_config_reclaim_unused_agents_locked(cp_config);
+	spinlock_unlock(&cp_config->agent_lock);
+	cp_config_gen_release(cp_config, config_gen);
 
 unlock:
-	cp_config_unlock(cp_config);
+	// Every completed agent mutation sweeps, the failed attaches
+	// included. No incoming path holds the agent lock here: the
+	// failure legs release it before jumping, and the success path
+	// falls through from its release above.
+	spinlock_lock(&cp_config->agent_lock);
+	cp_config_reclaim_unused_agents_locked(cp_config);
+	spinlock_unlock(&cp_config->agent_lock);
 
 	return new_agent;
 }
 
 uint64_t
 agent_memory_limit(struct agent *agent) {
-	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
-
-	cp_config_lock(cp_config);
-	uint64_t memory_limit = agent->memory_limit;
-	cp_config_unlock(cp_config);
-
-	return memory_limit;
+	// The limit only ever grows, and always while the agent lock is
+	// held, so an unlocked reader needs nothing stronger than an atomic
+	// load to observe a value that was valid at some point.
+	return __atomic_load_n(&agent->memory_limit, __ATOMIC_ACQUIRE);
 }
 
 static int
@@ -411,11 +442,12 @@ agent_extend_locked(struct agent *agent, uint64_t size, yanet_error **err) {
 	// An agent that draws straight from the controlplane pool owns no
 	// arena of its own and cannot be grown here.
 	//
-	// Built-in services are set up that way.
+	// The dataplane's own system agent is set up that way.
 	if (ADDR_OF(&agent->memory_context.block_allocator) !=
 	    &agent->block_allocator) {
-		yanet_error_add(
+		yanet_error_add_kind(
 			err,
+			YANET_ERROR_FAILED_PRECONDITION,
 			"agent \"%s\" draws memory from the controlplane "
 			"pool and cannot be extended",
 			agent->name
@@ -428,8 +460,11 @@ agent_extend_locked(struct agent *agent, uint64_t size, yanet_error **err) {
 	if (misaligned != 0) {
 		uint64_t pad = MEMORY_BLOCK_ALLOCATOR_MIN_SIZE - misaligned;
 		if (needed > UINT64_MAX - pad) {
-			yanet_error_add(
-				err, "agent cannot grow by %lu bytes", size
+			yanet_error_add_kind(
+				err,
+				YANET_ERROR_INVALID_ARGUMENT,
+				"agent cannot grow by %lu bytes",
+				size
 			);
 			return -1;
 		}
@@ -482,7 +517,9 @@ agent_extend_locked(struct agent *agent, uint64_t size, yanet_error **err) {
 
 	SET_OFFSET_OF(&agent->arenas, new_arenas);
 	agent->arena_count = new_arena_count;
-	agent->memory_limit += needed;
+	// The limit only ever grows and is read by unlocked observers, so
+	// the store is an atomic matching their acquire loads.
+	__atomic_add_fetch(&agent->memory_limit, needed, __ATOMIC_RELEASE);
 
 	for (uint64_t idx = 0; idx < added_count; ++idx) {
 		struct agent_arena *reserved = &new_arenas[arena_count + idx];
@@ -506,9 +543,13 @@ int
 agent_extend(struct agent *agent, uint64_t size, yanet_error **err) {
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
 
-	cp_config_lock(cp_config);
+	spinlock_lock(&cp_config->agent_lock);
 	int ret = agent_extend_locked(agent, size, err);
-	cp_config_unlock(cp_config);
+	// Every completed mutation of agent state sweeps under the agent
+	// lock, so a final generation release that finds the lock busy is
+	// postponed at most until a mutating holder releases it.
+	cp_config_reclaim_unused_agents_locked(cp_config);
+	spinlock_unlock(&cp_config->agent_lock);
 
 	return ret;
 }
@@ -517,6 +558,104 @@ int
 agent_detach(struct agent *agent) {
 	(void)agent;
 	// NOTE: Currently a no-op.
+	return 0;
+}
+
+int
+agent_destroy(struct agent *agent) {
+	if (agent == NULL) {
+		return 0;
+	}
+
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+	if (cp_config == NULL) {
+		agent_cleanup(agent);
+		return 0;
+	}
+
+	spinlock_lock(&cp_config->agent_lock);
+
+	// Remove every registry reference to the agent, so no later sweep
+	// of the configuration can walk into the memory freed below. A
+	// predecessor chain naming it is unlinked first; its own slot, when
+	// it has one, goes to its predecessor. A sole agent leaves no
+	// predecessor, and every slot must name an agent, so the registry
+	// is rebuilt without the emptied slot instead.
+	struct cp_agent_registry *registry =
+		ADDR_OF(&cp_config->agent_registry);
+	if (registry != NULL) {
+		for (uint64_t idx = 0; idx < registry->count; ++idx) {
+			struct agent *chain = ADDR_OF(&registry->agents[idx]);
+			while (chain != NULL && ADDR_OF(&chain->prev) != NULL) {
+				if (ADDR_OF(&chain->prev) == agent) {
+					SET_OFFSET_OF(
+						&chain->prev,
+						ADDR_OF(&agent->prev)
+					);
+					break;
+				}
+				chain = ADDR_OF(&chain->prev);
+			}
+		}
+		for (uint64_t idx = 0; idx < registry->count; ++idx) {
+			if (ADDR_OF(&registry->agents[idx]) != agent) {
+				continue;
+			}
+			struct agent *predecessor = ADDR_OF(&agent->prev);
+			if (predecessor != NULL) {
+				SET_OFFSET_OF(
+					&registry->agents[idx], predecessor
+				);
+				break;
+			}
+			// The registry allocation always matches the live
+			// slot count — the growth path frees the old array
+			// by that size — so the emptied slot is squeezed
+			// out with the same copy-swap, and a failed
+			// allocation leaves the agent registered rather
+			// than the invariant broken.
+			struct cp_agent_registry *new_registry =
+				(struct cp_agent_registry *)memory_balloc(
+					&cp_config->memory_context,
+					sizeof(struct cp_agent_registry) +
+						(registry->count - 1) *
+							sizeof(struct agent *)
+				);
+			if (new_registry == NULL) {
+				spinlock_unlock(&cp_config->agent_lock);
+				errno = ENOMEM;
+				return -1;
+			}
+			new_registry->count = registry->count - 1;
+			for (uint64_t copy = 0; copy < idx; ++copy) {
+				SET_OFFSET_OF(
+					&new_registry->agents[copy],
+					ADDR_OF(&registry->agents[copy])
+				);
+			}
+			for (uint64_t copy = idx; copy < new_registry->count;
+			     ++copy) {
+				SET_OFFSET_OF(
+					&new_registry->agents[copy],
+					ADDR_OF(&registry->agents[copy + 1])
+				);
+			}
+			memory_bfree(
+				&cp_config->memory_context,
+				registry,
+				sizeof(struct cp_agent_registry) +
+					sizeof(struct agent *) * registry->count
+			);
+			SET_OFFSET_OF(&cp_config->agent_registry, new_registry);
+			break;
+		}
+	}
+
+	agent_cleanup(agent);
+	// Every completed hold of the agent lock sweeps, this holder
+	// included.
+	cp_config_reclaim_unused_agents_locked(cp_config);
+	spinlock_unlock(&cp_config->agent_lock);
 	return 0;
 }
 
@@ -898,26 +1037,25 @@ cp_module_list_info_free(struct cp_module_list_info *module_list_info) {
 struct cp_module_list_info *
 yanet_get_cp_module_list_info(struct dp_config *dp_config) {
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
-	cp_config_lock(cp_config);
+	struct cp_config_gen *config_gen = cp_config_gen_acquire(cp_config);
 
-	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
 	struct cp_module_registry *module_registry =
 		&config_gen->module_registry;
 
 	struct cp_module_list_info *module_list_info =
 		(struct cp_module_list_info *)malloc(
 			sizeof(struct cp_module_list_info) +
-			sizeof(struct cp_module_info) *
-				module_registry->registry.capacity
+			sizeof(struct cp_module_info
+			) * module_registry->entity_registry.registry.capacity
 		);
 	if (module_list_info == NULL) {
-		goto unlock;
+		goto release;
 	}
 
 	module_list_info->module_count = 0;
 
 	for (uint64_t module_idx = 0;
-	     module_idx < module_registry->registry.capacity;
+	     module_idx < module_registry->entity_registry.registry.capacity;
 	     ++module_idx) {
 		struct cp_module_info *info = module_list_info->modules +
 					      module_list_info->module_count;
@@ -934,8 +1072,8 @@ yanet_get_cp_module_list_info(struct dp_config *dp_config) {
 		module_list_info->module_count += 1;
 	}
 
-unlock:
-	cp_config_unlock(cp_config);
+release:
+	cp_config_gen_release(cp_config, config_gen);
 
 	return module_list_info;
 }
@@ -976,9 +1114,8 @@ cp_function_list_info_free(struct cp_function_list_info *function_list_info) {
 struct cp_function_list_info *
 yanet_get_cp_function_list_info(struct dp_config *dp_config) {
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
-	cp_config_lock(cp_config);
+	struct cp_config_gen *config_gen = cp_config_gen_acquire(cp_config);
 
-	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
 	struct cp_function_registry *function_registry =
 		&config_gen->function_registry;
 
@@ -989,7 +1126,7 @@ yanet_get_cp_function_list_info(struct dp_config *dp_config) {
 				function_registry->registry.capacity
 		);
 	if (function_list_info == NULL) {
-		goto unlock;
+		goto release;
 	}
 
 	function_list_info->function_count = 0;
@@ -1065,16 +1202,14 @@ yanet_get_cp_function_list_info(struct dp_config *dp_config) {
 		function_list_info->function_count += 1;
 	}
 
-	cp_config_unlock(cp_config);
-
-	return function_list_info;
+	goto release;
 
 error_free:
 	cp_function_list_info_free(function_list_info);
 	function_list_info = NULL;
 
-unlock:
-	cp_config_unlock(cp_config);
+release:
+	cp_config_gen_release(cp_config, config_gen);
 
 	return function_list_info;
 }
@@ -1125,9 +1260,8 @@ cp_pipeline_list_info_free(struct cp_pipeline_list_info *pipeline_list_info) {
 struct cp_pipeline_list_info *
 yanet_get_cp_pipeline_list_info(struct dp_config *dp_config) {
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
-	cp_config_lock(cp_config);
+	struct cp_config_gen *config_gen = cp_config_gen_acquire(cp_config);
 
-	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
 	struct registry *pipeline_registry =
 		&config_gen->pipeline_registry.registry;
 
@@ -1138,7 +1272,7 @@ yanet_get_cp_pipeline_list_info(struct dp_config *dp_config) {
 				pipeline_registry->capacity
 		);
 	if (pipeline_list_info == NULL) {
-		goto unlock;
+		goto release;
 	}
 
 	memset(pipeline_list_info,
@@ -1162,7 +1296,7 @@ yanet_get_cp_pipeline_list_info(struct dp_config *dp_config) {
 		if (pipeline_info == NULL) {
 			cp_pipeline_list_info_free(pipeline_list_info);
 			pipeline_list_info = NULL;
-			goto unlock;
+			goto release;
 		}
 
 		strtcpy(pipeline_info->name,
@@ -1178,8 +1312,8 @@ yanet_get_cp_pipeline_list_info(struct dp_config *dp_config) {
 			pipeline_info;
 	}
 
-unlock:
-	cp_config_unlock(cp_config);
+release:
+	cp_config_gen_release(cp_config, config_gen);
 
 	return pipeline_list_info;
 }
@@ -1263,9 +1397,7 @@ yanet_build_device_info(struct cp_device *device, uint64_t index) {
 struct cp_device_list_info *
 yanet_get_cp_device_list_info(struct dp_config *dp_config) {
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
-	cp_config_lock(cp_config);
-	struct cp_config_gen *cp_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *cp_config_gen = cp_config_gen_acquire(cp_config);
 
 	struct cp_device_registry *device_registry =
 		&cp_config_gen->device_registry;
@@ -1273,16 +1405,17 @@ yanet_get_cp_device_list_info(struct dp_config *dp_config) {
 	size_t device_list_info_size =
 		sizeof(struct cp_device_list_info) +
 		sizeof(struct cp_device_info *) *
-			device_registry->registry.capacity;
+			device_registry->entity_registry.registry.capacity;
 	struct cp_device_list_info *device_list_info =
 		(struct cp_device_list_info *)malloc(device_list_info_size);
 	if (device_list_info == NULL) {
-		goto unlock;
+		goto release;
 	}
 
 	memset(device_list_info, 0, device_list_info_size);
 	device_list_info->device_count = 0;
-	for (uint64_t idx = 0; idx < device_registry->registry.capacity;
+	for (uint64_t idx = 0;
+	     idx < device_registry->entity_registry.registry.capacity;
 	     ++idx) {
 		struct cp_device *cp_device =
 			cp_config_gen_get_device(cp_config_gen, idx);
@@ -1294,7 +1427,7 @@ yanet_get_cp_device_list_info(struct dp_config *dp_config) {
 		if (device_info == NULL) {
 			cp_device_list_info_free(device_list_info);
 			device_list_info = NULL;
-			goto unlock;
+			goto release;
 		}
 
 		device_list_info->devices[device_list_info->device_count] =
@@ -1302,8 +1435,8 @@ yanet_get_cp_device_list_info(struct dp_config *dp_config) {
 		device_list_info->device_count++;
 	}
 
-unlock:
-	cp_config_unlock(cp_config);
+release:
+	cp_config_gen_release(cp_config, cp_config_gen);
 
 	return device_list_info;
 }
@@ -1389,6 +1522,26 @@ memory_context_fill_nodes(
 	}
 }
 
+static_assert(
+	CP_ALLOCATOR_POOL_COUNT == MEMORY_BLOCK_ALLOCATOR_EXP,
+	"API allocator size classes must match the internal snapshot"
+);
+
+static void
+allocator_fill_info(
+	struct block_allocator *allocator, struct cp_allocator_info *info
+) {
+	struct block_allocator_stats stats;
+	block_allocator_get_stats(allocator, &stats);
+	info->free_bytes = stats.free_bytes;
+	info->largest_free_block_bytes = stats.largest_free_block_bytes;
+	for (size_t idx = 0; idx < CP_ALLOCATOR_POOL_COUNT; ++idx) {
+		info->pools[idx].block_size_bytes =
+			block_allocator_pool_size(allocator, idx);
+		info->pools[idx].free_blocks = stats.free_blocks[idx];
+	}
+}
+
 // Build the heap-side instance info for one agent, including its
 // memory-context tree snapshot.
 //
@@ -1423,12 +1576,11 @@ build_instance_info(struct agent *agent) {
 	info->pid = agent->pid;
 	info->memory_limit = agent->memory_limit;
 	info->gen = agent->gen;
-	// For agent_attach'd agents, &agent->block_allocator is the same
-	// allocator as alloc above, and its spinlock is not reentrant, so this
-	// call must run strictly outside the locked sections above and below.
-	// For dp_system_agent_new agents the two allocators differ, but running
-	// it here uniformly keeps the call site the same for both shapes.
-	info->free_bytes = block_allocator_free_size(&agent->block_allocator);
+	// Agent-owned arenas share a non-reentrant lock with their context
+	// tree, so free-capacity sampling must remain outside locked tree
+	// traversal.
+	allocator_fill_info(&agent->block_allocator, &info->allocator);
+	info->free_bytes = info->allocator.free_bytes;
 
 	uint32_t next_idx = 0;
 	spinlock_lock(&alloc->lock);
@@ -1499,7 +1651,10 @@ cp_agent_list_info_free(struct cp_agent_list_info *agent_list_info) {
 struct cp_agent_list_info *
 yanet_get_cp_agent_list_info(struct dp_config *dp_config) {
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
-	cp_config_lock(cp_config);
+	// The listing is a pure read of agent state, so it takes the agent
+	// lock alone: it never waits behind a configuration update, whose
+	// lock an install can hold across the worker generation round-trip.
+	spinlock_lock(&cp_config->agent_lock);
 
 	struct cp_agent_registry *agent_registry =
 		ADDR_OF(&cp_config->agent_registry);
@@ -1562,63 +1717,64 @@ yanet_get_cp_agent_list_info(struct dp_config *dp_config) {
 	}
 
 unlock:
-	cp_config_unlock(cp_config);
+	// A pure reader does not sweep: reclamation is left to the mutation
+	// paths and the final generation release, so holding the agent lock
+	// here never delays or waits on anything but other agent-state work.
+	spinlock_unlock(&cp_config->agent_lock);
 	return agent_list_info;
 }
 
-struct cp_device_config *
-cp_device_config_create(
-	const char *name,
-	uint64_t input_pipeline_count,
-	uint64_t output_pipeline_count
-) {
-	struct cp_device_config *config =
-		(struct cp_device_config *)malloc(sizeof(struct cp_device_config
-		));
+void
+cp_memory_info_free(struct cp_memory_info *memory_info) {
+	free(memory_info);
+}
 
-	if (config == NULL) {
-		return NULL;
-	}
+// Snapshot the controlplane zone's own memory-context tree, rooted at the
+// "cp" bootstrap context. Every context of the zone shares the zone's
+// block_allocator, whose lock guards the tree splices, so the same
+// two-phase best-effort read as build_instance_info applies: count under
+// lock, malloc outside it, fill under lock bounded by the counted capacity.
+struct cp_memory_info *
+yanet_get_cp_memory_info(struct dp_config *dp_config) {
+	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
 
-	memset(config, 0, sizeof(struct cp_device_config));
-	strtcpy(config->name, name, CP_DEVICE_NAME_LEN);
-	config->input_pipelines = (struct cp_device_entry_config *)malloc(
-		sizeof(struct cp_device_entry_config) +
-		sizeof(struct cp_pipeline_weight_config) * input_pipeline_count
+	spinlock_lock(&cp_config->block_allocator.lock);
+	uint64_t node_count =
+		memory_context_count_nodes(&cp_config->memory_context);
+	spinlock_unlock(&cp_config->block_allocator.lock);
+
+	struct cp_memory_info *memory_info = (struct cp_memory_info *)malloc(
+		sizeof(struct cp_memory_info) +
+		sizeof(struct cp_memory_node_info) * node_count
 	);
-	if (config->input_pipelines == NULL) {
-		cp_device_config_free(config);
+	if (memory_info == NULL) {
 		return NULL;
 	}
-	memset(config->input_pipelines,
-	       0,
-	       sizeof(struct cp_device_entry_config) +
-		       sizeof(struct cp_pipeline_weight_config) *
-			       input_pipeline_count);
-	config->input_pipelines->count = input_pipeline_count;
+	// The allocator lock is not reentrant, so this lock-taking call must
+	// run strictly outside the locked sections above and below.
+	memory_info->free_bytes =
+		block_allocator_free_size(&cp_config->block_allocator);
 
-	config->output_pipelines = (struct cp_device_entry_config *)malloc(
-		sizeof(struct cp_device_entry_config) +
-		sizeof(struct cp_pipeline_weight_config) * output_pipeline_count
+	uint32_t next_idx = 0;
+	spinlock_lock(&cp_config->block_allocator.lock);
+	memory_context_fill_nodes(
+		&cp_config->memory_context,
+		memory_info->memory_nodes,
+		UINT32_MAX,
+		&next_idx,
+		(uint32_t)node_count
 	);
-	if (config->output_pipelines == NULL) {
-		cp_device_config_free(config);
-		return NULL;
-	}
-	memset(config->output_pipelines,
-	       0,
-	       sizeof(struct cp_device_entry_config) +
-		       sizeof(struct cp_pipeline_weight_config) *
-			       output_pipeline_count);
-	config->output_pipelines->count = output_pipeline_count;
-
-	return config;
+	spinlock_unlock(&cp_config->block_allocator.lock);
+	memory_info->memory_node_count = next_idx;
+	return memory_info;
 }
 
 void
-cp_device_config_free(struct cp_device_config *config) {
-	cp_device_config_fini(config);
-	free(config);
+yanet_get_cp_allocator_stats(
+	struct dp_config *dp_config, struct cp_allocator_info *info
+) {
+	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
+	allocator_fill_info(&cp_config->block_allocator, info);
 }
 
 int
@@ -1664,11 +1820,11 @@ agent_free_unused_agents(struct agent *agent) {
 	}
 
 	// Registry-wide reclamation mutates predecessor chains and returns
-	// whole arenas, so the sweep runs under the configuration lock.
+	// whole arenas, so the sweep runs under the agent lock.
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
-	cp_config_lock(cp_config);
+	spinlock_lock(&cp_config->agent_lock);
 	cp_config_reclaim_unused_agents_locked(cp_config);
-	cp_config_unlock(cp_config);
+	spinlock_unlock(&cp_config->agent_lock);
 }
 
 struct dp_config *
@@ -1676,67 +1832,8 @@ agent_dp_config(struct agent *agent) {
 	return ADDR_OF(&agent->dp_config);
 }
 
-void *
-agent_storage_read(struct agent *agent, const char *name) {
-	struct agent_storage *storage = ADDR_OF(&agent->storage);
-	while (storage != NULL) {
-		if (strncmp(storage->name, name, 80) == 0) {
-			return storage->data;
-		}
-		storage = ADDR_OF(&storage->next);
-	}
-	return NULL;
-}
-
-int
-agent_storage_put(
-	struct agent *agent,
-	const char *name,
-	void *data,
-	size_t size,
-	yanet_error **err
-) {
-	struct agent_storage *storage = ADDR_OF(&agent->storage);
-	struct agent_storage *prev = NULL;
-	struct memory_context *mctx = &agent->memory_context;
-
-	struct agent_storage *new_storage =
-		memory_balloc(mctx, sizeof(struct agent_storage) + size);
-	if (new_storage == NULL) {
-		yanet_error_add(err, "memory not enough");
-		return -1;
-	}
-
-	memcpy(new_storage->data, data, size);
-	strtcpy(new_storage->name, name, sizeof(new_storage->name));
-	new_storage->size = size;
-	new_storage->next = NULL;
-
-	while (storage != NULL) {
-		struct agent_storage *next = ADDR_OF(&storage->next);
-		if (strncmp(storage->name, name, 80) == 0) {
-			memory_bfree(
-				mctx,
-				storage,
-				sizeof(struct agent_storage) + storage->size
-			);
-			SET_OFFSET_OF(&new_storage->next, next);
-			goto set_prev;
-		}
-		prev = storage;
-		storage = next;
-	}
-
-set_prev:
-	if (prev != NULL) {
-		SET_OFFSET_OF(&prev->next, new_storage);
-	} else {
-		SET_OFFSET_OF(&agent->storage, new_storage);
-	}
-
-	return 0;
-}
-
+// The caller must hold the agent lock: the registry structure belongs
+// to it, and agent maintenance mutates it under that lock alone.
 static struct agent *
 find_agent_locked(struct cp_config *cp_config, const char *name) {
 	struct cp_agent_registry *registry =
@@ -1771,7 +1868,7 @@ yanet_shm_extend_agent(
 		return -1;
 	}
 
-	cp_config_lock(cp_config);
+	spinlock_lock(&cp_config->agent_lock);
 
 	int ret = 1;
 	struct agent *agent = find_agent_locked(cp_config, name);
@@ -1782,7 +1879,11 @@ yanet_shm_extend_agent(
 		}
 	}
 
-	cp_config_unlock(cp_config);
+	// Every completed mutation of agent state sweeps under the agent
+	// lock, so a final generation release that finds the lock busy is
+	// postponed at most until a mutating holder releases it.
+	cp_config_reclaim_unused_agents_locked(cp_config);
+	spinlock_unlock(&cp_config->agent_lock);
 
 	return ret;
 }

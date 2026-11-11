@@ -2,8 +2,8 @@ package route_mpls
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"math/bits"
 	"net/netip"
 	"slices"
 
@@ -16,8 +16,7 @@ import (
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/maptrie"
-	"github.com/yanet-platform/yanet2/controlplane/configstore"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/modules/route-mpls/bindings/go/croutempls"
 	"github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb/v1"
 )
@@ -47,8 +46,7 @@ func WithRouteMPLSServiceLog(log *zap.Logger) RouteMPLSServiceOption {
 type RouteMPLSService struct {
 	routemplspb.UnimplementedRouteMPLSServiceServer
 
-	backend Backend
-	configs *configstore.Store[*routeMPLSConfig]
+	core *crud.Core[*routeMPLSConfig]
 
 	log *zap.Logger
 }
@@ -99,19 +97,10 @@ func (m *NextHopList) Remove(nextHop NextHop) {
 	}
 }
 
+// routeMPLSConfig is the published payload: the prefix trie of the
+// module's forwarding state.
 type routeMPLSConfig struct {
 	Prefixes maptrie.MapTrie[netip.Prefix, netip.Addr, NextHopList]
-	Handle   ModuleHandle
-}
-
-// Free releases the module handle held by the config.
-//
-// It is safe to call even when no handle is held.
-func (m *routeMPLSConfig) Free() error {
-	if m.Handle == nil {
-		return nil
-	}
-	return m.Handle.Free()
 }
 
 // BuildRules iterates the maptrie from longest to shortest prefix and
@@ -126,6 +115,7 @@ func (m *routeMPLSConfig) BuildRules() []croutempls.Rule {
 			for _, nh := range nextHopList.NextHops {
 				nexthops = append(nexthops, nh.ToFFI())
 			}
+			normalizeWeights(nexthops)
 
 			rule := croutempls.Rule{Nexthops: nexthops}
 			if net4, ok := xnetip.ContiguousFromPrefix4(prefix); ok {
@@ -163,6 +153,82 @@ func (m *routeMPLSConfig) BuildRules() []croutempls.Rule {
 	return rules
 }
 
+// maxSelectionSlots bounds the selection map of one rule, which takes eight
+// bytes a slot and one slot per unit of weight.
+//
+// With its header the map then fits a 32 KiB allocator block; 4096 slots
+// would already take a 64 KiB one.
+const maxSelectionSlots = 4000
+
+// normalizeWeights shrinks the weights of one rule's nexthops so their
+// selection map stays within maxSelectionSlots.
+//
+// Dividing by their greatest common divisor keeps every share exact. A sum
+// still above the bound is scaled down in proportion, each nonzero weight
+// keeping at least one slot, and divided again by the new common divisor.
+func normalizeWeights(nexthops []croutempls.Nexthop) {
+	if !divideByCommonDivisor(nexthops) {
+		return
+	}
+
+	var slots uint64
+	var nonzero uint64
+	fits := true
+	total := 0.0
+	for _, nexthop := range nexthops {
+		var carry uint64
+		slots, carry = bits.Add64(slots, nexthop.Weight, 0)
+		fits = fits && carry == 0 && slots <= maxSelectionSlots
+		total += float64(nexthop.Weight)
+		if nexthop.Weight != 0 {
+			nonzero++
+		}
+	}
+	if fits {
+		return
+	}
+
+	// The slots beyond the scaled shares hold the one-slot floors.
+	budget := 0.0
+	if nonzero < maxSelectionSlots {
+		budget = float64(maxSelectionSlots - nonzero)
+	}
+	for idx := range nexthops {
+		if nexthops[idx].Weight == 0 {
+			continue
+		}
+		share := float64(nexthops[idx].Weight) / total
+		nexthops[idx].Weight = max(1, uint64(share*budget))
+	}
+	divideByCommonDivisor(nexthops)
+}
+
+// divideByCommonDivisor divides the weights by their greatest common
+// divisor, reporting false when every weight is zero.
+func divideByCommonDivisor(nexthops []croutempls.Nexthop) bool {
+	var divisor uint64
+	for _, nexthop := range nexthops {
+		divisor = greatestCommonDivisor(divisor, nexthop.Weight)
+	}
+	if divisor == 0 {
+		return false
+	}
+
+	for idx := range nexthops {
+		nexthops[idx].Weight /= divisor
+	}
+	return true
+}
+
+// greatestCommonDivisor returns the greatest common divisor of two weights,
+// zero only when both are zero.
+func greatestCommonDivisor(first uint64, second uint64) uint64 {
+	for second != 0 {
+		first, second = second, first%second
+	}
+	return first
+}
+
 // ToFFI converts the nexthop into its bindings representation for the
 // route-mpls dataplane.
 func (m *NextHop) ToFFI() croutempls.Nexthop {
@@ -184,9 +250,8 @@ func NewRouteMPLSService(backend Backend, options ...RouteMPLSServiceOption) *Ro
 	}
 
 	return &RouteMPLSService{
-		backend: backend,
-		configs: configstore.NewStore[*routeMPLSConfig](),
-		log:     opts.Log,
+		core: crud.NewCore(backend),
+		log:  opts.Log,
 	}
 }
 
@@ -196,7 +261,7 @@ func (m *RouteMPLSService) ListConfigs(
 	ctx context.Context,
 	request *routemplspb.ListConfigsRequest,
 ) (*routemplspb.ListConfigsResponse, error) {
-	return &routemplspb.ListConfigsResponse{Configs: m.configs.Names()}, nil
+	return &routemplspb.ListConfigsResponse{Configs: m.core.List()}, nil
 }
 
 // ShowConfig returns the rules currently stored for the requested configuration.
@@ -205,7 +270,7 @@ func (m *RouteMPLSService) ShowConfig(
 	req *routemplspb.ShowConfigRequest,
 ) (*routemplspb.ShowConfigResponse, error) {
 	name := req.GetName()
-	config, ok := m.configs.Get(name)
+	config, ok := m.core.Get(name)
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
@@ -245,19 +310,8 @@ func (m *RouteMPLSService) DeleteConfig(
 	req *routemplspb.DeleteConfigRequest,
 ) (*routemplspb.DeleteConfigResponse, error) {
 	name := req.GetName()
-	err := m.configs.Delete(name, func(*routeMPLSConfig) error {
-		return m.backend.DeleteModule(name)
-	})
-	if errors.Is(err, configstore.ErrNotFound) {
-		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
-	}
-	if err != nil {
-		code := codes.Internal
-		if errors.Is(err, ffi.ErrFailedPrecondition) {
-			// A chain still references the config.
-			code = codes.FailedPrecondition
-		}
-		return nil, status.Errorf(code, "failed to delete module config %q: %v", name, err)
+	if err := m.core.Delete(name); err != nil {
+		return nil, crud.DeleteError(name, err)
 	}
 
 	return &routemplspb.DeleteConfigResponse{}, nil
@@ -301,16 +355,8 @@ func (m *RouteMPLSService) CreateConfig(
 		Prefixes: prefixes,
 	}
 
-	err := m.configs.Update(name, func(*routeMPLSConfig, bool) (*routeMPLSConfig, error) {
-		handle, err := m.backend.UpdateModule(name, config.BuildRules())
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
-		}
-		config.Handle = handle
-		return config, nil
-	})
-	if err != nil {
-		return nil, err
+	if err := m.core.Replace(name, config); err != nil {
+		return nil, crud.PublishError(name, err)
 	}
 
 	return &routemplspb.CreateConfigResponse{}, nil
@@ -318,23 +364,30 @@ func (m *RouteMPLSService) CreateConfig(
 
 // UpdateConfig applies incremental prefix updates or withdrawals to an
 // existing route-mpls module configuration.
+//
+// A config this process does not hold reports NotFound, so a client sends
+// the whole rule set with CreateConfig first: after a control-plane
+// restart the dataplane may still run a full table this process never
+// saw, which a set of changes alone would replace.
 func (m *RouteMPLSService) UpdateConfig(
 	ctx context.Context,
 	req *routemplspb.UpdateConfigRequest,
 ) (*routemplspb.UpdateConfigResponse, error) {
 	name := req.Name
-	err := m.configs.Update(name, func(current *routeMPLSConfig, ok bool) (*routeMPLSConfig, error) {
+	err := m.core.Mutate(name, func(current *routeMPLSConfig, ok bool) (*routeMPLSConfig, error) {
+		if !ok {
+			return nil, status.Errorf(codes.NotFound,
+				"config %q not found; create it first", name,
+			)
+		}
+
 		// Every mutation below copies the nexthop list it touches, since
 		// the trie clone shares the lists with the published config.
 		//
 		// Readers see the published config without a lock, and a failed
 		// publish keeps it live, so an in-place change would both race
 		// with them and corrupt what stays published.
-		prefixes := maptrie.NewMapTrie[netip.Prefix, netip.Addr, NextHopList](0)
-		if ok {
-			prefixes = current.Prefixes.Clone()
-		}
-		config := &routeMPLSConfig{Prefixes: prefixes}
+		config := &routeMPLSConfig{Prefixes: current.Prefixes.Clone()}
 
 		for _, update := range req.Updates {
 			if u := update.GetUpdate(); u != nil {
@@ -385,15 +438,10 @@ func (m *RouteMPLSService) UpdateConfig(
 			}
 		}
 
-		handle, err := m.backend.UpdateModule(name, config.BuildRules())
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
-		}
-		config.Handle = handle
 		return config, nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, crud.PublishError(name, err)
 	}
 
 	return &routemplspb.UpdateConfigResponse{}, nil
@@ -407,6 +455,11 @@ func makeNextHop(nexthop *routemplspb.NextHop) (NextHop, error) {
 	dst, err := nexthop.GetDestinationIp().ToAddr()
 	if err != nil {
 		return NextHop{}, fmt.Errorf("invalid destination_ip (bytes=%x): %w", nexthop.GetDestinationIp().GetAddr(), err)
+	}
+	// The tunnel's outer header takes the destination's family, which the
+	// source must share.
+	if src.BitLen() != dst.BitLen() {
+		return NextHop{}, fmt.Errorf("source_ip %s and destination_ip %s belong to different address families", src, dst)
 	}
 
 	return NextHop{

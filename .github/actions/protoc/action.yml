@@ -1,0 +1,35 @@
+name: 'protoc (release binary)'
+description: >-
+  Put a pinned official protoc release on PATH, the same version Ubuntu 24.04
+  packages, with the well-known type definitions it ships next to the binary.
+  Rust builds need nothing else from apt, so they no longer stall on a slow
+  mirror. Each archive is pinned by its SHA-256 digest.
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install pinned protoc release
+      shell: bash
+      env:
+        PROTOC_VERSION: '21.12'
+      run: |
+        set -euo pipefail
+        case "${RUNNER_ARCH:-}" in
+          X64)
+            asset=linux-x86_64
+            digest=3a4c1e5f2516c639d3079b1586e703fc7bcfa2136d58bda24d1d54f949c315e8
+            ;;
+          ARM64)
+            asset=linux-aarch_64
+            digest=2dd17f75d66a682640b136e31848da9fb2eefe68d55303baf8b32617374f6711
+            ;;
+          *) echo "Unsupported runner architecture for protoc: ${RUNNER_ARCH:-}" >&2; exit 1 ;;
+        esac
+        archive="$RUNNER_TEMP/protoc-$PROTOC_VERSION-$asset.zip"
+        dir="$RUNNER_TEMP/protoc-$PROTOC_VERSION"
+        curl -fsSL --connect-timeout 15 --max-time 120 --retry 3 --retry-all-errors -o "$archive" \
+          "https://github.com/protocolbuffers/protobuf/releases/download/v$PROTOC_VERSION/protoc-$PROTOC_VERSION-$asset.zip"
+        echo "$digest  $archive" | sha256sum -c -
+        unzip -q -o "$archive" -d "$dir"
+        echo "$dir/bin" >>"$GITHUB_PATH"
+        "$dir/bin/protoc" --version

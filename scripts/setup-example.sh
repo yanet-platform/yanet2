@@ -9,9 +9,8 @@ if [[ "$script_dir" == "$script_path" ]]; then
 fi
 cd -P -- "$script_dir"
 script_dir=$PWD
-repo_root=${script_dir%/scripts}
 
-yanet-cli-forward update --name=forward0 "$repo_root/forward.yaml"
+yanet-cli-forward update --name=forward0 "$script_dir/forward.yaml"
 
 yanet-cli-pipeline update --name=dummy --functions
 

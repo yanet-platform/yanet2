@@ -3,7 +3,7 @@
 # commitlint enforces the "<type>(<scope>): <brief>" subject convention on
 # commit messages and PR titles.
 #
-# The convention is documented in CLAUDE.md under "Commits & PRs": type is
+# The convention is documented in AGENTS.md under "Commits & PRs": type is
 # one of a closed set, scope is mandatory and lowercase, an optional "!"
 # marks a breaking change, and the brief must not start with an uppercase
 # letter and carries no trailing period. Enforcing it mechanically keeps

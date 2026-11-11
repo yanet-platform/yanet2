@@ -110,9 +110,7 @@ dataplane_ut_tx_stage_free(struct dataplane_ut_tx_stage *fixture) {
 
 struct packet *
 dataplane_ut_tx_stage_packet(
-	struct dataplane_ut_tx_stage *fixture,
-	uint16_t tx_device_id,
-	uint32_t hash
+	struct dataplane_ut_tx_stage *fixture, uint32_t hash
 ) {
 	struct rte_mbuf *mbuf = rte_pktmbuf_alloc(fixture->mempool);
 	if (mbuf == NULL) {
@@ -122,7 +120,6 @@ dataplane_ut_tx_stage_packet(
 	struct packet *packet = mbuf_to_packet(mbuf);
 	memset(packet, 0, sizeof(*packet));
 	packet->mbuf = mbuf;
-	packet->tx_device_id = tx_device_id;
 	packet->hash = hash;
 
 	return packet;
@@ -130,13 +127,16 @@ dataplane_ut_tx_stage_packet(
 
 void
 dataplane_ut_tx_stage_offer(
-	struct dataplane_ut_tx_stage *fixture, struct packet *packet
+	struct dataplane_ut_tx_stage *fixture,
+	struct packet *packet,
+	uint16_t device_id
 ) {
 	worker_tx_stage(
 		fixture->connections,
 		fixture->device_count,
 		&fixture->dp_worker,
 		packet,
+		device_id,
 		&fixture->failed
 	);
 }

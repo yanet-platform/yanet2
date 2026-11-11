@@ -8,7 +8,7 @@
 // consecutive resamples sit at least this far apart.
 #define WORKER_RX_POOL_SAMPLE_INTERVAL_NS UINT64_C(10000000)
 
-// Gauge state for one worker RX mempool, owned by the worker itself.
+// Gauge state for a worker's RX mempools, owned by the worker itself.
 //
 // A worker round resamples the occupancy at most once per interval, on
 // finding the deadline expired; a slow round delays a resample past the
@@ -19,23 +19,34 @@
 struct worker_rx_pool_sampler {
 	uint64_t *available_slot;
 	uint64_t next_sample_ns;
+	uint32_t pool_count;
+	struct rte_mempool **pools;
 };
 
 // Binds the sampler to its counter slots and records the initial values.
 //
-// Returns 0, or -1 when the pool or either slot is missing, so the
+// The gauges hold the sums across the worker's pools: capacity is the
+// total object count, availability the total free objects.
+//
+// Returns 0, or -1 when a pool or either slot is missing, so the
 // caller can fail startup instead of publishing a zero-valued pool. The
 // capacity slot is only needed here: it is written once and never
 // resampled, so it is not kept in the sampler state.
 static inline int
 worker_rx_pool_sampler_init(
 	struct worker_rx_pool_sampler *sampler,
-	struct rte_mempool *pool,
+	uint32_t pool_count,
+	struct rte_mempool **pools,
 	uint64_t *capacity_slot,
 	uint64_t *available_slot
 ) {
-	if (pool == NULL || capacity_slot == NULL || available_slot == NULL) {
+	if (capacity_slot == NULL || available_slot == NULL) {
 		return -1;
+	}
+	for (uint32_t idx = 0; idx < pool_count; ++idx) {
+		if (pools[idx] == NULL) {
+			return -1;
+		}
 	}
 
 	*sampler = (struct worker_rx_pool_sampler){
@@ -44,10 +55,18 @@ worker_rx_pool_sampler_init(
 		// round resamples right after these initial values, and the
 		// resample schedule starts from the loop clock.
 		.next_sample_ns = 0,
+		.pool_count = pool_count,
+		.pools = pools,
 	};
 
-	*capacity_slot = (uint64_t)pool->size;
-	*available_slot = (uint64_t)rte_mempool_avail_count(pool);
+	uint64_t capacity = 0;
+	uint64_t available = 0;
+	for (uint32_t idx = 0; idx < pool_count; ++idx) {
+		capacity += (uint64_t)pools[idx]->size;
+		available += (uint64_t)rte_mempool_avail_count(pools[idx]);
+	}
+	*capacity_slot = capacity;
+	*available_slot = available;
 
 	return 0;
 }
@@ -56,14 +75,18 @@ worker_rx_pool_sampler_init(
 // schedules the next one a full interval past the current time.
 static inline void
 worker_rx_pool_sampler_sample(
-	struct worker_rx_pool_sampler *sampler,
-	struct rte_mempool *pool,
-	uint64_t now_ns
+	struct worker_rx_pool_sampler *sampler, uint64_t now_ns
 ) {
 	if (now_ns < sampler->next_sample_ns) {
 		return;
 	}
 
 	sampler->next_sample_ns = now_ns + WORKER_RX_POOL_SAMPLE_INTERVAL_NS;
-	*sampler->available_slot = (uint64_t)rte_mempool_avail_count(pool);
+
+	uint64_t available = 0;
+	for (uint32_t idx = 0; idx < sampler->pool_count; ++idx) {
+		available +=
+			(uint64_t)rte_mempool_avail_count(sampler->pools[idx]);
+	}
+	*sampler->available_slot = available;
 }

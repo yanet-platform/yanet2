@@ -2,8 +2,9 @@ package dscp
 
 import (
 	"fmt"
-	"net/netip"
+	"slices"
 
+	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/dscp/bindings/go/cdscp"
 )
@@ -23,43 +24,30 @@ func newBackend(agent *ffi.Agent) *backend {
 	}
 }
 
-func (m *backend) UpdateModule(
-	name string,
-	prefixes []netip.Prefix,
-	flag uint8,
-	mark uint8,
-) (ModuleHandle, error) {
+func (m *backend) Update(name string, payload *config) (crud.Handle, error) {
 	module, err := cdscp.NewModuleConfig(m.agent, name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create module config: %w", err)
 	}
 
-	for _, prefix := range prefixes {
-		if err := module.PrefixAdd(prefix); err != nil {
-			if err := module.Free(); err != nil {
-				return nil, fmt.Errorf("failed to free abandoned config: %w", err)
+	build := func(module *cdscp.ModuleConfig) error {
+		for _, prefix := range slices.Concat(payload.Prefixes4, payload.Prefixes6) {
+			if err := module.PrefixAdd(prefix); err != nil {
+				return fmt.Errorf("failed to add prefix: %w", err)
 			}
-			return nil, fmt.Errorf("failed to add prefix: %w", err)
 		}
+		if err := module.SetDscpMarking(payload.Config.Flag, payload.Config.Mark); err != nil {
+			return fmt.Errorf("failed to set DSCP marking: %w", err)
+		}
+		return nil
 	}
-
-	if err := module.SetDscpMarking(flag, mark); err != nil {
-		if err := module.Free(); err != nil {
-			return nil, fmt.Errorf("failed to free abandoned config: %w", err)
-		}
-		return nil, fmt.Errorf("failed to set DSCP marking: %w", err)
-	}
-
-	if err := m.agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}); err != nil {
-		if err := module.Free(); err != nil {
-			return nil, fmt.Errorf("failed to free abandoned config: %w", err)
-		}
-		return nil, fmt.Errorf("failed to update module: %w", err)
+	if err := crud.PublishModule(m.agent, module, build); err != nil {
+		return nil, err
 	}
 
 	return module, nil
 }
 
-func (m *backend) DeleteModule(name string) error {
+func (m *backend) Delete(name string) error {
 	return m.agent.DeleteModuleConfig(moduleType, name)
 }

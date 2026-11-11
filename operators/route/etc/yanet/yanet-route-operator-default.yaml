@@ -4,6 +4,17 @@
 logging:
   level: debug
 
+# Debug server with the Go runtime profiles under /debug/pprof/, off
+# unless an endpoint is set.
+#
+# It has no authentication, and its profiles expose the process internals
+# and can load it, so keep it on a unix socket, which is created owner-only,
+# or on a loopback address. The endpoint is "host:port" or an absolute
+# socket path whose directory must exist.
+#
+# debug:
+#   endpoint: /run/yanet-route-operator-debug.sock
+
 # One entry per dataplane instance (typically one per NUMA node).
 gateways:
   - name: numa0
@@ -15,9 +26,16 @@ gateways:
     #   tls:
     #     # PEM bundle that replaces the system roots.
     #     ca_file: /etc/yanet2/tls/ca.pem
-    #     # Client certificate, both files or neither.
-    #     cert_file: /etc/yanet2/tls/operator.pem
-    #     key_file: /etc/yanet2/tls/operator.key
+    #     # Client certificates, reread without a restart.
+    #     #
+    #     # A handshake presents the first pair that is valid and that the
+    #     # gateway accepts, else none. Replace the files by rename or
+    #     # symlink swap. Paths cannot be set from the environment.
+    #     key_pairs:
+    #       - type: file
+    #         config:
+    #           cert_file: /etc/yanet2/tls/operator.pem
+    #           key_file: /etc/yanet2/tls/operator.key
     #     # Host the server certificate is checked against, defaults to the
     #     # host of the endpoint.
     #     server_name: gateway.numa0
@@ -47,20 +65,23 @@ gateway_devices: {}
 register:
   interval: 30s
 
-# Reconcile loop: snapshot RIB + neighbour-table -> build FIB ->
+# Reconcile loop: snapshot RIB + neighbour-table (on each flush or neighbour
+# change, and within an interval after any other RIB change) -> build FIB ->
 # fan-out per-gateway.
 #
-# Backoffs apply on per-gateway push errors.
+# Backoffs apply on preflight rejection, programming errors, and unresolved
+# configured static paths. Preflight rejection suppresses FIB/function writes
+# for the affected gateway.
 reconcile:
   interval: 30s
   initial_backoff: 500ms
   max_backoff: 30s
 
-# The single network function published by the operator on every
-# gateway.
+# The network function maintained on each gateway after forwarding preflight
+# succeeds.
 #
-# Re-applied every reconcile pass (idempotent). One operator manages exactly
-# one function with one chain and one route module.
+# Rejected candidates leave the installed function unchanged and drive backoff.
+# One operator manages one function with one chain and one route module.
 function:
   name: "fn:route"
   chain: "default"
@@ -94,12 +115,14 @@ netlink_monitor:
   table_name: kernel
   default_priority: 100
 
-# Readiness probes reported to the gateway.
+# Readiness reporting and BIRD forwarding requirements.
 #
-# expect_bird: set to true when a BIRD adapter is expected; the rib scope
-# stays NOT_READY (SYNCING) until the FeedRIB update rate settles, then
-# becomes READY for the duration of the session. Set false for static-only
-# deployments; rib scope is driven by route presence only.
+# When enabled, every present module needs BIRD routes and at least one locally
+# resolved BIRD path; surviving static routes cannot substitute. Static neighbours
+# may resolve BIRD nexthops. RIB readiness also requires an active, settled FeedRIB
+# session and nonempty content. Disable expectation for static-only deployments:
+# RIB readiness then follows route presence, and publication keeps the general
+# empty-input and empty-FIB guards without requiring BIRD.
 readiness:
   expect_bird: false
   # rate_threshold: maximum RIB updates/sec below which the bulk-load

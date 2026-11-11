@@ -415,8 +415,7 @@ func (sc *SocketClient) ReceivePacket(timeout time.Duration, dumpPath string) ([
 		// Read the packet length prefix (4 bytes)
 		lengthPrefix, bytesRead, err := sc.readFullCount(4, timeout)
 		if err != nil {
-			var timeoutErr net.Error
-			if bytesRead == 0 && errors.As(err, &timeoutErr) && timeoutErr.Timeout() {
+			if timeoutErr, ok := errors.AsType[net.Error](err); bytesRead == 0 && ok && timeoutErr.Timeout() {
 				return nil, fmt.Errorf("failed to read packet length prefix: %w: %w", ErrCaptureTimeout, err)
 			}
 			return nil, fmt.Errorf("failed to read packet length prefix: %w", err)
@@ -490,8 +489,7 @@ func (sc *SocketClient) SendAndReceivePacket(budget *ReplyBudget, packet []byte,
 
 	responseData, err := sc.ReceivePacket(timeout, dumpPath)
 	if err != nil {
-		var netErr net.Error
-		if errors.As(err, &netErr) && netErr.Timeout() {
+		if netErr, ok := errors.AsType[net.Error](err); ok && netErr.Timeout() {
 			budget.debit(timeout)
 			return nil, nil
 		}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -15,8 +16,8 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
@@ -28,6 +29,7 @@ import (
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/httpproxy"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
 	"github.com/yanet-platform/yanet2/controlplane/internal/xgrpc"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
@@ -77,10 +79,13 @@ const errorReasonMetadataKey = "x-yanet-error-reason"
 const errorReasonServiceUnregistered = "service-unregistered"
 
 type gatewayOptions struct {
-	Services []serviceEntry
-	Log      *zap.Logger
-	LogLevel *zap.AtomicLevel
-	Listener net.Listener
+	Services      []serviceEntry
+	Log           *zap.Logger
+	LogLevel      *zap.AtomicLevel
+	Listener      net.Listener
+	TLSListener   net.Listener
+	HTTPListener  net.Listener
+	HTTPSListener net.Listener
 }
 
 func newGatewayOptions() *gatewayOptions {
@@ -121,14 +126,58 @@ func WithAtomicLogLevel(level *zap.AtomicLevel) GatewayOption {
 }
 
 // WithListener hands the Gateway an already-open listener to serve instead
-// of binding cfg.Server.Endpoint itself.
+// of binding the gRPC endpoint the config names.
 //
-// Run serves this listener directly and never calls net.Listen. The server
-// closes it when it stops, and closing it again is a harmless net.ErrClosed
-// — close it yourself only if Run never runs.
+// It stands in for server.grpc.endpoint and serves plaintext, or for the
+// deprecated server.endpoint, which serves TLS while the deprecated
+// server.tls is set. Run serves this listener directly and never calls
+// net.Listen for it. The server closes it when it stops, and closing it
+// again is a harmless net.ErrClosed — close it yourself only if Run never
+// serves it.
 func WithListener(listener net.Listener) GatewayOption {
 	return func(o *gatewayOptions) {
 		o.Listener = listener
+	}
+}
+
+// WithTLSListener hands the Gateway an already-open listener to serve gRPC
+// over TLS on instead of binding server.grpc.tls.endpoint.
+//
+// It requires the server.grpc.tls section, whose certificate it serves.
+// Run serves this listener directly and never calls net.Listen for it. The
+// server closes it when it stops, and closing it again is a harmless
+// net.ErrClosed — close it yourself only if Run never serves it.
+func WithTLSListener(listener net.Listener) GatewayOption {
+	return func(o *gatewayOptions) {
+		o.TLSListener = listener
+	}
+}
+
+// WithHTTPListener hands the Gateway an already-open listener to serve HTTP
+// on instead of binding the HTTP endpoint the config names.
+//
+// It stands in for server.http.endpoint and serves plaintext, or for the
+// deprecated server.http_endpoint, which serves TLS while the deprecated
+// server.tls is set; with neither the HTTP section nor that endpoint it
+// serves plaintext. Run serves this listener directly and never calls
+// net.Listen for it. The HTTP server closes it when it shuts down — close
+// it yourself only if Run never serves it.
+func WithHTTPListener(listener net.Listener) GatewayOption {
+	return func(o *gatewayOptions) {
+		o.HTTPListener = listener
+	}
+}
+
+// WithHTTPSListener hands the Gateway an already-open listener to serve
+// HTTPS on instead of binding server.http.tls.endpoint.
+//
+// It requires the server.http.tls section, whose certificate it serves.
+// Run serves this listener directly and never calls net.Listen for it. The
+// HTTP server closes it when it shuts down — close it yourself only if Run
+// never serves it.
+func WithHTTPSListener(listener net.Listener) GatewayOption {
+	return func(o *gatewayOptions) {
+		o.HTTPSListener = listener
 	}
 }
 
@@ -163,14 +212,57 @@ type serviceRunner interface {
 //
 // Think of it as gRPC middleware if it were a single process.
 type Gateway struct {
-	cfg              Config
-	server           *grpc.Server
-	listener         net.Listener
+	cfg Config
+	// server is the plaintext gRPC server.
+	server *grpc.Server
+	// secureServer is the TLS gRPC server, nil without a gRPC TLS listener.
+	secureServer *grpc.Server
+	// loopbackServer serves every call of the HTTP surface over an in-memory
+	// connection, through the interceptors of the network servers.
+	loopbackServer *grpc.Server
+	// loopback is the HTTP surface's way into the loopback server.
+	loopback *backend
+	// releaseLoopback ends the gateway's own lease on the loopback.
+	releaseLoopback func()
+	grpcListeners   []grpcListener
+	http            ListenerConfig
+	// httpListener is the injected plaintext HTTP listener, nil when Run
+	// binds the configured endpoint.
+	httpListener net.Listener
+	// httpsListener is the injected HTTPS listener, nil when Run binds the
+	// configured endpoint.
+	httpsListener net.Listener
+	// crossOrigin rejects cross-origin browser requests to the HTTP server
+	// from every origin but the trusted ones.
+	crossOrigin *http.CrossOriginProtection
+	// httpsCertificates is the store the HTTPS listener serves from, nil
+	// without one.
+	httpsCertificates *commonxgrpc.CertificateStore
+	// clientCAs returns the authorities client certificates are verified
+	// against, nil without an x509 authenticator.
+	clientCAs     func() *x509.CertPool
+	authManager   *auth.Manager
+	serverMetrics *grpcmetrics.ServerMetrics
+	// methods returns how each method the loopback server serves itself
+	// streams.
+	methods          func() map[string]grpc.MethodInfo
 	memoryListener   *bufconn.Listener
 	runners          []serviceRunner
 	registry         *BackendRegistry
 	readinessTracker *readiness.Tracker
 	log              *zap.Logger
+}
+
+// grpcListener is a network listener of one of the gateway's gRPC servers.
+type grpcListener struct {
+	// Scheme is how the listener is logged: grpcs for TLS, grpc otherwise.
+	Scheme string
+	// Server is the gRPC server the listener feeds.
+	Server *grpc.Server
+	// Listener is the injected listener, nil when Run binds the endpoint.
+	Listener net.Listener
+	// Endpoint is the configured address of the listener.
+	Endpoint string
 }
 
 // NewGateway creates a new Gateway API.
@@ -180,14 +272,100 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 		o(opts)
 	}
 	log := opts.Log
-	registry := NewBackendRegistry()
 
-	// Every backend hosted inside this process is labeled with the address it
-	// is reachable at from outside: the injected listener's, else the configured.
-	endpoint := cfg.Server.Endpoint
-	if opts.Listener != nil {
-		endpoint = opts.Listener.Addr().String()
+	plan := newListenerPlan(&cfg.Server)
+	if len(plan.Mapped) > 0 || len(plan.Ignored) > 0 {
+		log.Warn("deprecated gateway server keys, use server.grpc and server.http instead",
+			zap.Strings("mapped", plan.Mapped),
+			zap.Strings("ignored", plan.Ignored),
+			zap.String("issue", deprecatedKeysIssue),
+		)
 	}
+
+	// An injected TLS listener stands in for the endpoint of the gRPC TLS
+	// section and serves that section's certificate.
+	if opts.TLSListener != nil && (cfg.Server.GRPC == nil || cfg.Server.GRPC.TLS == nil) {
+		return nil, errors.New("TLS listener requires server.grpc.tls")
+	}
+
+	// The deprecated gRPC endpoint serves TLS while the deprecated TLS
+	// material is set, and so does a listener injected in its place.
+	listener, tlsListener := opts.Listener, opts.TLSListener
+	if cfg.Server.GRPC == nil && cfg.Server.TLS != nil {
+		listener, tlsListener = nil, opts.Listener
+	}
+
+	plaintext := listener != nil || plan.GRPC.Endpoint != ""
+	if !plaintext && plan.GRPC.TLS == nil {
+		return nil, errors.New("server.grpc needs an endpoint or a tls listener")
+	}
+
+	// An injected HTTPS listener stands in for the endpoint of the HTTPS
+	// section and serves that section's certificate.
+	if opts.HTTPSListener != nil && (cfg.Server.HTTP == nil || cfg.Server.HTTP.TLS == nil) {
+		return nil, errors.New("HTTPS listener requires server.http.tls")
+	}
+
+	// The deprecated HTTP endpoint serves TLS while the deprecated TLS
+	// material is set, and so does a listener injected in its place.
+	httpListener, httpsListener := opts.HTTPListener, opts.HTTPSListener
+	if cfg.Server.HTTP == nil && plan.HTTP.TLS != nil {
+		httpListener, httpsListener = nil, opts.HTTPListener
+	}
+
+	// Only the gRPC TLS server bounds connection age, so an age given to
+	// HTTPS would silently do nothing.
+	if plan.HTTP.TLS != nil && plan.HTTP.TLS.MaxConnectionAge != 0 {
+		return nil, errors.New("server.http.tls.max_connection_age is not supported, only server.grpc.tls bounds connection age")
+	}
+	// Only the HTTP server sees browser origins, so origins given to gRPC
+	// would silently do nothing.
+	if len(plan.GRPC.TrustedOrigins) > 0 {
+		return nil, errors.New("server.grpc.trusted_origins is not supported, only server.http checks request origins")
+	}
+	crossOrigin, err := newCrossOriginProtection(plan.HTTP.TrustedOrigins)
+	if err != nil {
+		return nil, fmt.Errorf("server.http: %w", err)
+	}
+	if plan.GRPC.TLS != nil {
+		switch age := plan.GRPC.TLS.MaxConnectionAge; {
+		case age < 0:
+			return nil, fmt.Errorf("server.grpc.tls.max_connection_age (%s) must not be negative", age)
+		case age > 0 && age < minConnectionAge:
+			return nil, fmt.Errorf("server.grpc.tls.max_connection_age (%s) must be at least %s", age, minConnectionAge)
+		}
+	}
+
+	// Every TLS listener serves from a store that picks up renewed files
+	// without a restart. Building a store loads its files, so an unreadable
+	// or mismatched pair fails startup here, before any authenticator starts
+	// its background refresh.
+	var grpcsCertificates, httpsCertificates *commonxgrpc.CertificateStore
+	var served servedCertificates
+	if plan.GRPC.TLS != nil {
+		store, err := newCertificateStore(
+			&plan.GRPC.TLS.TLSConfig,
+			commonxgrpc.WithCertificateStoreLog(log.With(zap.String("listener", "grpcs"))),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("load gateway TLS: %w", err)
+		}
+		grpcsCertificates = store
+		served = append(served, listenerCertificates{Listener: "grpcs", Store: store})
+	}
+	if plan.HTTP.TLS != nil {
+		store, err := newCertificateStore(
+			&plan.HTTP.TLS.TLSConfig,
+			commonxgrpc.WithCertificateStoreLog(log.With(zap.String("listener", "https"))),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("load gateway HTTPS: %w", err)
+		}
+		httpsCertificates = store
+		served = append(served, listenerCertificates{Listener: "https", Store: store})
+	}
+
+	registry := NewBackendRegistry()
 
 	authManager, err := auth.NewManager(&cfg.Auth, auth.WithLog(log))
 	if err != nil {
@@ -195,9 +373,31 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 	}
 
 	// A client certificate is only ever verified in a TLS handshake, so an
-	// authenticator that reads one is dead without server TLS.
-	if authManager.ClientCAs() != nil && cfg.Server.TLS == nil {
-		return nil, errors.New("x509 authenticator requires server.tls")
+	// authenticator that reads one is dead without a TLS listener.
+	if authManager.ClientCAs() != nil && plan.GRPC.TLS == nil && plan.HTTP.TLS == nil {
+		return nil, errors.New("x509 authenticator requires server.tls, server.grpc.tls or server.http.tls")
+	}
+
+	// A connection keeps the client certificate of its handshake, so
+	// without a bounded age a renewed one reaches the gateway only when its
+	// client reconnects.
+	if authManager.ClientCAs() != nil && plan.GRPC.TLS != nil && plan.GRPC.TLS.MaxConnectionAge == 0 {
+		log.Warn("gRPC TLS connection age is unbounded, clients keep their certificate until they reconnect",
+			zap.String("key", "server.grpc.tls.max_connection_age"),
+		)
+	}
+
+	// A plaintext HTTP listener stays a valid choice under an active policy,
+	// but no client certificate reaches the gateway over it.
+	plaintextHTTP := plan.HTTP.Endpoint
+	if httpListener != nil {
+		plaintextHTTP = httpListener.Addr().String()
+	}
+	if authManager.Mode() != auth.ModeDisabled && plaintextHTTP != "" {
+		log.Warn("plaintext http listener carries no client certificates, browser calls over it are anonymous",
+			zap.String("mode", string(authManager.Mode())),
+			zap.String("endpoint", plaintextHTTP),
+		)
 	}
 
 	authService := NewAuthService(authManager)
@@ -318,14 +518,17 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 
 	serverOpts := []grpc.ServerOption{
 		grpc.ChainUnaryInterceptor(
+			commonxgrpc.ResponseCompressionUnaryInterceptor(),
 			serverMetrics.UnaryServerInterceptor(),
 			auth.UnaryServerInterceptor(authManager, log),
 			xgrpc.AccessLogInterceptor(log),
 			commonxgrpc.ValidateUnaryInterceptor(),
 		),
 		grpc.ChainStreamInterceptor(
+			commonxgrpc.ResponseCompressionStreamInterceptor(),
 			serverMetrics.StreamServerInterceptor(),
 			auth.StreamServerInterceptor(authManager, log),
+			xgrpc.StreamAccessLogInterceptor(log),
 			commonxgrpc.ValidateStreamInterceptor(),
 		),
 		grpc.MaxRecvMsgSize(1024 * 1024 * 256),
@@ -335,24 +538,8 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 			proxy.TransparentHandler(director),
 		),
 	}
-	if cfg.Server.TLS != nil {
-		var clientCAs func() *x509.CertPool
-		if authManager.ClientCAs() != nil {
-			clientCAs = authManager.ClientCAs
-		}
-
-		creds, err := cfg.Server.TLS.ServerCredentials(clientCAs)
-		if err != nil {
-			return nil, fmt.Errorf("load gateway TLS: %w", err)
-		}
-		serverOpts = append(serverOpts, grpc.Creds(creds))
-	}
-	server = grpc.NewServer(serverOpts...)
 
 	gatewayService := NewGatewayService(registry, WithGatewayServiceLog(log))
-	ynpb.RegisterGatewayServer(server, gatewayService)
-
-	ynpb.RegisterAuthServiceServer(server, authService)
 
 	// The gateway scope is set once at startup and has no heartbeat source,
 	// so it declares no expected freshness.
@@ -362,33 +549,103 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 		readiness.WithLog(log),
 	)
 	readinessSvc := NewReadinessService(rdTracker)
-	ynpb.RegisterReadinessServiceServer(server, readinessSvc)
-
-	metricsService := NewMetricsService(append(metricsCollectors(serverMetrics, opts.Services), authManager)...)
-	ynpb.RegisterMetricsServiceServer(server, metricsService)
-
+	metricsService := NewMetricsService(append(metricsCollectors(serverMetrics, opts.Services), authManager, served)...)
 	portMetricsService := NewPortMetricsService(portMetricsCollectors(opts.Services)...)
-	ynpb.RegisterPortMetricsServiceServer(server, portMetricsService)
 
-	// Gateway-hosted services are reached through one in-memory connection
-	// back into this server, a backend for the HTTP surface and the registry.
-	//
-	// No network hop is involved, and the interceptor chain still runs on every
-	// request that comes through it. External backends (from the Register RPC)
-	// each get their own network connection via RegisterBackend in the
-	// registration loop.
-	// The loopback completes the handshake the server credentials impose on
-	// every listener, so under TLS it pins the gateway's own certificate.
-	loopbackCreds := credentials.TransportCredentials(insecure.NewCredentials())
-	if cfg.Server.TLS != nil {
-		loopbackCreds, err = cfg.Server.TLS.LoopbackCredentials()
-		if err != nil {
-			return nil, fmt.Errorf("failed to build loopback TLS credentials: %w", err)
+	var builtins []Service
+	for _, entry := range opts.Services {
+		if entry.Kind == BackendKindBuiltin {
+			builtins = append(builtins, entry.Service)
 		}
 	}
 
+	// Every gRPC server shares the options, the interceptor instances and
+	// the services, and adds only transport options of its own.
+	newServer := func(options ...grpc.ServerOption) *grpc.Server {
+		server := grpc.NewServer(slices.Concat(serverOpts, options)...)
+		ynpb.RegisterGatewayServer(server, gatewayService)
+		ynpb.RegisterAuthServiceServer(server, authService)
+		ynpb.RegisterReadinessServiceServer(server, readinessSvc)
+		ynpb.RegisterMetricsServiceServer(server, metricsService)
+		ynpb.RegisterPortMetricsServiceServer(server, portMetricsService)
+		for _, service := range builtins {
+			service.RegisterService(server)
+		}
+
+		return server
+	}
+
+	// The plaintext server exists even without a plaintext gRPC listener,
+	// since the service filter and the metrics retention read the services
+	// registered on it.
+	server = newServer()
+	loopbackServer := newServer()
+	// The method types are read at the first refused HTTP call, by when
+	// every service is registered.
+	methods := sync.OnceValue(func() map[string]grpc.MethodInfo {
+		methods := map[string]grpc.MethodInfo{}
+		for service, info := range loopbackServer.GetServiceInfo() {
+			for _, method := range info.Methods {
+				methods["/"+service+"/"+method.Name] = method
+			}
+		}
+		return methods
+	})
+
+	var grpcListeners []grpcListener
+	if plaintext {
+		grpcListeners = append(grpcListeners, grpcListener{
+			Scheme:   "grpc",
+			Server:   server,
+			Listener: listener,
+			Endpoint: plan.GRPC.Endpoint,
+		})
+	}
+
+	// Client certificates are asked for on the TLS listeners alone, and only
+	// with an x509 authenticator to verify them.
+	var clientCAs func() *x509.CertPool
+	if authManager.ClientCAs() != nil {
+		clientCAs = authManager.ClientCAs
+	}
+
+	var secureServer *grpc.Server
+	if plan.GRPC.TLS != nil {
+		secureOptions := []grpc.ServerOption{grpc.Creds(serverCredentials(grpcsCertificates, clientCAs))}
+		// A bounded age makes every client reconnect and present its current
+		// certificate. The grace stays unlimited, so calls in flight run to
+		// completion.
+		if age := plan.GRPC.TLS.MaxConnectionAge; age > 0 {
+			secureOptions = append(secureOptions, grpc.KeepaliveParams(keepalive.ServerParameters{
+				MaxConnectionAge: age,
+			}))
+		}
+		secureServer = newServer(secureOptions...)
+		grpcListeners = append(grpcListeners, grpcListener{
+			Scheme:   "grpcs",
+			Server:   secureServer,
+			Listener: tlsListener,
+			Endpoint: plan.GRPC.TLS.Endpoint.Unwrap(),
+		})
+	}
+
+	// Every backend hosted inside this process is labeled with the address it
+	// is reachable at from outside: the plaintext gRPC listener's, else the
+	// TLS one's, injected or configured.
+	endpoint := grpcListeners[0].Endpoint
+	if grpcListeners[0].Listener != nil {
+		endpoint = grpcListeners[0].Listener.Addr().String()
+	}
+
+	// Every HTTP call goes into the loopback server over an in-memory
+	// connection and is served or proxied there as on a network server.
+	//
+	// No network hop is involved, and the interceptor chain still runs on
+	// every request that comes through it. The in-memory connection runs no
+	// TLS. External backends each get a network connection of their own when
+	// they register.
 	memoryListener := newMemoryListener()
-	loopback, err := dialMemoryBackend(endpoint, memoryListener, loopbackCreds)
+	loopback, err := dialMemoryBackend(endpoint, memoryListener, insecure.NewCredentials())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create loopback backend for gateway-hosted services: %w", err)
 	}
@@ -407,15 +664,17 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 		)
 	}
 
+	// The gateway holds a lease of its own on the loopback, which the HTTP
+	// surface needs even once external backends take over all its names.
+	_, releaseLoopback, _ := registry.GetBackend(ynpb.Gateway_ServiceDesc.ServiceName)
+
 	var runners []serviceRunner
 
 	for _, entry := range opts.Services {
 		switch entry.Kind {
 		case BackendKindBuiltin:
-			// Shared-server service: register on the gateway's gRPC server and
-			// point every service name at the shared loopback backend.
-			entry.Service.RegisterService(server)
-
+			// Shared-server service: registered on the gateway's gRPC servers
+			// above, every service name points at the shared loopback backend.
 			for _, name := range entry.Service.ServicesNames() {
 				registry.RegisterBackend(name, loopback, entry.Kind)
 				log.Info("registered service in registry",
@@ -435,14 +694,27 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 	}
 
 	return &Gateway{
-		cfg:              cfg,
-		server:           server,
-		listener:         opts.Listener,
-		memoryListener:   memoryListener,
-		runners:          runners,
-		registry:         registry,
-		readinessTracker: rdTracker,
-		log:              log,
+		cfg:               cfg,
+		server:            server,
+		secureServer:      secureServer,
+		loopbackServer:    loopbackServer,
+		loopback:          loopback,
+		releaseLoopback:   releaseLoopback,
+		grpcListeners:     grpcListeners,
+		http:              plan.HTTP,
+		httpListener:      httpListener,
+		httpsListener:     httpsListener,
+		crossOrigin:       crossOrigin,
+		httpsCertificates: httpsCertificates,
+		clientCAs:         clientCAs,
+		authManager:       authManager,
+		serverMetrics:     serverMetrics,
+		methods:           methods,
+		memoryListener:    memoryListener,
+		runners:           runners,
+		registry:          registry,
+		readinessTracker:  rdTracker,
+		log:               log,
 	}, nil
 }
 
@@ -456,6 +728,7 @@ func (m *Gateway) Close() error {
 		}
 	}
 
+	m.releaseLoopback()
 	if err := m.registry.Close(); err != nil {
 		errs = append(errs, fmt.Errorf("failed to close backend registry: %w", err))
 	}
@@ -484,26 +757,35 @@ func (m *Gateway) pendingRunners() []serviceRunner {
 func (m *Gateway) Run(ctx context.Context) error {
 	m.log.Info("starting gRPC gateway")
 
-	listener := m.listener
-	if listener == nil {
-		var err error
-		listener, err = net.Listen("tcp", m.cfg.Server.Endpoint)
+	// Every gRPC listener is bound before any is served.
+	listeners := slices.Clone(m.grpcListeners)
+	for idx := range listeners {
+		if listeners[idx].Listener != nil {
+			continue
+		}
+
+		listener, err := net.Listen("tcp", listeners[idx].Endpoint)
 		if err != nil {
 			return fmt.Errorf("failed to initialize gRPC listener: %w", err)
 		}
+		listeners[idx].Listener = listener
 	}
-
-	m.log.Info("exposing gRPC gateway", zap.Stringer("addr", listener.Addr()))
 
 	wg, ctx := errgroup.WithContext(ctx)
 
+	for _, entry := range listeners {
+		m.log.Info("exposing gRPC gateway",
+			zap.String("scheme", entry.Scheme),
+			zap.Stringer("addr", entry.Listener.Addr()),
+		)
+		wg.Go(func() error {
+			return serve(entry.Server, entry.Listener)
+		})
+	}
 	wg.Go(func() error {
-		return serve(m.server, listener)
+		return serve(m.loopbackServer, m.memoryListener)
 	})
-	wg.Go(func() error {
-		return serve(m.server, m.memoryListener)
-	})
-	if m.cfg.Server.HTTPEndpoint != "" {
+	if m.http.Serves() || m.httpListener != nil {
 		wg.Go(func() error {
 			return m.runHTTPServer(ctx)
 		})
@@ -557,16 +839,41 @@ func (m *Gateway) Run(ctx context.Context) error {
 
 	m.readinessTracker.Drain()
 
-	m.log.Info("stopping gRPC gateway", zap.Stringer("addr", listener.Addr()))
-	defer m.log.Info("stopped gRPC gateway", zap.Stringer("addr", listener.Addr()))
-
-	commonxgrpc.StopGracefully(m.server, commonxgrpc.GracefulStopTimeout, func() {
-		m.log.Warn("graceful stop timed out, forcing shutdown",
-			zap.Duration("grace_period", commonxgrpc.GracefulStopTimeout),
+	for _, entry := range listeners {
+		m.log.Info("stopping gRPC gateway",
+			zap.String("scheme", entry.Scheme),
+			zap.Stringer("addr", entry.Listener.Addr()),
 		)
-	})
+	}
 
-	return wg.Wait()
+	// The servers stop in parallel, so a shutdown waits out one grace period
+	// rather than one per server.
+	var stops errgroup.Group
+	for _, server := range []*grpc.Server{m.server, m.secureServer, m.loopbackServer} {
+		if server == nil {
+			continue
+		}
+
+		stops.Go(func() error {
+			commonxgrpc.StopGracefully(server, commonxgrpc.GracefulStopTimeout, func() {
+				m.log.Warn("graceful stop timed out, forcing shutdown",
+					zap.Duration("grace_period", commonxgrpc.GracefulStopTimeout),
+				)
+			})
+			return nil
+		})
+	}
+	_ = stops.Wait()
+
+	err := wg.Wait()
+	for _, entry := range listeners {
+		m.log.Info("stopped gRPC gateway",
+			zap.String("scheme", entry.Scheme),
+			zap.Stringer("addr", entry.Listener.Addr()),
+		)
+	}
+
+	return err
 }
 
 // runRegistrySweeper periodically evicts stale external backends from the
@@ -625,49 +932,175 @@ func (m *Gateway) runRegistrySweeper(ctx context.Context) error {
 	}
 }
 
+// maxAnonymousBodySize bounds the body of an HTTP call an anonymous caller
+// makes while authentication is enforced.
+const maxAnonymousBodySize = 1 << 20
+
+// maxBodySize bounds the body of every other HTTP call, at as many bytes of
+// JSON as the gRPC servers accept for one protobuf message.
+const maxBodySize = 256 << 20
+
+// httpReadHeaderTimeout bounds how long a client of the HTTP server may take
+// over its TLS handshake and, over HTTP/1, its request headers.
+//
+// No read or write timeout bounds the rest, since a large config upload and
+// a server stream take as long as they need.
+const httpReadHeaderTimeout = 10 * time.Second
+
+// httpIdleTimeout is how long the HTTP server keeps a connection open with
+// no request in flight.
+const httpIdleTimeout = 2 * time.Minute
+
 // runHTTPServer runs the HTTP server that provides access to gRPC services
-// via HTTP.
+// via HTTP, one server on its plaintext and TLS listeners alike.
+//
+// A listener that fails to bind or to serve ends the run with its error.
 func (m *Gateway) runHTTPServer(ctx context.Context) error {
+	// Every call is admitted before its body is read, and goes into the
+	// loopback server, which lets it in by its admission.
+	//
+	// A service the registry does not know is answered without reading the
+	// request; one that leaves the registry after the handler last checked it
+	// is answered as an unknown service of the gateway.
 	server := &http.Server{
-		Addr: m.cfg.Server.HTTPEndpoint,
-		Handler: httpproxy.GzipMiddleware(
-			httpproxy.NewHTTPHandler(
-				m.registry,
-				httpproxy.WithLog(m.log),
+		Handler: m.crossOrigin.Handler(
+			httpproxy.GzipMiddleware(
+				httpproxy.NewHTTPHandler(
+					m.loopback,
+					m.registry,
+					m.admitHTTP,
+					httpproxy.WithTrustedOrigins(m.http.TrustedOrigins),
+					httpproxy.WithLog(m.log),
+				),
 			),
 		),
+		ReadHeaderTimeout: httpReadHeaderTimeout,
+		IdleTimeout:       httpIdleTimeout,
 	}
 
+	type httpListener struct {
+		Scheme   string
+		Listener net.Listener
+		Serve    func(listener net.Listener) error
+	}
+
+	var listeners []httpListener
+	if m.httpListener != nil || m.http.Endpoint != "" {
+		listener, err := listenUnlessInjected(m.httpListener, m.http.Endpoint)
+		if err != nil {
+			return fmt.Errorf("failed to serve: %w", err)
+		}
+		listeners = append(listeners, httpListener{Scheme: "http", Listener: listener, Serve: server.Serve})
+	}
+	if config := m.http.TLS; config != nil {
+		listener, err := listenUnlessInjected(m.httpsListener, config.Endpoint.Unwrap())
+		if err != nil {
+			return fmt.Errorf("failed to serve: %w", err)
+		}
+		// HTTPS asks for a client certificate just as the gRPC TLS listener
+		// does. The config names h2, so HTTP/2 is set up whether this listener
+		// or the plaintext one starts serving first.
+		tlsConfig := serverTLSConfig(m.httpsCertificates, m.clientCAs)
+		tlsConfig.NextProtos = []string{"h2", "http/1.1"}
+		server.TLSConfig = tlsConfig
+		serveTLS := func(listener net.Listener) error {
+			return server.ServeTLS(listener, "", "")
+		}
+		listeners = append(listeners, httpListener{Scheme: "https", Listener: listener, Serve: serveTLS})
+	}
+
+	group, ctx := errgroup.WithContext(ctx)
+
 	// Set up graceful shutdown.
-	go func() {
+	group.Go(func() error {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		m.log.Info("shutting down HTTP server", zap.String("addr", m.cfg.Server.HTTPEndpoint))
+		for _, entry := range listeners {
+			m.log.Info("shutting down HTTP server",
+				zap.String("scheme", entry.Scheme),
+				zap.Stringer("addr", entry.Listener.Addr()),
+			)
+		}
 		if err := server.Shutdown(shutdownCtx); err != nil {
 			m.log.Warn("failed to shut down HTTP server", zap.Error(err))
 		}
-	}()
+		return nil
+	})
 
-	scheme := "http"
-	listen := server.ListenAndServe
-	if tlsCfg := m.cfg.Server.TLS; tlsCfg != nil {
-		scheme = "https"
-		cert, key := tlsCfg.CertFile.Unwrap(), tlsCfg.KeyFile.Unwrap()
+	for _, entry := range listeners {
+		m.log.Info("exposing HTTP <-> gRPC gateway",
+			zap.String("scheme", entry.Scheme),
+			zap.Stringer("addr", entry.Listener.Addr()),
+		)
+		group.Go(func() error {
+			if err := entry.Serve(entry.Listener); err != http.ErrServerClosed {
+				return fmt.Errorf("failed to serve: %w", err)
+			}
+			return nil
+		})
+	}
 
-		listen = func() error {
-			return server.ListenAndServeTLS(cert, key)
+	return group.Wait()
+}
+
+// admitHTTP lets an HTTP call in, before its body is read, on the token
+// header and the TLS state of its request.
+//
+// The admission travels on to the loopback server that serves the call.
+// While authentication is enforced, an anonymous caller may send a body of
+// at most a mebibyte, so a caller that proved nothing cannot make the
+// gateway buffer and decode a large one.
+func (m *Gateway) admitHTTP(r *http.Request, fullMethodName string) (httpproxy.Admission, error) {
+	var credential core.Credential
+	if tokens := r.Header.Values(auth.TokenMetadataKey); len(tokens) > 0 {
+		credential.Token = tokens[0]
+	}
+	if r.TLS != nil {
+		state := *r.TLS
+		credential.TLS = &state
+	}
+
+	principal, id, release, err := m.authManager.Admit(r.Context(), credential, fullMethodName)
+	if err != nil {
+		// The refusal never reaches the loopback server, so it is counted
+		// as the loopback server would have counted it.
+		//
+		// That is under the type a gateway service declares for its method,
+		// or as the bidirectional stream the proxy serves every other call as.
+		method, ok := m.methods()[fullMethodName]
+		if !ok {
+			method = grpc.MethodInfo{IsClientStream: true, IsServerStream: true}
 		}
+		m.serverMetrics.RecordRefused(
+			fullMethodName,
+			method.IsClientStream,
+			method.IsServerStream,
+			status.Code(err),
+		)
+
+		return httpproxy.Admission{}, err
 	}
 
-	m.log.Info("exposing HTTP <-> gRPC gateway",
-		zap.String("scheme", scheme),
-		zap.String("addr", m.cfg.Server.HTTPEndpoint),
-	)
-	if err := listen(); err != http.ErrServerClosed {
-		return fmt.Errorf("failed to serve: %w", err)
+	size := int64(maxBodySize)
+	if principal.IsAnonymous && m.authManager.Mode() == auth.ModeEnabled {
+		size = maxAnonymousBodySize
 	}
 
-	return nil
+	return httpproxy.Admission{
+		Metadata:    metadata.Pairs(auth.AdmissionMetadataKey, id),
+		MaxBodySize: size,
+		Release:     release,
+	}, nil
+}
+
+// listenUnlessInjected returns the injected listener, or binds the endpoint
+// when none was injected.
+func listenUnlessInjected(injected net.Listener, endpoint string) (net.Listener, error) {
+	if injected != nil {
+		return injected, nil
+	}
+
+	return net.Listen("tcp", endpoint)
 }

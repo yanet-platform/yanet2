@@ -1,13 +1,56 @@
 package neigh
 
 import (
+	"context"
+	"maps"
 	"net/netip"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/vishvananda/netlink"
 )
+
+// observedContext delegates cancellation and reports its first error check.
+type observedContext struct {
+	context.Context
+	Checked chan struct{}
+	once    sync.Once
+}
+
+// Err preserves the underlying result while signaling the cancellation check.
+func (m *observedContext) Err() error {
+	result := m.Context.Err()
+	m.once.Do(func() { close(m.Checked) })
+	return result
+}
+
+// Test_NeighTable_SwapSourceContext_CancelledWhileWaitingPreservesObservation
+// verifies that lock contention cannot commit a cancelled table replacement.
+func Test_NeighTable_SwapSourceContext_CancelledWhileWaitingPreservesObservation(t *testing.T) {
+	m := NewNeighTable()
+	mustCreateSource(t, m, "publisher", 100, false)
+	entry := makeEntry("192.0.2.1", [6]byte{2, 0, 0, 0, 0, 1}, 100)
+	require.NoError(t, m.Add("publisher", []NeighbourEntry{entry}))
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	observation := &observedContext{Context: ctx, Checked: make(chan struct{})}
+	result := make(chan error, 1)
+	m.mu.Lock()
+	go func() {
+		result <- m.SwapSourceContext(observation, "publisher", map[netip.Addr]NeighbourEntry{})
+	}()
+	<-observation.Checked
+	cancel()
+	m.mu.Unlock()
+	require.ErrorIs(t, <-result, context.Canceled)
+	view, ok := m.SourceView("publisher")
+	require.True(t, ok)
+	actual, ok := view.Lookup(entry.NextHop)
+	require.True(t, ok, "cancelled replacement must retain the last accepted neighbour")
+	require.Equal(t, entry, actual)
+}
 
 func makeEntry(ip string, mac [6]byte, priority uint32) NeighbourEntry {
 	return NeighbourEntry{
@@ -134,22 +177,62 @@ func TestNeighTableSourceView(t *testing.T) {
 	// Source view for static should only contain 10.0.0.1.
 	sv, ok := nt.SourceView("static")
 	require.True(t, ok)
-	_, count := sv.Entries()
-	require.Equal(t, 1, count)
+	require.Equal(t, 1, sv.Len())
 	_, ok = sv.Lookup(netip.MustParseAddr("10.0.0.1"))
 	require.True(t, ok)
 
 	// Source view for kernel should only contain 10.0.0.2.
 	sv, ok = nt.SourceView("kernel")
 	require.True(t, ok)
-	_, count = sv.Entries()
-	require.Equal(t, 1, count)
+	require.Equal(t, 1, sv.Len())
 	_, ok = sv.Lookup(netip.MustParseAddr("10.0.0.2"))
 	require.True(t, ok)
 
 	// Non-existent source returns false.
 	_, ok = nt.SourceView("nonexistent")
 	require.False(t, ok)
+}
+
+// Test_NeighTable_SourceView_KeepsSnapshotAcrossChanges verifies that a
+// source view keeps the entries it was taken with after the source changes.
+//
+// Readers iterate views without the table lock, so a change written into
+// the map a view holds races with them and can crash the process.
+func Test_NeighTable_SourceView_KeepsSnapshotAcrossChanges(t *testing.T) {
+	kept := makeEntry("10.0.0.1", [6]byte{0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA}, 10)
+	added := makeEntry("10.0.0.2", [6]byte{0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB}, 10)
+
+	cases := []struct {
+		name   string
+		change func(nt *NeighTable) error
+	}{
+		{
+			name: "add",
+			change: func(nt *NeighTable) error {
+				return nt.Add("static", []NeighbourEntry{added})
+			},
+		},
+		{
+			name: "remove",
+			change: func(nt *NeighTable) error {
+				return nt.Remove("static", []netip.Addr{kept.NextHop})
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			nt := NewNeighTable()
+			mustCreateSource(t, nt, "static", 10, true)
+			require.NoError(t, nt.Add("static", []NeighbourEntry{kept}))
+			view, ok := nt.SourceView("static")
+			require.True(t, ok)
+
+			require.NoError(t, tc.change(nt))
+
+			require.Equal(t, map[netip.Addr]NeighbourEntry{kept.NextHop: kept}, maps.Collect(view.Iter()))
+		})
+	}
 }
 
 func TestNeighTableCreateSource(t *testing.T) {
@@ -242,9 +325,7 @@ func TestNeighTableBatchAdd(t *testing.T) {
 	}
 	require.NoError(t, nt.Add("static", entries))
 
-	view := nt.View()
-	_, count := view.Entries()
-	require.Equal(t, 3, count)
+	require.Equal(t, 3, nt.View().Len())
 }
 
 func TestNeighTableBatchRemove(t *testing.T) {
@@ -264,8 +345,7 @@ func TestNeighTableBatchRemove(t *testing.T) {
 	}))
 
 	view := nt.View()
-	_, count := view.Entries()
-	require.Equal(t, 1, count)
+	require.Equal(t, 1, view.Len())
 
 	_, ok := view.Lookup(netip.MustParseAddr("10.0.0.2"))
 	require.True(t, ok)

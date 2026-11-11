@@ -1,16 +1,19 @@
 /*
  * Unit tests for the generic shared object entity: lifecycle symmetry,
  * stable name index across copy/upsert/delete, counter continuity across
- * replacement, and the agent reclamation gate driven by loaded_object_count.
+ * replacement, and the agent reclamation gate driven by loaded_entity_count.
  */
 
 #include "api/agent.h"
 
+#include "common/container_of.h"
 #include "common/memory_block.h"
+#include "common/strutils.h"
 #include "common/test_assert.h"
 
 #include "lib/controlplane/agent/agent.h"
 #include "lib/controlplane/config/cp_object.h"
+#include "lib/dataplane/object/object.h"
 
 #include "lib/counters/counters.h"
 
@@ -30,10 +33,14 @@
 // arena than the registry-heavy subtests.
 #define CP_OBJECT_GATE_MEMORY_LIMIT (1u * 1024u * 1024u)
 
+// The many-keys test holds two hundred bare objects without counters, an
+// order less than the registry-heavy subtests carry in theirs.
+#define CP_OBJECT_MANY_MEMORY_LIMIT (1u * 1024u * 1024u)
+
 // Lifecycle symmetry: allocate+init then fini+reclaim, plus the zero-init
 // fini no-op. The agent arena must return to its pre-test size.
 //
-// loaded_object_count tracks only generation references, so the creator's
+// loaded_entity_count tracks only generation references, so the creator's
 // own reference never touches it and init/fini leave the count at zero.
 static int
 test_cp_object_lifecycle(struct yanet_shm *shm) {
@@ -44,9 +51,9 @@ test_cp_object_lifecycle(struct yanet_shm *shm) {
 	);
 	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
 	TEST_ASSERT_EQUAL(
-		agent->loaded_object_count,
+		agent->loaded_entity_count,
 		0,
-		"fresh agent must start with zero loaded_object_count"
+		"fresh agent must start with zero loaded_entity_count"
 	);
 
 	size_t baseline = block_allocator_free_size(&agent->block_allocator);
@@ -61,16 +68,16 @@ test_cp_object_lifecycle(struct yanet_shm *shm) {
 		err ? yanet_error_message(err) : "?"
 	);
 	TEST_ASSERT_EQUAL(
-		agent->loaded_object_count,
+		agent->loaded_entity_count,
 		0,
-		"loaded_object_count must stay 0 after cp_object_init without "
+		"loaded_entity_count must stay 0 after cp_object_init without "
 		"a registry upsert"
 	);
 	cp_object_fini(object);
 	TEST_ASSERT_EQUAL(
-		agent->loaded_object_count,
+		agent->loaded_entity_count,
 		0,
-		"loaded_object_count must stay 0 after cp_object_fini"
+		"loaded_entity_count must stay 0 after cp_object_fini"
 	);
 	memory_bfree(&agent->memory_context, object, sizeof(*object));
 
@@ -79,9 +86,9 @@ test_cp_object_lifecycle(struct yanet_shm *shm) {
 	memset(&zero, 0, sizeof(zero));
 	cp_object_fini(&zero);
 	TEST_ASSERT_EQUAL(
-		agent->loaded_object_count,
+		agent->loaded_entity_count,
 		0,
-		"zero-init fini must not perturb loaded_object_count"
+		"zero-init fini must not perturb loaded_entity_count"
 	);
 
 	size_t after = block_allocator_free_size(&agent->block_allocator);
@@ -101,7 +108,7 @@ test_cp_object_lifecycle(struct yanet_shm *shm) {
 // Stable name index across registry_copy, slot-preserving upsert-replace,
 // and delete+reinsert; counter continuity via counter_registry_link.
 //
-// loaded_object_count tracks generation references: each copy, upsert, and
+// loaded_entity_count tracks generation references: each copy, upsert, and
 // delete mirrors the reference it adds or drops into the owning agent, and
 // finalizing every registry that referenced the objects returns the count
 // to zero.
@@ -159,9 +166,9 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 		err ? yanet_error_message(err) : "?"
 	);
 	TEST_ASSERT_EQUAL(
-		agent->loaded_object_count,
+		agent->loaded_entity_count,
 		1,
-		"loaded_object_count must be 1 after upsert(foo)"
+		"loaded_entity_count must be 1 after upsert(foo)"
 	);
 	TEST_ASSERT_SUCCESS(
 		cp_object_registry_upsert(&registry, "test", "bar", bar, &err),
@@ -169,9 +176,9 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 		err ? yanet_error_message(err) : "?"
 	);
 	TEST_ASSERT_EQUAL(
-		agent->loaded_object_count,
+		agent->loaded_entity_count,
 		2,
-		"loaded_object_count must be 2 after upsert(bar)"
+		"loaded_entity_count must be 2 after upsert(bar)"
 	);
 
 	uint64_t foo_index;
@@ -201,7 +208,7 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 		err ? yanet_error_message(err) : "?"
 	);
 	TEST_ASSERT_EQUAL(
-		agent->loaded_object_count,
+		agent->loaded_entity_count,
 		4,
 		"registry_copy must mirror a generation reference per object"
 	);
@@ -246,9 +253,9 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 		err ? yanet_error_message(err) : "?"
 	);
 	TEST_ASSERT_EQUAL(
-		agent->loaded_object_count,
+		agent->loaded_entity_count,
 		4,
-		"loaded_object_count must stay 4 after upsert(foo2) replaces "
+		"loaded_entity_count must stay 4 after upsert(foo2) replaces "
 		"foo in one of two registries"
 	);
 	TEST_ASSERT_SUCCESS(
@@ -274,9 +281,9 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 		"delete(bar) failed"
 	);
 	TEST_ASSERT_EQUAL(
-		agent->loaded_object_count,
+		agent->loaded_entity_count,
 		3,
-		"loaded_object_count must stay 3 after delete(bar) in one "
+		"loaded_entity_count must stay 3 after delete(bar) in one "
 		"of two registries"
 	);
 	struct cp_object *bar2 = (struct cp_object *)memory_balloc(
@@ -294,9 +301,9 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 		err ? yanet_error_message(err) : "?"
 	);
 	TEST_ASSERT_EQUAL(
-		agent->loaded_object_count,
+		agent->loaded_entity_count,
 		4,
-		"loaded_object_count must be 4 after upsert(bar2)"
+		"loaded_entity_count must be 4 after upsert(bar2)"
 	);
 	TEST_ASSERT_SUCCESS(
 		cp_object_registry_lookup_index(&copied, "test", "bar", &index),
@@ -323,14 +330,14 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 
 	// Finalizing both registries drops every generation reference: foo2
 	// and bar2 retire from the copy, foo and bar retire from the original,
-	// returning loaded_object_count to zero. Every object is now dangling
+	// returning loaded_entity_count to zero. Every object is now dangling
 	// at a zero reference count, known only to this test.
 	cp_object_registry_fini(&copied);
 	cp_object_registry_fini(&registry);
 	TEST_ASSERT_EQUAL(
-		agent->loaded_object_count,
+		agent->loaded_entity_count,
 		0,
-		"loaded_object_count must balance to 0 after both registries "
+		"loaded_entity_count must balance to 0 after both registries "
 		"are finalized"
 	);
 
@@ -340,6 +347,13 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 	// dangling object out of circulation and tear it down explicitly so
 	// the arena returns to its pre-test size.
 	yanet_error *free_err = NULL;
+	// Each successful gate takes one destruction hold of the owner, so
+	// the owners are captured before any teardown can free the objects
+	// and the holds are returned once each typed destroy is done.
+	struct agent *foo_owner = ADDR_OF(&foo->entity.agent);
+	struct agent *bar_owner = ADDR_OF(&bar->entity.agent);
+	struct agent *foo2_owner = ADDR_OF(&foo2->entity.agent);
+	struct agent *bar2_owner = ADDR_OF(&bar2->entity.agent);
 	TEST_ASSERT_SUCCESS(
 		cp_object_try_destroy(foo, &free_err),
 		"dangling object must be destroyable"
@@ -358,12 +372,22 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 	);
 	cp_object_fini(foo);
 	memory_bfree(&agent->memory_context, foo, sizeof(*foo));
+	agent_destroy_released(foo_owner);
 	cp_object_fini(bar);
 	memory_bfree(&agent->memory_context, bar, sizeof(*bar));
+	agent_destroy_released(bar_owner);
 	cp_object_fini(foo2);
 	memory_bfree(&agent->memory_context, foo2, sizeof(*foo2));
+	agent_destroy_released(foo2_owner);
 	cp_object_fini(bar2);
 	memory_bfree(&agent->memory_context, bar2, sizeof(*bar2));
+	agent_destroy_released(bar2_owner);
+	TEST_ASSERT_EQUAL(
+		agent->loaded_entity_count,
+		0,
+		"loaded_entity_count must stay balanced through the destroy "
+		"gates"
+	);
 
 	size_t after = block_allocator_free_size(&agent->block_allocator);
 	TEST_ASSERT_EQUAL(
@@ -378,13 +402,347 @@ test_cp_object_index_stability(struct yanet_shm *shm) {
 	return TEST_SUCCESS;
 }
 
+// Index health across growth: upserting a key set far past the initial
+// capacity forces repeated items-array growth, each of which rehashes
+// the side index, and deleting a subset removes those entries in place.
+// Every key must resolve to its own slot in the original and the copy,
+// deleted keys must vanish only where they were deleted, and the arena
+// must return to baseline.
+static int
+test_cp_object_index_many_keys(struct yanet_shm *shm) {
+	yanet_error *err = NULL;
+
+	enum { MANY = 200, DELETE_STRIDE = 8 };
+
+	// The attach reuses the lifecycle scenario's agent name on purpose:
+	// that agent drained to zero and detached, so this attach reclaims
+	// its arena instead of consuming fresh zone the later scenarios
+	// still need.
+	struct agent *agent = agent_attach(
+		shm, 0, "cp-object-life", CP_OBJECT_MANY_MEMORY_LIMIT, &err
+	);
+	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
+
+	size_t baseline = block_allocator_free_size(&agent->block_allocator);
+
+	struct cp_object_registry registry;
+	TEST_ASSERT_SUCCESS(
+		cp_object_registry_init(
+			&agent->memory_context, NULL, &registry, &err
+		),
+		"object registry init failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+
+	struct cp_object **objects = (struct cp_object **)memory_balloc(
+		&agent->memory_context, sizeof(struct cp_object *) * MANY
+	);
+	TEST_ASSERT_NOT_NULL(objects, "object array allocation failed");
+
+	char name[CP_OBJECT_NAME_LEN];
+	for (uint64_t idx = 0; idx < MANY; ++idx) {
+		objects[idx] = (struct cp_object *)memory_balloc(
+			&agent->memory_context, sizeof(struct cp_object)
+		);
+		TEST_ASSERT_NOT_NULL(
+			objects[idx], "object allocation (%lu) failed", idx
+		);
+
+		snprintf(name, sizeof(name), "obj-%03lu", idx);
+		TEST_ASSERT_SUCCESS(
+			cp_object_init(objects[idx], agent, "test", name, &err),
+			"cp_object_init(%lu) failed: %s",
+			idx,
+			err ? yanet_error_message(err) : "?"
+		);
+		TEST_ASSERT_SUCCESS(
+			cp_object_registry_upsert(
+				&registry, "test", name, objects[idx], &err
+			),
+			"upsert(%lu) failed: %s",
+			idx,
+			err ? yanet_error_message(err) : "?"
+		);
+	}
+	TEST_ASSERT_EQUAL(
+		agent->loaded_entity_count,
+		MANY,
+		"loaded_entity_count must be one per upserted object"
+	);
+
+	uint64_t *slots = (uint64_t *)memory_balloc(
+		&agent->memory_context, sizeof(uint64_t) * MANY
+	);
+	TEST_ASSERT_NOT_NULL(slots, "slot array allocation failed");
+
+	for (uint64_t idx = 0; idx < MANY; ++idx) {
+		snprintf(name, sizeof(name), "obj-%03lu", idx);
+		TEST_ASSERT(
+			cp_object_registry_lookup(&registry, "test", name) ==
+				objects[idx],
+			"lookup(%lu) must return its own object after growth",
+			idx
+		);
+		TEST_ASSERT_SUCCESS(
+			cp_object_registry_lookup_index(
+				&registry, "test", name, &slots[idx]
+			),
+			"lookup_index(%lu) failed",
+			idx
+		);
+	}
+	TEST_ASSERT(
+		cp_object_registry_lookup(&registry, "test", "obj-absent") ==
+			NULL,
+		"an absent key must not resolve"
+	);
+
+	struct cp_object_registry copied;
+	TEST_ASSERT_SUCCESS(
+		cp_object_registry_copy(
+			&agent->memory_context, &copied, &registry, &err
+		),
+		"cp_object_registry_copy failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	TEST_ASSERT_EQUAL(
+		agent->loaded_entity_count,
+		2 * (uint64_t)MANY,
+		"registry_copy must mirror a generation reference per object"
+	);
+
+	for (uint64_t idx = 0; idx < MANY; ++idx) {
+		snprintf(name, sizeof(name), "obj-%03lu", idx);
+		uint64_t copied_slot;
+		TEST_ASSERT_SUCCESS(
+			cp_object_registry_lookup_index(
+				&copied, "test", name, &copied_slot
+			),
+			"lookup_index(%lu) in copy failed",
+			idx
+		);
+		TEST_ASSERT_EQUAL(
+			(long)copied_slot,
+			(long)slots[idx],
+			"slot %lu must be stable across copy",
+			idx
+		);
+	}
+
+	uint64_t deleted = 0;
+	for (uint64_t idx = 0; idx < MANY; idx += DELETE_STRIDE) {
+		snprintf(name, sizeof(name), "obj-%03lu", idx);
+		TEST_ASSERT_SUCCESS(
+			cp_object_registry_delete(&copied, "test", name),
+			"delete(%lu) in copy failed",
+			idx
+		);
+		deleted += 1;
+	}
+	TEST_ASSERT_EQUAL(
+		agent->loaded_entity_count,
+		2 * (uint64_t)MANY - deleted,
+		"each delete in the copy must drop one generation reference"
+	);
+
+	for (uint64_t idx = 0; idx < MANY; ++idx) {
+		snprintf(name, sizeof(name), "obj-%03lu", idx);
+		int deleted_key = (idx % DELETE_STRIDE) == 0;
+
+		TEST_ASSERT(
+			cp_object_registry_lookup(&copied, "test", name) ==
+				(deleted_key ? NULL : objects[idx]),
+			"lookup(%lu) in copy must reflect the deletes",
+			idx
+		);
+		TEST_ASSERT(
+			cp_object_registry_lookup(&registry, "test", name) ==
+				objects[idx],
+			"lookup(%lu) in original must survive copy-side "
+			"deletes",
+			idx
+		);
+	}
+
+	memory_bfree(&agent->memory_context, slots, sizeof(uint64_t) * MANY);
+	cp_object_registry_fini(&copied);
+	cp_object_registry_fini(&registry);
+	TEST_ASSERT_EQUAL(
+		agent->loaded_entity_count,
+		0,
+		"loaded_entity_count must balance to 0 after both registries "
+		"are finalized"
+	);
+
+	struct agent *object_owner = ADDR_OF(&objects[0]->entity.agent);
+	for (uint64_t idx = 0; idx < MANY; ++idx) {
+		TEST_ASSERT_SUCCESS(
+			cp_object_try_destroy(objects[idx], &err),
+			"dangling object %lu must be destroyable",
+			idx
+		);
+	}
+	for (uint64_t idx = 0; idx < MANY; ++idx) {
+		cp_object_fini(objects[idx]);
+		memory_bfree(
+			&agent->memory_context,
+			objects[idx],
+			sizeof(*objects[idx])
+		);
+		agent_destroy_released(object_owner);
+	}
+	memory_bfree(
+		&agent->memory_context,
+		objects,
+		sizeof(struct cp_object *) * MANY
+	);
+
+	size_t after = block_allocator_free_size(&agent->block_allocator);
+	TEST_ASSERT_EQUAL(
+		(long)after,
+		(long)baseline,
+		"arena did not return to baseline: baseline=%zu after=%zu",
+		baseline,
+		after
+	);
+
+	agent_detach(agent);
+	return TEST_SUCCESS;
+}
+
+// Verifies that a hole survives a copy and is handed out first: an
+// object upserted into the copy lands in the slot the deletion
+// vacated in the original.
+static int
+test_cp_object_hole_reuse_across_copy(struct yanet_shm *shm) {
+	yanet_error *err = NULL;
+
+	struct agent *agent = agent_attach(
+		shm, 0, "cp-object-hole", CP_OBJECT_GATE_MEMORY_LIMIT, &err
+	);
+	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
+
+	struct cp_object_registry registry;
+	TEST_ASSERT_SUCCESS(
+		cp_object_registry_init(
+			&agent->memory_context, NULL, &registry, &err
+		),
+		"object registry init failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+
+	struct cp_object *objects[3];
+	for (uint64_t idx = 0; idx < 3; ++idx) {
+		objects[idx] = (struct cp_object *)memory_balloc(
+			&agent->memory_context, sizeof(struct cp_object)
+		);
+		TEST_ASSERT_NOT_NULL(objects[idx], "object allocation failed");
+		char name[2] = {(char)('a' + idx), 0};
+		TEST_ASSERT_SUCCESS(
+			cp_object_init(objects[idx], agent, "test", name, &err),
+			"cp_object_init failed: %s",
+			err ? yanet_error_message(err) : "?"
+		);
+		TEST_ASSERT_SUCCESS(
+			cp_object_registry_upsert(
+				&registry, "test", name, objects[idx], &err
+			),
+			"upsert(%c) failed: %s",
+			name[0],
+			err ? yanet_error_message(err) : "?"
+		);
+	}
+
+	uint64_t middle_index;
+	TEST_ASSERT_SUCCESS(
+		cp_object_registry_lookup_index(
+			&registry, "test", "b", &middle_index
+		),
+		"lookup(b) failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		cp_object_registry_delete(&registry, "test", "b"),
+		"delete(b) failed"
+	);
+
+	struct cp_object_registry copied;
+	TEST_ASSERT_SUCCESS(
+		cp_object_registry_copy(
+			&agent->memory_context, &copied, &registry, &err
+		),
+		"cp_object_registry_copy failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+
+	struct cp_object *fresh = (struct cp_object *)memory_balloc(
+		&agent->memory_context, sizeof(struct cp_object)
+	);
+	TEST_ASSERT_NOT_NULL(fresh, "fresh object allocation failed");
+	TEST_ASSERT_SUCCESS(
+		cp_object_init(fresh, agent, "test", "d", &err),
+		"cp_object_init(fresh) failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	TEST_ASSERT_SUCCESS(
+		cp_object_registry_upsert(&copied, "test", "d", fresh, &err),
+		"upsert(d) into copy failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+
+	uint64_t fresh_index;
+	TEST_ASSERT_SUCCESS(
+		cp_object_registry_lookup_index(
+			&copied, "test", "d", &fresh_index
+		),
+		"lookup(d) in copy failed"
+	);
+	TEST_ASSERT_EQUAL(
+		(long)fresh_index,
+		(long)middle_index,
+		"the copy must hand out the vacated slot first"
+	);
+
+	// Finalizing both registries drops every generation reference; the
+	// deleted object has none left already.
+	cp_object_registry_fini(&copied);
+	cp_object_registry_fini(&registry);
+	TEST_ASSERT_EQUAL(
+		agent->loaded_entity_count,
+		0,
+		"loaded_entity_count must balance to 0 after both registries "
+		"are finalized"
+	);
+
+	struct agent *owners[4];
+	struct cp_object *all[4] = {objects[0], objects[1], objects[2], fresh};
+	for (uint64_t idx = 0; idx < 4; ++idx) {
+		owners[idx] = ADDR_OF(&all[idx]->entity.agent);
+	}
+	for (uint64_t idx = 0; idx < 4; ++idx) {
+		TEST_ASSERT_SUCCESS(
+			cp_object_try_destroy(all[idx], &err),
+			"dangling object must be destroyable"
+		);
+	}
+	for (uint64_t idx = 0; idx < 4; ++idx) {
+		cp_object_fini(all[idx]);
+		memory_bfree(
+			&agent->memory_context, all[idx], sizeof(*all[idx])
+		);
+		agent_destroy_released(owners[idx]);
+	}
+
+	agent_detach(agent);
+	return TEST_SUCCESS;
+}
+
 // The agent_attach reclamation gate must spare a previous agent that still
 // owns live cp_objects: agent_cleanup frees the arena wholesale and cannot
 // run per-object teardown, so an agent is only reclaimed once every loaded
 // count reaches zero.
 //
 // Attach an agent, upsert one object into a registry on it (bumping its
-// loaded_object_count), then re-attach under the same name: the previous
+// loaded_entity_count), then re-attach under the same name: the previous
 // agent survives in the new agent's prev chain because its count is
 // non-zero. Once the registry is finalized (dropping the count to zero),
 // a further re-attach reclaims every prior agent and leaves the new agent
@@ -398,9 +756,9 @@ test_cp_object_attach_gate(struct yanet_shm *shm) {
 	);
 	TEST_ASSERT_NOT_NULL(agent1, "agent_attach(agent1) failed");
 	TEST_ASSERT_EQUAL(
-		agent1->loaded_object_count,
+		agent1->loaded_entity_count,
 		0,
-		"fresh agent must start with zero loaded_object_count"
+		"fresh agent must start with zero loaded_entity_count"
 	);
 
 	struct cp_object *object = (struct cp_object *)memory_balloc(
@@ -429,9 +787,9 @@ test_cp_object_attach_gate(struct yanet_shm *shm) {
 		err ? yanet_error_message(err) : "?"
 	);
 	TEST_ASSERT_EQUAL(
-		agent1->loaded_object_count,
+		agent1->loaded_entity_count,
 		1,
-		"loaded_object_count must be 1 after upsert(gate)"
+		"loaded_entity_count must be 1 after upsert(gate)"
 	);
 
 	// Re-attach under the same name: agent1 becomes the previous agent
@@ -446,14 +804,14 @@ test_cp_object_attach_gate(struct yanet_shm *shm) {
 		"object"
 	);
 
-	// Finalizing the registry drops agent1's loaded_object_count back to
+	// Finalizing the registry drops agent1's loaded_entity_count back to
 	// zero. agent1 is still alive (the gate held), so its memory context
 	// stays valid for the object teardown that follows.
 	cp_object_registry_fini(&registry);
 	TEST_ASSERT_EQUAL(
-		agent1->loaded_object_count,
+		agent1->loaded_entity_count,
 		0,
-		"loaded_object_count must be 0 after the registry is finalized"
+		"loaded_entity_count must be 0 after the registry is finalized"
 	);
 	cp_object_fini(object);
 	memory_bfree(&agent1->memory_context, object, sizeof(*object));
@@ -527,6 +885,127 @@ test_cp_object_init_unknown_type_fails(struct yanet_shm *shm) {
 	return TEST_SUCCESS;
 }
 
+// Constructor of the "test" object type, which the harness resolves from
+// this executable: it declares no hook and no prepared buffer.
+struct object *
+new_object_test(void) {
+	struct object *object =
+		(struct object *)calloc(1, sizeof(struct object));
+	if (object != NULL) {
+		strtcpy(object->name, "test", sizeof(object->name));
+	}
+	return object;
+}
+
+// The allocation-free batched release must reproduce the snapshot path's
+// outcome across the batch boundary: every item reference dropped, every
+// owner count mirrored down to zero, and the registry storage discarded
+// while the objects' own storage stays valid for their owner to destroy.
+#define CP_OBJECT_BATCH_TEST_COUNT 150
+
+// The batch scenario's agent stays registered for the harness lifetime
+// (detach is a no-op), so it claims a small arena on top of the other
+// scenarios' agents rather than a full test-memory one.
+#define CP_OBJECT_BATCH_MEMORY_LIMIT (1u * 1024u * 1024u)
+
+static struct agent *
+batch_test_item_owner(struct registry_item *item) {
+	struct cp_object *object = container_of(item, struct cp_object, entity);
+	return ADDR_OF(&object->entity.agent);
+}
+
+static int
+test_cp_object_batched_release(struct yanet_shm *shm) {
+	yanet_error *err = NULL;
+
+	struct agent *agent = agent_attach(
+		shm, 0, "cp-object-batch", CP_OBJECT_BATCH_MEMORY_LIMIT, &err
+	);
+	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
+
+	size_t baseline = block_allocator_free_size(&agent->block_allocator);
+
+	struct cp_object_registry registry;
+	TEST_ASSERT_SUCCESS(
+		cp_object_registry_init(
+			&agent->memory_context, NULL, &registry, &err
+		),
+		"object registry init failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+
+	struct cp_object *objects[CP_OBJECT_BATCH_TEST_COUNT];
+	char name[CP_OBJECT_NAME_LEN];
+	for (uint64_t idx = 0; idx < CP_OBJECT_BATCH_TEST_COUNT; ++idx) {
+		snprintf(
+			name,
+			sizeof(name),
+			"batch-%llu",
+			(unsigned long long)idx
+		);
+		struct cp_object *object = (struct cp_object *)memory_balloc(
+			&agent->memory_context, sizeof(struct cp_object)
+		);
+		TEST_ASSERT_NOT_NULL(object, "object allocation failed");
+		TEST_ASSERT_SUCCESS(
+			cp_object_init(object, agent, "test", name, &err),
+			"cp_object_init failed: %s",
+			err ? yanet_error_message(err) : "?"
+		);
+		TEST_ASSERT_SUCCESS(
+			cp_object_registry_upsert(
+				&registry, "test", name, object, &err
+			),
+			"upsert(%s) failed: %s",
+			name,
+			err ? yanet_error_message(err) : "?"
+		);
+		objects[idx] = object;
+	}
+	TEST_ASSERT_EQUAL(
+		agent->loaded_entity_count,
+		CP_OBJECT_BATCH_TEST_COUNT,
+		"every upsert must take one generation reference"
+	);
+
+	agent_release_registry_items(
+		&registry.entity_registry.registry, batch_test_item_owner
+	);
+	TEST_ASSERT_EQUAL(
+		agent->loaded_entity_count,
+		0,
+		"the batched release must mirror every dropped reference"
+	);
+	TEST_ASSERT_NULL(
+		ADDR_OF(&registry.entity_registry.registry.items),
+		"the batched release must discard the registry storage"
+	);
+
+	// The items' storage survives the release for their owner: each
+	// object tears down explicitly and the arena returns to baseline.
+	for (uint64_t idx = 0; idx < CP_OBJECT_BATCH_TEST_COUNT; ++idx) {
+		cp_object_fini(objects[idx]);
+		memory_bfree(
+			&agent->memory_context,
+			objects[idx],
+			sizeof(*objects[idx])
+		);
+	}
+
+	size_t after = block_allocator_free_size(&agent->block_allocator);
+	TEST_ASSERT_EQUAL(
+		(long)after,
+		(long)baseline,
+		"arena did not return to baseline after the batched release: "
+		"baseline=%zu after=%zu",
+		baseline,
+		after
+	);
+
+	agent_detach(agent);
+	return TEST_SUCCESS;
+}
+
 int
 main(void) {
 	log_enable_name("debug");
@@ -567,7 +1046,16 @@ main(void) {
 		res = test_cp_object_index_stability(shm);
 	}
 	if (res == TEST_SUCCESS) {
+		res = test_cp_object_index_many_keys(shm);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_cp_object_hole_reuse_across_copy(shm);
+	}
+	if (res == TEST_SUCCESS) {
 		res = test_cp_object_attach_gate(shm);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_cp_object_batched_release(shm);
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_cp_object_init_unknown_type_fails(shm);

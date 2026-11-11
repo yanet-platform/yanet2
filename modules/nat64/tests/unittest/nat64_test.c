@@ -235,7 +235,7 @@ test_setup(void) {
 	);
 
 	test_params.memory_context =
-		&test_params.module_config.cp_module.memory_context;
+		&test_params.module_config.cp_module.entity.memory_context;
 	memory_context_init(
 		test_params.memory_context, "nat64 tests", &test_params.ba
 	);
@@ -1803,6 +1803,17 @@ struct test_case {
 	struct upkt pkt_expected; /**< Expected output after translation */
 };
 
+/* Packet payloads remain borrowed when list storage is released. */
+static void
+free_test_cases(struct test_case *head) {
+	while (head != NULL) {
+		struct test_case *next = head->next;
+		free(head->name);
+		free(head);
+		head = next;
+	}
+}
+
 /**
  * @brief Add a new test case to the test suite
  *
@@ -2152,8 +2163,6 @@ push_packet(struct upkt *pkt) {
 	struct packet *packet = mbuf_to_packet(mbuf);
 	memset(packet, 0, sizeof(struct packet));
 	packet->mbuf = mbuf;
-	packet->rx_device_id = 0;
-	packet->tx_device_id = 0;
 
 	if (parse_packet(packet)) {
 		RTE_LOG(ERR,
@@ -2285,8 +2294,6 @@ push_packet_malformed(
 	struct packet *packet = mbuf_to_packet(mbuf);
 	memset(packet, 0, sizeof(struct packet));
 	packet->mbuf = mbuf;
-	packet->rx_device_id = 0;
-	packet->tx_device_id = 0;
 
 	// SKIP parse_packet() - we want malformed packets to reach NAT64
 	// parse_packet() would reject these due to length mismatches
@@ -4241,9 +4248,11 @@ test_nat64_generic(int (*tc_provider)(struct test_case **)) {
 	struct test_case *test_cases = NULL;
 	int result = 0;
 
-	TEST_ASSERT_EQUAL(
-		tc_provider(&test_cases), 0, "Failed to get test cases\n"
-	);
+	int provider_result = tc_provider(&test_cases);
+	if (provider_result != 0) {
+		free_test_cases(test_cases);
+	}
+	TEST_ASSERT_EQUAL(provider_result, 0, "Failed to get test cases\n");
 
 	struct test_case *tc;
 	for (tc = test_cases; tc != NULL; tc = tc->next) {
@@ -4251,6 +4260,7 @@ test_nat64_generic(int (*tc_provider)(struct test_case **)) {
 		result += process_test_case(tc);
 	}
 
+	free_test_cases(test_cases);
 	return result;
 }
 

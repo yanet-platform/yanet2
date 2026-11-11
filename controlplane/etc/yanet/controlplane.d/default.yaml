@@ -6,6 +6,16 @@ logging:
   #
   # Possible values: "debug", "info", "warning", "error".
   level: debug
+# Debug server with the Go runtime profiles under /debug/pprof/, off
+# unless an endpoint is set.
+#
+# It has no authentication, and its profiles expose the process internals
+# and can load it, so keep it on a unix socket, which is created owner-only,
+# or on a loopback address. The endpoint is "host:port" or an absolute
+# socket path whose directory must exist.
+#
+# debug:
+#   endpoint: /run/yanet-controlplane-debug.sock
 # MemoryPath is the path to the shared-memory file that is used to
 # communicate with dataplane.
 memory_path: &memory_path /dev/hugepages/yanet
@@ -14,31 +24,93 @@ gateway:
   # value but must be written down.
   instance_id: 0
   server:
+    # Deprecated listener keys, kept here until issue #2983 removes them, so
+    # the director logs a deprecation warning. With tls set, endpoint and
+    # http_endpoint serve TLS instead of plaintext.
     endpoint: "[::1]:8080"
     http_endpoint: "[::1]:8081"
-    # TLS is optional. When present both gRPC and HTTP listeners use it.
-    # The certificate only has to match the hosts clients dial: the
-    # director's own in-process loopback pins this certificate and needs
-    # no name for it. Cert rotation requires a director restart.
     # tls:
-    #   cert_file: /etc/yanet2/tls/server.pem
-    #   key_file:  /etc/yanet2/tls/server.key
-  auth:
-    disabled: true
-    # Enabling auth means setting `disabled: false` plus all three keys
-    # below: an identity source, an authenticator, a permissions policy.
-    # None of the referenced files ships with the package — add per site.
-    # identity_providers:
-    #   - type: file
-    #     path: /etc/yanet2/auth/identities.yaml
+    #   key_pairs:
+    #     - type: file
+    #       config:
+    #         cert_file: /etc/yanet2/tls/server.pem
+    #         key_file:  /etc/yanet2/tls/server.key
+    # The grpc and http sections replace these keys, each for its own
+    # protocol. A section takes a plaintext endpoint, a TLS listener, or both
+    # side by side, so clients can move to TLS one at a time.
+    #
+    # Both listeners serve every service. The certificate only has to match
+    # the hosts clients dial; a handshake gets the first key pair that is
+    # valid and that the client supports, else the first. Renewed files are
+    # picked up within an hour without a restart: replace them by rename or
+    # symlink swap, since a key and certificate written one after the other
+    # keep the old pair until both match. Key pair paths cannot be set from
+    # the environment. With an x509 authenticator both TLS listeners, gRPC
+    # and HTTPS, ask clients for an optional certificate.
+    # grpc:
+    #   endpoint: "[::1]:8080"
+    #   tls:
+    #     endpoint: "[::1]:8443"
+    #     # Clients reconnect within this age plus 10%, presenting their
+    #     # current certificate; a running stream keeps its connection until
+    #     # it ends.
+    #     #
+    #     # Off by default, at least 1s when set. Deploy a renewed client pair
+    #     # more than 1h plus 1.1 times the age before the old one expires; a
+    #     # day is plenty.
+    #     max_connection_age: 1h
+    #     key_pairs:
+    #       - type: file
+    #         config:
+    #           cert_file: /etc/yanet2/tls/server.pem
+    #           key_file:  /etc/yanet2/tls/server.key
+    # http:
+    #   endpoint: "[::1]:8081"
+    #   # Web origins whose pages may call this server cross-origin, such as
+    #   # a web UI served apart from the gateway. Any other cross-origin
+    #   # browser POST is rejected with 403; same-origin pages and clients
+    #   # that are not browsers are unaffected. Each is scheme://host[:port].
+    #   trusted_origins:
+    #     - "https://yanet-ui.example.net"
+    #   tls:
+    #     endpoint: "[::1]:8444"
+    #     key_pairs:
+    #       - type: file
+    #         config:
+    #           cert_file: /etc/yanet2/tls/server.pem
+    #           key_file:  /etc/yanet2/tls/server.key
+  # auth:
+    # Audit admits RPCs after transport TLS checks and logs verified identities.
+    # Enabled enforces identity lookup and permissions; disabled is anonymous.
+    #
+    # Replace legacy disabled: true/false with mode: disabled/enabled. Remove
+    # the old key and YANET_GATEWAY_AUTH_DISABLED when setting mode or
+    # YANET_GATEWAY_AUTH_MODE; both policy spellings together are an error.
+    # mode: disabled
+    # For SSH-agent certificate audit logging, select mode: audit and
+    # configure the SSH certificate authenticator below with a trusted CA.
+    #
+    # Audit needs no identity source or permissions file. None of these
+    # site-specific files ships with the package.
     # authenticators:
+    #   - type: sshcert
+    #     config:
+    #       ca_sources:
+    #         - /etc/yanet2/auth/ssh-ca.pub
+    # Additional authenticators can be appended to the same list.
     #   - type: basic
     #     config:
     #       credentials_path: /etc/yanet2/auth/basic_auth.yaml
-    #   # A client certificate presented in the TLS handshake identifies a
-    #   # caller that sends no token by its common name, which must be listed
-    #   # in the identities file. Requires server.tls. Revocation lists are
-    #   # optional and must be signed by one of the authorities.
+    #   # A client certificate identifies a caller that sends no token by its
+    #   # verified common name.
+    #   #
+    #   # Enabled mode requires this name in the identities file; audit records
+    #   # it directly. Requires a TLS listener (server.grpc.tls,
+    #   # server.http.tls, or the deprecated server.tls), the only listeners
+    #   # that check certificates; plaintext callers stay anonymous. Over
+    #   # HTTPS the certificate authenticates the calls of a browser.
+    #   # Revocation lists are optional and must be signed by one of the
+    #   # authorities.
     #   - type: x509
     #     config:
     #       ca_sources:
@@ -46,6 +118,10 @@ gateway:
     #       crl_sources:
     #         - https://pki.example.com/yanet-clients.crl
     #       refresh_interval: 5m
+    # Enabled mode also requires an identity source and permissions policy.
+    # identity_providers:
+    #   - type: file
+    #     path: /etc/yanet2/auth/identities.yaml
     # permissions_path: /etc/yanet2/auth/permissions.yaml
   registry:
     # The gateway drops backends that stopped refreshing their registration,
@@ -100,7 +176,14 @@ modules:
   pdump:
     instance_id: 0
     memory_path: *memory_path
-    memory_requirements: 16MB
+    # Ring objects a pdump config links allocate in this agent's arena,
+    # with no separate reserve. Configs capture into a shared ring
+    # without multiplying its cost.
+    #
+    # A 1 MiB ring on a 16-worker dataplane takes about 16 MiB, so this
+    # default holds several such rings with headroom. Raise it to fit
+    # more or larger rings.
+    memory_requirements: 128MB
   acl:
     instance_id: 0
     memory_path: *memory_path
@@ -125,6 +208,10 @@ devices:
     memory_path: *memory_path
     memory_requirements: 16MB
   vlan:
+    instance_id: 0
+    memory_path: *memory_path
+    memory_requirements: 16MB
+  vxlan:
     instance_id: 0
     memory_path: *memory_path
     memory_requirements: 16MB

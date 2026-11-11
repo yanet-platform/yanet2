@@ -17,8 +17,7 @@ import { useConfigListCache, useSearchParamHelpers, usePageContribution, useCont
 import { API, inventoryConfigNames, loadKnownConfigs, unionConfigNames } from '@yanet/core/api';
 import { Direction, MapKind, type FwStateEntry, type ListEntriesRequest, type MapStats } from '@yanet/core/api/fwstatemap';
 import { ConfigTabStrip, PageLayout, PageLoader, EmptyPagePlaceholder } from '@yanet/core/components';
-import { isIPv6MulticastAddress, isValidIPAddress, parseIPToBytes, stringToIPAddress } from '@yanet/core/utils/netip';
-import { normalizeMAC, parseMACToBytes } from '@yanet/core/utils/mac';
+import { isValidIPAddress, parseIPToBytes, stringToIPAddress } from '@yanet/core/utils/netip';
 import { formatBytes, toaster, compareNatural, warnConfigsUnknown } from '@yanet/core/utils';
 import { AddConfigModal, CommandPaletteHeader, ConfirmModal, DeleteConfigModal } from '@yanet/core/components';
 import { SaveIcon, TrashIcon } from '@yanet/core/components/draft';
@@ -26,15 +25,28 @@ import type { Command, PagePaletteContribution } from '@yanet/core/components/co
 import '@yanet/core/styles/chrome.scss';
 import './fwstate.scss';
 
+// One sync endpoint form entry: an all-empty entry is left unconfigured.
+interface DraftSyncEndpoint {
+    src: string;
+    dst: string;
+    port: string;
+}
+
+const emptyDraftSyncEndpoint = (): DraftSyncEndpoint => ({ src: '', dst: '', port: '' });
+
+// One sync listener form entry: an all-empty entry is left unconfigured.
+interface DraftSyncListener {
+    dst: string;
+    port: string;
+}
+
+const emptyDraftSyncListener = (): DraftSyncListener => ({ dst: '', port: '' });
+
 interface DraftConfig {
     mapNameV4: string;
     mapNameV6: string;
-    srcAddr: string;
-    dstEther: string;
-    dstAddrMulticast: string;
-    portMulticast: number;
-    dstAddrUnicast: string;
-    portUnicast: number;
+    endpoints: DraftSyncEndpoint[];
+    listeners: DraftSyncListener[];
     tcpSynAck: string;
     tcpSyn: string;
     tcpFin: string;
@@ -103,17 +115,51 @@ const isValidNonzeroIPv6Address = (value: string): boolean => {
     return isValidIPv6Address(value) && !isZeroIPv6Address(value);
 };
 
-const isValidNonzeroUnicastIPv6Address = (value: string): boolean => {
-    return isValidNonzeroIPv6Address(value) && !isIPv6MulticastAddress(value);
+const isIPv4MappedIPv6Address = (value: string): boolean => {
+    const bytes = parseIPToBytes(value);
+    return Boolean(
+        bytes &&
+        bytes.length === 16 &&
+        bytes.slice(0, 10).every((byte) => byte === 0) &&
+        bytes[10] === 0xff &&
+        bytes[11] === 0xff,
+    );
 };
 
-const isValidNonzeroMAC = (value: string): boolean => {
-    const parsed = parseMACToBytes(value);
-    return Boolean(parsed && parsed.some((byte) => byte !== 0));
+// The service rejects IPv4-mapped addresses for every sync destination,
+// so the form fails the field instead of letting the save hit the API
+// refusal.
+const isValidSyncAddress = (value: string): boolean => {
+    return isValidNonzeroIPv6Address(value) && !isIPv4MappedIPv6Address(value);
 };
 
-const isValidPort = (value: number): boolean => {
-    return Number.isInteger(value) && value >= 0 && value <= 65535;
+// An endpoint source additionally names the router itself, never a
+// multicast group (RFC 4291).
+const isValidEndpointSourceAddress = (value: string): boolean => {
+    if (!isValidSyncAddress(value)) return false;
+    const bytes = parseIPToBytes(value);
+    return Boolean(bytes && bytes[0] !== 0xff);
+};
+
+// An endpoint entry is configured when any of its fields is filled in; a
+// configured entry must then be complete to save.
+const isDraftEndpointConfigured = (endpoint: DraftSyncEndpoint): boolean => {
+    return endpoint.src.trim() !== '' || endpoint.dst.trim() !== '' || endpoint.port.trim() !== '';
+};
+
+// A listener entry is configured when any of its fields is filled in.
+const isDraftListenerConfigured = (listener: DraftSyncListener): boolean => {
+    return listener.dst.trim() !== '' || listener.port.trim() !== '';
+};
+
+// Parse an endpoint port input: null for anything but a decimal integer in
+// 1..65535.
+const parseEndpointPort = (value: string): number | null => {
+    const trimmed = value.trim();
+    if (!/^\d+$/.test(trimmed)) return null;
+    const parsed = Number(trimmed);
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) return null;
+    return parsed;
 };
 
 // Parse the Sync MTU input: undefined for an empty input, which leaves the
@@ -149,12 +195,15 @@ const toDraftConfig = (config: Awaited<ReturnType<typeof API.fwstate.showConfig>
     return {
         mapNameV4: config?.map_name_v4 ?? '',
         mapNameV6: config?.map_name_v6 ?? '',
-        srcAddr: sync?.src_addr ?? '',
-        dstEther: sync?.dst_ether ?? '',
-        dstAddrMulticast: sync?.dst_addr_multicast ?? '',
-        portMulticast: sync?.port_multicast ?? 0,
-        dstAddrUnicast: sync?.dst_addr_unicast ?? '',
-        portUnicast: sync?.port_unicast ?? 0,
+        endpoints: (sync?.endpoints ?? []).map((endpoint) => ({
+            src: endpoint.src_addr ?? '',
+            dst: endpoint.dst_addr ?? '',
+            port: endpoint.port != null ? String(endpoint.port) : '',
+        })),
+        listeners: (sync?.listeners ?? []).map((listener) => ({
+            dst: listener.dst_addr ?? '',
+            port: listener.port != null ? String(listener.port) : '',
+        })),
         tcpSynAck: formatDurationNsAsSeconds(sync?.tcp_syn_ack ?? DEFAULT_NS.tcpSynAck),
         tcpSyn: formatDurationNsAsSeconds(sync?.tcp_syn ?? DEFAULT_NS.tcpSyn),
         tcpFin: formatDurationNsAsSeconds(sync?.tcp_fin ?? DEFAULT_NS.tcpFin),
@@ -1164,11 +1213,11 @@ const MapNameField: React.FC<MapNameFieldProps> = ({
                         value={stashSize}
                         onUpdate={onStashSizeUpdate}
                         error={stashSizeError}
-                        placeholder="3968"
+                        placeholder="3648"
                         disabled={busy || knownKind !== undefined}
                         controlProps={{
                             'aria-label': 'Stash size in bytes of the new map',
-                            title: 'Stash size in bytes used only when the create button makes a new map: each worker\'s sync stash buffer, one 62-byte record per stateful packet per round. Empty or 0 selects room for 64 records (3968 bytes); at most 1048576. An existing map keeps the size it was created with.',
+                            title: 'Stash size in bytes used only when the create button makes a new map: each worker\'s sync stash buffer, one 57-byte record per stateful packet per round. Empty or 0 selects room for 64 records (3648 bytes); at most 1048576. An existing map keeps the size it was created with.',
                         }}
                     />
                 </div>
@@ -1463,20 +1512,88 @@ const FWStatePage: React.FC = () => {
         setDirtyConfigs((prev) => new Set(prev).add(currentName));
     };
 
+    const updateEndpoint = (index: number, patch: Partial<DraftSyncEndpoint>): void => {
+        if (!currentName) return;
+        setConfigs((prev) => ({
+            ...prev,
+            [currentName]: {
+                ...prev[currentName],
+                endpoints: prev[currentName].endpoints.map((endpoint, idx) => (idx === index ? { ...endpoint, ...patch } : endpoint)),
+            },
+        }));
+        setDirtyConfigs((prev) => new Set(prev).add(currentName));
+    };
+
+    const addEndpoint = (): void => {
+        if (!currentName) return;
+        setConfigs((prev) => {
+            const currentConfig = prev[currentName];
+            return { ...prev, [currentName]: { ...currentConfig, endpoints: [...currentConfig.endpoints, emptyDraftSyncEndpoint()] } };
+        });
+        setDirtyConfigs((prev) => new Set(prev).add(currentName));
+    };
+
+    const removeEndpoint = (index: number): void => {
+        if (!currentName) return;
+        setConfigs((prev) => ({
+            ...prev,
+            [currentName]: {
+                ...prev[currentName],
+                endpoints: prev[currentName].endpoints.filter((_, idx) => idx !== index),
+            },
+        }));
+        setDirtyConfigs((prev) => new Set(prev).add(currentName));
+    };
+
+    const updateListener = (index: number, patch: Partial<DraftSyncListener>): void => {
+        if (!currentName) return;
+        setConfigs((prev) => ({
+            ...prev,
+            [currentName]: {
+                ...prev[currentName],
+                listeners: prev[currentName].listeners.map((listener, idx) => (idx === index ? { ...listener, ...patch } : listener)),
+            },
+        }));
+        setDirtyConfigs((prev) => new Set(prev).add(currentName));
+    };
+
+    const addListener = (): void => {
+        if (!currentName) return;
+        setConfigs((prev) => {
+            const currentConfig = prev[currentName];
+            return { ...prev, [currentName]: { ...currentConfig, listeners: [...currentConfig.listeners, emptyDraftSyncListener()] } };
+        });
+        setDirtyConfigs((prev) => new Set(prev).add(currentName));
+    };
+
+    const removeListener = (index: number): void => {
+        if (!currentName) return;
+        setConfigs((prev) => ({
+            ...prev,
+            [currentName]: {
+                ...prev[currentName],
+                listeners: prev[currentName].listeners.filter((_, idx) => idx !== index),
+            },
+        }));
+        setDirtyConfigs((prev) => new Set(prev).add(currentName));
+    };
+
     const validateCurrent = (): boolean => {
         if (!current) return false;
         const durationFields = [current.tcpSynAck, current.tcpSyn, current.tcpFin, current.tcp, current.udp, current.defaultTimeout];
-        const multicastConfigured = current.dstAddrMulticast.trim() !== '' || current.portMulticast !== 0;
-        const unicastConfigured = current.dstAddrUnicast.trim() !== '' || current.portUnicast !== 0;
-        const endpointConfigured = multicastConfigured || unicastConfigured;
+        const configuredEndpoints = current.endpoints.filter(isDraftEndpointConfigured);
+        const configuredListeners = current.listeners.filter(isDraftListenerConfigured);
         if (currentServerMapNames?.v4 && !current.mapNameV4.trim()) return false;
         if (currentServerMapNames?.v6 && !current.mapNameV6.trim()) return false;
-        if (!isValidPort(current.portMulticast) || !isValidPort(current.portUnicast)) return false;
-        if (current.srcAddr.trim() !== '' && !isValidIPv6Address(current.srcAddr)) return false;
-        if (current.dstEther.trim() !== '' && !parseMACToBytes(current.dstEther)) return false;
-        if (endpointConfigured && (!isValidNonzeroIPv6Address(current.srcAddr) || !isValidNonzeroMAC(current.dstEther))) return false;
-        if (multicastConfigured && (!isValidNonzeroIPv6Address(current.dstAddrMulticast) || current.portMulticast === 0)) return false;
-        if (unicastConfigured && (!isValidNonzeroUnicastIPv6Address(current.dstAddrUnicast) || current.portUnicast === 0)) return false;
+        if (configuredEndpoints.some((endpoint) => (
+            !isValidEndpointSourceAddress(endpoint.src) ||
+            !isValidSyncAddress(endpoint.dst) ||
+            parseEndpointPort(endpoint.port) === null
+        ))) return false;
+        if (configuredListeners.some((listener) => (
+            !isValidSyncAddress(listener.dst) ||
+            parseEndpointPort(listener.port) === null
+        ))) return false;
         if (durationFields.some((value) => parseDurationToNs(value) === null)) return false;
         if (!isValidSyncMtuInput(current.syncMtu)) return false;
         return true;
@@ -1493,14 +1610,20 @@ const FWStatePage: React.FC = () => {
             return;
         }
         const requestName = currentName;
-        // An endpoint left empty in the form carries a zero port, which disables it.
+        const configuredEndpoints = current.endpoints.filter(isDraftEndpointConfigured);
+        const configuredListeners = current.listeners.filter(isDraftListenerConfigured);
+        // Both lists are always carried whole: an empty list clears it on
+        // the server.
         const syncConfig = {
-            src_addr: stringToIPAddress(current.srcAddr),
-            dst_ether: normalizeMAC(current.dstEther),
-            dst_addr_multicast: current.dstAddrMulticast ? stringToIPAddress(current.dstAddrMulticast) : undefined,
-            port_multicast: current.portMulticast,
-            dst_addr_unicast: current.dstAddrUnicast ? stringToIPAddress(current.dstAddrUnicast) : undefined,
-            port_unicast: current.portUnicast,
+            endpoints: configuredEndpoints.map((endpoint) => ({
+                src_addr: stringToIPAddress(endpoint.src),
+                dst_addr: stringToIPAddress(endpoint.dst),
+                port: parseEndpointPort(endpoint.port) ?? 0,
+            })),
+            listeners: configuredListeners.map((listener) => ({
+                dst_addr: stringToIPAddress(listener.dst),
+                port: parseEndpointPort(listener.port) ?? 0,
+            })),
             tcp_syn_ack: parseDurationToNs(current.tcpSynAck) ?? undefined,
             tcp_syn: parseDurationToNs(current.tcpSyn) ?? undefined,
             tcp_fin: parseDurationToNs(current.tcpFin) ?? undefined,
@@ -1738,21 +1861,23 @@ const FWStatePage: React.FC = () => {
     }
 
     const configurationTab = current && (() => {
-        const multicastConfigured = current.dstAddrMulticast.trim() !== '' || current.portMulticast !== 0;
-        const unicastConfigured = current.dstAddrUnicast.trim() !== '' || current.portUnicast !== 0;
-        const endpointConfigured = multicastConfigured || unicastConfigured;
         const mapNameV4Error = currentServerMapNames?.v4 && !current.mapNameV4.trim() ? 'Linked map cannot be cleared' : undefined;
         const mapNameV6Error = currentServerMapNames?.v6 && !current.mapNameV6.trim() ? 'Linked map cannot be cleared' : undefined;
-        const sourceAddrError = endpointConfigured
-            ? !isValidNonzeroIPv6Address(current.srcAddr) ? 'Non-zero IPv6 required' : undefined
-            : current.srcAddr.trim() !== '' && !isValidIPv6Address(current.srcAddr) ? 'IPv6 required' : undefined;
-        const dstEtherError = endpointConfigured
-            ? !isValidNonzeroMAC(current.dstEther) ? 'Non-zero MAC required' : undefined
-            : current.dstEther.trim() !== '' && !parseMACToBytes(current.dstEther) ? 'MAC required' : undefined;
-        const multicastAddrError = multicastConfigured && !isValidNonzeroIPv6Address(current.dstAddrMulticast) ? 'Non-zero IPv6 required' : undefined;
-        const multicastPortError = !isValidPort(current.portMulticast) ? 'Integer 0..65535' : multicastConfigured && current.portMulticast === 0 ? 'Port required' : undefined;
-        const unicastAddrError = unicastConfigured && !isValidNonzeroUnicastIPv6Address(current.dstAddrUnicast) ? 'Non-zero unicast IPv6 required' : undefined;
-        const unicastPortError = !isValidPort(current.portUnicast) ? 'Integer 0..65535' : unicastConfigured && current.portUnicast === 0 ? 'Port required' : undefined;
+        const endpointErrors = current.endpoints.map((endpoint) => {
+            if (!isDraftEndpointConfigured(endpoint)) return {};
+            return {
+                src: !isValidEndpointSourceAddress(endpoint.src) ? 'Non-multicast IPv6 source required' : undefined,
+                dst: !isValidSyncAddress(endpoint.dst) ? 'Non-mapped IPv6 required' : undefined,
+                port: parseEndpointPort(endpoint.port) === null ? 'Integer 1..65535' : undefined,
+            };
+        });
+        const listenerErrors = current.listeners.map((listener) => {
+            if (!isDraftListenerConfigured(listener)) return {};
+            return {
+                dst: !isValidSyncAddress(listener.dst) ? 'Non-mapped IPv6 required' : undefined,
+                port: parseEndpointPort(listener.port) === null ? 'Integer 1..65535' : undefined,
+            };
+        });
         const syncMtuError = !isValidSyncMtuInput(current.syncMtu) ? 'Integer 0..65535' : undefined;
 
         return (
@@ -1814,14 +1939,6 @@ const FWStatePage: React.FC = () => {
                             <Text variant="subheader-2">Sync endpoints</Text>
                         </div>
                         <div className="fwstate-sync-grid">
-                            <label className="fwstate-field fwstate-sync-grid__src">
-                                <Text variant="caption-2" color="secondary">Sync source address</Text>
-                                <TextInput value={current.srcAddr} onUpdate={(srcAddr) => updateCurrent({ srcAddr })} error={sourceAddrError} placeholder="2001:db8::1" />
-                            </label>
-                            <label className="fwstate-field fwstate-sync-grid__mac">
-                                <Text variant="caption-2" color="secondary">Destination MAC</Text>
-                                <TextInput value={current.dstEther} onUpdate={(dstEther) => updateCurrent({ dstEther })} error={dstEtherError} placeholder="aa:bb:cc:dd:ee:ff" />
-                            </label>
                             <label className="fwstate-field fwstate-sync-grid__mtu">
                                 <Text variant="caption-2" color="secondary">Sync MTU</Text>
                                 <TextInput
@@ -1839,35 +1956,79 @@ const FWStatePage: React.FC = () => {
                                     or 104..65535.
                                 </span>
                             </label>
-                            <div className="fwstate-sync-grid__endpoint">
-                                <div className="fwstate-field">
-                                    <Text variant="caption-2" color="secondary">Multicast endpoint</Text>
-                                    <div className="fwstate-endpoint-row">
-                                        <label className="fwstate-field">
-                                            <Text variant="caption-2" color="secondary">Address</Text>
-                                            <TextInput value={current.dstAddrMulticast} onUpdate={(dstAddrMulticast) => updateCurrent({ dstAddrMulticast })} error={multicastAddrError} placeholder="ff02::1" />
-                                        </label>
-                                        <label className="fwstate-field">
-                                            <Text variant="caption-2" color="secondary">Port</Text>
-                                            <TextInput type="number" value={String(current.portMulticast)} onUpdate={(v) => updateCurrent({ portMulticast: Number(v) })} error={multicastPortError} placeholder="2000" />
-                                        </label>
+                            {current.endpoints.map((endpoint, index) => (
+                                <div key={index} className="fwstate-sync-grid__endpoint">
+                                    <div className="fwstate-field">
+                                        <Text variant="caption-2" color="secondary">Endpoint {index + 1}</Text>
+                                        <div className="fwstate-endpoint-row">
+                                            <label className="fwstate-field">
+                                                <Text variant="caption-2" color="secondary">Source</Text>
+                                                <TextInput value={endpoint.src} onUpdate={(src) => updateEndpoint(index, { src })} error={endpointErrors[index]?.src} placeholder="2001:db8::1" />
+                                            </label>
+                                            <label className="fwstate-field">
+                                                <Text variant="caption-2" color="secondary">Destination</Text>
+                                                <TextInput value={endpoint.dst} onUpdate={(dst) => updateEndpoint(index, { dst })} error={endpointErrors[index]?.dst} placeholder="ff02::1" />
+                                            </label>
+                                            <label className="fwstate-field">
+                                                <Text variant="caption-2" color="secondary">Port</Text>
+                                                <TextInput type="number" value={endpoint.port} onUpdate={(port) => updateEndpoint(index, { port })} error={endpointErrors[index]?.port} placeholder="9999" />
+                                            </label>
+                                            <Button
+                                                size="s"
+                                                view="outlined"
+                                                onClick={() => removeEndpoint(index)}
+                                                aria-label={`Remove endpoint ${index + 1}`}
+                                            >
+                                                <TrashIcon />
+                                            </Button>
+                                        </div>
                                     </div>
                                 </div>
+                            ))}
+                            <div className="fwstate-sync-grid__endpoint">
+                                <Button size="s" view="outlined" onClick={addEndpoint}>
+                                    <Icon data={Plus} size={14} /> Add endpoint
+                                </Button>
+                                <span className="yn-field__hint">
+                                    Emitted sync packets are stamped per endpoint and the Ethernet
+                                    header is left for the route module to resolve. The list is
+                                    unbounded, and an update replaces it whole.
+                                </span>
                             </div>
-                            <div className="fwstate-sync-grid__endpoint">
-                                <div className="fwstate-field">
-                                    <Text variant="caption-2" color="secondary">Unicast endpoint</Text>
-                                    <div className="fwstate-endpoint-row">
-                                        <label className="fwstate-field">
-                                            <Text variant="caption-2" color="secondary">Address</Text>
-                                            <TextInput value={current.dstAddrUnicast} onUpdate={(dstAddrUnicast) => updateCurrent({ dstAddrUnicast })} error={unicastAddrError} placeholder="2001:db8::2" />
-                                        </label>
-                                        <label className="fwstate-field">
-                                            <Text variant="caption-2" color="secondary">Port</Text>
-                                            <TextInput type="number" value={String(current.portUnicast)} onUpdate={(v) => updateCurrent({ portUnicast: Number(v) })} error={unicastPortError} placeholder="2000" />
-                                        </label>
+                            {current.listeners.map((listener, index) => (
+                                <div key={index} className="fwstate-sync-grid__endpoint">
+                                    <div className="fwstate-field">
+                                        <Text variant="caption-2" color="secondary">Listener {index + 1}</Text>
+                                        <div className="fwstate-endpoint-row">
+                                            <label className="fwstate-field">
+                                                <Text variant="caption-2" color="secondary">Destination</Text>
+                                                <TextInput value={listener.dst} onUpdate={(dst) => updateListener(index, { dst })} error={listenerErrors[index]?.dst} placeholder="ff02::1" />
+                                            </label>
+                                            <label className="fwstate-field">
+                                                <Text variant="caption-2" color="secondary">Port</Text>
+                                                <TextInput type="number" value={listener.port} onUpdate={(port) => updateListener(index, { port })} error={listenerErrors[index]?.port} placeholder="9999" />
+                                            </label>
+                                            <Button
+                                                size="s"
+                                                view="outlined"
+                                                onClick={() => removeListener(index)}
+                                                aria-label={`Remove listener ${index + 1}`}
+                                            >
+                                                <TrashIcon />
+                                            </Button>
+                                        </div>
                                     </div>
                                 </div>
+                            ))}
+                            <div className="fwstate-sync-grid__endpoint">
+                                <Button size="s" view="outlined" onClick={addListener}>
+                                    <Icon data={Plus} size={14} /> Add listener
+                                </Button>
+                                <span className="yn-field__hint">
+                                    Incoming packets naming a listener by destination and port are
+                                    claimed as external sync; emission and reception are
+                                    independent. A unicast listener names this router's own address.
+                                </span>
                             </div>
                         </div>
                     </div>

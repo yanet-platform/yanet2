@@ -3,6 +3,7 @@ package forward
 import (
 	"fmt"
 
+	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 )
@@ -28,30 +29,26 @@ func NewBackend(agent *ffi.Agent) Backend {
 	}
 }
 
-func (m *backend) UpdateModule(name string, rules []cforward.ForwardRule) (ModuleHandle, error) {
+func (m *backend) Update(name string, payload RuleSet) (crud.Handle, error) {
 	module, err := cforward.NewModuleConfig(m.agent, name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create module config: %w", err)
 	}
 
-	if err := module.Update(rules); err != nil {
-		if err := module.Free(); err != nil {
-			return nil, fmt.Errorf("failed to free abandoned config: %w", err)
+	build := func(module *cforward.ModuleConfig) error {
+		if err := module.Update(payload.Compiled); err != nil {
+			return fmt.Errorf("failed to update module config: %w", err)
 		}
-		return nil, fmt.Errorf("failed to update module config: %w", err)
+		return nil
 	}
-
-	if err := m.agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}); err != nil {
-		if err := module.Free(); err != nil {
-			return nil, fmt.Errorf("failed to free abandoned config: %w", err)
-		}
-		return nil, fmt.Errorf("failed to update module: %w", err)
+	if err := crud.PublishModule(m.agent, module, build); err != nil {
+		return nil, err
 	}
 
 	return module, nil
 }
 
-func (m *backend) DeleteModule(name string) error {
+func (m *backend) Delete(name string) error {
 	return m.agent.DeleteModuleConfig(moduleType, name)
 }
 

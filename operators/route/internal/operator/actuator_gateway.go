@@ -4,6 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"net/netip"
+	"slices"
+	"strings"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -11,8 +15,10 @@ import (
 	"github.com/yanet-platform/xnetip"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/operator"
+	"github.com/yanet-platform/yanet2/common/go/xgrpc"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1"
+	"github.com/yanet-platform/yanet2/operators/route/internal/rib"
 	"github.com/yanet-platform/yanet2/operators/route/neigh"
 )
 
@@ -24,7 +30,10 @@ type GatewayActuator struct {
 	routes           routepb.RouteServiceClient
 	function         *ynpb.Function
 	functionActuator *operator.FunctionActuator
-	devices          []string
+	devices          neigh.DeviceScope
+	module           string
+	staticRoutes     map[netip.Prefix]map[netip.Addr]struct{}
+	expectBird       bool
 	onFIBBuilt       func(module string, stats FIBBuildStats)
 	log              *zap.Logger
 }
@@ -43,8 +52,25 @@ func NewGatewayActuator(
 	if opts.Function.Name.Unwrap() == "" {
 		return nil, fmt.Errorf("gateway actuator: function is required")
 	}
+	staticRoutes := map[netip.Prefix]map[netip.Addr]struct{}{}
+	for _, route := range opts.StaticRoutes {
+		prefix, err := netip.ParsePrefix(route.Prefix)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse static route prefix %q: %w", route.Prefix, err)
+		}
+		nexthop, err := netip.ParseAddr(route.NexthopAddr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse static route nexthop %q: %w", route.NexthopAddr, err)
+		}
+		prefix = prefix.Masked()
+		if staticRoutes[prefix] == nil {
+			staticRoutes[prefix] = map[netip.Addr]struct{}{}
+		}
+		staticRoutes[prefix][nexthop.Unmap()] = struct{}{}
+	}
 
-	conn, err := operator.DialGateway(cfg)
+	log := opts.Log.With(zap.String("gateway", cfg.Name))
+	conn, err := operator.DialGatewayWith(cfg, opts.DialOptions, xgrpc.WithCertificateStoreLog(log))
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +90,6 @@ func NewGatewayActuator(
 		}},
 	}
 
-	log := opts.Log.With(zap.String("gateway", cfg.Name))
 	actuatorOptions := []operator.FunctionActuatorOption{operator.WithFunctionLog(log)}
 	if fn.IgnorePdump {
 		actuatorOptions = append(actuatorOptions, operator.WithIgnorePDump())
@@ -76,7 +101,10 @@ func NewGatewayActuator(
 		routes:           routepb.NewRouteServiceClient(conn),
 		function:         function,
 		functionActuator: operator.NewFunctionActuator(ynpb.NewFunctionServiceClient(conn), actuatorOptions...),
-		devices:          opts.Devices,
+		devices:          neigh.NewDeviceScope(opts.Devices),
+		module:           fn.Module.Unwrap(),
+		staticRoutes:     staticRoutes,
+		expectBird:       opts.ExpectBird,
 		onFIBBuilt:       opts.OnFIBBuilt,
 		log:              log.With(zap.String("function", fn.Name.Unwrap())),
 	}, nil
@@ -87,30 +115,100 @@ func (m *GatewayActuator) Close() error {
 	return m.conn.Close()
 }
 
-// Apply builds and pushes the FIB for each module config to the gateway,
-// then republishes the operator's network function.
+// Apply validates every local forwarding candidate before publishing any
+// forwarding table or the operator's network function.
 //
-// Every FIB is attempted and the function is published even on a partial
-// failure — the joined errors let the reconcile loop retry under backoff.
+// Empty desired or locally resolved state leaves installed forwarding intact.
+// When BIRD is expected, static routes cannot substitute for local BIRD paths.
+// Rejections include missing configured static prefixes for diagnosis.
+// After preflight succeeds, every table and the function are attempted despite
+// RPC failures. Configured static-path resolution gates success after
+// publication.
 func (m *GatewayActuator) Apply(ctx context.Context, snapshot RouteSnapshot) error {
-	neighbours := neigh.FilterByDevices(snapshot.Neighbours, m.devices)
-
 	var err error
-	for name, dump := range snapshot.RIBs {
+	if snapshot.Neighbours.Len() == 0 {
+		err = errors.Join(err, fmt.Errorf("gateway %q module %q has an empty merged neighbour view", m.name, m.module))
+	}
+	if len(snapshot.RIBs) == 0 {
+		err = errors.Join(err, fmt.Errorf("gateway %q module %q has no RIBs", m.name, m.module))
+	}
+
+	fibs := make([]FIB, 0, len(snapshot.RIBs))
+	for _, name := range slices.Sorted(maps.Keys(snapshot.RIBs)) {
 		if name == "" {
-			err = errors.Join(err, fmt.Errorf("FIB is missing module config name"))
+			err = errors.Join(err, fmt.Errorf("gateway %q FIB is missing module config name", m.name))
 			continue
 		}
 
-		fib, stats := BuildFIB(dump, neighbours)
+		fib, stats := BuildFIB(snapshot.RIBs[name], snapshot.Neighbours, m.devices)
 		fib.Name = name
 		m.onFIBBuilt(name, stats)
+		switch {
+		case stats.TotalRoutes == 0:
+			err = errors.Join(err, fmt.Errorf("gateway %q module %q has no route records", m.name, name))
+		case len(fib.Entries) == 0:
+			err = errors.Join(err, fmt.Errorf(
+				"gateway %q module %q has an empty local FIB: %d routes, %d unresolved nexthops, %d device-excluded routes",
+				m.name, name, stats.TotalRoutes, stats.NeighbourNotFound, stats.DeviceExcludedRoutes,
+			))
+		case m.expectBird && stats.BirdRoutes == 0:
+			err = errors.Join(err, fmt.Errorf("gateway %q module %q has no BIRD route records", m.name, name))
+		case m.expectBird && stats.LocalBirdRoutes == 0:
+			err = errors.Join(err, fmt.Errorf(
+				"gateway %q module %q has no local BIRD forwarding: %d BIRD route records",
+				m.name, name, stats.BirdRoutes,
+			))
+		}
+		fibs = append(fibs, fib)
+	}
+	if err != nil {
+		return errors.Join(err, m.validateStaticRoutes(snapshot))
+	}
+
+	for _, fib := range fibs {
 		if e := m.pushFIB(ctx, fib); e != nil {
 			err = errors.Join(err, fmt.Errorf("failed to push FIB to gateway %q: %w", m.name, e))
 		}
 	}
 
-	return errors.Join(err, m.applyFunction(ctx))
+	return errors.Join(err, m.applyFunction(ctx), m.validateStaticRoutes(snapshot))
+}
+
+// validateStaticRoutes keeps configured requirements independent of runtime
+// deletion and accepts only configured static paths in the gateway's local view.
+func (m *GatewayActuator) validateStaticRoutes(snapshot RouteSnapshot) error {
+	if len(m.staticRoutes) == 0 {
+		return nil
+	}
+
+	dump := snapshot.RIBs[m.module]
+	var missing []string
+	for prefix, nexthops := range m.staticRoutes {
+		resolved := false
+		for _, route := range dump[prefix.Bits()][prefix].Routes {
+			if route.SourceID != rib.RouteSourceStatic {
+				continue
+			}
+			nexthop := route.NextHop.Unmap()
+			if _, ok := nexthops[nexthop]; !ok {
+				continue
+			}
+			if entry, ok := snapshot.Neighbours.Lookup(nexthop); ok && m.devices.Allows(entry.HardwareRoute.Device) {
+				resolved = true
+				break
+			}
+		}
+		if !resolved {
+			missing = append(missing, prefix.String())
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	slices.Sort(missing)
+	return fmt.Errorf("gateway %q module %q has unresolved configured static prefixes: %s",
+		m.name, m.module, strings.Join(missing, ", "),
+	)
 }
 
 // applyFunction publishes the operator's single network-function definition to

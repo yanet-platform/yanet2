@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
 
@@ -17,8 +18,9 @@ import (
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
+	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
+	cplain "github.com/yanet-platform/yanet2/devices/plain/bindings/go/cplain"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	forwardpb "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb/v1"
@@ -74,7 +76,7 @@ func setupForwardHarnessWithLimit(
 	return h, agent, backend
 }
 
-// applyRules pushes the given rules via backend.UpdateModule.
+// applyRules pushes the given rules via the backend.
 //
 // The module handle is freed via t.Cleanup. The caller must wire the pipeline
 // after calling applyRules, because the forward module config must exist in
@@ -84,10 +86,10 @@ func applyRules(
 	backend forward.Backend,
 	name string,
 	rules []cforward.ForwardRule,
-) forward.ModuleHandle {
+) crud.Handle {
 	t.Helper()
 
-	handle, err := backend.UpdateModule(name, rules)
+	handle, err := backend.Update(name, forward.RuleSet{Compiled: rules})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = handle.Free() })
 	return handle
@@ -143,7 +145,7 @@ func wireForwardPipeline(
 	// Primary device sink: appended after the test module in the chain so
 	// packets that pass through (ModeNone/NoMatch) reach the output stage.
 	primarySink := configName + "-sink"
-	primarySinkHandle, err := fwdBackend.UpdateModule(primarySink, catchAllForwardRules(primaryDevice))
+	primarySinkHandle, err := fwdBackend.Update(primarySink, forward.RuleSet{Compiled: catchAllForwardRules(primaryDevice)})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = primarySinkHandle.Free() })
 
@@ -151,7 +153,7 @@ func wireForwardPipeline(
 	// sink so packets re-routed via ModeIn reach the output stage.
 	for _, dev := range extraDevices {
 		sinkName := configName + "-sink-" + dev
-		sinkHandle, err := fwdBackend.UpdateModule(sinkName, catchAllForwardRules(dev))
+		sinkHandle, err := fwdBackend.Update(sinkName, forward.RuleSet{Compiled: catchAllForwardRules(dev)})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = sinkHandle.Free() })
 
@@ -220,7 +222,7 @@ func wireForwardPipeline(
 		})
 	}
 
-	_, err = plain.UpdateDevices(agent, allDevices)
+	_, err = cplain.UpdateDevices(agent, allDevices)
 	require.NoError(t, err)
 }
 
@@ -254,8 +256,6 @@ func fwdEtherLayers() (layers.Ethernet, layers.IPv4, layers.IPv6, layers.ICMPv4)
 
 // TestForward_NoMatch verifies that a packet not matched by any rule passes
 // through to the next module unchanged.
-//
-// Covers branch: action == FILTER_RULE_INVALID -> packet_front_output (no target).
 func TestForward_NoMatch(t *testing.T) {
 	// A rule with only Dst4s and no Src4s is excluded from the ip4 filter
 	// by check_has_ip4 (which requires both src and dst). Such a rule also
@@ -285,8 +285,6 @@ func TestForward_NoMatch(t *testing.T) {
 // TestForward_ModeNone_IPv4 verifies that an IPv4 packet matched by an ip4
 // rule with ModeNone passes through to the next module without device redirect,
 // and that the per-rule counter is incremented.
-//
-// Covers branch: target found, mode == FORWARD_MODE_NONE -> packet_front_output.
 func TestForward_ModeNone_IPv4(t *testing.T) {
 	eth, ip4, _, icmp := fwdEtherLayers()
 	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
@@ -323,9 +321,6 @@ func TestForward_ModeNone_IPv4(t *testing.T) {
 // TestForward_ModeOut_IPv4 verifies that an IPv4 packet matched by a ModeOut
 // rule is re-queued for egress via the target device, and that the per-rule
 // counter is incremented.
-//
-// Covers branch: target found, mode == FORWARD_MODE_OUT -> set tx_device_id,
-// queue to pending_output.
 func TestForward_ModeOut_IPv4(t *testing.T) {
 	eth, ip4, _, icmp := fwdEtherLayers()
 	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
@@ -366,8 +361,8 @@ func TestForward_ModeOut_IPv4(t *testing.T) {
 // path under the materialised "to_"+target counter, and that no counter the
 // module registers is left unnamed.
 //
-// Goes through ForwardService.UpdateConfig rather than backend.UpdateModule
-// directly, so the service's materialisation runs end to end.
+// Goes through ForwardService.UpdateConfig rather than a direct backend
+// publish, so the service's materialisation runs end to end.
 func TestForward_EmptyCounterMaterializesToTarget(t *testing.T) {
 	eth, ip4, _, icmp := fwdEtherLayers()
 	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
@@ -475,9 +470,6 @@ func TestForward_EmptyCounterLongTargetRegistersInCounterRegistry(t *testing.T) 
 // TestForward_ModeIn_IPv4 verifies that an IPv4 packet matched by a ModeIn
 // rule is re-queued for ingress via the target device, and that the per-rule
 // counter is incremented.
-//
-// Covers branch: target found, mode == FORWARD_MODE_IN -> set tx_device_id,
-// queue to pending_input.
 func TestForward_ModeIn_IPv4(t *testing.T) {
 	eth, ip4, _, icmp := fwdEtherLayers()
 	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
@@ -606,7 +598,7 @@ func Test_Forward_ModeInCrossDeviceLoopAttributesDropToTarget(t *testing.T) {
 		}))
 	}
 
-	_, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{
+	_, err := cplain.UpdateDevices(agent, []ffi.DeviceConfig{
 		{
 			Name:   "port0",
 			Input:  []ffi.DevicePipelineConfig{{Name: "loop0", Weight: 1}},
@@ -697,7 +689,7 @@ func Test_Forward_MixedModeLoopSharesTotalLimit(t *testing.T) {
 		Name: "dummy_out_port1",
 	}))
 
-	_, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{
+	_, err := cplain.UpdateDevices(agent, []ffi.DeviceConfig{
 		{
 			Name:   "port0",
 			Input:  []ffi.DevicePipelineConfig{{Name: "to_input_in", Weight: 1}},
@@ -769,7 +761,7 @@ func Test_Forward_ModeOutSelfTargetStopsAtTotalLimit(t *testing.T) {
 		}))
 	}
 
-	_, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	_, err := cplain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: "feeder", Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "loop", Weight: 1}},
@@ -841,7 +833,7 @@ func Test_Forward_ModeOutCrossDeviceLoopAttributesDropToTarget(t *testing.T) {
 			Functions: []string{route.name},
 		}))
 	}
-	_, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{
+	_, err := cplain.UpdateDevices(agent, []ffi.DeviceConfig{
 		{
 			Name:   "port0",
 			Input:  []ffi.DevicePipelineConfig{{Name: "feeder", Weight: 1}},
@@ -879,8 +871,6 @@ func Test_Forward_ModeOutCrossDeviceLoopAttributesDropToTarget(t *testing.T) {
 //
 // The per-rule counter is incremented BEFORE the device translation check,
 // so the counter must show 1 even though the packet is dropped.
-//
-// Covers branch: target found, module_ectx_encode_device returns -1 -> drop.
 func TestForward_UnmappedDevice(t *testing.T) {
 	eth, ip4, _, icmp := fwdEtherLayers()
 	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
@@ -1029,9 +1019,6 @@ func TestForward_NonIP(t *testing.T) {
 // Rule 0: device-only (L2 filter, action 0).
 // Rule 1: ip4 prefix rule (ip4 filter, action 1).
 // An IPv4 packet satisfies both filters. action = min(0, 1) = 0 -> rule 0 wins.
-//
-// Covers branch: both vlan_result and ip4_result valid -> action = min ->
-// lower-index rule's target is used.
 func TestForward_MinAction(t *testing.T) {
 	eth, ip4, _, icmp := fwdEtherLayers()
 	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
@@ -1146,9 +1133,9 @@ func TestForwardConfigMemoryLeak(t *testing.T) {
 // generation still referenced them, mirroring what the module control
 // plane keeps: the owner remembers the handle and retries it once the
 // generations drain.
-type modulePark []forward.ModuleHandle
+type modulePark []crud.Handle
 
-func (m *modulePark) freeOrPark(handle forward.ModuleHandle) {
+func (m *modulePark) freeOrPark(handle crud.Handle) {
 	if handle == nil {
 		return
 	}
@@ -1166,4 +1153,201 @@ func (m *modulePark) retry() {
 	}
 	clear((*m)[len(kept):])
 	*m = kept
+}
+
+// The burst kinds cycle through the ip4 and ip6 family filters and the
+// device-only L2 filter, plus a source only the L2 rule covers.
+const (
+	fwdKindEcho4 = iota
+	fwdKindEcho6
+	fwdKindARP
+	fwdKindOther4
+	fwdKindCount
+)
+
+// fwdMultibatchCount exceeds three full handler batches and leaves the last
+// batch partial, so both the batch boundary crossing and the tail are
+// exercised in a single burst.
+const fwdMultibatchCount = 3*64 + 5
+
+// fwdMultibatchPacket builds one burst packet of the given kind; idx keeps
+// every packet's addresses distinct.
+func fwdMultibatchPacket(t *testing.T, kind, idx int) gopacket.Packet {
+	t.Helper()
+
+	srcLast := byte(1 + idx%200)
+	switch kind {
+	case fwdKindEcho4, fwdKindOther4:
+		srcFmt := "192.0.2.%d"
+		if kind == fwdKindOther4 {
+			srcFmt = "198.51.100.%d"
+		}
+		eth := layers.Ethernet{
+			SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+			DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+			EthernetType: layers.EthernetTypeIPv4,
+		}
+		ip4 := layers.IPv4{
+			Version: 4, TTL: 64,
+			Protocol: layers.IPProtocolICMPv4,
+			SrcIP:    net.ParseIP(fmt.Sprintf(srcFmt, srcLast)),
+			DstIP:    net.ParseIP("10.0.0.5"),
+		}
+		icmp := layers.ICMPv4{
+			TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoRequest, 0),
+		}
+		return xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
+	case fwdKindEcho6:
+		eth := layers.Ethernet{
+			SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+			DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+			EthernetType: layers.EthernetTypeIPv6,
+		}
+		ip6 := layers.IPv6{
+			Version: 6, HopLimit: 64,
+			NextHeader: layers.IPProtocolICMPv6,
+			SrcIP:      net.ParseIP(fmt.Sprintf("2001:db8::%x", srcLast)),
+			DstIP:      net.ParseIP("2001:db8:1::1"),
+		}
+		icmp6 := layers.ICMPv6{
+			TypeCode: layers.CreateICMPv6TypeCode(layers.ICMPv6TypeEchoRequest, 0),
+		}
+		icmp6.SetNetworkLayerForChecksum(&ip6)
+		return xpacket.LayersToPacket(t, &eth, &ip6, &icmp6)
+	case fwdKindARP:
+		eth := layers.Ethernet{
+			SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+			DstMAC:       net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
+			EthernetType: layers.EthernetTypeARP,
+		}
+		arp := layers.ARP{
+			AddrType:          layers.LinkTypeEthernet,
+			Protocol:          layers.EthernetTypeIPv4,
+			HwAddressSize:     6,
+			ProtAddressSize:   4,
+			Operation:         layers.ARPRequest,
+			SourceHwAddress:   eth.SrcMAC,
+			SourceProtAddress: net.ParseIP(fmt.Sprintf("10.0.0.%d", srcLast)).To4(),
+			DstHwAddress:      net.HardwareAddr{0, 0, 0, 0, 0, 0},
+			DstProtAddress:    net.ParseIP("10.0.0.2").To4(),
+		}
+		return xpacket.LayersToPacket(t, &eth, &arp)
+	}
+	t.Fatalf("unknown burst kind %d", kind)
+	return nil
+}
+
+// Test_Forward_MultiBatchBurst verifies that a burst spanning several
+// handler batches keeps every packet's verdict bound to its own packet:
+// the output holds every burst packet exactly once by content, each rule
+// counter holds exactly the packets and bytes of its kind, and nothing is
+// dropped across the batch boundaries.
+func Test_Forward_MultiBatchBurst(t *testing.T) {
+	rule4 := cforward.ForwardRule{
+		Target:  "port1",
+		Mode:    cforward.ModeOut,
+		Counter: "rule4",
+		Src4s:   []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("192.0.2.0/255.255.255.0")},
+		Dst4s:   []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("10.0.0.0/24")},
+	}
+	rule6 := cforward.ForwardRule{
+		Target:  "port1",
+		Mode:    cforward.ModeOut,
+		Counter: "rule6",
+		Src6s:   []xnetip.BiContiguous{xnetip.MustParseBiContiguous("2001:db8::/ffff:ffff::")},
+		Dst6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+	}
+	ruleL2 := cforward.ForwardRule{
+		Target:  "port0",
+		Mode:    cforward.ModeNone,
+		Counter: "rule_l2",
+		Devices: filter.Devices{{Name: "port0"}},
+	}
+
+	h, agent, backend := setupForwardHarness(t, []string{"port0", "port1"})
+	applyRules(t, backend, "multibatch", []cforward.ForwardRule{rule4, rule6, ruleL2})
+	wireForwardPipeline(t, agent, "port0", "multibatch", []string{"port1"})
+
+	counts := make([]int, fwdKindCount)
+	sizes := make([]int, fwdKindCount)
+	packets := make([]gopacket.Packet, fwdMultibatchCount)
+	wantOutput := map[string]int{}
+	for idx := range packets {
+		kind := idx % fwdKindCount
+		packets[idx] = fwdMultibatchPacket(t, kind, idx)
+		counts[kind]++
+		sizes[kind] = len(packets[idx].Data())
+		wantOutput[string(packets[idx].Data())]++
+	}
+
+	result, err := h.HandlePackets(packets...)
+	require.NoError(t, err)
+	require.Len(t, result.Output, fwdMultibatchCount, "every burst packet must reach output")
+	require.Empty(t, result.Drop, "no burst packet may be dropped")
+
+	gotOutput := map[string]int{}
+	for _, pkt := range result.Output {
+		gotOutput[string(pkt.RawData)]++
+	}
+	require.Equal(t, wantOutput, gotOutput, "output must hold every burst packet exactly once by content")
+
+	path := dataplaneut.CounterPath{
+		Device:     "port0",
+		Pipeline:   "multibatch",
+		Function:   "multibatch",
+		Chain:      "multibatch_chain",
+		ModuleType: "forward",
+		ModuleName: "multibatch",
+	}
+	dataplaneut.RequireModuleCounter(
+		t, h, path, "rule4",
+		uint64(counts[fwdKindEcho4]), uint64(counts[fwdKindEcho4]*sizes[fwdKindEcho4]),
+	)
+	dataplaneut.RequireModuleCounter(
+		t, h, path, "rule6",
+		uint64(counts[fwdKindEcho6]), uint64(counts[fwdKindEcho6]*sizes[fwdKindEcho6]),
+	)
+	l2Packets := counts[fwdKindARP] + counts[fwdKindOther4]
+	l2Bytes := counts[fwdKindARP]*sizes[fwdKindARP] + counts[fwdKindOther4]*sizes[fwdKindOther4]
+	dataplaneut.RequireModuleCounter(t, h, path, "rule_l2", uint64(l2Packets), uint64(l2Bytes))
+}
+
+// Test_Forward_ModeOut_PortlessTargetCountsTerminalDrop verifies that a packet
+// forwarded to a port-less device drops at the output-entry terminal.
+//
+// The drop is counted in that device's output_drop counter and never reaches
+// the write stage: the target is registered by the wiring helper but
+// deliberately absent from the harness topology, so its egress resolves to no
+// port.
+func Test_Forward_ModeOut_PortlessTargetCountsTerminalDrop(t *testing.T) {
+	eth, ip4, _, icmp := fwdEtherLayers()
+	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
+	pktSize := uint64(len(pkt.Data()))
+
+	rule := cforward.ForwardRule{
+		Target:  "sink",
+		Mode:    cforward.ModeOut,
+		Counter: "rule0",
+		Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Dst4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+	}
+
+	h, agent, backend := setupForwardHarness(t, []string{"port0"})
+	applyRules(t, backend, "test", []cforward.ForwardRule{rule})
+	wireForwardPipeline(t, agent, "port0", "test", []string{"sink"})
+
+	result, err := h.HandlePackets(pkt)
+	require.NoError(t, err)
+	require.Empty(t, result.Output, "a port-less target must not reach the write stage")
+	require.Len(t, result.Drop, 1, "the packet must drop at the output entry terminal")
+
+	deviceCounters := dataplaneut.ValueCounters(
+		h.SharedMemory().DPConfig(0).DeviceCounters("sink"),
+	)
+	require.Equal(
+		t,
+		[]uint64{1, pktSize},
+		deviceCounters["output_drop"],
+		"the terminal drop must be counted on the port-less device",
+	)
 }

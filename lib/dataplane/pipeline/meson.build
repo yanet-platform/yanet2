@@ -1,6 +1,5 @@
 dependencies = [
-  lib_packet_dp_dep,
-  lib_module_dp_dep,
+  lib_common_dep,
 ]
 
 sources = files(
@@ -10,8 +9,6 @@ sources = files(
 lib_pipeline_dp = static_library(
   'pipeline',
   sources,
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
   dependencies: dependencies,
   install: false,
 )

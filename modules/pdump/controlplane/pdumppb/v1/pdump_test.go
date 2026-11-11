@@ -2,12 +2,14 @@ package pdumppb_test
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	pdumppb "github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb/v1"
+	ringpb "github.com/yanet-platform/yanet2/objects/ring/controlplane/ringpb/v1"
 )
 
 // Test_ShowConfigRequest_Validate verifies that an empty or nil request is
@@ -38,23 +40,6 @@ func Test_ShowConfigRequest_Validate(t *testing.T) {
 // Test_SetConfigRequest_Validate verifies that the rules for the config fields
 // a request carries report their exact field and rule text.
 func Test_SetConfigRequest_Validate(t *testing.T) {
-	maxRingSizeMessage := ""
-	if pdumppb.MaxRingSize&(pdumppb.MaxRingSize-1) != 0 {
-		maxRingSizeMessage = fmt.Sprintf(
-			"ring_size %d must be a power of two",
-			pdumppb.MaxRingSize,
-		)
-	}
-	normalMaxRingSizeMessage := ""
-	if pdumppb.MaxRingSize < 1<<26 {
-		normalMaxRingSizeMessage = fmt.Sprintf(
-			"ring_size %d must be in range %d..%d",
-			1<<26,
-			1<<20,
-			pdumppb.MaxRingSize,
-		)
-	}
-
 	cases := []struct {
 		name    string
 		request *pdumppb.SetConfigRequest
@@ -79,7 +64,7 @@ func Test_SetConfigRequest_Validate(t *testing.T) {
 			name: "absent snaplen is not checked",
 			request: &pdumppb.SetConfigRequest{
 				Name:   "pdump0",
-				Config: &pdumppb.Config{Filter: proto.String("tcp")},
+				Config: &pdumppb.Config{Filter: new("tcp")},
 			},
 		},
 		{
@@ -102,7 +87,7 @@ func Test_SetConfigRequest_Validate(t *testing.T) {
 				Name:   "pdump0",
 				Config: &pdumppb.Config{Mode: proto.Uint32(pdumppb.MaxMode + 1)},
 			},
-			message: "mode 4 must be in range 0..3",
+			message: "config: mode 4 must be in range 0..3",
 		},
 		{
 			name: "zero snaplen",
@@ -110,7 +95,7 @@ func Test_SetConfigRequest_Validate(t *testing.T) {
 				Name:   "pdump0",
 				Config: &pdumppb.Config{Snaplen: proto.Uint32(0)},
 			},
-			message: "snaplen must be greater than zero",
+			message: "config: snaplen must be greater than zero",
 		},
 		{
 			name: "positive snaplen",
@@ -120,60 +105,83 @@ func Test_SetConfigRequest_Validate(t *testing.T) {
 			},
 		},
 		{
-			name: "ring size below minimum",
+			name: "ring_name is absent",
 			request: &pdumppb.SetConfigRequest{
 				Name:   "pdump0",
-				Config: &pdumppb.Config{RingSize: proto.Uint32(1 << 19)},
-			},
-			message: fmt.Sprintf(
-				"ring_size %d must be in range %d..%d",
-				1<<19,
-				1<<20,
-				pdumppb.MaxRingSize,
-			),
-		},
-		{
-			name: "minimum ring size",
-			request: &pdumppb.SetConfigRequest{
-				Name:   "pdump0",
-				Config: &pdumppb.Config{RingSize: proto.Uint32(1048576)},
+				Config: &pdumppb.Config{Snaplen: proto.Uint32(1)},
 			},
 		},
 		{
-			name: "largest ASAN power-of-two ring size",
+			name: "ring_name is empty",
 			request: &pdumppb.SetConfigRequest{
 				Name:   "pdump0",
-				Config: &pdumppb.Config{RingSize: proto.Uint32(1 << 25)},
+				Config: &pdumppb.Config{RingName: new("")},
+			},
+			message: "config: ring_name is required",
+		},
+		{
+			name: "ring_name contains NUL",
+			request: &pdumppb.SetConfigRequest{
+				Name:   "pdump0",
+				Config: &pdumppb.Config{RingName: new("ring\x00a")},
+			},
+			message: "config: ring_name must not contain NUL",
+		},
+		{
+			name: "ring_name is overlong",
+			request: &pdumppb.SetConfigRequest{
+				Name:   "pdump0",
+				Config: &pdumppb.Config{RingName: new(strings.Repeat("r", ringpb.MaxRingNameLen))},
+			},
+			message: fmt.Sprintf("config: ring_name must be shorter than %d bytes", ringpb.MaxRingNameLen),
+		},
+		{
+			name: "ring_name at the longest accepted length",
+			request: &pdumppb.SetConfigRequest{
+				Name:   "pdump0",
+				Config: &pdumppb.Config{RingName: new(strings.Repeat("r", ringpb.MaxRingNameLen-1))},
 			},
 		},
 		{
-			name: "allocator maximum ring size",
+			name: "ring_name is valid",
 			request: &pdumppb.SetConfigRequest{
 				Name:   "pdump0",
-				Config: &pdumppb.Config{RingSize: proto.Uint32(pdumppb.MaxRingSize)},
+				Config: &pdumppb.Config{RingName: new("ring0")},
 			},
-			message: maxRingSizeMessage,
 		},
 		{
-			name: "normal allocator maximum ring size",
+			name: "filter contains NUL",
 			request: &pdumppb.SetConfigRequest{
 				Name:   "pdump0",
-				Config: &pdumppb.Config{RingSize: proto.Uint32(1 << 26)},
+				Config: &pdumppb.Config{Filter: new("tcp\x00udp")},
 			},
-			message: normalMaxRingSizeMessage,
+			message: "config: filter must not contain NUL",
 		},
 		{
-			name: "ring size above maximum",
+			name: "explicit zero disables the rate limit",
 			request: &pdumppb.SetConfigRequest{
-				Name:   "pdump0",
-				Config: &pdumppb.Config{RingSize: proto.Uint32(1 << 27)},
+				Name: "pdump0", Config: &pdumppb.Config{RatePps: proto.Uint64(0)},
 			},
-			message: fmt.Sprintf(
-				"ring_size %d must be in range %d..%d",
-				1<<27,
-				1<<20,
-				pdumppb.MaxRingSize,
-			),
+		},
+		{
+			name: "maximum rate is accepted",
+			request: &pdumppb.SetConfigRequest{
+				Name: "pdump0", Config: &pdumppb.Config{RatePps: proto.Uint64(pdumppb.MaxRatePPS)},
+			},
+		},
+		{
+			name: "rate above maximum is rejected",
+			request: &pdumppb.SetConfigRequest{
+				Name: "pdump0", Config: &pdumppb.Config{RatePps: proto.Uint64(pdumppb.MaxRatePPS + 1)},
+			},
+			message: "config: rate_pps 1000001 must be in range 0..1000000",
+		},
+		{
+			name: "full uint64 rate is rejected",
+			request: &pdumppb.SetConfigRequest{
+				Name: "pdump0", Config: &pdumppb.Config{RatePps: new(^uint64(0))},
+			},
+			message: "config: rate_pps 18446744073709551615 must be in range 0..1000000",
 		},
 	}
 

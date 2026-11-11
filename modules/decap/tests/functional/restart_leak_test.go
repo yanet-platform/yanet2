@@ -45,9 +45,9 @@ func TestRestart_WithoutRelease_ReclaimsSupersededAgents(t *testing.T) {
 		// The returned handle is deliberately dropped rather than released,
 		// modeling a creator that crashed before it could drop its own
 		// reference.
-		_, err = decap.NewBackend(agent).UpdateModule(
+		_, err = decap.NewBackend(agent).Update(
 			moduleName,
-			[]netip.Prefix{netip.MustParsePrefix("2001:db8::/32")},
+			decap.PrefixSets{Prefixes6: []netip.Prefix{netip.MustParsePrefix("2001:db8::/32")}},
 		)
 		require.NoErrorf(t, err, "round %d: publish failed", round)
 

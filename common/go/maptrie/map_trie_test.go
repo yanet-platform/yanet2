@@ -2,7 +2,7 @@ package maptrie
 
 import (
 	"encoding/binary"
-	"math/rand"
+	"math/rand/v2"
 	"net/netip"
 	"runtime"
 	"testing"
@@ -400,7 +400,7 @@ func initTestData(v4count int, v6count int, random bool) ([]netip.Addr, []netip.
 	for idx, a := range addrs {
 		mask := a.BitLen() - maskShift
 		if random {
-			mask = rand.Intn(a.BitLen() + 1)
+			mask = rand.IntN(a.BitLen() + 1)
 		}
 		p, _ := a.Prefix(mask)
 		prefixes[idx] = p.Masked()
@@ -488,7 +488,7 @@ func Benchmark_MapTrie_InsertUniq(b *testing.B) {
 	b.StopTimer()
 	inuse2 := heapInUse()
 	var found int
-	idx := max(rand.Intn(len(addrs))-1000, 0)
+	idx := max(rand.IntN(len(addrs))-1000, 0)
 	for idx := range addrs[idx : idx+1000] {
 		_, v, ok := trie.Lookup(addrs[idx])
 		if !ok {
@@ -550,10 +550,10 @@ func Benchmark_mapTrie_lookup_mess_1k(b *testing.B) {
 		)
 	}
 
-	var found int
-	b.ResetTimer()
-	for idx := range b.N {
+	var found, idx int
+	for b.Loop() {
 		_, v, ok := mt.Lookup(addrs[idx%len(addrs)])
+		idx++
 		if !ok {
 			panic("not found")
 		}

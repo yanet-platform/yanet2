@@ -16,7 +16,7 @@ import (
 // A config's outer structure is allocated and freed directly against this
 // root context, so its free count advances once and only once per config
 // actually torn down.
-func mapChainAgentRootMemoryNode(t *testing.T, shm *ffi.SharedMemory, name string) ffi.AgentMemoryNode {
+func mapChainAgentRootMemoryNode(t *testing.T, shm *ffi.SharedMemory, name string) ffi.MemoryNode {
 	t.Helper()
 
 	for _, agentInfo := range shm.DPConfig(0).Agents() {
@@ -34,7 +34,7 @@ func mapChainAgentRootMemoryNode(t *testing.T, shm *ffi.SharedMemory, name strin
 	}
 
 	t.Fatalf("agent %q not found in dataplane config", name)
-	return ffi.AgentMemoryNode{}
+	return ffi.MemoryNode{}
 }
 
 // newMapChainConfig builds and publishes an fwstate config under the given

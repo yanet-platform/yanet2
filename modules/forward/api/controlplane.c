@@ -23,7 +23,7 @@ forward_module_config_destroy(struct cp_module *cp_module) {
 	);
 
 	memory_bfree(
-		&cp_module->memory_context,
+		&cp_module->entity.memory_context,
 		ADDR_OF(&config->targets),
 		sizeof(struct forward_target) * config->target_count
 	);
@@ -43,25 +43,37 @@ forward_module_config_destroy(struct cp_module *cp_module) {
 	memset(&config->filter_ip6, 0, sizeof(config->filter_ip6));
 
 	struct fwd_classifier_core *core = &config->classifier_core;
-	classify_attr_device_free(&cp_module->memory_context, &core->dev_attr);
-	classify_attr_line_free(&cp_module->memory_context, &core->vlan_attr);
+	classify_attr_device_free(
+		&cp_module->entity.memory_context, &core->dev_attr
+	);
+	classify_attr_line_free(
+		&cp_module->entity.memory_context, &core->vlan_attr
+	);
 	value_table_free(&core->joint);
 	memset(core, 0, sizeof(*core));
 
 	struct fwd_classifier_net4 *net4 = &config->classifier_net4;
-	classify_attr_net4_free(&cp_module->memory_context, &net4->src_attr);
-	classify_attr_net4_free(&cp_module->memory_context, &net4->dst_attr);
+	classify_attr_net4_free(
+		&cp_module->entity.memory_context, &net4->src_attr
+	);
+	classify_attr_net4_free(
+		&cp_module->entity.memory_context, &net4->dst_attr
+	);
 	value_table_free(&net4->joint);
 	memset(net4, 0, sizeof(*net4));
 
 	struct fwd_classifier_net6 *net6 = &config->classifier_net6;
-	classify_attr_net6_free(&cp_module->memory_context, &net6->src_attr);
-	classify_attr_net6_free(&cp_module->memory_context, &net6->dst_attr);
+	classify_attr_net6_free(
+		&cp_module->entity.memory_context, &net6->src_attr
+	);
+	classify_attr_net6_free(
+		&cp_module->entity.memory_context, &net6->dst_attr
+	);
 	value_table_free(&net6->joint);
 	memset(net6, 0, sizeof(*net6));
 
 	// Capture agent before fini zeroes it.
-	struct agent *agent = ADDR_OF(&cp_module->agent);
+	struct agent *agent = ADDR_OF(&cp_module->entity.agent);
 
 	cp_module_fini(cp_module);
 
@@ -118,7 +130,10 @@ forward_module_config_free(struct cp_module *cp_module, yanet_error **err) {
 		return -1;
 	}
 
+	struct agent *owner = ADDR_OF(&cp_module->entity.agent);
+
 	forward_module_config_destroy(cp_module);
+	agent_destroy_released(owner);
 	return 0;
 }
 
@@ -294,7 +309,8 @@ forward_module_build_core(
 	struct forward_module_config *config = container_of(
 		cp_module, struct forward_module_config, cp_module
 	);
-	struct memory_context *memory_context = &cp_module->memory_context;
+	struct memory_context *memory_context =
+		&cp_module->entity.memory_context;
 	struct fwd_classifier_core *cls = &config->classifier_core;
 	const struct classifier_rule **rule_ptrs = forward_rule_ptrs_project(
 		forward_rules, forward_rule_count, check_forward_rule_any
@@ -311,6 +327,7 @@ forward_module_build_core(
 	}
 	if (classify_fwd_device_compile(
 		    memory_context,
+		    "l2:device",
 		    rule_ptrs,
 		    forward_rule_count,
 		    &cls->dev_attr,
@@ -320,6 +337,7 @@ forward_module_build_core(
 	}
 	if (classify_fwd_vlan_compile(
 		    memory_context,
+		    "l2:vlan",
 		    rule_ptrs,
 		    forward_rule_count,
 		    &cls->vlan_attr,
@@ -329,6 +347,7 @@ forward_module_build_core(
 	}
 	if (classify_join(
 		    memory_context,
+		    "l2:joint",
 		    &stage_dev,
 		    &stage_vlan,
 		    forward_rule_count,
@@ -369,7 +388,8 @@ forward_module_derive_l2(
 	struct forward_module_config *config = container_of(
 		cp_module, struct forward_module_config, cp_module
 	);
-	struct memory_context *memory_context = &cp_module->memory_context;
+	struct memory_context *memory_context =
+		&cp_module->entity.memory_context;
 	const struct classifier_rule **rule_ptrs = forward_rule_ptrs_project(
 		forward_rules, forward_rule_count, check_forward_rule_l2
 	);
@@ -380,6 +400,7 @@ forward_module_derive_l2(
 
 	if (classify_decode(
 		    memory_context,
+		    "l2:rules",
 		    core_stage,
 		    rule_ptrs,
 		    forward_rule_count,
@@ -423,7 +444,8 @@ forward_module_build_net4(
 	struct forward_module_config *config = container_of(
 		cp_module, struct forward_module_config, cp_module
 	);
-	struct memory_context *memory_context = &cp_module->memory_context;
+	struct memory_context *memory_context =
+		&cp_module->entity.memory_context;
 	struct fwd_classifier_net4 *cls = &config->classifier_net4;
 	const struct classifier_rule **rule_ptrs = forward_rule_ptrs_project(
 		forward_rules, forward_rule_count, check_forward_rule_ip4
@@ -442,6 +464,7 @@ forward_module_build_net4(
 
 	if (classify_fwd_net4_src_compile(
 		    memory_context,
+		    "ip4:net4_src",
 		    rule_ptrs,
 		    forward_rule_count,
 		    &cls->src_attr,
@@ -451,6 +474,7 @@ forward_module_build_net4(
 	}
 	if (classify_fwd_net4_dst_compile(
 		    memory_context,
+		    "ip4:net4_dst",
 		    rule_ptrs,
 		    forward_rule_count,
 		    &cls->dst_attr,
@@ -460,6 +484,7 @@ forward_module_build_net4(
 	}
 	if (classify_join(
 		    memory_context,
+		    "ip4:nets_joint",
 		    &stage_src,
 		    &stage_dst,
 		    forward_rule_count,
@@ -470,6 +495,7 @@ forward_module_build_net4(
 	}
 	if (classify_join(
 		    memory_context,
+		    "ip4:root_joint",
 		    core_stage,
 		    &stage_nets,
 		    forward_rule_count,
@@ -510,7 +536,8 @@ forward_module_derive_net4(
 	struct forward_module_config *config = container_of(
 		cp_module, struct forward_module_config, cp_module
 	);
-	struct memory_context *memory_context = &cp_module->memory_context;
+	struct memory_context *memory_context =
+		&cp_module->entity.memory_context;
 	const struct classifier_rule **rule_ptrs = forward_rule_ptrs_project(
 		forward_rules, forward_rule_count, check_forward_rule_ip4
 	);
@@ -521,6 +548,7 @@ forward_module_derive_net4(
 	}
 	if (classify_decode(
 		    memory_context,
+		    "ip4:rules",
 		    ip4_stage,
 		    rule_ptrs,
 		    forward_rule_count,
@@ -550,7 +578,8 @@ forward_module_build_net6(
 	struct forward_module_config *config = container_of(
 		cp_module, struct forward_module_config, cp_module
 	);
-	struct memory_context *memory_context = &cp_module->memory_context;
+	struct memory_context *memory_context =
+		&cp_module->entity.memory_context;
 	struct fwd_classifier_net6 *cls = &config->classifier_net6;
 	const struct classifier_rule **rule_ptrs = forward_rule_ptrs_project(
 		forward_rules, forward_rule_count, check_forward_rule_ip6
@@ -569,6 +598,7 @@ forward_module_build_net6(
 
 	if (classify_fwd_net6_src_compile(
 		    memory_context,
+		    "ip6:net6_src",
 		    rule_ptrs,
 		    forward_rule_count,
 		    &cls->src_attr,
@@ -578,6 +608,7 @@ forward_module_build_net6(
 	}
 	if (classify_fwd_net6_dst_compile(
 		    memory_context,
+		    "ip6:net6_dst",
 		    rule_ptrs,
 		    forward_rule_count,
 		    &cls->dst_attr,
@@ -587,6 +618,7 @@ forward_module_build_net6(
 	}
 	if (classify_join(
 		    memory_context,
+		    "ip6:nets_joint",
 		    &stage_src,
 		    &stage_dst,
 		    forward_rule_count,
@@ -597,6 +629,7 @@ forward_module_build_net6(
 	}
 	if (classify_join(
 		    memory_context,
+		    "ip6:root_joint",
 		    core_stage,
 		    &stage_nets,
 		    forward_rule_count,
@@ -637,7 +670,8 @@ forward_module_derive_net6(
 	struct forward_module_config *config = container_of(
 		cp_module, struct forward_module_config, cp_module
 	);
-	struct memory_context *memory_context = &cp_module->memory_context;
+	struct memory_context *memory_context =
+		&cp_module->entity.memory_context;
 	const struct classifier_rule **rule_ptrs = forward_rule_ptrs_project(
 		forward_rules, forward_rule_count, check_forward_rule_ip6
 	);
@@ -648,6 +682,7 @@ forward_module_derive_net6(
 	}
 	if (classify_decode(
 		    memory_context,
+		    "ip6:rules",
 		    ip6_stage,
 		    rule_ptrs,
 		    forward_rule_count,
@@ -676,7 +711,7 @@ forward_module_config_update(
 	);
 
 	struct forward_target *targets = (struct forward_target *)memory_balloc(
-		&cp_module->memory_context,
+		&cp_module->entity.memory_context,
 		sizeof(struct forward_target) * rule_count
 	);
 	if (targets == NULL) {
@@ -731,7 +766,9 @@ forward_module_config_update(
 		    cp_module, &core_stage, forward_rules, rule_count, err
 	    )) {
 		classifier_fini(
-			&core_stage, &cp_module->memory_context, rule_count
+			&core_stage,
+			&cp_module->entity.memory_context,
+			rule_count
 		);
 		goto error_target;
 	}
@@ -757,12 +794,12 @@ forward_module_config_update(
 		    )) {
 			classifier_fini(
 				&ip4_stage,
-				&cp_module->memory_context,
+				&cp_module->entity.memory_context,
 				rule_count
 			);
 			classifier_fini(
 				&core_stage,
-				&cp_module->memory_context,
+				&cp_module->entity.memory_context,
 				rule_count
 			);
 			goto error_target;
@@ -788,25 +825,27 @@ forward_module_config_update(
 		    )) {
 			classifier_fini(
 				&ip6_stage,
-				&cp_module->memory_context,
+				&cp_module->entity.memory_context,
 				rule_count
 			);
 			classifier_fini(
 				&core_stage,
-				&cp_module->memory_context,
+				&cp_module->entity.memory_context,
 				rule_count
 			);
 			goto error_target;
 		}
 	}
 
-	classifier_fini(&core_stage, &cp_module->memory_context, rule_count);
+	classifier_fini(
+		&core_stage, &cp_module->entity.memory_context, rule_count
+	);
 
 	return 0;
 
 error_target:
 	memory_bfree(
-		&cp_module->memory_context,
+		&cp_module->entity.memory_context,
 		targets,
 		sizeof(struct forward_target) * rule_count
 	);

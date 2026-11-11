@@ -12,10 +12,10 @@ import (
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/encoding/gzip"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
+	"github.com/yanet-platform/yanet2/common/go/xgrpc"
 	adapterpb "github.com/yanet-platform/yanet2/operators/bird-adapter/adapterpb/v1"
 )
 
@@ -59,7 +59,7 @@ func init() {
 	clientCmd.Flags().StringVarP(&clientCmdArgs.ServerConfigPath, "server-config", "s", "", "Path to the server configuration file (required)")
 	clientCmd.Flags().StringVar(&clientCmdArgs.ConfigName, "config", "", "Configuration name (required)")
 	clientCmd.Flags().StringSliceVar(&clientCmdArgs.Sockets, "sockets", nil, "List of BIRD socket paths (required)")
-	clientCmd.Flags().Var(&clientCmdArgs.LogLevel, "log-level", "Log level for this client. If not set, logging is disabled.")
+	clientCmd.Flags().Var(&clientCmdArgs.LogLevel, "log-level", "Log level of this import's own log. If not set, that log is off; the service log is written regardless.")
 	clientCmd.Flags().StringVar(&clientCmdArgs.SourceV4, "source-v4", "", "MPLS source IPv4 address (required)")
 	clientCmd.Flags().StringVar(&clientCmdArgs.SourceV6, "source-v6", "", "MPLS source IPv6 address (required)")
 
@@ -113,7 +113,7 @@ func runClient() error {
 	conn, err := grpc.NewClient(
 		serverCfg.ListenAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithDefaultCallOptions(grpc.UseCompressor(gzip.Name)),
+		grpc.WithDefaultCallOptions(grpc.UseCompressor(xgrpc.ZstdName)),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to connect to adapter server: %w", err)
@@ -183,7 +183,7 @@ func runListSessions() error {
 	conn, err := grpc.NewClient(
 		serverCfg.ListenAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithDefaultCallOptions(grpc.UseCompressor(gzip.Name)),
+		grpc.WithDefaultCallOptions(grpc.UseCompressor(xgrpc.ZstdName)),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to connect to adapter server: %w", err)
@@ -215,6 +215,16 @@ func runListSessions() error {
 		fmt.Printf("Sockets:    %s\n", strings.Join(session.Sockets, ", "))
 		fmt.Printf("Created:    %s (uptime: %s)\n", createdAt.Format(time.RFC3339), uptime)
 		fmt.Printf("Connection: %s\n", connStateStr)
+		if holding := session.GetReplacing(); holding != nil {
+			holdingCreatedAt := time.Unix(0, holding.GetCreatedAt())
+			fmt.Println("Status:     pending, takes over once the holder below stops")
+			fmt.Printf("Holding:    sockets %s, created %s (uptime: %s), connection %s\n",
+				strings.Join(holding.GetSockets(), ", "),
+				holdingCreatedAt.Format(time.RFC3339),
+				time.Since(holdingCreatedAt).Round(time.Second),
+				connectionStateToString(holding.GetConnectionState()),
+			)
+		}
 		fmt.Println(strings.Repeat("-", 80))
 	}
 

@@ -15,11 +15,7 @@ install_data(
     install_dir: '/etc/yanet2/decap.d',
 )
 
-# Not a fuzz target, and nothing in the fuzz suite runs it, so the
-# fuzzing configuration skips it to save build time.
-if not get_option('fuzzing').enabled()
-  # The binary links every gateway-facing proto package, so it depends on
-  # every protoc generator.
+if yanet_go_binaries
   custom_target(
       'yanet-generic-operator',
       output: 'yanet-generic-operator',
@@ -33,25 +29,7 @@ if not get_option('fuzzing').enabled()
       env: yanet_go_nocgo_env,
       build_by_default: true,
       build_always_stale: true,
-      depends: [
-          ynpb_gen,
-          common_protoc_gen,
-          common_readiness_protoc_gen,
-          filter_protoc_gen,
-          blackhole_protoc_gen,
-          decap_protoc_gen,
-          dscp_protoc_gen,
-          forward_protoc_gen,
-          mirror_protoc_gen,
-          nat64_protoc_gen,
-          pdump_protoc_gen,
-          plain_protoc_gen,
-          route_protoc_gen,
-          route_mpls_protoc_gen,
-          trafgen_protoc_gen,
-          unrdup_protoc_gen,
-          vlan_protoc_gen,
-      ],
+      depends: go_proto_targets,
       install: true,
       install_dir: get_option('bindir'),
   )

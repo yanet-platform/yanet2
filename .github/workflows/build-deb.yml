@@ -1,76 +1,44 @@
 name: Build DEB Packages
 
+# Packages are built nightly, on demand, by release candidates and releases,
+# and on pull requests that change the packaging itself.
+#
+# Releases, release candidates and the nightly build start from a clean
+# tree with no compiler caches, so a released package never depends on what
+# earlier runs left behind; a pull request reuses the Rust dependencies the
+# last nightly build compiled. Most pull requests build no packages and
+# check the release flags and arm64 in the build workflow instead.
 on:
-  push:
-    branches: ["main"]
-    tags: ["v*"]
-    # Keep this list identical to the pull_request paths below.
-    paths:
-      - "dataplane/**"
-      - "controlplane/**"
-      - "modules/**"
-      - "devices/**"
-      - "operators/**"
-      - "lib/**"
-      - "api/**"
-      - "bindings/**"
-      - "common/**"
-      - "cli/**"
-      - "tests/**"
-      - "debian/**"
-      - "scripts/**"
-      - "subprojects/**"
-      - ".gitmodules"
-      - "Makefile"
-      - "meson.build"
-      - "meson_options.txt"
-      - "dataplane.yaml"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "go.mod"
-      - "go.sum"
-      - ".github/actions/**"
-      - ".github/scripts/**"
-      - ".github/workflows/build-deb.yml"
-      # A later match wins, so these negations drop the documentation and
-      # web sources that would otherwise ride in on the source trees above.
-      - "!**.md"
-      - "!modules/**/web/**"
-      - "!devices/**/web/**"
-      - "!operators/**/web/**"
+  workflow_call:
+    inputs:
+      source_sha:
+        type: string
+        required: true
+      pkg_version:
+        type: string
+        required: true
+      include_2204:
+        type: boolean
+        required: false
+        default: false
   pull_request:
     branches: ["**"]
     paths:
-      - "dataplane/**"
-      - "controlplane/**"
-      - "modules/**"
-      - "devices/**"
-      - "operators/**"
-      - "lib/**"
-      - "api/**"
-      - "bindings/**"
-      - "common/**"
-      - "cli/**"
-      - "tests/**"
       - "debian/**"
-      - "scripts/**"
-      - "subprojects/**"
-      - ".gitmodules"
+      - "scripts/build-deb.sh"
+      - "scripts/verify-deb-artifacts.sh"
+      - "scripts/gen-shell-completions.sh"
+      - "scripts/uprobe/**"
       - "Makefile"
-      - "meson.build"
       - "meson_options.txt"
-      - "dataplane.yaml"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "go.mod"
-      - "go.sum"
-      - ".github/actions/**"
-      - ".github/scripts/**"
+      - "ci/go-version"
+      - ".github/actions/apt-failover/**"
+      - ".github/actions/protoc-plugins/**"
+      - ".github/scripts/release-deb-artifacts.sh"
+      - ".github/scripts/verify-deb-artifacts_test.sh"
       - ".github/workflows/build-deb.yml"
-      - "!**.md"
-      - "!modules/**/web/**"
-      - "!devices/**/web/**"
-      - "!operators/**/web/**"
+  schedule:
+    - cron: "30 3 * * *"
   workflow_dispatch:
     inputs:
       include_2204:
@@ -79,54 +47,65 @@ on:
         default: false
 
 concurrency:
-  # Pushes key on the ref, so a newer push supersedes an older one still
-  # running. A manual dispatch keys on its run id instead, so two explicit
-  # packaging runs (e.g. a 22.04 build alongside a default one) never collide.
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || (github.event_name == 'workflow_dispatch' && github.run_id) || github.ref }}
+  # A pull request supersedes its own earlier run; every other run, including
+  # one called from a release workflow, keys on its own run id.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
-  set-matrix:
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.set.outputs.matrix }}
-    steps:
-      - id: set
-        run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ github.event.inputs.include_2204 }}" == "true" ]]; then
-            echo 'matrix={"include":[{"unbtver":"24.04","arch":"amd64","runner":"ubuntu-24.04","artifact":"debs-24.04-amd64"},{"unbtver":"24.04","arch":"arm64","runner":"ubuntu-24.04-arm","artifact":"debs-24.04-arm64"},{"unbtver":"22.04","arch":"amd64","runner":"ubuntu-22.04","artifact":"debs-22.04-amd64"}]}' >> "$GITHUB_OUTPUT"
-          else
-            echo 'matrix={"include":[{"unbtver":"24.04","arch":"amd64","runner":"ubuntu-24.04","artifact":"debs-24.04-amd64"},{"unbtver":"24.04","arch":"arm64","runner":"ubuntu-24.04-arm","artifact":"debs-24.04-arm64"}]}' >> "$GITHUB_OUTPUT"
-          fi
-
   test-deb-artifacts:
     name: Test Debian artifact scripts
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Run Debian artifact tests
         run: |
           set -euo pipefail
           bash -n scripts/verify-deb-artifacts.sh \
             .github/scripts/release-deb-artifacts.sh \
-            .github/scripts/verify-deb-artifacts_test.sh \
-            .github/scripts/release-deb-artifacts_test.sh
+            .github/scripts/verify-deb-artifacts_test.sh
           .github/scripts/verify-deb-artifacts_test.sh
-          .github/scripts/release-deb-artifacts_test.sh
 
   build-deb:
     name: Build DEB (${{ matrix.unbtver }}, ${{ matrix.arch }})
-    needs: [set-matrix, test-deb-artifacts]
+    timeout-minutes: 90
+    env:
+      PKG_VERSION: ${{ inputs.pkg_version }}
+      # Ubuntu 22.04 ships meson 0.61, below the project minimum, so its
+      # build takes meson from PyPI and the profile drops the apt package
+      # from Build-Depends.
+      DEB_BUILD_PROFILES: ${{ matrix.unbtver == '22.04' && 'pkg.yanet2.nouprobe pkg.yanet2.pipmeson' || '' }}
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.set-matrix.outputs.matrix) }}
+      # Ubuntu 22.04 joins only when a caller or a manual run asks for it.
+      matrix: >-
+        ${{ fromJSON(inputs.include_2204 &&
+        '{"include":[{"unbtver":"24.04","arch":"amd64","runner":"ubuntu-24.04","artifact":"debs-24.04-amd64"},{"unbtver":"24.04","arch":"arm64","runner":"ubuntu-24.04-arm","artifact":"debs-24.04-arm64"},{"unbtver":"22.04","arch":"amd64","runner":"ubuntu-22.04","artifact":"debs-22.04-amd64"}]}' ||
+        '{"include":[{"unbtver":"24.04","arch":"amd64","runner":"ubuntu-24.04","artifact":"debs-24.04-amd64"},{"unbtver":"24.04","arch":"arm64","runner":"ubuntu-24.04-arm","artifact":"debs-24.04-arm64"}]}') }}
 
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.source_sha || github.sha }}
           submodules: true
+
+      - env:
+          SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+
+      # A release rerun from main builds an older tag whose tree may predate the
+      # Go version file, so a manual run takes it from the workflow's commit.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          ref: ${{ github.sha }}
+          path: release-tools
+          sparse-checkout: ci/go-version
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - uses: ./.github/actions/apt-failover
 
@@ -136,50 +115,99 @@ jobs:
             || git fetch --tags --filter=blob:none origin \
             || true
 
-      - uses: hendrikmuhs/ccache-action@v1.2.23
-        name: ccache
-        with:
-          key: ${{ runner.os }}-deb-ccache-${{ matrix.unbtver }}-${{ matrix.arch }}
-          max-size: 2G
-          verbose: 2
-          save: ${{ github.ref == 'refs/heads/main' }}
-
       - name: update apt (act hack)
         if: ${{ env.ACT }}
         run: |
           apt-get update
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@1.88.0
-
-      # Only the cargo home is cached. Debuild runs the clean target first,
-      # which removes the target directory, so an entry holding it would be
-      # deleted before the build could use it.
-      - name: Cache rust
-        uses: Swatinem/rust-cache@v2.9.2
-        with:
-          shared-key: deb-${{ matrix.unbtver }}-${{ matrix.arch }}
-          cache-targets: false
+        uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
 
       - name: Install packaging tools
         timeout-minutes: 10
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends devscripts
-      - uses: actions/setup-go@v6
+
+      # Pinned to the version Ubuntu 24.04 packages, so every build uses
+      # the same meson. Installed system-wide because the package build runs
+      # under sudo.
+      - name: Install meson from PyPI
+        if: matrix.unbtver == '22.04'
+        timeout-minutes: 10
+        run: |
+          sudo python3 -m pip install --no-cache-dir meson==1.3.2
+          meson --version
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.24.x"
+          go-version-file: ${{ github.event_name == 'workflow_dispatch' && 'release-tools/ci/go-version' || 'ci/go-version' }}
           cache: false
-          check-latest: true
-      - name: Restore Go module cache
-        uses: ./.github/actions/go-modcache
+
+      # A pull request reuses the Rust dependencies the nightly build compiled.
+      #
+      # Without them a packaging change rebuilds every crate it depends on.
+      # The save drops the workspace's own outputs, which every build compiles
+      # again, and keeps no Go build cache, which does not track its C
+      # dependencies on the runner's packages. The restore comes before the
+      # protobuf plugins, whose install would leave read-only module
+      # directories in its way.
+      - name: Name the build caches
+        id: build-cache
+        env:
+          UBUNTU: ${{ matrix.unbtver }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          rust=$(rustc -V | cut -d' ' -f2)
+          echo "prefix=deb-build-v1-$UBUNTU-$ARCH-rust$rust-$(go env GOVERSION)-" >>"$GITHUB_OUTPUT"
+
+      - name: Restore build caches
+        if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            target
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            ~/go/pkg/mod
+          key: ${{ steps.build-cache.outputs.prefix }}${{ hashFiles('Cargo.lock', 'go.sum') }}
+          restore-keys: |
+            ${{ steps.build-cache.outputs.prefix }}${{ hashFiles('Cargo.lock', 'go.sum') }}-
+            ${{ steps.build-cache.outputs.prefix }}
+
       - name: Install Go Protobuf Plugins
         uses: ./.github/actions/protoc-plugins
 
       - name: Build packages
+        timeout-minutes: 75
+        env:
+          DEB_KEEP_BUILD_CACHES: ${{ github.event_name == 'pull_request' && '1' || '' }}
+        run: sudo -E env "PATH=$PATH" "PKG_VERSION=$PKG_VERSION" "DEB_KEEP_BUILD_CACHES=$DEB_KEEP_BUILD_CACHES" ./scripts/build-deb.sh
+
+      # Only a build of main itself saves the caches, and only for Ubuntu 24.04.
+      #
+      # Pull requests build 24.04 alone, and a release calling this workflow
+      # passes its source commit, which leaves the caches alone.
+      - name: Drop the workspace outputs from the build caches
+        if: success() && github.ref == 'refs/heads/main' && inputs.source_sha == '' && matrix.unbtver == '24.04' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
         run: |
-          sudo -E env "PATH=$PATH" ./scripts/build-deb.sh
-          sudo chown -R $(id -u) ~/.cargo  # fix caching for Rust
+          sudo rm -rf target/release/yanet-* target/release/libyanet_* target/release/deps/yanet_* \
+            target/release/deps/libyanet_* target/release/build/yanet-* \
+            target/release/.fingerprint/yanet-*
+
+      - name: Save build caches
+        if: success() && github.ref == 'refs/heads/main' && inputs.source_sha == '' && matrix.unbtver == '24.04' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            target
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            ~/go/pkg/mod
+          key: ${{ steps.build-cache.outputs.prefix }}${{ hashFiles('Cargo.lock', 'go.sum') }}-${{ github.run_id }}
 
       - name: Verify package artifacts
         run: sudo ./scripts/verify-deb-artifacts.sh outdeb '${{ matrix.arch }}'
@@ -195,26 +223,35 @@ jobs:
           fi
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.artifact }}
+          overwrite: true
           path: |
             outdeb/*.changes
             outdeb/*.buildinfo
             outdeb/*.deb
             outdeb/*.ddeb
 
-  release:
-    needs: build-deb
-    if: startsWith(github.ref, 'refs/tags/')
+  verify-release:
+    if: inputs.pkg_version != ''
+    needs: [test-deb-artifacts, build-deb]
     runs-on: ubuntu-latest
-
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.source_sha }}
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          ref: ${{ github.sha }}
+          path: release-tools
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: debs-*
           path: artifacts
 
       - name: Install Debian verification tools
@@ -223,21 +260,46 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends devscripts
 
-      # Normal tag pushes validate and publish the two 24.04 architectures. A
-      # manual dispatch on a tag with include_2204=true additionally validates
-      # the optional Ubuntu 22.04 amd64 set, but does not publish it.
-      - name: Verify and flatten Debian artifacts
+      - name: Verify release packages
+        env:
+          EXPECTED_VERSION: ${{ inputs.pkg_version }}
+          INCLUDE_2204: ${{ inputs.include_2204 }}
         run: |
-          set -euo pipefail
-          helper_args=(artifacts outdeb)
-          if [[ "${{ github.event_name }}" == 'workflow_dispatch' && "${{ github.event.inputs.include_2204 }}" == 'true' ]]; then
-            helper_args+=(--include-2204)
+          args=(artifacts outdeb --expected-version "$EXPECTED_VERSION")
+          if [[ "$INCLUDE_2204" == true ]]; then
+            args+=(--include-2204)
           fi
-          .github/scripts/release-deb-artifacts.sh "${helper_args[@]}"
+          helper=.github/scripts/release-deb-artifacts.sh
+          if [[ $GITHUB_EVENT_NAME == workflow_dispatch ]]; then
+            helper=release-tools/.github/scripts/release-deb-artifacts.sh
+          fi
+          bash "$helper" "${args[@]}"
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          files: |
+          name: verified-debs
+          overwrite: true
+          path: |
             outdeb/*.deb
             outdeb/*.ddeb
+
+  notify-on-failure:
+    name: Notify on nightly packaging failure
+    runs-on: ubuntu-latest
+    needs: [test-deb-artifacts, build-deb]
+    if: failure() && github.event_name == 'schedule'
+    env:
+      Message: |
+        ❌ Nightly DEB build failed
+        Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Send failure notification to Telegram
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_YANET_NOTIFICATIONS_BOT_TOKEN }}
+          CHAT_ID: ${{ vars.TELEGRAM_YANET_CHAT_ID }}
+          TOPIC_ID: ${{ vars.TELEGRAM_YANET_PR_TOPIC_ID }}
+        run: |
+          curl -fsS -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${CHAT_ID}" \
+            --data-urlencode "message_thread_id=${TOPIC_ID}" \
+            --data-urlencode "text=${Message}" >/dev/null

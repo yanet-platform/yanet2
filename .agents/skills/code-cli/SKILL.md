@@ -15,6 +15,8 @@ A CLI is a thin, typed front for one gRPC service: clap proves the argument
 form before a connection exists, the service owns every invariant,
 `ync` owns connection, output, errors and completion. `references/new-crate.md`
 has the manifest, `build.rs`, skeleton and registration steps for a new binary.
+Private CLIs outside this repository build against `ync` through a pinned
+yanet2 submodule, so a `ync` API change reaches them only on their next bump.
 
 ## Shape
 
@@ -35,12 +37,13 @@ has the manifest, `build.rs`, skeleton and registration steps for a new binary.
   where `type <X>Service = Service<<X>ServiceClient<LayeredChannel>>`, each
   returning `Result<(), Error>`. A crate talking to several services keeps
   a local struct holding them.
-- The tonic build generates both client and server modules, so the CLI imports
-  `SERVICE_NAME` from the generated `<x>_service_server` module. A crate that
+- The build generates a client over the shared gRPC runtime (`ync::rpc`) and a
+  `<x>_service_server` module holding only `SERVICE_NAME`, which the CLI
+  imports from there. A crate that
   builds its client at a single site keeps the builder inline:
-  `|channel| <X>ServiceClient::new(channel).send_compressed(Gzip)
-  .accept_compressed(Gzip)`. Once the crate builds it at more than one site,
-  pull it into `fn client(channel: LayeredChannel) ->
+  `|channel| <X>ServiceClient::new(channel).send_compressed(Zstd)
+  .accept_compressed(Zstd).accept_compressed(Gzip)`. Once the crate builds it at
+  more than one site, pull it into `fn client(channel: LayeredChannel) ->
   <X>ServiceClient<LayeredChannel>`, named `<x>_client` only when the crate
   imports the `ync::client` module under that name. One service:
   `Service::connect_for(&cmd.globals.connection, action, SERVICE_NAME,
@@ -95,8 +98,8 @@ has the manifest, `build.rs`, skeleton and registration steps for a new binary.
   and parses on its own.
 - Flags: `--name/-n` names the object the binary manages (a config, a map,
   a sessions state) and nothing else; `-4/-6` family filters, mutually
-  exclusive (nat64's address pair excepted); `--endpoint` and `--auth`
-  exist only through `ConnectionArgs`. A short flag has one meaning across
+  exclusive; `--endpoint` and `--auth` exist only through
+  `ConnectionArgs`. A short flag has one meaning across
   all binaries: `-d` device, `-p` pipeline, or prefix in a binary without
   pipelines, `-f` function, `-c` chain, `-t` tag, `-i`/`-o` input and
   output, `-m` module name, `-r` rate. A subcommand flag never shadows the
@@ -198,7 +201,11 @@ no `--yes`, no `--dry-run`.
   `Error::invalid_argument(verb, endpoint, message)`; a command addressing an
   existing object passes `service.not_found("<verb>", "<resource>")` as
   the mapper of `unary_with`, so a missing object reads `<resource> not found`
-  and exits 3. Hints via `.with_hint(…)`.
+  and exits 3. A command whose RPC can report `NotFound` for an object other
+  than the one it addresses, an element inside the config or a ring the
+  config refers to (pdump `set`), keeps `status`: one label would misname
+  what is missing. Hints via
+  `.with_hint(…)`.
 
 ## Tests
 

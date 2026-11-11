@@ -122,6 +122,12 @@ export interface DeviceTypeManifest {
     /** Whether the ext slice differs from the clean snapshot. */
     extDirty?: (device: BaseDevice, snapshot: BaseDevice | undefined) => boolean;
 
+    /**
+     * Whether the ext slice can be submitted; Save stays disabled while
+     * false. Absent means the type has no submittability constraints.
+     */
+    extValid?: (device: BaseDevice) => boolean;
+
     /** When false, Save commits directly instead of opening the YAML diff modal. */
     confirmViaDiff?: boolean;
 

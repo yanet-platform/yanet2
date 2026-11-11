@@ -37,14 +37,18 @@ struct dp_device {
 };
 
 /*
- * Inert dataplane-side descriptor for a loaded object type.
+ * Dataplane-side descriptor for a loaded object type.
  *
- * Carries only the type name: objects take no per-packet action, so there
- * is no handler slot. A handler field can be added here when objects gain
- * dataplane behaviour.
+ * Objects take no per-packet action, so there is no packet handler slot;
+ * the execution-context commit handler and the prepared buffer size it
+ * fills mirror the module slots of the same names.
  */
 struct dp_object {
 	char name[OBJECT_TYPE_LEN];
+	object_commit_ectx_handler commit_ectx_handler;
+	// Size of the object's private per-context buffer, zero when the
+	// object needs none; mirrors the loaded object's declaration.
+	uint64_t prepared_size;
 };
 
 // Per-DPDK-port counter registry and storage.
@@ -57,6 +61,16 @@ struct dp_port_counters {
 	char port_name[80];
 	struct counter_registry registry;
 	struct counter_storage *storage;
+};
+
+// One (device, queue) pair a worker polls and transmits on.
+//
+// The weight is the assignment's rx service: up to weight bursts in a
+// worker round, always at least 1.
+struct dp_worker_assignment {
+	uint32_t device_id;
+	uint32_t queue_id;
+	uint32_t weight;
 };
 
 struct dp_worker {
@@ -102,13 +116,25 @@ struct dp_worker {
 	// Total packets dropped by this worker for any reason.
 	uint64_t *drop_count;
 
+	// Packet source pool of the worker's first assignment.
+	//
+	// A worker with several assignments owns one pool per assignment; this
+	// names the primary one, from which helper paths (unit-test packet
+	// injection, packet cloning) allocate.
 	struct rte_mempool *rx_mempool;
 
 	uint64_t *rx_bursts;
 	uint32_t core_id;
-	uint32_t device_id;
-	uint32_t queue_id;
 	uint32_t rx_burst_size;
+
+	// The (device, queue) pairs this worker polls, in configuration
+	// order.
+	//
+	// An offset pointer into the same zone, filled in before the worker
+	// is appended to dp_config->workers, so a reader bounded by
+	// worker_count only ever observes live assignments.
+	uint32_t assignment_count;
+	struct dp_worker_assignment *assignments;
 
 	// Offset pointer to the execution context this worker runs,
 	// taken from the generation most recently assigned to it.
@@ -127,7 +153,12 @@ struct dp_worker {
 // The writer uses release ordering; readers use acquire ordering before
 // attempting to attach, so observing this value guarantees the instance is
 // ready and its cp_config lock is free.
-#define DP_CONFIG_READY_MAGIC UINT64_C(0xDEAD10CC00000001)
+//
+// The value also versions the shared-memory layout: a process built
+// against a different layout of the control-plane zone or the dataplane
+// structures recognises a foreign magic and refuses the attach instead
+// of misreading shifted fields. Bump it on every layout change.
+#define DP_CONFIG_READY_MAGIC UINT64_C(0xDEAD10CC0000000B)
 
 struct dp_config {
 	uint32_t instance_count;
@@ -185,10 +216,13 @@ struct dp_config {
 	// numbers advance monotonically per zone — a superseded
 	// generation is freed only after every worker moved to its
 	// successor — so the record names exactly one generation: the
-	// last whose commit handlers ran. It is written and read only
-	// under the commit lock, by one process's assigner threads or
-	// harness round driver; no reader in another process exists.
+	// last whose commit handlers ran. The pointer below names the
+	// same generation; the next pass skips the items it inherits
+	// from it. Both are written and read only under the commit lock,
+	// by one process's assigner threads or harness round driver; no
+	// reader in another process exists.
 	uint64_t committed_gen_seq;
+	struct cp_config_gen *committed_gen;
 
 	// Selects the synchronous generation hand-off used by in-process
 	// harnesses; production leaves it clear.
@@ -260,13 +294,23 @@ dp_config_lookup_object(
 
 // Count of workers bound to device_id, across every instance.
 //
-// O(1), reading a count dp_topology_set_device_worker_count publishes per
+// O(1), reading a count dp_topology_set_device_queue_counts publishes per
 // device. Zero for an out-of-range device_id or one whose count was never
 // set.
 uint64_t
 dp_config_device_worker_count(struct dp_config *dp_config, uint32_t device_id);
 
-// Run the generation's commit handlers once.
+// Count of device_id's queues the RSS table spreads traffic over.
+//
+// O(1), reading a count dp_topology_set_device_queue_counts publishes
+// per device. Zero for an out-of-range device_id or one whose count was
+// never set.
+uint64_t
+dp_config_device_rss_queue_count(
+	struct dp_config *dp_config, uint32_t device_id
+);
+
+// Run the commit handlers of the generation's new config items once.
 //
 // Runs inside the dataplane address space during config deliverance,
 // from exactly one thread per shared config: a process-wide lock plus

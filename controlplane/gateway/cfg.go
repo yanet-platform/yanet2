@@ -1,7 +1,9 @@
 package gateway
 
 import (
+	"cmp"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
@@ -19,6 +21,17 @@ const defaultRegistryTTL = 5 * time.Minute
 // defaultRegistrySweepInterval is the default period between eviction sweeps.
 const defaultRegistrySweepInterval = 30 * time.Second
 
+// defaultEndpoint is the gRPC endpoint served when the config names neither
+// the deprecated endpoint nor a gRPC section.
+const defaultEndpoint = "[::1]:8080"
+
+// deprecatedKeysIssue is the issue that removes the deprecated server keys.
+const deprecatedKeysIssue = "https://github.com/yanet-platform/yanet2/issues/2983"
+
+// minConnectionAge is the shortest bound on gRPC TLS connection age; a
+// shorter one would keep clients reconnecting almost without pause.
+const minConnectionAge = time.Second
+
 // Config is the configuration for the gateway.
 type Config struct {
 	// InstanceID specifies which dataplane instance this gateway serves.
@@ -34,15 +47,162 @@ type Config struct {
 }
 
 // ServerConfig is the configuration for the gateway server.
+//
+// Each protocol listens where its section says. Without a section it
+// listens where the deprecated keys say, which serve TLS only while the
+// deprecated TLS material is set.
 type ServerConfig struct {
-	// Endpoint is the endpoint for the gateway server to be exposed on.
-	Endpoint string `yaml:"endpoint"`
-	// HTTPEndpoint is the endpoint for the HTTP server that provides
+	// GRPC configures the gRPC listeners and replaces the deprecated
+	// endpoint and TLS keys for gRPC.
+	GRPC *ListenerConfig `yaml:"grpc,omitempty"`
+	// HTTP configures the listeners of the HTTP server that provides
 	// access to gRPC services for web clients.
+	//
+	// It replaces the deprecated HTTP endpoint and TLS keys for HTTP. No
+	// HTTP server runs without it, the deprecated HTTP endpoint or a
+	// listener handed to the gateway.
+	HTTP *ListenerConfig `yaml:"http,omitempty"`
+	// Endpoint is the gRPC endpoint, "[::1]:8080" when neither it nor the
+	// gRPC section is given.
+	//
+	// Deprecated: use the gRPC section; issue #2983 removes it.
+	Endpoint string `yaml:"endpoint"`
+	// HTTPEndpoint is the HTTP endpoint.
+	//
+	// Deprecated: use the HTTP section; issue #2983 removes it.
 	HTTPEndpoint string `yaml:"http_endpoint"`
-	// TLS configures TLS for both gRPC and HTTP listeners. When nil,
-	// both listen in plaintext.
+	// TLS turns the deprecated gRPC and HTTP endpoints into TLS listeners.
+	//
+	// Deprecated: use the TLS listener of each section; issue #2983 removes
+	// it.
 	TLS *TLSConfig `yaml:"tls,omitempty"`
+}
+
+// ListenerConfig configures where one protocol listens: an optional
+// plaintext endpoint and an optional TLS listener, side by side.
+type ListenerConfig struct {
+	// Endpoint is the plaintext listener's address; empty means none.
+	Endpoint string `yaml:"endpoint"`
+	// TLS configures the TLS listener; nil means none.
+	TLS *TLSListenerConfig `yaml:"tls,omitempty"`
+	// TrustedOrigins are the web origins, each "scheme://host[:port]",
+	// whose browser pages may call the HTTP server cross-origin, such as a
+	// web UI served apart from the gateway.
+	//
+	// A cross-origin browser request from any other origin that is not a
+	// GET, HEAD or OPTIONS is rejected with 403, and only a trusted origin
+	// gets CORS headers. Clients that are not browsers send no origin and
+	// are unaffected. Only server.http takes it.
+	TrustedOrigins []string `yaml:"trusted_origins,omitempty"`
+}
+
+// Validate rejects a trusted origin that is not a bare
+// "scheme://host[:port]".
+func (m *ListenerConfig) Validate() error {
+	_, err := newCrossOriginProtection(m.TrustedOrigins)
+	return err
+}
+
+// Serves reports whether the configuration names any listener.
+func (m *ListenerConfig) Serves() bool {
+	return m.Endpoint != "" || m.TLS != nil
+}
+
+// newCrossOriginProtection returns the protection that rejects cross-origin
+// browser requests from every origin but the trusted ones.
+func newCrossOriginProtection(origins []string) (*http.CrossOriginProtection, error) {
+	protection := http.NewCrossOriginProtection()
+	for _, origin := range origins {
+		if err := protection.AddTrustedOrigin(origin); err != nil {
+			return nil, fmt.Errorf("trusted_origins: %w", err)
+		}
+	}
+
+	return protection, nil
+}
+
+// TLSListenerConfig configures a listener that serves TLS.
+type TLSListenerConfig struct {
+	// Endpoint is the listener's address.
+	Endpoint xcfg.NonEmptyString `yaml:"endpoint"`
+	// TLSConfig holds the certificates the listener serves.
+	TLSConfig `yaml:",inline"`
+	// MaxConnectionAge bounds how long a gRPC TLS connection lives before
+	// the gateway asks its client to reconnect, so a renewed client
+	// certificate reaches every connection.
+	//
+	// Optional; zero leaves connections open for as long as their clients
+	// keep them, and any other value is at least 1s. Each connection's age
+	// varies by up to 10% either way, calls in flight complete without a
+	// deadline, and the client reconnects on its next call. Only
+	// server.grpc.tls takes it.
+	MaxConnectionAge time.Duration `yaml:"max_connection_age"`
+}
+
+// listenerPlan is where the gateway listens, with the deprecated keys
+// mapped onto the sections they alias.
+type listenerPlan struct {
+	// GRPC is where gRPC is served.
+	GRPC ListenerConfig
+	// HTTP is where HTTP is served; it names no listener when no HTTP server
+	// runs.
+	HTTP ListenerConfig
+	// Mapped names the deprecated keys the plan serves.
+	Mapped []string
+	// Ignored names the deprecated keys given beside the sections that
+	// replace them.
+	Ignored []string
+}
+
+// newListenerPlan maps the server config onto one listener plan, so the
+// sections and the deprecated keys are served by one path.
+//
+// A present section replaces the deprecated keys of its protocol. Without
+// one, a deprecated endpoint serves TLS while the deprecated TLS material is
+// set, and gRPC falls back to the default endpoint.
+func newListenerPlan(server *ServerConfig) listenerPlan {
+	plan := listenerPlan{}
+
+	note := func(key string, given, replaced bool) {
+		switch {
+		case !given:
+		case replaced:
+			plan.Ignored = append(plan.Ignored, key)
+		default:
+			plan.Mapped = append(plan.Mapped, key)
+		}
+	}
+	note("server.endpoint", server.Endpoint != "", server.GRPC != nil)
+	note("server.http_endpoint", server.HTTPEndpoint != "", server.HTTP != nil)
+	// The deprecated TLS material serves every protocol still listening on
+	// its deprecated endpoint, so it is ignored only when none is.
+	tlsReplaced := server.GRPC != nil && (server.HTTP != nil || server.HTTPEndpoint == "")
+	note("server.tls", server.TLS != nil, tlsReplaced)
+
+	deprecated := func(endpoint string) ListenerConfig {
+		if server.TLS == nil {
+			return ListenerConfig{Endpoint: endpoint}
+		}
+
+		return ListenerConfig{TLS: &TLSListenerConfig{
+			Endpoint:  xcfg.MustNonEmptyString(endpoint),
+			TLSConfig: *server.TLS,
+		}}
+	}
+
+	if server.GRPC != nil {
+		plan.GRPC = *server.GRPC
+	} else {
+		plan.GRPC = deprecated(cmp.Or(server.Endpoint, defaultEndpoint))
+	}
+	switch {
+	case server.HTTP != nil:
+		plan.HTTP = *server.HTTP
+	case server.HTTPEndpoint != "":
+		plan.HTTP = deprecated(server.HTTPEndpoint)
+	}
+
+	return plan
 }
 
 // RegistryConfig is the configuration for stale backend eviction.
@@ -80,11 +240,11 @@ func (m *Config) Default() {
 }
 
 // DefaultConfig returns a Config with sensible defaults.
+//
+// It names no listener: the gRPC default endpoint applies only while the
+// config names neither the deprecated endpoint nor a gRPC section.
 func DefaultConfig() Config {
 	return Config{
-		Server: ServerConfig{
-			Endpoint: "[::1]:8080",
-		},
 		Auth: auth.DefaultConfig(),
 		Registry: RegistryConfig{
 			TTL:           xcfg.MustNonZero(defaultRegistryTTL),

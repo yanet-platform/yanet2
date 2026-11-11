@@ -1,8 +1,10 @@
 #include "cp_counter.h"
 
+#include "common/hash_index.h"
 #include "common/memory.h"
 
 #include "common/memory_address.h"
+#include "common/str_index.h"
 #include "lib/counters/counters.h"
 #include "lib/errors/errors.h"
 #include <stdlib.h>
@@ -10,11 +12,79 @@
 
 #define COUNTER_REGISTRY_PREALLOC 8
 
+// The equality probe context: the query tag set plus the registry whose
+// items the probed positions index into.
+struct tag_set_lookup {
+	struct cp_config_counter_storage_registry *registry;
+	const struct counter_tag *tags;
+	size_t tag_count;
+};
+
 static int
 compare_tags(const void *left, const void *right) {
 	const struct counter_tag *left_tag = (const struct counter_tag *)left;
 	const struct counter_tag *right_tag = (const struct counter_tag *)right;
 	return strcmp(left_tag->key, right_tag->key);
+}
+
+// Hash of a normalized tag set: keys and values folded in sorted order,
+// seeded with the count so sets differing only in length land apart.
+static uint32_t
+tags_hash(const struct counter_tag *tags, size_t tag_count) {
+	uint64_t hash = str_index_fnv1a(&tag_count, sizeof(tag_count), 0);
+	for (size_t i = 0; i < tag_count; ++i) {
+		hash = str_index_fnv1a(
+			tags[i].key,
+			strnlen(tags[i].key, COUNTER_TAG_KEY_LEN),
+			(uint32_t)hash
+		);
+		hash = str_index_fnv1a(
+			tags[i].value,
+			strnlen(tags[i].value, COUNTER_TAG_VALUE_LEN),
+			(uint32_t)hash
+		);
+	}
+	return (uint32_t)hash;
+}
+
+// Equality of a probed item's tag set against the query's, both already
+// normalized; zero only when every key and value matches.
+static int
+tag_set_equal(uint32_t item_idx, const void *data) {
+	const struct tag_set_lookup *lookup = data;
+	struct cp_counter_storage *items = ADDR_OF(&lookup->registry->items);
+	struct cp_counter_storage *item = items + item_idx;
+	if (item->tag_count != lookup->tag_count) {
+		return 1;
+	}
+	for (size_t i = 0; i < lookup->tag_count; ++i) {
+		if (strcmp(item->tags[i].key, lookup->tags[i].key) != 0 ||
+		    strcmp(item->tags[i].value, lookup->tags[i].value) != 0) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+// Position of the item registered under exactly the passed normalized
+// tag set, or HASH_INDEX_INVALID when no item carries it.
+static uint32_t
+tag_index_lookup(
+	struct cp_config_counter_storage_registry *registry,
+	const struct counter_tag *tags,
+	size_t tag_count
+) {
+	struct tag_set_lookup lookup = {
+		.registry = registry,
+		.tags = tags,
+		.tag_count = tag_count,
+	};
+	return hash_index_lookup(
+		&registry->tag_index,
+		tags_hash(tags, tag_count),
+		tag_set_equal,
+		&lookup
+	);
 }
 
 int
@@ -28,6 +98,23 @@ cp_config_counter_storage_registry_init(
 		sizeof(struct cp_counter_storage) * COUNTER_REGISTRY_PREALLOC
 	);
 	if (items == NULL) {
+		yanet_error_add(
+			err, "failed to initialize registry for counter storage"
+		);
+		return -1;
+	}
+
+	if (hash_index_init(
+		    &registry->tag_index,
+		    memory_context,
+		    COUNTER_REGISTRY_PREALLOC
+	    )) {
+		memory_bfree(
+			memory_context,
+			items,
+			sizeof(struct cp_counter_storage) *
+				COUNTER_REGISTRY_PREALLOC
+		);
 		yanet_error_add(
 			err, "failed to initialize registry for counter storage"
 		);
@@ -110,35 +197,6 @@ normalize_tags(
 	return 0;
 }
 
-static int
-check_already_exists(
-	struct cp_config_counter_storage_registry *registry,
-	struct counter_tag *tags,
-	size_t tag_count,
-	yanet_error **err
-) {
-	struct cp_counter_storage *items = ADDR_OF(&registry->items);
-	for (size_t i = 0; i < registry->count; ++i) {
-		struct cp_counter_storage *cur = items + i;
-		if (cur->tag_count != tag_count) {
-			continue;
-		}
-		int equals = 1;
-		for (size_t j = 0; j < tag_count; ++j) {
-			if (strcmp(tags[j].key, cur->tags[j].key) != 0 ||
-			    strcmp(tags[j].value, cur->tags[j].value) != 0) {
-				equals = 0;
-				break;
-			}
-		}
-		if (equals) {
-			yanet_error_add(err, "already exists");
-			return -1;
-		}
-	}
-	return 0;
-}
-
 int
 cp_config_counter_storage_registry_insert(
 	struct cp_config_counter_storage_registry *registry,
@@ -160,7 +218,8 @@ cp_config_counter_storage_registry_insert(
 		return -1;
 	}
 
-	if (check_already_exists(registry, tags, tag_count, err) != 0) {
+	if (tag_index_lookup(registry, tags, tag_count) != HASH_INDEX_INVALID) {
+		yanet_error_add(err, "already exists");
 		return -1;
 	}
 
@@ -190,12 +249,37 @@ cp_config_counter_storage_registry_insert(
 		registry->capacity *= 2;
 	}
 
+	// The guard, not the doubling above, decides: a failed index growth
+	// on an earlier insert can leave the index one doubling behind, and
+	// a failed array growth can leave it one ahead.
+	if (registry->tag_index.capacity < registry->capacity) {
+		if (hash_index_rehash(
+			    &registry->tag_index, (uint32_t)registry->capacity
+		    )) {
+			yanet_error_add(
+				err, "failed to allocate counter storage index"
+			);
+			return -1;
+		}
+	}
+
 	struct cp_counter_storage *dst =
 		ADDR_OF(&registry->items) + registry->count;
 	SET_OFFSET_OF(&dst->storage, storage);
 	dst->tag_count = tag_count;
 	for (size_t i = 0; i < tag_count; ++i) {
 		dst->tags[i] = tags[i];
+	}
+
+	if (hash_index_insert(
+		    &registry->tag_index,
+		    tags_hash(tags, tag_count),
+		    (uint32_t)registry->count
+	    )) {
+		yanet_error_add(
+			err, "failed to allocate counter storage index"
+		);
+		return -1;
 	}
 
 	registry->count += 1;
@@ -284,6 +368,32 @@ cp_config_counter_storage_registry_find(
 	return list;
 }
 
+struct counter_storage *
+cp_config_counter_storage_registry_lookup_exact(
+	struct cp_config_counter_storage_registry *registry,
+	const struct counter_tag *const_tags,
+	size_t tag_count
+) {
+	if (tag_count > MAX_TAG_COUNT) {
+		return NULL;
+	}
+	struct counter_tag tags[MAX_TAG_COUNT];
+	for (size_t i = 0; i < tag_count; ++i) {
+		tags[i] = const_tags[i];
+	}
+
+	if (normalize_tags(tags, tag_count, true, NULL) != 0) {
+		return NULL;
+	}
+
+	uint32_t item_idx = tag_index_lookup(registry, tags, tag_count);
+	if (item_idx == HASH_INDEX_INVALID) {
+		return NULL;
+	}
+	struct cp_counter_storage *item = ADDR_OF(&registry->items) + item_idx;
+	return ADDR_OF(&item->storage);
+}
+
 void
 cp_config_counter_storage_registry_fini(
 	struct cp_config_counter_storage_registry *registry
@@ -292,26 +402,10 @@ cp_config_counter_storage_registry_fini(
 	if (mctx == NULL) {
 		return;
 	}
+	hash_index_fini(&registry->tag_index);
 	struct cp_counter_storage *items = ADDR_OF(&registry->items);
 	memory_bfree(mctx, items, sizeof(*items) * registry->capacity);
 	memset(registry, 0, sizeof(*registry));
-}
-
-static struct counter_storage *
-get_one(struct cp_config_counter_storage_registry *registry,
-	struct counter_tag *tags,
-	size_t tag_count) {
-	struct cp_counter_storage **storages =
-		cp_config_counter_storage_registry_find(
-			registry, tags, tag_count, NULL
-		);
-	if (storages == NULL || storages[0] == NULL) {
-		free(storages);
-		return NULL;
-	}
-	struct counter_storage *result = ADDR_OF(&storages[0]->storage);
-	free(storages);
-	return result;
 }
 
 struct counter_storage *
@@ -323,7 +417,9 @@ cp_config_counter_storage_registry_lookup_device(
 		counter_tag_init("device", device_name),
 		counter_tag_init("kind", "device")
 	};
-	return get_one(registry, tags, 2);
+	return cp_config_counter_storage_registry_lookup_exact(
+		registry, tags, 2
+	);
 }
 
 int
@@ -353,7 +449,9 @@ cp_config_counter_storage_registry_lookup_pipeline(
 		counter_tag_init("pipeline", pipeline_name),
 		counter_tag_init("kind", "pipeline")
 	};
-	return get_one(registry, tags, 3);
+	return cp_config_counter_storage_registry_lookup_exact(
+		registry, tags, 3
+	);
 }
 
 int
@@ -387,7 +485,9 @@ cp_config_counter_storage_registry_lookup_function(
 		counter_tag_init("function", function_name),
 		counter_tag_init("kind", "function")
 	};
-	return get_one(registry, tags, 4);
+	return cp_config_counter_storage_registry_lookup_exact(
+		registry, tags, 4
+	);
 }
 
 int
@@ -425,7 +525,9 @@ cp_config_counter_storage_registry_lookup_chain(
 		counter_tag_init("chain", chain_name),
 		counter_tag_init("kind", "chain")
 	};
-	return get_one(registry, tags, 5);
+	return cp_config_counter_storage_registry_lookup_exact(
+		registry, tags, 5
+	);
 }
 
 int
@@ -469,7 +571,9 @@ cp_config_counter_storage_registry_lookup_module(
 		counter_tag_init("module_name", module_name),
 		counter_tag_init("kind", "module"),
 	};
-	return get_one(registry, tags, 7);
+	return cp_config_counter_storage_registry_lookup_exact(
+		registry, tags, 7
+	);
 }
 
 int
@@ -519,7 +623,9 @@ cp_config_counter_storage_registry_lookup_module_tagged(
 		counter_tag_init("kind", "runtime"),
 		counter_tag_init("config", registry_tag),
 	};
-	return get_one(registry, tags, 8);
+	return cp_config_counter_storage_registry_lookup_exact(
+		registry, tags, 8
+	);
 }
 
 int
@@ -561,7 +667,9 @@ cp_config_counter_storage_registry_lookup_object(
 		counter_tag_init("object_name", object_name),
 		counter_tag_init("kind", "object")
 	};
-	return get_one(registry, tags, 3);
+	return cp_config_counter_storage_registry_lookup_exact(
+		registry, tags, 3
+	);
 }
 
 int
@@ -602,9 +710,12 @@ cp_config_counter_storage_registry_lookup_module_object_link(
 		counter_tag_init("module_type", module_type),
 		counter_tag_init("module_name", module_name),
 		counter_tag_init("object_type", object_type),
-		counter_tag_init("object_name", object_name)
+		counter_tag_init("object_name", object_name),
+		counter_tag_init("kind", "module_object_link")
 	};
-	return get_one(registry, tags, 8);
+	return cp_config_counter_storage_registry_lookup_exact(
+		registry, tags, 9
+	);
 }
 
 int

@@ -1,16 +1,31 @@
 package operator
 
 import (
+	"context"
+	"encoding/binary"
 	"io"
+	"net"
 	"net/netip"
+	"slices"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/common/go/readiness"
+	"github.com/yanet-platform/yanet2/common/go/testutils/memnet"
+	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
+	birdadapter "github.com/yanet-platform/yanet2/operators/bird-adapter"
+	adapterpb "github.com/yanet-platform/yanet2/operators/bird-adapter/adapterpb/v1"
 	"github.com/yanet-platform/yanet2/operators/route/internal/rib"
 	"github.com/yanet-platform/yanet2/operators/route/neigh"
 	operatorpb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
@@ -45,6 +60,31 @@ func (m *feedRIBTestStream) Recv() (*operatorpb.Update, error) {
 }
 
 func (m *feedRIBTestStream) SendAndClose(*operatorpb.UpdateSummary) error {
+	return nil
+}
+
+// channelFeedRIBStream serves updates pushed onto a channel, blocking Recv
+// until one arrives or the channel is closed, so a test can interleave two
+// concurrent FeedRIB calls in a controlled order.
+//
+// recvCount counts completed Recv calls, so a test can assert that an
+// update already sent to the channel was never consumed.
+type channelFeedRIBStream struct {
+	grpc.ServerStream
+	updates   chan *operatorpb.Update
+	recvCount int
+}
+
+func (m *channelFeedRIBStream) Recv() (*operatorpb.Update, error) {
+	update, ok := <-m.updates
+	if !ok {
+		return nil, io.EOF
+	}
+	m.recvCount++
+	return update, nil
+}
+
+func (m *channelFeedRIBStream) SendAndClose(*operatorpb.UpdateSummary) error {
 	return nil
 }
 
@@ -90,15 +130,17 @@ func TestShowRoutes_BirdDifferentPref_OnlyBetterIsBest(t *testing.T) {
 	// Use the RIB directly to insert two bird routes with distinct Prefs via
 	// the operator's RIB, accessed through the service internals.
 	ribRef := svc.getOrCreateRib("route0")
+	sessionID := ribRef.NewSession()
 
 	p1 := netip.MustParseAddr("192.0.2.1")
 	p2 := netip.MustParseAddr("192.0.2.2")
 	pfx := netip.MustParsePrefix("10.1.0.0/24")
 
-	ribRef.Update(
+	require.True(t, ribRef.Update(
+		sessionID,
 		rib.Route{Prefix: pfx, NextHop: netip.MustParseAddr("10.0.0.10"), Peer: p1, SourceID: rib.RouteSourceBird, Pref: 200},
 		rib.Route{Prefix: pfx, NextHop: netip.MustParseAddr("10.0.0.20"), Peer: p2, SourceID: rib.RouteSourceBird, Pref: 100},
-	)
+	))
 
 	resp, err := svc.ShowRoutes(t.Context(), &operatorpb.ShowRoutesRequest{Name: "route0"})
 	require.NoError(t, err)
@@ -207,6 +249,354 @@ func Test_RouteService_FeedRIB_FirstNameOwnsSession(t *testing.T) {
 	require.Len(t, response.GetRoutes(), 2)
 	_, ok := svc.ribs.Get("other")
 	require.False(t, ok, "a later update name must not create another session RIB")
+}
+
+// Test_RouteService_FeedRIB_HeartbeatStartsSession verifies that a stream
+// carrying only heartbeats starts its session, so an import whose BIRD
+// table is empty still takes the RIB over, and that the heartbeats
+// themselves report no change.
+func Test_RouteService_FeedRIB_HeartbeatStartsSession(t *testing.T) {
+	sessionStarts := 0
+	changes := 0
+	svc := NewRouteService(neigh.NewNeighTable(),
+		WithRouteServiceOnRIBSessionStart(func(string, uint64) { sessionStarts++ }),
+		WithRouteServiceOnChanged(func() { changes++ }),
+	)
+	defer func() {
+		require.NoError(t, svc.Close())
+	}()
+
+	stream := &feedRIBTestStream{updates: []*operatorpb.Update{
+		{Name: "route0", Heartbeat: true},
+		{Name: "route0", Heartbeat: true},
+	}}
+	require.NoError(t, svc.FeedRIB(stream))
+
+	require.Equal(t, 1, sessionStarts)
+	require.Equal(t, 1, changes, "only the end of the stream may report a change")
+	_, ok := svc.ribs.Get("route0")
+	require.True(t, ok, "the session must create its RIB")
+}
+
+// Test_RouteService_FeedRIB_NewSessionSweepsOpenPredecessor verifies that a
+// new session removes, one RIB TTL after it started, the routes of an older
+// session it did not send again, even while the older stream stays open.
+func Test_RouteService_FeedRIB_NewSessionSweepsOpenPredecessor(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const ttl = 5 * time.Minute
+		svc := NewRouteService(neigh.NewNeighTable(), WithRouteServiceRIBTTL(ttl))
+		old := &operatorpb.Route{
+			Prefix:  mustNetwork(t, "10.0.0.0/24"),
+			NextHop: commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.0.2.1")),
+			Peer:    commonpb.NewIPAddressFromAddr(netip.MustParseAddr("198.51.100.1")),
+			Source:  operatorpb.RouteSourceID_ROUTE_SOURCE_ID_BIRD,
+		}
+		streamA := &channelFeedRIBStream{updates: make(chan *operatorpb.Update)}
+		streamB := &channelFeedRIBStream{updates: make(chan *operatorpb.Update)}
+		var feeds errgroup.Group
+		feeds.Go(func() error { return svc.FeedRIB(streamA) })
+		feeds.Go(func() error { return svc.FeedRIB(streamB) })
+		routes := func() int {
+			response, err := svc.ShowRoutes(t.Context(), &operatorpb.ShowRoutesRequest{Name: "route0"})
+			require.NoError(t, err)
+			return len(response.GetRoutes())
+		}
+
+		streamA.updates <- &operatorpb.Update{Name: "route0", Route: old}
+		streamA.updates <- &operatorpb.Update{Name: "route0"}
+		synctest.Wait()
+		require.Equal(t, 1, routes())
+
+		// A stays open: only the start of B can schedule the sweep.
+		streamB.updates <- &operatorpb.Update{Name: "route0", Heartbeat: true}
+		synctest.Wait()
+
+		time.Sleep(ttl - time.Nanosecond)
+		synctest.Wait()
+		require.Equal(t, 1, routes(), "the old route must stay until the RIB TTL")
+		time.Sleep(time.Nanosecond)
+		synctest.Wait()
+		require.Equal(t, 0, routes(), "the old route must go one RIB TTL after the new session started")
+
+		close(streamA.updates)
+		close(streamB.updates)
+		require.NoError(t, feeds.Wait())
+		require.NoError(t, svc.Close())
+	})
+}
+
+// Test_RouteService_FeedRIB_HeartbeatChangesNoRoutes verifies that a
+// heartbeat inside an active session leaves the RIB alone, even when it
+// carries a route withdrawal, and that the stream keeps reading after it.
+func Test_RouteService_FeedRIB_HeartbeatChangesNoRoutes(t *testing.T) {
+	route := &operatorpb.Route{
+		Prefix:  mustNetwork(t, "10.0.0.0/24"),
+		NextHop: commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.0.2.1")),
+		Peer:    commonpb.NewIPAddressFromAddr(netip.MustParseAddr("198.51.100.1")),
+	}
+	updates := 0
+	svc := NewRouteService(neigh.NewNeighTable(),
+		WithRouteServiceOnRIBUpdate(func(n int) { updates += n }),
+	)
+
+	stream := &feedRIBTestStream{updates: []*operatorpb.Update{
+		{Name: "route0", Route: route},
+		{Name: "route0"},
+		{Name: "route0", Heartbeat: true, IsDelete: true, Route: route},
+		{Name: "route0", Heartbeat: true},
+	}}
+	require.NoError(t, svc.FeedRIB(stream))
+
+	require.Equal(t, len(stream.updates), stream.index,
+		"an active session must read on past its heartbeats",
+	)
+	require.Equal(t, 1, updates)
+	response, err := svc.ShowRoutes(t.Context(), &operatorpb.ShowRoutesRequest{Name: "route0"})
+	require.NoError(t, err)
+	require.Len(t, response.GetRoutes(), 1)
+}
+
+// Test_RouteService_FeedRIB_SupersededSessionUpdateRejected verifies that
+// a superseded stream's late announce or withdraw is rejected.
+//
+// The route keeps the newer stream's attributes; the rejected write is not
+// counted by the update callback, and the stream stops reading and ends
+// cleanly instead of hanging or erroring. A cleanup pass targeting the
+// superseded session afterward still leaves the route in place.
+func Test_RouteService_FeedRIB_SupersededSessionUpdateRejected(t *testing.T) {
+	cases := []struct {
+		name     string
+		isDelete bool
+	}{
+		{name: "announce"},
+		{name: "withdraw", isDelete: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				sessionStarted := make(chan uint64, 2)
+				routeApplied := make(chan struct{}, 2)
+				var onUpdateCount atomic.Int64
+				svc := NewRouteService(
+					neigh.NewNeighTable(),
+					// A long TTL keeps the service's own scheduled cleanup
+					// pending instead of running during the test; Close cancels
+					// the pending cleanup once the assertions below are done.
+					WithRouteServiceRIBTTL(time.Hour),
+					WithRouteServiceOnRIBSessionStart(func(name string, sessionID uint64) {
+						sessionStarted <- sessionID
+					}),
+					WithRouteServiceOnRIBUpdate(func(int) {
+						onUpdateCount.Add(1)
+						routeApplied <- struct{}{}
+					}),
+				)
+				defer func() {
+					require.NoError(t, svc.Close())
+				}()
+
+				peer := commonpb.NewIPAddressFromAddr(netip.MustParseAddr("198.51.100.1"))
+				fromA := &operatorpb.Route{
+					Prefix:  mustNetwork(t, "10.0.0.0/24"),
+					NextHop: commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.0.2.1")),
+					Peer:    peer,
+					Source:  operatorpb.RouteSourceID_ROUTE_SOURCE_ID_BIRD,
+				}
+				fromB := &operatorpb.Route{
+					Prefix:  mustNetwork(t, "10.0.0.0/24"),
+					NextHop: commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.0.2.2")),
+					Peer:    peer,
+					Source:  operatorpb.RouteSourceID_ROUTE_SOURCE_ID_BIRD,
+				}
+
+				// streamA is buffered so the update queued after the rejected
+				// one — which FeedRIB must never read — can be sent without
+				// blocking the test itself.
+				streamA := &channelFeedRIBStream{updates: make(chan *operatorpb.Update, 3)}
+				streamB := &channelFeedRIBStream{updates: make(chan *operatorpb.Update)}
+
+				// Closing is idempotent and also runs at cleanup, so a failed
+				// require partway through cannot leave either FeedRIB call
+				// blocked in Recv forever.
+				closeStreamA := sync.OnceFunc(func() { close(streamA.updates) })
+				closeStreamB := sync.OnceFunc(func() { close(streamB.updates) })
+				t.Cleanup(closeStreamA)
+				t.Cleanup(closeStreamB)
+
+				// A and B are waited on independently, since B's stream must
+				// stay open past A's own end for the assertions below.
+				var groupA, groupB errgroup.Group
+				groupA.Go(func() error { return svc.FeedRIB(streamA) })
+				streamA.updates <- &operatorpb.Update{Name: "route0", Route: fromA}
+
+				sessionA := receiveEvent(t, sessionStarted, "A's session to start")
+				require.Equal(t, uint64(1), sessionA, "setup: A's session must start first")
+
+				// A's route is committed before B can supersede it.
+				receiveEvent(t, routeApplied, "A's route to be applied")
+
+				groupB.Go(func() error { return svc.FeedRIB(streamB) })
+				streamB.updates <- &operatorpb.Update{Name: "route0", Route: fromB}
+
+				sessionB := receiveEvent(t, sessionStarted, "B's session to start")
+				require.Equal(t, uint64(2), sessionB, "setup: B's session must supersede A's")
+
+				// B's route is committed before the late send below.
+				receiveEvent(t, routeApplied, "B's route to be applied")
+
+				// A's session is already superseded by the time this reaches the
+				// service, so this send is rejected by the RIB's own fence.
+				streamA.updates <- &operatorpb.Update{Name: "route0", Route: fromA, IsDelete: tc.isDelete}
+				// Queued after the rejected send; FeedRIB must never read it,
+				// since the rejection ends the stream immediately.
+				streamA.updates <- &operatorpb.Update{Name: "route0", Route: fromA}
+				closeStreamA()
+				require.NoError(t, groupA.Wait(), "A's FeedRIB call must end cleanly despite the rejection")
+
+				require.Equal(t, 2, streamA.recvCount,
+					"A must stop reading once its write is rejected, never reaching the queued update after it")
+
+				ribRef, ribExists := svc.getRib("route0")
+				require.True(t, ribExists, "the RIB must already exist after FeedRIB created it")
+				// Run the superseded session's cleanup synchronously, standing
+				// in for the service's own long-TTL scheduled pass so the
+				// outcome below does not depend on winning a background race.
+				ribRef.CleanupTask(sessionA, make(chan bool), 0)
+
+				_, routes, ok := ribRef.LongestMatch(netip.MustParseAddr("10.0.0.1"))
+				require.True(t, ok, "the prefix must still be present after A's rejected send and cleanup")
+				require.Len(t, routes.Routes, 1,
+					"A's rejected send must not change the route set, and cleanup of the superseded session must not remove B's route")
+				require.Equal(t, sessionB, routes.Routes[0].SessionID, "the surviving route must keep B's session id")
+				require.Equal(t, netip.MustParseAddr("192.0.2.2"), routes.Routes[0].NextHop,
+					"the surviving route must keep B's attributes")
+
+				closeStreamB()
+				require.NoError(t, groupB.Wait(), "B's FeedRIB call must end cleanly")
+
+				require.Equal(t, int64(2), onUpdateCount.Load(),
+					"A's rejected write must not be counted by the update callback")
+			})
+		})
+	}
+}
+
+// Test_RouteService_FeedRIB_SupersededSessionNonWritingUpdateRejected
+// verifies that a superseded stream's late non-writing message — a flush, a
+// heartbeat or a route the converter rejects — is rejected.
+//
+// The rejection mirrors how a route write is rejected by the fence in
+// Update: the stream ends cleanly without waking the reconcile loop, a
+// further queued update on that stream is never read, and the second
+// stream's own FeedRIB call still ends cleanly too.
+func Test_RouteService_FeedRIB_SupersededSessionNonWritingUpdateRejected(t *testing.T) {
+	cases := []struct {
+		name          string
+		unconvertible bool
+		heartbeat     bool
+	}{
+		{name: "flush"},
+		{name: "unconvertible route", unconvertible: true},
+		{name: "heartbeat", heartbeat: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				sessionStarted := make(chan uint64, 2)
+				routeApplied := make(chan struct{}, 2)
+				var onChangedCount atomic.Int64
+				svc := NewRouteService(
+					neigh.NewNeighTable(),
+					WithRouteServiceRIBTTL(time.Hour),
+					WithRouteServiceOnRIBSessionStart(func(name string, sessionID uint64) {
+						sessionStarted <- sessionID
+					}),
+					WithRouteServiceOnRIBUpdate(func(int) {
+						routeApplied <- struct{}{}
+					}),
+					WithRouteServiceOnChanged(func() { onChangedCount.Add(1) }),
+				)
+				defer func() {
+					require.NoError(t, svc.Close())
+				}()
+
+				peer := commonpb.NewIPAddressFromAddr(netip.MustParseAddr("198.51.100.1"))
+				fromA := &operatorpb.Route{
+					Prefix:  mustNetwork(t, "10.0.0.0/24"),
+					NextHop: commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.0.2.1")),
+					Peer:    peer,
+					Source:  operatorpb.RouteSourceID_ROUTE_SOURCE_ID_BIRD,
+				}
+				fromB := &operatorpb.Route{
+					Prefix:  mustNetwork(t, "10.0.0.0/24"),
+					NextHop: commonpb.NewIPAddressFromAddr(netip.MustParseAddr("192.0.2.2")),
+					Peer:    peer,
+					Source:  operatorpb.RouteSourceID_ROUTE_SOURCE_ID_BIRD,
+				}
+
+				lateUpdate := &operatorpb.Update{Name: "route0", Heartbeat: tc.heartbeat}
+				if tc.unconvertible {
+					// NextHop is left unset, which ToRIBRoute rejects.
+					lateUpdate.Route = &operatorpb.Route{
+						Prefix: mustNetwork(t, "10.0.0.0/24"),
+						Peer:   peer,
+						Source: operatorpb.RouteSourceID_ROUTE_SOURCE_ID_BIRD,
+					}
+				}
+
+				// streamA is buffered so the update queued after the rejected
+				// one — which FeedRIB must never read — can be sent without
+				// blocking the test itself.
+				streamA := &channelFeedRIBStream{updates: make(chan *operatorpb.Update, 3)}
+				streamB := &channelFeedRIBStream{updates: make(chan *operatorpb.Update)}
+
+				closeStreamA := sync.OnceFunc(func() { close(streamA.updates) })
+				closeStreamB := sync.OnceFunc(func() { close(streamB.updates) })
+				t.Cleanup(closeStreamA)
+				t.Cleanup(closeStreamB)
+
+				var groupA, groupB errgroup.Group
+				groupA.Go(func() error { return svc.FeedRIB(streamA) })
+				streamA.updates <- &operatorpb.Update{Name: "route0", Route: fromA}
+
+				sessionA := receiveEvent(t, sessionStarted, "A's session to start")
+				require.Equal(t, uint64(1), sessionA, "setup: A's session must start first")
+
+				receiveEvent(t, routeApplied, "A's route to be applied")
+
+				groupB.Go(func() error { return svc.FeedRIB(streamB) })
+				streamB.updates <- &operatorpb.Update{Name: "route0", Route: fromB}
+
+				sessionB := receiveEvent(t, sessionStarted, "B's session to start")
+				require.Equal(t, uint64(2), sessionB, "setup: B's session must supersede A's")
+
+				receiveEvent(t, routeApplied, "B's route to be applied")
+
+				// From here on, onChanged must increase by exactly one: A's own
+				// stream-end epilogue.
+				onChangedBefore := onChangedCount.Load()
+
+				// A's session is already superseded by the time this reaches
+				// the service, so this send is the late non-writing message
+				// under test.
+				streamA.updates <- lateUpdate
+				// Queued after the rejected send; FeedRIB must never read it.
+				streamA.updates <- &operatorpb.Update{Name: "route0", Route: fromA}
+				closeStreamA()
+				require.NoError(t, groupA.Wait(), "A's FeedRIB call must end cleanly despite the rejected message")
+
+				require.Equal(t, 2, streamA.recvCount,
+					"A must stop reading once its message is rejected, never reaching the queued update after it")
+				require.Equal(t, onChangedBefore+1, onChangedCount.Load(),
+					"A's rejected message must not wake the reconcile loop itself, only its own stream-end epilogue may")
+
+				closeStreamB()
+				require.NoError(t, groupB.Wait(), "B's FeedRIB call must end cleanly")
+			})
+		})
+	}
 }
 
 // TestInsertRoute_MalformedPrefix_InvalidArgument verifies that a prefix
@@ -456,4 +846,202 @@ func TestListConfigs_ConfiguredModule_ReportedOnceBeforeAndAfterRIB(t *testing.T
 	resp, err = svc.ListConfigs(t.Context(), &operatorpb.ListConfigsRequest{})
 	require.NoError(t, err)
 	require.Equal(t, []string{"route0", "route1", "route2"}, resp.GetConfigs())
+}
+
+// Test_RouteService_FeedRIB_IdleBirdImportReplaysAfterTransportRestart
+// verifies that an idle BIRD import replays its table into the RIB after the
+// route operator's gRPC server restarts: the replayed route stays, the route
+// withdrawn during the outage leaves exactly one RIB TTL after the old
+// session ended and the bird-session scope returns to READY.
+func Test_RouteService_FeedRIB_IdleBirdImportReplaysAfterTransportRestart(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		kept := netip.MustParsePrefix("2001:db8:1::/48")
+		withdrawn := netip.MustParsePrefix("2001:db8:2::/48")
+		network := memnet.NewNetwork()
+		// BIRD exports both routes to the first connection; the second one
+		// was withdrawn by the time the import reconnects.
+		serveBIRDExportSocket(t, network.Listen("bird.sock"), func(idx int) []netip.Prefix {
+			if idx == 0 {
+				return []netip.Prefix{kept, withdrawn}
+			}
+			return []netip.Prefix{kept}
+		})
+
+		store := newRIBStore()
+		tracker := readiness.NewTracker(specs("bird-session", "rib"))
+		sessions := newBirdRIBReadiness(ReadinessConfig{
+			RateThreshold:   1000,
+			StabilityWindow: 50 * time.Millisecond,
+			SampleInterval:  20 * time.Millisecond,
+			ReconnectGrace:  time.Minute,
+		}, store, "route0", tracker)
+		svc := NewRouteService(neigh.NewNeighTable(),
+			WithRouteServiceRIBStore(store),
+			WithRouteServiceRIBTTL(DefaultRIBTTL),
+			WithRouteServiceOnRIBSessionStart(sessions.OnSessionStart),
+			WithRouteServiceOnRIBUpdate(sessions.OnUpdate),
+			WithRouteServiceOnRIBSessionEnd(sessions.OnSessionEnd),
+		)
+		t.Cleanup(func() { require.NoError(t, svc.Close()) })
+
+		server := serveFeedRIB(t, network.Listen("route-operator"), svc)
+
+		adapter := birdadapter.NewAdapterService("passthrough:///route-operator",
+			birdadapter.WithRouteOperatorDialOptions(
+				grpc.WithContextDialer(network.Dial),
+				// The zstd codec pools its decoders process-wide, and a
+				// decoder made in one bubble must never run in another.
+				grpc.WithDefaultCallOptions(grpc.UseCompressor(encoding.Identity)),
+			),
+			birdadapter.WithBIRDDialer(network.Dial),
+		)
+		t.Cleanup(func() {
+			ctx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), 5*time.Second)
+			defer cancel()
+			require.NoError(t, adapter.Close(ctx))
+		})
+		sourceV4, err := commonpb.NewIPv4AddressFromAddr(netip.MustParseAddr("192.0.2.1"))
+		require.NoError(t, err)
+		sourceV6, err := commonpb.NewIPv6AddressFromAddr(netip.MustParseAddr("2001:db8::1"))
+		require.NoError(t, err)
+		_, err = adapter.SetupConfig(t.Context(), &adapterpb.SetupConfigRequest{
+			Name:     "route0",
+			Config:   &adapterpb.ImportConfig{Sockets: []string{"bird.sock"}, DumpThreshold: 1},
+			SourceV4: sourceV4,
+			SourceV6: sourceV6,
+		})
+		require.NoError(t, err)
+
+		birdSessionState := func() readinesspb.State {
+			return requireScope(t, tracker, "bird-session").GetState()
+		}
+		synctest.Wait()
+		require.Equal(t, []netip.Prefix{kept, withdrawn}, ribPrefixes(store, "route0"))
+		require.Equal(t, readinesspb.State_STATE_READY, birdSessionState())
+
+		server.Stop()
+		synctest.Wait()
+		sessionEnded := time.Now()
+		require.NotEqual(t, readinesspb.State_STATE_READY, birdSessionState())
+		serveFeedRIB(t, network.Listen("route-operator"), svc)
+
+		time.Sleep(5 * time.Second)
+		synctest.Wait()
+		require.Equal(t, readinesspb.State_STATE_READY, birdSessionState(),
+			"the idle import did not start a new session within five seconds",
+		)
+		time.Sleep(time.Until(sessionEnded.Add(DefaultRIBTTL)) - time.Nanosecond)
+		synctest.Wait()
+		require.Equal(t, []netip.Prefix{kept, withdrawn}, ribPrefixes(store, "route0"),
+			"the withdrawn route must stay until the RIB TTL",
+		)
+		time.Sleep(time.Nanosecond)
+		synctest.Wait()
+		require.Equal(t, []netip.Prefix{kept}, ribPrefixes(store, "route0"),
+			"the RIB must hold the replayed route and lose the withdrawn one after the TTL",
+		)
+	})
+}
+
+// receiveEvent waits for the next value on events for at most an hour of
+// fake time, failing with what it awaited.
+func receiveEvent[T any](t *testing.T, events <-chan T, awaited string) T {
+	t.Helper()
+	select {
+	case event := <-events:
+		return event
+	case <-time.After(time.Hour):
+		t.Fatalf("timed out waiting for %s", awaited)
+		var zero T
+		return zero
+	}
+}
+
+// serveFeedRIB serves svc on listener until the test ends and returns the
+// gRPC server, so the test may stop it earlier.
+func serveFeedRIB(t *testing.T, listener net.Listener, svc *RouteService) *grpc.Server {
+	t.Helper()
+	server := grpc.NewServer()
+	operatorpb.RegisterRouteServiceServer(server, svc)
+	var workers errgroup.Group
+	workers.Go(func() error { return server.Serve(listener) })
+	t.Cleanup(func() {
+		server.Stop()
+		require.NoError(t, workers.Wait())
+	})
+	return server
+}
+
+// ribPrefixes returns the sorted prefixes the named RIB holds routes for.
+func ribPrefixes(store *RIBStore, name string) []netip.Prefix {
+	ribRef, ok := store.Get(name)
+	if !ok {
+		return nil
+	}
+	var prefixes []netip.Prefix
+	dump := ribRef.DumpRoutes()
+	for bits := range dump {
+		for prefix, routes := range dump[bits] {
+			if len(routes.Routes) > 0 {
+				prefixes = append(prefixes, prefix)
+			}
+		}
+	}
+	slices.SortFunc(prefixes, func(a, b netip.Prefix) int { return a.Addr().Compare(b.Addr()) })
+	return prefixes
+}
+
+// serveBIRDExportSocket serves a BIRD export socket on listener that
+// announces the prefixes routes gives for each accepted connection's ordinal
+// via 2001:db8::1, then stays quiet until the test ends.
+//
+// Every prefix must be a /48 under 2001:db8::/32.
+func serveBIRDExportSocket(t *testing.T, listener net.Listener, routes func(idx int) []netip.Prefix) {
+	t.Helper()
+	var workers errgroup.Group
+	workers.Go(func() error {
+		for idx := 0; ; idx++ {
+			connection, err := listener.Accept()
+			if err != nil {
+				return nil
+			}
+			workers.Go(func() error {
+				defer connection.Close()
+				stop := context.AfterFunc(t.Context(), func() { _ = connection.Close() })
+				defer stop()
+				for _, prefix := range routes(idx) {
+					if _, err := connection.Write(birdExportChunk(prefix)); err != nil {
+						return err
+					}
+				}
+				_, _ = io.Copy(io.Discard, connection)
+				return nil
+			})
+		}
+	})
+	t.Cleanup(func() {
+		_ = listener.Close()
+		require.NoError(t, workers.Wait())
+	})
+}
+
+// birdExportChunk returns a BIRD export chunk announcing the /48 prefix via
+// 2001:db8::1.
+//
+// BIRD lays every 32-bit word of an address out in host byte order.
+func birdExportChunk(prefix netip.Prefix) []byte {
+	addr := prefix.Addr().As16()
+	update := []byte{
+		0: 92,
+		4: 2, 5: 48, 6: 20,
+		8: addr[3], 9: addr[2], 10: addr[1], 11: addr[0],
+		12: addr[7], 13: addr[6], 14: addr[5], 15: addr[4],
+		44: 1,
+		68: 24,
+		72: 3, 73: 4, 76: 16,
+		80: 0xb8, 81: 0x0d, 82: 1, 83: 0x20,
+		92: 1, 95: 0,
+	}
+	binary.LittleEndian.PutUint32(update[:4], uint32(len(update)-4))
+	return update
 }

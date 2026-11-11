@@ -23,18 +23,19 @@ static int
 route_test_fib(yanet_error **err) {
 	memset(&fuzz_fib, 0, sizeof(fuzz_fib));
 	memory_context_init_from(
-		&fuzz_fib.cp_object.memory_context,
+		&fuzz_fib.cp_object.entity.memory_context,
 		&fuzz_params.mctx,
 		"route_test_fib"
 	);
 	if (counter_registry_init(
 		    &fuzz_fib.cp_object.link_counter_registry,
-		    &fuzz_fib.cp_object.memory_context,
-		    0
+		    &fuzz_fib.cp_object.entity.memory_context
 	    )) {
 		return -1;
 	}
-	if (route_fib_init(&fuzz_fib.fib, &fuzz_fib.cp_object.memory_context)) {
+	if (route_fib_init(
+		    &fuzz_fib.fib, &fuzz_fib.cp_object.entity.memory_context
+	    )) {
 		return -1;
 	}
 
@@ -47,7 +48,7 @@ route_test_fib(yanet_error **err) {
 
 	int route_idx = route_fib_add_route(
 		&fuzz_fib.fib,
-		&fuzz_fib.cp_object.memory_context,
+		&fuzz_fib.cp_object.entity.memory_context,
 		(struct ether_addr){
 			.addr = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06},
 		},
@@ -63,7 +64,7 @@ route_test_fib(yanet_error **err) {
 
 	int route_list_idx = route_fib_add_route_list(
 		&fuzz_fib.fib,
-		&fuzz_fib.cp_object.memory_context,
+		&fuzz_fib.cp_object.entity.memory_context,
 		1,
 		(uint32_t[]){route_idx}
 	);
@@ -125,7 +126,9 @@ route_test_fib(yanet_error **err) {
 	return 0;
 
 error_table:
-	route_fib_fini(&fuzz_fib.fib, &fuzz_fib.cp_object.memory_context);
+	route_fib_fini(
+		&fuzz_fib.fib, &fuzz_fib.cp_object.entity.memory_context
+	);
 	return -1;
 }
 
@@ -145,13 +148,13 @@ route_test_config(struct cp_module **cp_module, yanet_error **err) {
 		"route_test",
 		sizeof(config->cp_module.name));
 	memory_context_init_from(
-		&config->cp_module.memory_context,
+		&config->cp_module.entity.memory_context,
 		&fuzz_params.mctx,
 		"route_test"
 	);
 
 	config->cp_module.dp_module_idx = 0;
-	config->cp_module.agent = NULL;
+	config->cp_module.entity.agent = NULL;
 	config->cp_module.device_count = 0;
 	SET_OFFSET_OF(&config->cp_module.devices, NULL);
 
@@ -161,8 +164,7 @@ route_test_config(struct cp_module **cp_module, yanet_error **err) {
 	// Needed by route_module_config_register_counters.
 	if (counter_registry_init(
 		    &config->cp_module.counter_registry,
-		    &config->cp_module.memory_context,
-		    0
+		    &config->cp_module.entity.memory_context
 	    )) {
 		goto error_config;
 	}
@@ -214,26 +216,12 @@ fuzz_setup(yanet_error **err) {
 		return EXIT_FAILURE;
 	}
 
-	// Configure module_ectx for route module
-	// Set up mc_index and config_gen_ectx stubs
+	// The zeroed module_ectx leaves the module with no device targets, so
+	// every routed packet resolves nothing and drops.
 	// TODO: For more comprehensive fuzzing, we should:
-	// - Provide real device contexts instead of stubs (device_count > 0)
-	// - Test with multiple mc_index values to cover different routing paths
-	// - Vary config_gen_ectx to test different device configurations
+	// - Provide real device target tables to cover the routing paths
 	// This would allow packets to actually be routed instead of always
 	// being dropped
-	fuzz_params.module_ectx.mc_index_size = 1;
-	SET_OFFSET_OF(
-		&fuzz_params.module_ectx.mc_index, &fuzz_params.mc_index_stub
-	);
-	fuzz_params.module_ectx.abs_mc_index = &fuzz_params.mc_index_stub;
-	SET_OFFSET_OF(
-		&fuzz_params.module_ectx.config_gen_ectx,
-		&fuzz_params.config_gen_ectx_stub
-	);
-	fuzz_params.module_ectx.abs_config_gen_ectx =
-		&fuzz_params.config_gen_ectx_stub;
-
 	return 0;
 }
 

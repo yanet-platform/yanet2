@@ -158,11 +158,9 @@ func TestHistogramConcurrent(t *testing.T) {
 	n := 1000
 
 	for range n {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			h.Observe(25) // goes to bucket[1]
-		}()
+		})
 	}
 	wg.Wait()
 

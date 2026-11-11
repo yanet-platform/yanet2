@@ -1,0 +1,1 @@
+../../.agents/conventions/c.md

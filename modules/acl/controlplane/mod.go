@@ -5,7 +5,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/modulebase"
 	aclpb "github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
 )
 
@@ -15,85 +15,44 @@ const (
 )
 
 // ModuleOption configures the ACLModule constructor.
-type ModuleOption func(*moduleOptions)
-
-type moduleOptions struct {
-	Log *zap.Logger
-}
-
-func newModuleOptions() *moduleOptions {
-	return &moduleOptions{
-		Log: zap.NewNop(),
-	}
-}
+type ModuleOption = modulebase.Option
 
 // WithModuleLog sets the logger for the ACL module.
 func WithModuleLog(log *zap.Logger) ModuleOption {
-	return func(o *moduleOptions) {
-		o.Log = log
-	}
+	return modulebase.WithLog(log)
 }
 
 // ACLModule is a control-plane component for ACL (Access Control List)
 // module.
 type ACLModule struct {
-	cfg            *Config
-	attachment     *ffi.Attachment
-	aclService     *ACLService
-	metricsService *MetricsService
+	*modulebase.Base
+
+	aclService *ACLService
 }
 
 // NewACLModule creates a new ACL module instance.
 func NewACLModule(cfg *Config, options ...ModuleOption) (*ACLModule, error) {
-	opts := newModuleOptions()
-	for _, o := range options {
-		o(opts)
-	}
-
-	log := opts.Log.With(zap.String("module", aclpb.ACLService_ServiceDesc.ServiceName))
-
-	attachment, err := ffi.Attach(cfg.AttachConfig, agentName, log)
+	base, err := modulebase.NewBase(cfg.AttachConfig, agentName, cfg.Endpoint.Unwrap(), options...)
 	if err != nil {
 		return nil, err
 	}
-	agent := attachment.Agent
 
 	aclService := NewACLService(
-		NewBackend(agent),
-		WithLog(log),
+		NewBackend(base.Agent()),
+		WithLog(base.Log()),
 		WithMetrics(grpcmetrics.NewFactory(
 			grpcmetrics.WithLabeler(labeler),
 		)),
 	)
-
 	metricsService := NewMetricsService(aclService)
+	base.AddService(aclpb.ACLService_ServiceDesc.ServiceName, func(server *grpc.Server) {
+		aclpb.RegisterACLServiceServer(server, aclService)
+	})
+	base.AddService(aclpb.MetricsService_ServiceDesc.ServiceName, func(server *grpc.Server) {
+		aclpb.RegisterMetricsServiceServer(server, metricsService)
+	})
 
-	return &ACLModule{
-		cfg:            cfg,
-		attachment:     attachment,
-		aclService:     aclService,
-		metricsService: metricsService,
-	}, nil
-}
-
-func (m *ACLModule) Name() string {
-	return moduleType
-}
-
-func (m *ACLModule) Endpoint() string {
-	return m.cfg.Endpoint.Unwrap()
-}
-
-func (m *ACLModule) ServicesNames() []string {
-	return []string{
-		aclpb.ACLService_ServiceDesc.ServiceName,
-		aclpb.MetricsService_ServiceDesc.ServiceName,
-	}
-}
-
-func (m *ACLModule) RegisterService(server *grpc.Server) {
-	aclpb.RegisterACLServiceServer(server, m.aclService)
-	aclpb.RegisterMetricsServiceServer(server, m.metricsService)
+	return &ACLModule{Base: base, aclService: aclService}, nil
 }
 
 // UnaryServerInterceptors returns the gRPC unary interceptors for this module.
@@ -109,5 +68,5 @@ func (m *ACLModule) Close() error {
 	// In-flight metric collections read the shared memory outside the
 	// drained request handlers; wait for them before releasing it.
 	m.aclService.DrainMetricsReads()
-	return m.attachment.Close()
+	return m.Base.Close()
 }

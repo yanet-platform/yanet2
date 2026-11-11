@@ -399,12 +399,13 @@ func Test_Load_LineErrorUnwrapsFromPathError(t *testing.T) {
 	// Verify that LineError from UnmarshalYAML is accessible via
 	// errors.As through the error chain, even when Decode doesn't
 	// directly produce it (yaml.v3 wraps it in TypeError).
-	var lineErr *LineError
 	err := errors.New("not a line error")
-	require.False(t, errors.As(err, &lineErr))
+	_, ok := errors.AsType[*LineError](err)
+	require.False(t, ok)
 
 	le := &LineError{Line: 5, Err: errors.New("test")}
 	pe := &PathError{Path: "a.b", Err: le}
-	require.True(t, errors.As(pe, &lineErr))
+	lineErr, ok := errors.AsType[*LineError](pe)
+	require.True(t, ok)
 	require.Equal(t, 5, lineErr.Line)
 }

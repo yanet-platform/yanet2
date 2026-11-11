@@ -47,10 +47,34 @@ func Test_MaxAgentNameLen_MatchesC(t *testing.T) {
 	require.Equal(t, ynpb.MaxAgentNameLen, ffi.MaxAgentNameLen)
 }
 
+// Test_AgentSizeAlignment_MatchesC verifies that the pure-Go size bound
+// uses the same granularity as the C allocator.
+func Test_AgentSizeAlignment_MatchesC(t *testing.T) {
+	require.Equal(t, ynpb.AgentSizeAlignment, ffi.AgentSizeAlignment)
+}
+
 // Test_MaxPipelineNameLen_MatchesC verifies that the pure-Go bound matches the
 // C pipeline-name buffer size, including its terminating byte.
 func Test_MaxPipelineNameLen_MatchesC(t *testing.T) {
 	require.Equal(t, commonpb.MaxPipelineNameLen, ffi.MaxPipelineNameLen)
+}
+
+// Test_MaxFunctionNameLen_MatchesC verifies that the pure-Go bound matches the
+// C function-name buffer size, including its terminating byte.
+func Test_MaxFunctionNameLen_MatchesC(t *testing.T) {
+	require.Equal(t, commonpb.MaxFunctionNameLen, ffi.MaxFunctionNameLen)
+}
+
+// Test_MaxChainNameLen_MatchesC verifies that the pure-Go bound matches the C
+// chain-name buffer size, including its terminating byte.
+func Test_MaxChainNameLen_MatchesC(t *testing.T) {
+	require.Equal(t, ynpb.MaxChainNameLen, ffi.MaxChainNameLen)
+}
+
+// Test_MaxModuleTypeLen_MatchesC verifies that the pure-Go bound matches the
+// C module-type buffer size, including its terminating byte.
+func Test_MaxModuleTypeLen_MatchesC(t *testing.T) {
+	require.Equal(t, commonpb.MaxModuleTypeLen, ffi.MaxModuleTypeLen)
 }
 
 var errInjectedFree = errors.New("injected free failure")

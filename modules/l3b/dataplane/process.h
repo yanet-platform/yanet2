@@ -29,24 +29,15 @@
 #include "lib/dataplane/packet/packet.h"
 #include "lib/dataplane/pipeline/econtext.h"
 
-#include <lib/filter/query.h>
-
-// Per-service source filter: classifies incoming packets by source network and
-// destination (service) port.
-FILTER_QUERY_DECLARE(l3b_source_filter_ip4, net4_src, port_dst);
-FILTER_QUERY_DECLARE(l3b_source_filter_ip6, net6_src, port_dst);
-
-// Module-level destination filter: classifies incoming packets by destination
-// network and protocol into a virtual service index.
-FILTER_QUERY_DECLARE(l3b_destination_filter_ip4, net4_dst, proto_range);
-FILTER_QUERY_DECLARE(l3b_destination_filter_ip6, net6_dst, proto_range);
+#include "filter_lookup.h"
 
 // The ICMP type byte of an initial packet, or -1 when the packet carries
 // no complete ICMP header.
 //
-// The transport region must hold the full header, not just the type byte:
-// an echo request classified by this predicate gets answered in place,
-// which rewrites the type, code and checksum bytes of the same header.
+// The head segment must hold the full header, not just the type byte: an
+// echo request classified by this predicate gets answered in place, which
+// rewrites the type, code and checksum bytes of the same header, and the
+// read below only reaches the head segment of a chained packet.
 static inline int
 l3b_packet_icmp_type(const struct packet *packet) {
 	if (packet->fragment_offset != 0) {
@@ -56,11 +47,11 @@ l3b_packet_icmp_type(const struct packet *packet) {
 	struct rte_mbuf *mbuf = packet_to_mbuf((struct packet *)packet);
 
 	if (packet->transport_header.type == IPPROTO_ICMP) {
-		if (rte_pktmbuf_pkt_len(mbuf) <
+		if (rte_pktmbuf_data_len(mbuf) <
 		    (uint32_t)packet->transport_header.offset +
 			    sizeof(struct yanet_icmp_hdr)) {
-			// The transport region holds no complete header
-			// to classify or rewrite.
+			// The head segment holds no complete header to
+			// classify or rewrite.
 			return -1;
 		}
 		const struct yanet_icmp_hdr *icmp = rte_pktmbuf_mtod_offset(
@@ -71,7 +62,7 @@ l3b_packet_icmp_type(const struct packet *packet) {
 		return icmp->icmp_type;
 	}
 	if (packet->transport_header.type == IPPROTO_ICMPV6) {
-		if (rte_pktmbuf_pkt_len(mbuf) <
+		if (rte_pktmbuf_data_len(mbuf) <
 		    (uint32_t)packet->transport_header.offset +
 			    sizeof(struct yanet_icmp6_hdr)) {
 			return -1;
@@ -84,6 +75,77 @@ l3b_packet_icmp_type(const struct packet *packet) {
 		return icmp6->icmp6_type;
 	}
 	return -1;
+}
+
+// Classifier keys and Echo rewrites require fixed/base headers in the head.
+//
+// This checks base IP and fixed TCP/UDP headers, not TCP options. ICMP and
+// ICMPv6 require only the type byte for non-Echo messages, all eight header
+// bytes for Echo. Unread protocols and globally short ICMP messages stay
+// exempt: neither enters classification or Echo rewriting.
+static inline bool
+l3b_packet_headers_are_head_resident(const struct packet *packet) {
+	struct rte_mbuf *mbuf = packet_to_mbuf((struct packet *)packet);
+	uint32_t data_len = rte_pktmbuf_data_len(mbuf);
+	uint32_t transport_len;
+	switch (packet->transport_header.type) {
+	case IPPROTO_TCP:
+		transport_len = sizeof(struct rte_tcp_hdr);
+		break;
+	case IPPROTO_UDP:
+		transport_len = sizeof(struct rte_udp_hdr);
+		break;
+	case IPPROTO_ICMP:
+		transport_len = sizeof(struct yanet_icmp_hdr);
+		break;
+	case IPPROTO_ICMPV6:
+		transport_len = sizeof(struct yanet_icmp6_hdr);
+		break;
+	default:
+		return true;
+	}
+	if ((packet->transport_header.type == IPPROTO_ICMP ||
+	     packet->transport_header.type == IPPROTO_ICMPV6) &&
+	    rte_pktmbuf_pkt_len(mbuf) <
+		    packet->transport_header.offset + transport_len) {
+		return true;
+	}
+
+	if (packet->network_header.type ==
+	    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
+		if (data_len < packet->network_header.offset +
+				       sizeof(struct rte_ipv4_hdr)) {
+			return false;
+		}
+	} else if (packet->network_header.type ==
+		   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
+		if (data_len < packet->network_header.offset +
+				       sizeof(struct rte_ipv6_hdr)) {
+			return false;
+		}
+	} else {
+		return true;
+	}
+
+	if (packet->transport_header.type == IPPROTO_ICMP ||
+	    packet->transport_header.type == IPPROTO_ICMPV6) {
+		if (data_len <= packet->transport_header.offset) {
+			return false;
+		}
+		uint8_t icmp_type = *rte_pktmbuf_mtod_offset(
+			mbuf, const uint8_t *, packet->transport_header.offset
+		);
+		bool is_echo =
+			packet->network_header.type ==
+					rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)
+				? icmp_type == ICMP_ECHO
+				: icmp_type == RTE_ICMP6_ECHO_REQUEST;
+		if (!is_echo) {
+			return true;
+		}
+	}
+
+	return data_len >= packet->transport_header.offset + transport_len;
 }
 
 // Whether the packet is an ICMP echo request towards a service address: the
@@ -108,13 +170,11 @@ l3b_csum_add(uint16_t sum, uint16_t value) {
 }
 
 /*
- * Answer an ICMP echo request in place, the same way the first-generation
- * balancer did: flip the message type to echo reply, swap the source and
- * destination addresses, restart the TTL at 64 and update the checksums
- * incrementally — swapping both addresses of the pseudo-header keeps its
- * sum, so only the type field change enters the ICMP checksum.
+ * Answer an admitted Echo request in place with initial TTL/Hop Limit 65.
  *
- * Returns 0 on success, -1 on a malformed packet.
+ * Swapping the pseudo-header addresses preserves their sum; the checksum
+ * delta covers both type and code. All other message bytes stay unchanged.
+ * Returns 0 on success, -1 for an unsupported network family before mutation.
  */
 static inline int
 l3b_icmp_echo_reply(struct packet *packet) {
@@ -133,7 +193,9 @@ l3b_icmp_echo_reply(struct packet *packet) {
 			packet->transport_header.offset
 		);
 
-		uint16_t before = rte_cpu_to_be_16((uint16_t)ICMP_ECHO << 8);
+		uint16_t before = rte_cpu_to_be_16(
+			((uint16_t)icmp->icmp_type << 8) | icmp->icmp_code
+		);
 		icmp->icmp_type = ICMP_ECHOREPLY;
 		icmp->icmp_code = 0;
 		uint16_t after =
@@ -142,12 +204,11 @@ l3b_icmp_echo_reply(struct packet *packet) {
 		uint32_t tmp = ip->src_addr;
 		ip->src_addr = ip->dst_addr;
 		ip->dst_addr = tmp;
-		ip->time_to_live = 64;
+		ip->time_to_live = 65;
 
 		ip->hdr_checksum = 0;
 		ip->hdr_checksum = rte_ipv4_cksum(ip);
 
-		// The reply is a fresh datagram: its checksum starts anew.
 		uint16_t sum = l3b_csum_add(~icmp->icmp_cksum, ~before);
 		icmp->icmp_cksum = ~l3b_csum_add(sum, after);
 		return 0;
@@ -166,8 +227,9 @@ l3b_icmp_echo_reply(struct packet *packet) {
 			packet->transport_header.offset
 		);
 
-		uint16_t before =
-			rte_cpu_to_be_16((uint16_t)RTE_ICMP6_ECHO_REQUEST << 8);
+		uint16_t before = rte_cpu_to_be_16(
+			((uint16_t)icmp6->icmp6_type << 8) | icmp6->icmp6_code
+		);
 		icmp6->icmp6_type = RTE_ICMP6_ECHO_REPLY;
 		icmp6->icmp6_code = 0;
 		uint16_t after =
@@ -177,10 +239,8 @@ l3b_icmp_echo_reply(struct packet *packet) {
 		memcpy(tmp, ip6->src_addr, sizeof(tmp));
 		memcpy(ip6->src_addr, ip6->dst_addr, sizeof(tmp));
 		memcpy(ip6->dst_addr, tmp, sizeof(tmp));
-		ip6->hop_limits = 64;
+		ip6->hop_limits = 65;
 
-		// Swapping both pseudo-header addresses keeps its checksum,
-		// so the type change alone enters incrementally.
 		uint16_t sum = l3b_csum_add(~icmp6->icmp6_cksum, ~before);
 		icmp6->icmp6_cksum = ~l3b_csum_add(sum, after);
 		return 0;
@@ -747,14 +807,12 @@ l3b_schedule_value(
 }
 
 /*
- * Process a single packet through a virtual service.
+ * Service processing preserves backend pins after source admission.
  *
- * The per-family filter is queried first; a non-match aborts with -1. A live
- * session record then pins the flow to its real server; only flows without
- * one go through the hash-derived scheduler, and the choice is written back
- * as a new session record. The chosen real performs the encapsulation.
- *
- * Returns 0 on success, -1 on failure.
+ * Echo replies bypass source filtering and sessions. Other packets require
+ * source admission before consulting an existing session. New flows and
+ * eligible disabled-real reselections use hash or link-counter scheduling;
+ * the chosen real performs encapsulation. Returns 0 on success, -1 on failure.
  */
 static inline int
 l3b_virtual_service_process(
@@ -764,8 +822,6 @@ l3b_virtual_service_process(
 	const uint64_t *link_packets,
 	struct counter_storage *counters
 ) {
-	uint16_t type = packet->network_header.type;
-
 	l3b_counter_add(counters, virtual_service->counter_incoming, packet);
 
 	// Echo replies require configured reals, regardless of eligibility.
@@ -784,23 +840,7 @@ l3b_virtual_service_process(
 		return 0;
 	}
 
-	const struct filter_query *query;
-	struct filter *filter;
-
-	if (type == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-		filter = &virtual_service->filter_ip4;
-		query = l3b_source_filter_ip4;
-	} else if (type == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-		filter = &virtual_service->filter_ip6;
-		query = l3b_source_filter_ip6;
-	} else {
-		return -1;
-	}
-
-	struct packet *packets[1] = {packet};
-	uint32_t result[1];
-	filter_query(filter, query, packets, result, 1);
-	if (result[0] == FILTER_RULE_INVALID) {
+	if (!l3b_source_filter_matches(virtual_service, packet)) {
 		l3b_counter_add(
 			counters,
 			virtual_service->counter_filter_rejected,
@@ -814,10 +854,12 @@ l3b_virtual_service_process(
 	uint64_t *real_counter_ids =
 		ADDR_OF(&virtual_service->real_counter_ids);
 
-	// An existing session keeps its backend while that backend is still
-	// listed — matched by address, so the session survives service
-	// updates that reorder or replace the list. A disabled backend counts
-	// as a rejection by state and falls through to the scheduler.
+	// Live pins survive backend-list reordering because they match by
+	// address.
+	//
+	// A disabled pin counts a state rejection; only UDP and TCP setup
+	// traffic may then use the scheduler. Established TCP must not move
+	// between reals.
 	uint32_t real_index;
 	struct l3s_key key;
 	l3s_key_of_packet(packet, &key);

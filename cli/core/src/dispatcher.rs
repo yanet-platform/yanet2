@@ -83,7 +83,8 @@ pub fn locate_modules(prefix: &str) -> Result<HashSet<String>, Box<dyn Error>> {
         let entries = match fs::read_dir(&path) {
             Ok(entries) => entries,
             Err(err) => {
-                // Continue on error, because some directories may not be readable.
+                // Continue on error, because some directories may not be
+                // readable.
                 log::trace!("failed to read directory {}: {err}", path.display());
                 continue;
             }
@@ -92,7 +93,8 @@ pub fn locate_modules(prefix: &str) -> Result<HashSet<String>, Box<dyn Error>> {
             let entry = match entry {
                 Ok(entry) => entry,
                 Err(err) => {
-                    // Continue on error, because some entries may not be readable.
+                    // Continue on error, because some entries may not be
+                    // readable.
                     log::trace!("failed to read entry in directory {}: {err}", path.display());
                     continue;
                 }
@@ -324,11 +326,6 @@ pub fn dispatch(name: &str, prefix: &str, behavior: &impl Dispatch) -> ! {
     exec_sub_binary(&prefix, cmd, collect_args(sub_matches), &modules, behavior);
 }
 
-// `core::io::ErrorKind` is behind the unstable `core_io` feature, so this
-// function keeps `std::io::ErrorKind`; the allow sits here rather than on a
-// `use` because clippy's `useless_attribute` rejects it directly on a `use`
-// item.
-#[allow(clippy::std_instead_of_core)]
 fn exec_sub_binary(
     prefix: &str,
     cmd: &str,

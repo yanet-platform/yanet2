@@ -13,6 +13,8 @@ import (
 // required while next-hop parsing remains the handler's responsibility.
 //
 // A MAC address wider than EUI-48 is rejected.
+//
+// A missing device is rejected.
 func Test_NeighbourEntry_Validate(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -38,6 +40,7 @@ func Test_NeighbourEntry_Validate(t *testing.T) {
 			entry: &operatorpb.NeighbourEntry{
 				HardwareAddr: &commonpb.MACAddress{},
 				LinkAddr:     &commonpb.MACAddress{},
+				Device:       "eth0",
 			},
 		},
 		{
@@ -45,7 +48,16 @@ func Test_NeighbourEntry_Validate(t *testing.T) {
 			entry: &operatorpb.NeighbourEntry{
 				HardwareAddr: &commonpb.MACAddress{Addr: 0xFFFF_FFFF_FFFF},
 				LinkAddr:     &commonpb.MACAddress{Addr: 0xFFFF_FFFF_FFFF},
+				Device:       "eth0",
 			},
+		},
+		{
+			name: "missing device",
+			entry: &operatorpb.NeighbourEntry{
+				HardwareAddr: &commonpb.MACAddress{},
+				LinkAddr:     &commonpb.MACAddress{},
+			},
+			message: "device is required",
 		},
 		{
 			name: "hardware address wider than EUI-48",
@@ -103,6 +115,7 @@ func Test_UpdateNeighboursRequest_Validate(t *testing.T) {
 					{
 						HardwareAddr: &commonpb.MACAddress{},
 						LinkAddr:     &commonpb.MACAddress{},
+						Device:       "eth0",
 					},
 					{HardwareAddr: &commonpb.MACAddress{}},
 				},
@@ -116,6 +129,7 @@ func Test_UpdateNeighboursRequest_Validate(t *testing.T) {
 					{
 						HardwareAddr: &commonpb.MACAddress{},
 						LinkAddr:     &commonpb.MACAddress{},
+						Device:       "eth0",
 					},
 				},
 			},

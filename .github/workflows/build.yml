@@ -8,6 +8,7 @@ on:
       - "**.c"
       - "**/meson.build"
       - "meson_options.txt"
+      - "ubsan-ignorelist.txt"
       - "subprojects/**"
       - ".gitmodules"
       # Protoc-generated Go is a build product, not a tracked file.
@@ -15,8 +16,13 @@ on:
       - "**.go"
       - "go.mod"
       - "go.sum"
+      - "ci/go-version"
       - "Makefile"
       - "Justfile"
+      - "scripts/go_cdeps.py"
+      - "scripts/go_cgo_flags.py"
+      - "scripts/test_go_cdeps.py"
+      - "scripts/check_link_deps.py"
       - "lab/**"
       - "docs/lab.md"
       - "**.rs"
@@ -27,8 +33,15 @@ on:
       - ".github/actions/apt-packages/**"
       - ".github/actions/apt-failover/**"
       - ".github/actions/go-modcache/**"
-      - ".github/actions/protoc-plugins/**"
+      - ".github/actions/go-buildcache/**"
+      - ".github/actions/protoc/**"
+      - ".github/actions/cli-inputs/**"
       - "tests/functional/**"
+      # The Rust module SDK is a workspace of its own that neither meson nor
+      # the CLI builds; its own workflows check it.
+      #
+      # A negation applies only to the patterns above it, so it stays last.
+      - "!bindings/rust/**"
   pull_request:
     # A stacked pull request has a non-main base, so a main-only filter would skip it.
     branches: ["**"]
@@ -37,6 +50,7 @@ on:
       - "**.c"
       - "**/meson.build"
       - "meson_options.txt"
+      - "ubsan-ignorelist.txt"
       - "subprojects/**"
       - ".gitmodules"
       # Protoc-generated Go is a build product, not a tracked file.
@@ -44,8 +58,13 @@ on:
       - "**.go"
       - "go.mod"
       - "go.sum"
+      - "ci/go-version"
       - "Makefile"
       - "Justfile"
+      - "scripts/go_cdeps.py"
+      - "scripts/go_cgo_flags.py"
+      - "scripts/test_go_cdeps.py"
+      - "scripts/check_link_deps.py"
       - "lab/**"
       - "docs/lab.md"
       - "**.rs"
@@ -56,53 +75,72 @@ on:
       - ".github/actions/apt-packages/**"
       - ".github/actions/apt-failover/**"
       - ".github/actions/go-modcache/**"
-      - ".github/actions/protoc-plugins/**"
+      - ".github/actions/go-buildcache/**"
+      - ".github/actions/protoc/**"
+      - ".github/actions/cli-inputs/**"
       - "tests/functional/**"
+      # The Rust module SDK is a workspace of its own that neither meson nor
+      # the CLI builds; its own workflows check it.
+      #
+      # A negation applies only to the patterns above it, so it stays last.
+      - "!bindings/rust/**"
 
 concurrency:
   # The run_id fallback keeps non-PR runs from cancelling each other.
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
+defaults:
+  run:
+    # The runner's default shell, which container jobs would replace with sh.
+    shell: bash -e {0}
+
+permissions:
+  contents: read
+
 jobs:
+  functional-makefile:
+    name: Functional Makefile sandbox
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check Makefile behavior
+        run: |
+          test "$(id -u)" -ne 0
+          bash tests/functional/test-makefile.sh
+          bash tests/functional/test-makefile.sh default
+
   build-asan-test:
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    container: ghcr.io/yanet-platform/yanet2-ci@sha256:3cbb2aae05beb4efc16f160cfa4d5307deba5d3110005d6557fdb49e5e2ee7a1
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           submodules: true
 
-      - uses: ./.github/actions/apt-packages
-        timeout-minutes: 10
-        with:
-          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler
-
-      - uses: hendrikmuhs/ccache-action@v1.2.23
+      - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
         name: ccache
         with:
-          key: ${{ runner.os }}-build-asan-test-cache
+          key: ${{ runner.os }}-build-asan-test-image-cache
           max-size: 2G
           verbose: 2
           save: ${{ github.ref == 'refs/heads/main' }}
 
-      - uses: actions/setup-go@v6
-        with:
-          go-version: "1.24.x"
-          cache: false
-          check-latest: true
-
       - name: Restore Go module cache
         uses: ./.github/actions/go-modcache
 
-      - name: Install Go Protobuf Plugins
-        uses: ./.github/actions/protoc-plugins
-
-      - name: Build YANET (sanitize)
-        run: |
-          make go-cache-clean
-          meson setup build -Dbuildtype=debug -Doptimization=0 -Db_sanitize=address,undefined
-          make dataplane
+      - name: Restore Go build cache
+        if: ${{ !env.ACT }}
+        id: go-buildcache
+        uses: ./.github/actions/go-buildcache
+        with:
+          profile: asan
 
       - name: Build and run tests (sanitize)
         run: make test-asan-only
@@ -111,38 +149,146 @@ jobs:
         if: always()
         run: grep -v 'Inherited environment' build/meson-logs/testlog.txt || true
 
-  build-tsan-test:
-    runs-on: ubuntu-24.04
+      - name: Save Go build cache
+        if: success() && github.ref == 'refs/heads/main' && steps.go-buildcache.outputs.cache-hit != 'true' && !env.ACT
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.go-buildcache.outputs.path }}
+          key: ${{ steps.go-buildcache.outputs.key }}
+
+  # Most pull requests get no package build, so this job checks the arm64
+  # build with the flags the packages use and runs the unit tests on arm64.
+  test-release-arm64:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    container: ghcr.io/yanet-platform/yanet2-ci@sha256:3cbb2aae05beb4efc16f160cfa4d5307deba5d3110005d6557fdb49e5e2ee7a1
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           submodules: true
 
-      - uses: ./.github/actions/apt-packages
-        timeout-minutes: 10
-        with:
-          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler
-
-      - uses: hendrikmuhs/ccache-action@v1.2.23
+      - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
         name: ccache
         with:
-          key: ${{ runner.os }}-build-tsan-test-cache
+          key: ${{ runner.os }}-test-release-arm64-image-cache
           max-size: 2G
           verbose: 2
           save: ${{ github.ref == 'refs/heads/main' }}
 
-      - uses: actions/setup-go@v6
-        with:
-          go-version: "1.24.x"
-          cache: false
-          check-latest: true
-
       - name: Restore Go module cache
         uses: ./.github/actions/go-modcache
 
-      - name: Install Go Protobuf Plugins
-        uses: ./.github/actions/protoc-plugins
+      - name: Restore Go build cache
+        if: ${{ !env.ACT }}
+        id: go-buildcache
+        uses: ./.github/actions/go-buildcache
+        with:
+          profile: release
+
+      # Debian's hardening flags turn warnings the plain release build never
+      # sees into errors, as they do in the package build.
+      - name: Build and run tests (release, packaging flags)
+        run: |
+          flags=$(DEB_BUILD_MAINT_OPTIONS=hardening=+all DEB_CFLAGS_MAINT_APPEND=-fno-lto DEB_LDFLAGS_MAINT_APPEND=-fno-lto dpkg-buildflags --export=sh)
+          eval "$flags"
+          meson setup build -Dbuildtype=release
+          make build
+          make test-only
+
+      - name: Show meson test log
+        if: always()
+        run: grep -v 'Inherited environment' build/meson-logs/testlog.txt || true
+
+      - name: Save Go build cache
+        if: success() && github.ref == 'refs/heads/main' && steps.go-buildcache.outputs.cache-hit != 'true' && !env.ACT
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.go-buildcache.outputs.path }}
+          key: ${{ steps.go-buildcache.outputs.key }}
+
+  # The CLI's bundled C libraries pick up the package flags too, so the arm64
+  # CLI build runs with them in a job of its own, beside the one above.
+  build-cli-arm64:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Hash the CLI inputs
+        id: inputs
+        uses: ./.github/actions/cli-inputs
+
+      # Main records each CLI input state it built, so a change that leaves
+      # the inputs alone has nothing new to build.
+      - name: Look up a build of the same inputs
+        id: built
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: target/cli-built
+          key: cli-ok-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.inputs.outputs.hash }}
+          lookup-only: true
+
+      - uses: ./.github/actions/protoc
+        if: steps.built.outputs.cache-hit != 'true'
+        timeout-minutes: 5
+
+      - name: Install Rust toolchain
+        if: steps.built.outputs.cache-hit != 'true'
+        uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
+
+      # A cache written on a pull-request ref is readable only from that
+      # same pull request, so only main writes this one.
+      - name: Cache rust
+        if: steps.built.outputs.cache-hit != 'true'
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: build-ci-arm64
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build CLI (ci profile, packaging flags)
+        if: steps.built.outputs.cache-hit != 'true'
+        run: |
+          flags=$(DEB_BUILD_MAINT_OPTIONS=hardening=+all DEB_CFLAGS_MAINT_APPEND=-fno-lto DEB_LDFLAGS_MAINT_APPEND=-fno-lto dpkg-buildflags --export=sh)
+          eval "$flags"
+          make cli CLI_PROFILE=ci
+
+      - name: Mark the build
+        if: github.ref == 'refs/heads/main' && steps.built.outputs.cache-hit != 'true'
+        run: touch target/cli-built
+
+      - name: Record the build
+        if: github.ref == 'refs/heads/main' && steps.built.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: target/cli-built
+          key: cli-ok-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.inputs.outputs.hash }}
+
+  build-tsan-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    container: ghcr.io/yanet-platform/yanet2-ci@sha256:3cbb2aae05beb4efc16f160cfa4d5307deba5d3110005d6557fdb49e5e2ee7a1
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: true
+
+      - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
+        name: ccache
+        with:
+          key: ${{ runner.os }}-build-tsan-test-image-cache
+          max-size: 2G
+          verbose: 2
+          save: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Restore Go module cache
+        uses: ./.github/actions/go-modcache
 
       - name: Run TSAN tests
         run: make test-tsan
@@ -151,60 +297,127 @@ jobs:
         if: always()
         run: grep -v 'Inherited environment' build-tsan/meson-logs/testlog.txt || true
 
+  # Functional tests need only binaries, so the CLI build and the release
+  # unit tests run in their own jobs instead of delaying them.
   build-release-artifacts:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    container: ghcr.io/yanet-platform/yanet2-ci@sha256:3cbb2aae05beb4efc16f160cfa4d5307deba5d3110005d6557fdb49e5e2ee7a1
+    env:
+      # Every meson-built binary the functional tests and lab scenarios copy
+      # into their VMs, and all that this job builds.
+      #
+      # Each entry is the build path of the meson target that makes it; the
+      # release test job builds and tests the rest of the tree.
+      FUNCTIONAL_BINARIES: |
+        build/dataplane/yanet-dataplane
+        build/controlplane/yanet-controlplane
+        build/operators/route/yanet-route-operator
+        build/operators/generic/yanet-generic-operator
+        build/operators/pipeline/yanet-pipeline-operator
+        build/operators/bird-adapter/yanet-bird-adapter
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           submodules: true
 
-      - uses: ./.github/actions/apt-packages
-        timeout-minutes: 10
+      # The release test job compiles the whole tree and is the one that saves
+      # this cache.
+      - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
+        name: ccache
         with:
-          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq
+          key: ${{ runner.os }}-build-release-artifacts-image-cache
+          max-size: 2G
+          verbose: 2
+          save: false
+
+      - name: Restore Go module cache
+        uses: ./.github/actions/go-modcache
+
+      # The release test job compiles a superset of these packages and is the
+      # one that saves this cache.
+      - name: Restore Go build cache
+        if: ${{ !env.ACT }}
+        uses: ./.github/actions/go-buildcache
+        with:
+          profile: release
+
+      - name: Build YANET (release)
+        run: |
+          meson setup build -Dbuildtype=release
+          mapfile -t targets < <(sed -n 's#^build/##p' <<<"$FUNCTIONAL_BINARIES")
+          meson compile -C build "${targets[@]}"
+
+      - name: Check functional test binaries
+        run: |
+          set -euo pipefail
+          while IFS= read -r path; do
+            if [[ -n $path && ! -x $path ]]; then
+              echo "missing functional test binary: $path" >&2
+              exit 1
+            fi
+          done <<<"$FUNCTIONAL_BINARIES"
+
+      # Artifacts keep paths relative to the build directory and drop the
+      # executable bit; the functional test job restores both.
+      - name: Upload YANET binaries
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: yanet2-binaries
+          if-no-files-found: error
+          path: ${{ env.FUNCTIONAL_BINARIES }}
+
+  build-cli:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Hash the CLI inputs
+        id: inputs
+        uses: ./.github/actions/cli-inputs
+
+      # Main saves the binaries of each CLI input state it built, so a change
+      # that leaves the inputs alone reuses them instead of building.
+      - name: Restore the CLI built from the same inputs
+        id: binaries
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            target/ci/yanet-cli
+            target/ci/yanet-cli-*
+            !target/ci/*.d
+          key: cli-bin-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.inputs.outputs.hash }}
+
+      - uses: ./.github/actions/protoc
+        if: steps.binaries.outputs.cache-hit != 'true'
+        timeout-minutes: 5
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@1.88.0
+        if: steps.binaries.outputs.cache-hit != 'true'
+        uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
 
       # A cache written on a pull-request ref is readable only from that
       # same pull request, so only main writes this one.
       - name: Cache rust
-        uses: Swatinem/rust-cache@v2.9.2
+        if: steps.binaries.outputs.cache-hit != 'true'
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          shared-key: build-release
+          shared-key: build-ci
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - uses: hendrikmuhs/ccache-action@v1.2.23
-        name: ccache
-        with:
-          key: ${{ runner.os }}-build-release-artifacts-cache
-          max-size: 2G
-          verbose: 2
-          save: ${{ github.ref == 'refs/heads/main' }}
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version: "1.24.x"
-          cache: false
-          check-latest: true
-
-      - name: Restore Go module cache
-        id: go-modcache
-        uses: ./.github/actions/go-modcache
-
-      - name: Install Go Protobuf Plugins
-        uses: ./.github/actions/protoc-plugins
-
-      - name: Build YANET (release)
-        run: |
-          make go-cache-clean
-          meson setup build -Dbuildtype=release
-          make dataplane cli
+      - name: Build CLI (ci profile)
+        if: steps.binaries.outputs.cache-hit != 'true'
+        run: make cli CLI_PROFILE=ci
 
       - name: Verify CLI crypto linkage
         run: |
-          for binary in target/release/yanet-cli target/release/yanet-cli-*; do
+          for binary in target/ci/yanet-cli target/ci/yanet-cli-*; do
             if [ ! -x "$binary" ]; then
               continue
             fi
@@ -214,15 +427,73 @@ jobs:
             fi
           done
 
-      - name: Clang syntax sweep
-        run: make lint/clang-syntax
+      - name: Save the CLI
+        if: github.ref == 'refs/heads/main' && steps.binaries.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            target/ci/yanet-cli
+            target/ci/yanet-cli-*
+            !target/ci/*.d
+          key: cli-bin-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.inputs.outputs.hash }}
 
+      # Artifacts keep paths relative to the profile directory and drop the
+      # executable bit; the functional test job restores both.
+      - name: Upload YANET CLI
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: yanet2-cli
+          if-no-files-found: error
+          path: |
+            target/ci/yanet-cli
+            target/ci/yanet-cli-*
+            !target/ci/*.d
+
+  test-release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    container: ghcr.io/yanet-platform/yanet2-ci@sha256:3cbb2aae05beb4efc16f160cfa4d5307deba5d3110005d6557fdb49e5e2ee7a1
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: true
+
+      # The artifacts job compiles part of this tree and restores this cache.
+      - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
+        name: ccache
+        with:
+          key: ${{ runner.os }}-build-release-artifacts-image-cache
+          max-size: 2G
+          verbose: 2
+          save: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Restore Go module cache
+        id: go-modcache
+        uses: ./.github/actions/go-modcache
+
+      - name: Restore Go build cache
+        if: ${{ !env.ACT }}
+        id: go-buildcache
+        uses: ./.github/actions/go-buildcache
+        with:
+          profile: release
+
+      # Building the binaries before the tests keeps their cgo-free packages in
+      # the Go build cache this job saves for the artifacts job.
       - name: Build and run tests (release)
-        run: make test-only
+        run: |
+          meson setup build -Dbuildtype=release
+          make build
+          make test-only
 
       - name: Show meson test log
         if: always()
         run: grep -v 'Inherited environment' build/meson-logs/testlog.txt || true
+
+      - name: Clang syntax sweep
+        run: make lint/clang-syntax
 
       # This job is the designated writer of the shared Go module cache key:
       # its `make test-only` resolves the whole module list, unlike tsan's
@@ -232,97 +503,46 @@ jobs:
       # earlier step fails the job.
       - name: Save Go module cache
         if: steps.go-modcache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.go-modcache.outputs.path }}
           key: ${{ steps.go-modcache.outputs.key }}
 
-      - name: Verify binaries before upload
-        run: |
-          echo "=== DIAGNOSTIC: Verifying binaries before artifact upload ==="
-          echo "Current git commit: $(git rev-parse HEAD)"
-          echo "Current git commit short: $(git rev-parse --short HEAD)"
-          echo ""
-
-          echo "yanet-dataplane:"
-          if [ -f "build/dataplane/yanet-dataplane" ]; then
-              stat build/dataplane/yanet-dataplane
-              md5sum build/dataplane/yanet-dataplane
-              strings build/dataplane/yanet-dataplane | grep -E "yanet|version" | head -20 || true
-          else
-              echo "ERROR: build/dataplane/yanet-dataplane not found!"
-              exit 1
-          fi
-
-          echo ""
-          echo "yanet-controlplane:"
-          if [ -f "build/controlplane/yanet-controlplane" ]; then
-              stat build/controlplane/yanet-controlplane
-              md5sum build/controlplane/yanet-controlplane
-              strings build/controlplane/yanet-controlplane | grep -E "yanet|version" | head -20 || true
-          else
-              echo "ERROR: build/controlplane/yanet-controlplane not found!"
-              exit 1
-          fi
-
-          echo ""
-          echo "yanet-cli binaries:"
-          if ls target/release/yanet-cli* 1>/dev/null 2>&1; then
-              stat target/release/yanet-cli* || true
-              md5sum target/release/yanet-cli* || true
-          else
-              echo "ERROR: No yanet-cli binaries found in target/release/!"
-              exit 1
-          fi
-
-      - name: Stage operator binaries
-        run: |
-          set -euo pipefail
-          for path in \
-            build/operators/route/yanet-route-operator \
-            build/operators/generic/yanet-generic-operator \
-            build/operators/pipeline/yanet-pipeline-operator \
-            build/operators/neighbour-sidecar/yanet-neighbour-sidecar \
-            build/operators/bird-adapter/yanet-bird-adapter; do
-            test -x "$path"
-            cp "$path" "$(basename "$path")"
-          done
-
-      - name: Upload YANET binaries
-        uses: actions/upload-artifact@v5
+      - name: Save Go build cache
+        if: success() && github.ref == 'refs/heads/main' && steps.go-buildcache.outputs.cache-hit != 'true' && !env.ACT
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          name: yanet2-binaries
-          path: |
-            build/dataplane/yanet-dataplane
-            build/controlplane/yanet-controlplane
-            target/release/yanet-cli*
-            yanet-*-operator
-            yanet-bird-adapter
-            yanet-neighbour-sidecar
+          path: ${{ steps.go-buildcache.outputs.path }}
+          key: ${{ steps.go-buildcache.outputs.key }}
 
+  # The two suites boot their own VMs, so they run on separate runners.
   functional-tests:
-    name: Run Functional Tests
+    name: Run ${{ matrix.suite == 'lab' && 'Lab Scenarios' || 'Functional Tests' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 150
-    needs: build-release-artifacts
+    timeout-minutes: 120
+    needs: [build-release-artifacts, build-cli]
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [functional, lab]
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
           persist-credentials: false
 
-      - name: Clean any pre-existing build artifacts
-        run: |
-          echo "=== Cleaning any cached build artifacts before downloading from build job ==="
-          rm -rf build/ target/ || true
-          echo "Cleaned build/ and target/ directories"
-
+      # The setup-go cache is keyed on the module list alone, so only one leg
+      # may write it; the lab leg restores modules only and compiles cold.
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.24.x"
-          cache: true
+          go-version-file: ci/go-version
+          cache: ${{ matrix.suite == 'functional' }}
+
+      - name: Restore Go module cache
+        if: matrix.suite == 'lab'
+        uses: ./.github/actions/go-modcache
 
       - uses: ./.github/actions/apt-packages
         timeout-minutes: 10
@@ -347,18 +567,19 @@ jobs:
           # Check QEMU capabilities
           qemu-system-x86_64 --version
 
-      - name: Cache Ubuntu cloud image
+      # Both legs restore the VM images; only the functional leg saves them.
+      - name: Restore Ubuntu cloud image
         id: cache-ubuntu-image
-        uses: actions/cache@v5
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: tests/functional/ubuntu-24.04-minimal-cloudimg-amd64.img
           key: ${{ runner.os }}-ubuntu-image-${{ hashFiles('tests/functional/Makefile') }}
           restore-keys: |
             ${{ runner.os }}-ubuntu-image-
 
-      - name: Cache QEMU image
+      - name: Restore QEMU image
         id: cache-qemu-image
-        uses: actions/cache@v5
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             tests/functional/yanet-test.qcow2
@@ -387,84 +608,37 @@ jobs:
               touch yanet-test.qcow2
           fi
 
-      - name: Download YANET binaries from build job
-        uses: actions/download-artifact@v5
+      - name: Download YANET binaries
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: yanet2-binaries
-          path: ./
+          path: build
 
-      - name: Place downloaded binaries
-        run: |
-          mkdir -p build/dataplane build/controlplane target/release
-          [ -f "./yanet-dataplane" ] && mv -f ./yanet-dataplane build/dataplane/
-          [ -f "./yanet-controlplane" ] && mv -f ./yanet-controlplane build/controlplane/
-          if ls ./yanet-cli* 1>/dev/null 2>&1; then
-              mv -f ./yanet-cli-* target/release/
-          fi
-          mkdir -p build/operators/{route,generic,pipeline,bird-adapter}
-          mv -f ./yanet-route-operator build/operators/route/
-          mv -f ./yanet-generic-operator build/operators/generic/
-          mv -f ./yanet-pipeline-operator build/operators/pipeline/
-          mv -f ./yanet-bird-adapter build/operators/bird-adapter/
-          chmod +x build/dataplane/yanet-dataplane 2>/dev/null || true
-          chmod +x build/controlplane/yanet-controlplane 2>/dev/null || true
-          chmod +x target/release/yanet-cli* 2>/dev/null || true
+      - name: Download YANET CLI
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: yanet2-cli
+          path: target/release
+
+      - name: Restore executable bits
+        run: chmod +x build/dataplane/yanet-dataplane build/controlplane/yanet-controlplane build/operators/*/yanet-* target/release/yanet-cli*
 
       - name: Prepare test environment
         working-directory: tests/functional
+        timeout-minutes: 60
         run: |
-          make check-deps
-
-          echo "=== Starting QEMU VM preparation ==="
-
-          # Run with timeout and monitoring
-          timeout 7200 make prepare-vm &
-          QEMU_PID=$!
-
-          # Monitor QEMU progress
-          for i in {1..120}; do
-              echo "=== QEMU status check $i/120 ==="
-              ps aux | grep qemu | grep -v grep || echo "QEMU process not found"
-
-              if [ -f qemu_debug.log ]; then
-                  echo "=== QEMU log size: $(wc -l <qemu_debug.log) lines ==="
-                  echo "=== Last 10 lines of QEMU log ==="
-                  tail -10 qemu_debug.log
-              fi
-
-              sleep 60
-
-              # Check if QEMU is still running
-              if ! kill -0 $QEMU_PID 2>/dev/null; then
-                  echo "QEMU process finished"
-                  break
-              fi
-          done
-
-          # Wait for QEMU to finish
-          wait $QEMU_PID
-          QEMU_EXIT_CODE=$?
-
-          echo "=== QEMU exit code: $QEMU_EXIT_CODE ==="
-
-          if [ -f qemu_debug.log ]; then
-              echo "=== Final QEMU log (last 50 lines) ==="
-              tail -50 qemu_debug.log
-          fi
-
-          if [ $QEMU_EXIT_CODE -ne 0 ]; then
-              echo "QEMU preparation failed with exit code $QEMU_EXIT_CODE"
-              exit $QEMU_EXIT_CODE
+          set -euo pipefail
+          if ! make prepare-vm; then
+            tail -n 50 qemu_debug.log 2>/dev/null || true
+            exit 1
           fi
 
           # Watch file length: actions/cache restores the image dense, so disk
           # size roughly doubles on every cache hit even with no real regrowth.
-          echo "=== yanet-test.qcow2 size ==="
           qemu-img info yanet-test.qcow2 || true
 
-        timeout-minutes: 130
-
       - name: Run functional tests
+        if: matrix.suite == 'functional'
         working-directory: tests/functional
         run: |
           set +e
@@ -480,6 +654,8 @@ jobs:
         timeout-minutes: 45
 
       - name: Run reusable lab scenarios
+        if: matrix.suite == 'lab'
+        timeout-minutes: 30
         run: |
           set -euo pipefail
           trap 'go run ./cmd/yanet-lab down || true' EXIT
@@ -489,13 +665,34 @@ jobs:
             go run ./cmd/yanet-lab scenario run "$scenario"
           done
 
+      - name: Save Ubuntu cloud image
+        if: success() && matrix.suite == 'functional' && steps.cache-ubuntu-image.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: tests/functional/ubuntu-24.04-minimal-cloudimg-amd64.img
+          key: ${{ steps.cache-ubuntu-image.outputs.cache-primary-key }}
+
+      - name: Save QEMU image
+        if: success() && matrix.suite == 'functional' && steps.cache-qemu-image.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            tests/functional/yanet-test.qcow2
+            tests/functional/*.iso
+          key: ${{ steps.cache-qemu-image.outputs.cache-primary-key }}
+
       - name: Upload functional test logs
-        uses: actions/upload-artifact@v5
-        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always() && matrix.suite == 'functional'
         with:
           name: functional-test-logs
+          path: tests/functional/main/test.log
+
+      - name: Upload lab logs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always() && matrix.suite == 'lab'
+        with:
+          name: lab-logs
           path: |
-            tests/functional/main/test.log
-            tests/functional/converted/test.log
             /tmp/yanet2-lab-*/**/supervisor.log
             /tmp/yanet2-lab-*/**/last-report.json

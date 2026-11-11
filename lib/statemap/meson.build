@@ -11,8 +11,6 @@ sources = files(
 lib_statemap = static_library(
   'statemap',
   sources,
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
   dependencies: dependencies,
   install: false,
 )

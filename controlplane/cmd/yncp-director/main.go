@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/yanet-platform/yanet2/common/go/debugserver"
 	"github.com/yanet-platform/yanet2/common/go/logging"
 	"github.com/yanet-platform/yanet2/common/go/logging/clog"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
@@ -54,7 +55,9 @@ func main() {
 }
 
 func run(cmd Cmd) error {
-	cfg, err := xcfg.LoadConfig[yncp.Config](cmd.ConfigPath, xcfg.WithKnownFields(), xcfg.WithEnv())
+	// Unknown keys are ignored so that a config extended for a newer release
+	// still loads on an older one during a rolling cluster upgrade.
+	cfg, err := xcfg.LoadConfig[yncp.Config](cmd.ConfigPath, xcfg.WithEnv())
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
@@ -86,6 +89,10 @@ func run(cmd Cmd) error {
 	wg, ctx := errgroup.WithContext(ctx)
 	wg.Go(func() error {
 		return director.Run(ctx)
+	})
+	debugServer := debugserver.NewServer(&cfg.Debug, debugserver.WithLog(log))
+	wg.Go(func() error {
+		return debugServer.Run(ctx)
 	})
 	wg.Go(func() error {
 		err := xcmd.WaitInterrupted(ctx)

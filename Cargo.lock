@@ -221,26 +221,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
-name = "bindgen"
-version = "0.72.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "993776b509cfb49c750f11b8f07a46fa23e0a1386ffc01fb1e7d343efc387895"
-dependencies = [
- "bitflags",
- "cexpr",
- "clang-sys",
- "itertools 0.13.0",
- "log",
- "prettyplease",
- "proc-macro2",
- "quote",
- "regex",
- "rustc-hash",
- "shlex 1.3.0",
- "syn 2.0.119",
-]
-
-[[package]]
 name = "bitflags"
 version = "2.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -303,16 +283,7 @@ dependencies = [
  "find-msvc-tools",
  "jobserver",
  "libc",
- "shlex 2.0.1",
-]
-
-[[package]]
-name = "cexpr"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6fac387a98bb7c37292057cffc56d62ecb629900026402633ae9160df93a8766"
-dependencies = [
- "nom",
+ "shlex",
 ]
 
 [[package]]
@@ -342,17 +313,6 @@ checksum = "773f3b9af64447d2ce9850330c473515014aa235e6a783b02db81ff39e4a3dad"
 dependencies = [
  "crypto-common",
  "inout",
-]
-
-[[package]]
-name = "clang-sys"
-version = "1.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "157a8ba7b480713b56f4c09fd13fc3e0a22a5dfab8097ba61cbc5feef950788a"
-dependencies = [
- "glob",
- "libc",
- "libloading",
 ]
 
 [[package]]
@@ -387,7 +347,7 @@ dependencies = [
  "clap",
  "clap_lex",
  "is_executable",
- "shlex 2.0.1",
+ "shlex",
 ]
 
 [[package]]
@@ -966,15 +926,6 @@ checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 
 [[package]]
 name = "itertools"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
-dependencies = [
- "either",
-]
-
-[[package]]
-name = "itertools"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
@@ -1023,16 +974,6 @@ name = "libc"
 version = "0.2.189"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
-
-[[package]]
-name = "libloading"
-version = "0.8.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7c4b02199fee7c5d21a5ae7d8cfa79a6ef5bb2fc834d6e9058e89c825efdc55"
-dependencies = [
- "cfg-if",
- "windows-link",
-]
 
 [[package]]
 name = "libm"
@@ -1105,9 +1046,9 @@ checksum = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084"
 
 [[package]]
 name = "netip"
-version = "0.3.9"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2d1ae2988edc6b837fa9c5103d83aa495d5b8a5b423e17f3fbd2beea67b9d74"
+checksum = "c4058a2de726e69740c2672e1ebd7b17436f37239deb01b03cf38a171b2e37a4"
 
 [[package]]
 name = "no-std-net"
@@ -1256,9 +1197,9 @@ dependencies = [
 
 [[package]]
 name = "pcap-file"
-version = "3.0.0-rc.2"
+version = "3.0.0-rc.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9552aee583a05913b6c6345e3c5f69a746787fd60c8fd39ca82ef882de0613b4"
+checksum = "2f2597dac7aa753b38f831d2cd882d0ff71bfe20b0e1b72f607e8ec096bba76b"
 dependencies = [
  "byteorder_slice",
  "derive-into-owned",
@@ -1422,28 +1363,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "proc-macro-error-attr2"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96de42df36bb9bba5542fe9f1a054b8cc87e172759a1868aa05c1f3acc89dfc5"
-dependencies = [
- "proc-macro2",
- "quote",
-]
-
-[[package]]
-name = "proc-macro-error2"
-version = "2.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11ec05c52be0a07b08061f7dd003e7d7092e0472bc731b4af7bb1ef876109802"
-dependencies = [
- "proc-macro-error-attr2",
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
 name = "proc-macro2"
 version = "1.0.107"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1469,7 +1388,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03da047801ff44bb6a4d407d4860c05fd70bb81714e6b2f3812603d5b145b042"
 dependencies = [
  "heck",
- "itertools 0.14.0",
+ "itertools",
  "log",
  "multimap",
  "petgraph",
@@ -1488,7 +1407,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -1620,12 +1539,6 @@ dependencies = [
  "subtle",
  "zeroize",
 ]
-
-[[package]]
-name = "rustc-hash"
-version = "2.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b1e7f9a428571be2dc5bc0505c13fb6bf936822b894ec87abf8a08a4e51742d"
 
 [[package]]
 name = "rustix"
@@ -1777,6 +1690,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_ignored"
+version = "0.1.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "115dffd5f3853e06e746965a20dcbae6ee747ae30b543d91b0e089668bb07798"
+dependencies = [
+ "serde",
+ "serde_core",
+]
+
+[[package]]
 name = "serde_json"
 version = "1.0.151"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1812,12 +1735,6 @@ dependencies = [
  "cpufeatures",
  "digest",
 ]
-
-[[package]]
-name = "shlex"
-version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
 name = "shlex"
@@ -1995,9 +1912,9 @@ checksum = "0bf256ce5efdfa370213c1dabab5935a12e49f2c58d15e9eac2870d3b4f27263"
 
 [[package]]
 name = "tabled"
-version = "0.21.0"
+version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5dc662e6da844ad6e428ad16b57967c9d33c82e16bb1c258326c0c078605dff"
+checksum = "2d2596a104db1900b943f97d793a6c99addca918c4525c999f751a0f17d472eb"
 dependencies = [
  "ansi-str",
  "ansitok",
@@ -2008,12 +1925,11 @@ dependencies = [
 
 [[package]]
 name = "tabled_derive"
-version = "0.11.0"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ea5d1b13ca6cff1f9231ffd62f15eefd72543dab5e468735f1a456728a02846"
+checksum = "7dca1937322a1e892b1a65f6a6736183bb0a29d3b4234d1d53bc436dff9beb76"
 dependencies = [
  "heck",
- "proc-macro-error2",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -2197,6 +2113,7 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
+ "zstd",
 ]
 
 [[package]]
@@ -2597,7 +2514,7 @@ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 
 [[package]]
 name = "yanet-cli"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "base64 0.23.1",
  "byteorder",
@@ -2612,6 +2529,7 @@ dependencies = [
  "log",
  "prost",
  "prost-types",
+ "rustls",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -2628,23 +2546,24 @@ dependencies = [
  "tonic-prost",
  "tower",
  "uuid",
+ "yanet-cli-rpc",
  "yanet-commonpb",
  "yanet-ynpb",
 ]
 
 [[package]]
 name = "yanet-cli-acl"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "clap",
  "clap_complete",
+ "netip",
  "prost",
  "serde",
  "serde_yaml",
  "tabled",
  "tokio",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
@@ -2653,28 +2572,28 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-blackhole"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "clap",
  "clap_complete",
  "prost",
  "serde",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
 ]
 
 [[package]]
 name = "yanet-cli-build"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
+ "prost-build",
  "tonic-prost-build",
 ]
 
 [[package]]
 name = "yanet-cli-common"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "bytesize",
  "clap",
@@ -2687,7 +2606,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-counters"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "bytesize",
  "clap",
@@ -2700,7 +2619,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-decap"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -2708,7 +2627,6 @@ dependencies = [
  "prost",
  "serde",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
@@ -2716,7 +2634,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-device-delete"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -2727,7 +2645,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-device-list"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "clap",
  "colored",
@@ -2738,7 +2656,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-device-plain"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -2746,7 +2664,6 @@ dependencies = [
  "serde",
  "tabled",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
@@ -2755,14 +2672,13 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-device-trafgen"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "clap",
  "clap_complete",
  "prost",
  "serde",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
@@ -2770,7 +2686,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-device-vlan"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -2778,7 +2694,23 @@ dependencies = [
  "serde",
  "tabled",
  "tonic",
- "tonic-prost",
+ "yanet-cli",
+ "yanet-cli-build",
+ "yanet-commonpb",
+ "yanet-ynpb",
+]
+
+[[package]]
+name = "yanet-cli-device-vxlan"
+version = "0.5.0"
+dependencies = [
+ "clap",
+ "clap_complete",
+ "netip",
+ "prost",
+ "serde",
+ "tabled",
+ "tonic",
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
@@ -2787,7 +2719,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-dscp"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -2795,7 +2727,6 @@ dependencies = [
  "prost",
  "serde",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
@@ -2803,7 +2734,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-forward"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -2811,7 +2742,6 @@ dependencies = [
  "serde",
  "serde_yaml",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
@@ -2820,7 +2750,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-function"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -2833,16 +2763,14 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-fwstate"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "clap",
  "clap_complete",
  "humantime",
- "netip",
  "prost",
  "serde",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
@@ -2850,17 +2778,17 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-fwstatemap"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "bytesize",
  "clap",
  "clap_complete",
+ "humantime",
  "log",
  "prost",
  "serde",
- "serde_json",
+ "tabled",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
@@ -2868,7 +2796,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-gateway"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "clap",
  "prost-types",
@@ -2880,7 +2808,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-inspect"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "bytesize",
  "clap",
@@ -2893,27 +2821,29 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-l3b"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "clap",
- "clap_complete",
  "log",
  "prost",
  "serde",
+ "serde_ignored",
+ "serde_json",
  "serde_yaml",
  "tabled",
+ "tempfile",
  "tokio",
  "tonic",
- "tonic-prost",
- "tonic-prost-build",
+ "unsafe-libyaml",
  "yanet-cli",
+ "yanet-cli-build",
  "yanet-commonpb",
  "yanet-filterpb",
 ]
 
 [[package]]
 name = "yanet-cli-metrics"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -2924,7 +2854,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-mirror"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -2932,7 +2862,6 @@ dependencies = [
  "serde",
  "serde_yaml",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
@@ -2941,15 +2870,14 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-nat64"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "clap",
  "clap_complete",
- "netip",
  "prost",
  "serde",
+ "serde_yaml",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
@@ -2957,7 +2885,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-operator-neighbour"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -2967,7 +2895,6 @@ dependencies = [
  "serde_json",
  "tabled",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
@@ -2975,7 +2902,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-operator-pipeline"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "clap",
  "yanet-cli",
@@ -2983,7 +2910,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-operator-route"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -2991,10 +2918,8 @@ dependencies = [
  "netip",
  "prost",
  "serde",
- "serde_json",
  "tabled",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
@@ -3002,10 +2927,8 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-pdump"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
- "bindgen",
- "bytesize",
  "clap",
  "clap_complete",
  "log",
@@ -3013,17 +2936,17 @@ dependencies = [
  "pnet_packet",
  "prost",
  "serde",
+ "tempfile",
  "tokio",
  "tokio-util",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
 ]
 
 [[package]]
 name = "yanet-cli-pipeline"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -3036,7 +2959,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-ready"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "chrono",
  "clap",
@@ -3051,19 +2974,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "yanet-cli-ring"
+version = "0.5.0"
+dependencies = [
+ "bytesize",
+ "clap",
+ "clap_complete",
+ "prost",
+ "serde",
+ "tabled",
+ "tonic",
+ "yanet-cli",
+ "yanet-cli-build",
+]
+
+[[package]]
 name = "yanet-cli-route"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "clap",
  "clap_complete",
  "netip",
  "prost",
  "serde",
- "serde_json",
  "serde_yaml",
  "tabled",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
@@ -3071,7 +3007,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-cli-route-mpls"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -3080,15 +3016,25 @@ dependencies = [
  "serde",
  "serde_yaml",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
 ]
 
 [[package]]
+name = "yanet-cli-rpc"
+version = "0.5.0"
+dependencies = [
+ "bytes",
+ "http",
+ "prost",
+ "tonic",
+ "tower",
+]
+
+[[package]]
 name = "yanet-cli-unrdup"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -3096,7 +3042,6 @@ dependencies = [
  "serde",
  "serde_yaml",
  "tonic",
- "tonic-prost",
  "yanet-cli",
  "yanet-cli-build",
  "yanet-commonpb",
@@ -3104,7 +3049,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-commonpb"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "netip",
  "prost",
@@ -3117,7 +3062,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-filterpb"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "prost",
  "serde",
@@ -3128,7 +3073,7 @@ dependencies = [
 
 [[package]]
 name = "yanet-readinesspb"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "prost",
  "prost-types",
@@ -3141,14 +3086,14 @@ dependencies = [
 
 [[package]]
 name = "yanet-ynpb"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "prost",
  "prost-types",
  "serde",
  "tonic",
- "tonic-prost",
- "tonic-prost-build",
+ "yanet-cli-build",
+ "yanet-cli-rpc",
  "yanet-commonpb",
 ]
 
@@ -3189,3 +3134,31 @@ name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
+
+[[package]]
+name = "zstd"
+version = "0.13.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e91ee311a569c327171651566e07972200e76fcfe2242a4fa446149a3881c08a"
+dependencies = [
+ "zstd-safe",
+]
+
+[[package]]
+name = "zstd-safe"
+version = "7.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "64d80649ab6db9d9f6f9c80a40becd948eda4714a0a5ac8c4d157a32231c7882"
+dependencies = [
+ "zstd-sys",
+]
+
+[[package]]
+name = "zstd-sys"
+version = "2.1.1+zstd.1.5.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aeec9eaf2dffbbd09201e23bd0ffcbaa33bb8e9266a10734fd7ed90a85eca078"
+dependencies = [
+ "cc",
+ "pkg-config",
+]

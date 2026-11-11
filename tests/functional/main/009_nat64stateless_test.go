@@ -23,9 +23,16 @@ func TestTest_009_nat64stateless(t *testing.T) {
 
 		fw.Run("Step_000_Configure_NAT64_Environment", func(fw *framework.TestFramework, t *testing.T) {
 			// Configure NAT64 module
+			require.NoError(t, fw.CreateConfigFile("nat64stateless0.yaml", `config:
+  prefixes:
+    - 5555:5555:5555:5555:5555:5555::/96
+  mappings:
+    - ipv4: 153.153.153.153
+      ipv6: aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa
+      prefix_index: 0
+`))
 			commands := []string{
-				"/mnt/target/release/yanet-cli-nat64 prefix add --name nat64stateless0 --prefix 5555:5555:5555:5555:5555:5555::/96",
-				"/mnt/target/release/yanet-cli-nat64 mapping add --name nat64stateless0 --ipv4 153.153.153.153 --ipv6 aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa --prefix-index 0",
+				"/mnt/target/release/yanet-cli-nat64 update --name nat64stateless0 /mnt/config/nat64stateless0.yaml",
 
 				"/mnt/target/release/yanet-cli-function update --name=test --chains chain2:1=forward:forward0,nat64:nat64stateless0,route:route0",
 				"/mnt/target/release/yanet-cli-pipeline update --name=test --functions test",

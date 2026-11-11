@@ -7,6 +7,9 @@
 #include "lib/classify/classify.h"
 #include "lib/classify/rule.h"
 
+#include <stdio.h>
+#include <string.h>
+
 /*
  * Compilation contracts shared by every attribute variant.
  *
@@ -130,7 +133,38 @@ classifier_init(
 }
 
 /*
+ * Composes the title of one memory context of a named compile or join
+ * entry: the entry name scoped to the consumer and the leaf naming the
+ * one artifact the context belongs to.
+ *
+ * An entry creates several sibling contexts under the caller's memory
+ * context - the artifacts it commits and the stage registry - so the
+ * entry name alone would leave the siblings indistinguishable in the
+ * memory tree. The buffer holds a full context title; an entry name
+ * too long for it is cut with a dot marker, so the leaf suffix telling
+ * the siblings apart always survives.
+ */
+static inline void
+classify_leaf_name(char *buf, size_t size, const char *name, const char *leaf) {
+	size_t leaf_len = strlen(leaf);
+	int name_max = (int)size - (int)leaf_len - 2;
+	if (name_max < 1) {
+		name_max = 1;
+	}
+	snprintf(buf, size, "%.*s:%s", name_max, name, leaf);
+	if ((size_t)name_max > 3 && strlen(name) > (size_t)name_max) {
+		memcpy(buf + name_max - 3, "...", 3);
+	}
+}
+
+/*
  * Runs the shared region enumeration of an attribute over the ruleset.
+ *
+ * The name scopes the memory contexts of the compile - the stage
+ * registry below and the attribute owned contexts the callbacks create
+ * - each titled with the name and its own artifact leaf, so every
+ * context of one compile pass is identified in the memory tree instead
+ * of sharing a library wide name.
  *
  * Rules holding the exact same attribute value are grouped together,
  * so the region enumeration and the registry ranges operate on
@@ -145,6 +179,7 @@ classifier_init(
 static inline int
 classify_attr_compile(
 	struct memory_context *memory_context,
+	const char *name,
 	const struct classify_attr_ops *ops,
 	void *compile,
 	const struct classifier_rule *const *rules,
@@ -167,12 +202,22 @@ classify_attr_compile(
 		memory_context, sizeof(uint32_t) * group_alloc_count
 	);
 	if (group_first_rule == NULL) {
+		// The stage row is already live here: release it so this
+		// failure returns the stage zeroed like every other one.
+		memory_bfree(
+			memory_context,
+			cls->rule_groups,
+			sizeof(uint32_t) * group_alloc_count
+		);
+		cls->rule_groups = NULL;
 		goto error_free_compile;
 	}
 
 	struct hash_index group_index;
 	if (hash_index_init(&group_index, memory_context, rule_count)) {
-		goto error_free_group_first_rule;
+		// The failed init empties the index, so the common unwind
+		// releases it safely.
+		goto error;
 	}
 
 	struct classify_attr_group_ctx group_ctx = {
@@ -263,7 +308,11 @@ classify_attr_compile(
 
 	remap_table_free(&remap_table);
 
-	if (value_registry_init(registry, memory_context, "filter:registry")) {
+	char registry_name[MEMORY_CONTEXT_NAME_SIZE];
+	classify_leaf_name(
+		registry_name, sizeof(registry_name), name, "registry"
+	);
+	if (value_registry_init(registry, memory_context, registry_name)) {
 		goto error;
 	}
 
@@ -323,7 +372,6 @@ error:
 	cls->rule_groups = NULL;
 	hash_index_fini(&group_index);
 
-error_free_group_first_rule:
 	memory_bfree(
 		memory_context,
 		group_first_rule,

@@ -14,6 +14,7 @@ import (
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/readiness"
+	"github.com/yanet-platform/yanet2/common/go/xgrpc"
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
@@ -98,54 +99,50 @@ func NewStaticModuleOperator(
 		return nil, err
 	}
 
-	tracker := readiness.NewTracker(staticScopes(cfg), readiness.WithLog(log))
-	operatorLabel := commonpb.NewLabel("operator", name)
-	reconcilerMetrics := NewReconcilerMetrics("generic_operator", operatorLabel)
-	metricsCollectors := []MetricsCollector{reconcilerMetrics}
-	actuators := make([]Actuator[[]StaticTarget], 0, len(cfg.Gateways))
+	tracker := readiness.NewTracker(
+		staticScopes(cfg),
+		readiness.WithDrainLatch(),
+		readiness.WithLog(log),
+	)
+	gateways := make([]Target[[]StaticTarget], 0, len(cfg.Gateways))
 	for _, gw := range cfg.Gateways {
-		gatewayMetrics := NewApplyMetrics(
-			"generic_operator_gateway",
-			operatorLabel,
-			commonpb.NewLabel("gateway", gw.Name),
-		)
-		metricsCollectors = append(metricsCollectors, gatewayMetrics)
-		conn, err := DialGateway(gw)
+		gatewayLog := log.With(zap.String("gateway", gw.Name))
+		conn, err := DialGateway(gw, xgrpc.WithCertificateStoreLog(gatewayLog))
 		if err != nil {
-			for _, a := range actuators {
-				_ = a.Close()
+			for _, gateway := range gateways {
+				_ = gateway.Actuator.Close()
 			}
 			return nil, err
 		}
-		actuator := &staticGatewayActuator{
-			name:      gw.Name,
-			conn:      conn,
-			functions: ynpb.NewFunctionServiceClient(conn),
-			log:       log.With(zap.String("gateway", gw.Name)),
-		}
-		observed := NewObservedActuator(actuator, "config:"+gw.Name, func(scope string, err error) {
-			tracker.Observe(scope, err)
-			gatewayMetrics.Observe(err)
+		gateways = append(gateways, Target[[]StaticTarget]{
+			Name: gw.Name,
+			Actuator: &staticGatewayActuator{
+				name:      gw.Name,
+				conn:      conn,
+				functions: ynpb.NewFunctionServiceClient(conn),
+				log:       gatewayLog,
+			},
+			Scope: staticScope(gw.Name),
 		})
-		actuators = append(actuators, observed)
 	}
 
+	// The targets never change, so they are published once and the interval
+	// alone paces the pushes.
+	desired := NewLatest[[]StaticTarget]()
+	desired.Publish(state)
+
 	return NewOperator(
-		NewFanOutActuator(actuators, WithFanOutLog(log)),
-		newStaticSource(state),
-		WithGRPCServer(
-			cfg.Server,
-			NewReadinessServiceRegistrar(name, tracker),
-			NewMetricsServiceRegistrar(name, metricsCollectors...),
-		),
-		WithGateways(cfg.Register, cfg.Gateways...),
-		WithWorkers(func(ctx context.Context) error {
-			<-ctx.Done()
-			tracker.Drain()
-			return nil
+		gateways,
+		desired,
+		WithGRPCServer(cfg.Server),
+		WithReadiness(name, tracker),
+		WithMetrics(MetricsConfig{
+			Name:   name,
+			Prefix: "generic_operator",
+			Labels: []*commonpb.Label{commonpb.NewLabel("operator", name)},
 		}),
+		WithGateways(cfg.Register, cfg.Gateways...),
 		WithLog(log),
-		WithMetrics(reconcilerMetrics),
 		WithReconcile(cfg.Reconcile),
 	), nil
 }
@@ -196,11 +193,17 @@ func staticScopes(cfg StaticConfig) []readiness.ScopeSpec {
 	specs := make([]readiness.ScopeSpec, len(cfg.Gateways))
 	for idx, gw := range cfg.Gateways {
 		specs[idx] = readiness.ScopeSpec{
-			Name:                        "config:" + gw.Name,
+			Name:                        staticScope(gw.Name),
 			ExpectedObservationInterval: cfg.Reconcile.Interval.Unwrap(),
 		}
 	}
 	return specs
+}
+
+// staticScope names the readiness scope of a gateway: whether every target
+// applies there.
+func staticScope(gateway string) string {
+	return "config:" + gateway
 }
 
 // resolvedMethod is a unary method ready to be invoked over a connection.
@@ -279,30 +282,6 @@ func resolveMethod(method string, request proto.Message) (resolvedMethod, error)
 	full := "/" + string(descriptor.Parent().FullName()) + "/" + string(descriptor.Name())
 	return resolvedMethod{Full: full, Reply: reply}, nil
 }
-
-// staticSource holds the targets for the lifetime of the operator and never
-// wakes the reconcile loop, so the interval is the sole pacing.
-type staticSource struct {
-	targets []StaticTarget
-	wake    chan struct{}
-}
-
-func newStaticSource(targets []StaticTarget) *staticSource {
-	return &staticSource{
-		targets: targets,
-		wake:    make(chan struct{}),
-	}
-}
-
-func (m *staticSource) Snapshot() ([]StaticTarget, bool) {
-	return m.targets, true
-}
-
-func (m *staticSource) Wake() <-chan struct{} {
-	return m.wake
-}
-
-func (m *staticSource) Advance(_ []StaticTarget) {}
 
 // staticGatewayActuator pushes the targets to one gateway: every module
 // config first, then every function.

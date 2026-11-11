@@ -1,43 +1,34 @@
 package dataplane
 
 //#cgo CFLAGS: -I../../..
-//#cgo LDFLAGS: -L../../../build/lib/utils -llib_utils
-//#cgo LDFLAGS: -L../../../build/lib/dataplane/packet -lpacket
-//#cgo LDFLAGS: -L../../../build/lib/logging -llogging
 //
 //#include "lib/dataplane/packet/packet.h"
 //#include "lib/dataplane/module/packet_front.h"
 //#include "lib/utils/packet.h"
 import "C"
 import (
-	"bytes"
 	"fmt"
 	"runtime"
 	"unsafe"
 
 	"github.com/gopacket/gopacket"
-	"github.com/yanet-platform/yanet2/tests/functional/framework"
 )
 
 type PacketData struct {
-	Payload    []uint8
-	TxDeviceId uint16
-	RxDeviceId uint16
+	Payload []uint8
 }
 
-func NewPacketData(txDeviceId uint16, rxDeviceId uint16, packet gopacket.Packet) PacketData {
-	return PacketData{Payload: packet.Data(), TxDeviceId: txDeviceId, RxDeviceId: rxDeviceId}
+func NewPacketData(packet gopacket.Packet) PacketData {
+	return PacketData{Payload: packet.Data()}
 }
 
-func PacketsData(txDeviceId uint16, rxDeviceId uint16, packets ...gopacket.Packet) []PacketData {
+func PacketsData(packets ...gopacket.Packet) []PacketData {
 	payload := make([]PacketData, 0, len(packets))
 	for idx := range packets {
 		payload = append(
 			payload,
 			PacketData{
-				Payload:    packets[idx].Data(),
-				TxDeviceId: txDeviceId,
-				RxDeviceId: rxDeviceId,
+				Payload: packets[idx].Data(),
 			},
 		)
 	}
@@ -54,7 +45,7 @@ type Packet C.struct_packet
 // AddressSanitizer. parse_packet is run on the assembled head mbuf.
 // Returns an error if segments is empty, the total payload is zero, or the
 // underlying C call fails.
-func NewPacketFromSegments(segments [][]byte, txDeviceId, rxDeviceId uint16) (*Packet, error) {
+func NewPacketFromSegments(segments [][]byte) (*Packet, error) {
 	if len(segments) == 0 {
 		return nil, fmt.Errorf("failed to create segmented packet: no segments provided")
 	}
@@ -86,10 +77,8 @@ func NewPacketFromSegments(segments [][]byte, txDeviceId, rxDeviceId uint16) (*P
 
 	packet := C.struct_packet{}
 	packetInfo := C.struct_packet_info{
-		data:         (*C.uint8_t)(&payload[0]),
-		size:         C.uint16_t(len(payload)),
-		tx_device_id: C.uint16_t(txDeviceId),
-		rx_device_id: C.uint16_t(rxDeviceId),
+		data: (*C.uint8_t)(&payload[0]),
+		size: C.uint16_t(len(payload)),
 	}
 
 	rc := C.fill_packet_from_segments(
@@ -108,10 +97,8 @@ func NewPacketFromSegments(segments [][]byte, txDeviceId, rxDeviceId uint16) (*P
 func NewPacketFromData(data PacketData) (*Packet, error) {
 	packet := C.struct_packet{}
 	packetData := C.struct_packet_info{
-		data:         (*C.uint8_t)(&data.Payload[0]),
-		size:         C.uint16_t(len(data.Payload)),
-		tx_device_id: C.uint16_t(data.TxDeviceId),
-		rx_device_id: C.uint16_t(data.RxDeviceId),
+		data: (*C.uint8_t)(&data.Payload[0]),
+		size: C.uint16_t(len(data.Payload)),
 	}
 
 	rc := C.fill_packet_from_data(&packet, &packetData)
@@ -127,21 +114,8 @@ func (packet *Packet) Data() PacketData {
 	size := data.size
 	bytes := unsafe.Slice((*uint8)(data.data), size)
 	return PacketData{
-		Payload:    bytes,
-		TxDeviceId: uint16(data.tx_device_id),
-		RxDeviceId: uint16(data.rx_device_id),
+		Payload: bytes,
 	}
-}
-
-func (packet *Packet) Info() *framework.PacketInfo {
-	data := packet.Data()
-	data.Payload = bytes.Clone(data.Payload)
-	info, err := framework.NewPacketParser().ParsePacket(data.Payload)
-	if err != nil {
-		msg := fmt.Sprintf("failed to parse packet: %v", err)
-		panic(msg)
-	}
-	return info
 }
 
 func (packet *Packet) Next() *Packet {
@@ -193,19 +167,6 @@ func (packetList *PacketList) Add(packet *Packet) {
 	C.packet_list_add((*C.struct_packet_list)(packetList), (*C.struct_packet)(packet))
 }
 
-func (packetList *PacketList) Info() []*framework.PacketInfo {
-	info := make([]*framework.PacketInfo, 0, packetList.Count())
-	packet := packetList.First()
-	for {
-		if packet == nil {
-			break
-		}
-		info = append(info, packet.Info())
-		packet = packet.Next()
-	}
-	return info
-}
-
 func (packetList *PacketList) Data() []PacketData {
 	packet := packetList.First()
 	data := make([]PacketData, 0, packetList.Count())
@@ -232,7 +193,7 @@ func NewPacketList(pinner *runtime.Pinner, packets []*Packet) *PacketList {
 }
 
 func NewPacketListFromPackets(pinner *runtime.Pinner, packets ...gopacket.Packet) (*PacketList, error) {
-	data := PacketsData(0, 0, packets...)
+	data := PacketsData(packets...)
 	return NewPacketListFromData(pinner, data...)
 }
 
@@ -342,9 +303,7 @@ func NewPacketFrontFromPayload(pinner *runtime.Pinner, payload [][]byte) (*Packe
 	packets := []PacketData{}
 	for idx := range payload {
 		packets = append(packets, PacketData{
-			Payload:    payload[idx],
-			TxDeviceId: 0,
-			RxDeviceId: 0,
+			Payload: payload[idx],
 		})
 	}
 	packetList, err := NewPacketListFromData(pinner, packets...)

@@ -21,38 +21,44 @@ lives in `cli/modules/<x>/`.
 ```toml
 [package]
 name = "yanet-cli-<suffix>"
-version = "0.1.0"
-edition = "2024"
-publish = false
-
-rust-version = "1.88"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+rust-version.workspace = true
 
 [lints]
 workspace = true
 
 [dependencies]
-commonpb = { path = "../../../common/rust/commonpb", version = "0.1", package = "yanet-commonpb" }
+commonpb.workspace = true
 # Only when the proto imports common/filterpb.
-filterpb = { path = "../../../common/rust/filterpb", version = "0.1", package = "yanet-filterpb" }
-ync = { path = "../../../cli/core", version = "0.1", package = "yanet-cli" }
-clap = { version = "4.5", features = ["derive", "wrap_help"] }
-clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
-netip = "0.3"
-prost = "0.14"
-serde = { version = "1", features = ["derive"] }
-tonic = { version = "0.14", features = ["gzip"] }
-tonic-prost = "0.14"
+filterpb.workspace = true
+ync.workspace = true
+clap = { workspace = true, features = ["wrap_help"] }
+clap_complete.workspace = true
+netip.workspace = true
+prost.workspace = true
+serde = { workspace = true, features = ["derive"] }
+tonic.workspace = true
 
 [build-dependencies]
-ync-build = { path = "../../../cli/ync-build", version = "0.1", package = "yanet-cli-build" }
+ync-build.workspace = true
 ```
+
+The package fields come from the root `[workspace.package]`. A dependency
+comes from the root `[workspace.dependencies]` when it is a workspace crate,
+when two or more members use it, or when it is a tonic or prost crate
+released with those; a member names only the features it adds. Any other
+dependency keeps its version in the crate's own manifest and moves to the
+root once a second member takes it. An out-of-tree module CLI carries its own
+`[workspace]`, so it spells the package fields and dependencies out instead.
 
 Add a dependency only when the code uses it; `netip` is listed because
 almost every binary parses an address. A binary that prints a table adds
-`tabled = { version = "0.21", default-features = false, features = ["ansi",
-"derive"] }`: default features off, since the default `assert` feature
-links `testing_table` into the binary, and `derive` only when a row type
-derives `Tabled`.
+`tabled.workspace = true`, or `tabled = { workspace = true, features =
+["derive"] }` when a row type derives `Tabled`: the workspace entry turns
+default features off, since the default `assert` feature links
+`testing_table` into the binary.
 
 ## build.rs
 
@@ -76,9 +82,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 ```
 
-`ync_build::client` builds the generated client and server modules, maps the
-shared packages (`common.commonpb.v1`, `common.filterpb.v1`) to their crates
-and watches the listed protos; a proto they import is not watched.
+`ync_build::client` generates the messages, a client per service whose calls
+run through `ync::rpc`, and a server module holding only the service name; it
+maps the shared packages (`common.commonpb.v1`, `common.filterpb.v1`) to their
+crates and watches the listed protos; a proto they import is not watched.
 
 ## src/main.rs
 
@@ -111,7 +118,8 @@ pub mod <x>pb {
 
 fn client(channel: LayeredChannel) -> <X>ServiceClient<LayeredChannel> {
     <X>ServiceClient::new(channel)
-        .send_compressed(CompressionEncoding::Gzip)
+        .send_compressed(CompressionEncoding::Zstd)
+        .accept_compressed(CompressionEncoding::Zstd)
         .accept_compressed(CompressionEncoding::Gzip)
 }
 
@@ -290,7 +298,10 @@ local struct the handlers take instead of the alias.
 Three files move together; missing the last two builds green and never
 installs the binary.
 
-1. Root `Cargo.toml`: add the crate path to `[workspace] members`.
+1. Root `Cargo.toml`: add the crate path to `[workspace] members`, and the
+   package name to `[profile.ci.package]`: `opt-level = "s"`, plus
+   `codegen-units = 1` for a binary-only crate (a missing entry only makes the
+   CI build slower).
 2. Root `Makefile`: add the suffix (`<x>`, `device-<x>`, `operator-<x>`) to
    `CLI_MODULES`; a `cli/modules/<x>` crate goes to `CLI_CORE_MODULES`.
 3. `debian/yanet2-cli.install`: add `usr/bin/yanet-cli-<suffix>`.
@@ -301,7 +312,7 @@ Shell completions need nothing: the packaging script emits
 ## Gates before review
 
 ```bash
-cargo +nightly-2026-08-28 fmt -p yanet-cli-<suffix>
+cargo +nightly-2026-10-22 fmt -p yanet-cli-<suffix>
 cargo clippy -p yanet-cli-<suffix> --all-targets
 cargo build --release -p yanet-cli-<suffix>
 cargo test -p yanet-cli-<suffix>

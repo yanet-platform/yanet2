@@ -80,7 +80,7 @@ run_loaded_counts_test(struct yanet_shm *shm) {
 	yanet_error *err = NULL;
 
 	// Agent A installs a device. The upsert refs A's device (0->1), so A's
-	// loaded_device_count rises to one. Before the fix the count was never
+	// loaded count rises to one. Before the fix the count was never
 	// written, so every superseded agent was considered reclaimable.
 	struct agent *agent_a = agent_attach(
 		shm, 0, "loaded-counts", LOADED_COUNTS_TEST_MEMORY_LIMIT, &err
@@ -95,14 +95,9 @@ run_loaded_counts_test(struct yanet_shm *shm) {
 		"failed to install dev0 under agent A"
 	);
 	TEST_ASSERT_EQUAL(
-		agent_a->loaded_module_count,
-		0,
-		"agent A module count should be zero"
-	);
-	TEST_ASSERT_EQUAL(
-		agent_a->loaded_device_count,
+		agent_a->loaded_entity_count,
 		1,
-		"agent A device count should reflect its live device"
+		"agent A loaded count should reflect its live device"
 	);
 
 	// Attaching a second agent under the same name supersedes agent A.
@@ -131,9 +126,9 @@ run_loaded_counts_test(struct yanet_shm *shm) {
 		"failed to replace dev0 under agent B"
 	);
 	TEST_ASSERT_EQUAL(
-		agent_b->loaded_device_count,
+		agent_b->loaded_entity_count,
 		1,
-		"agent B device count should reflect its live device"
+		"agent B loaded count should reflect its live device"
 	);
 	TEST_ASSERT_NULL(
 		ADDR_OF(&agent_b->prev),
@@ -143,8 +138,9 @@ run_loaded_counts_test(struct yanet_shm *shm) {
 	return TEST_SUCCESS;
 }
 
-// Verifies that a final delayed release reclaims the superseded owner it made
-// unreferenced.
+// Verifies that a final delayed release tears the retired generation down at
+// once, and that the superseded owner it made unreferenced is reclaimed by
+// the next agent sweep.
 static int
 run_delayed_generation_release_test(struct yanet_shm *shm) {
 	yanet_error *err = NULL;
@@ -160,9 +156,7 @@ run_delayed_generation_release_test(struct yanet_shm *shm) {
 		"failed to install delayed-dev under agent A"
 	);
 
-	cp_config_lock(cp_config);
 	struct cp_config_gen *pinned_gen = cp_config_gen_acquire(cp_config);
-	cp_config_unlock(cp_config);
 
 	struct agent *agent_b = agent_attach(
 		shm, 0, "delayed-release", LOADED_COUNTS_TEST_MEMORY_LIMIT, &err
@@ -176,18 +170,17 @@ run_delayed_generation_release_test(struct yanet_shm *shm) {
 		install_device(agent_b, dp_config, cp_config, "delayed-dev"),
 		"failed to replace delayed-dev under agent B"
 	);
-	cp_config_lock(cp_config);
 	bool generation_retired =
-		ADDR_OF(&cp_config->cp_config_gen) != pinned_gen;
-	uint64_t remaining_pins = pinned_gen->refcnt;
-	cp_config_unlock(cp_config);
+		cp_config_current_gen(cp_config) != pinned_gen;
+	uint64_t remaining_pins =
+		cp_config_gen_pin_count(cp_config, pinned_gen);
 
 	TEST_ASSERT(generation_retired, "pinned generation was not retired");
 	TEST_ASSERT_EQUAL(
 		remaining_pins, 1, "reader should hold the final generation pin"
 	);
 	TEST_ASSERT_EQUAL(
-		agent_a->loaded_device_count,
+		agent_a->loaded_entity_count,
 		1,
 		"retired generation should keep agent A's device referenced"
 	);
@@ -197,13 +190,15 @@ run_delayed_generation_release_test(struct yanet_shm *shm) {
 		"agent A was reclaimed while the retired generation was pinned"
 	);
 
-	cp_config_lock(cp_config);
+	// The last release frees the generation — dropping its device
+	// reference — and the sweep that follows reclaims the superseded
+	// agent wholesale, so the reclaimed agent's memory must not be read
+	// afterwards: the surviving agent's chain tells the outcome.
 	cp_config_gen_release(cp_config, pinned_gen);
-	cp_config_unlock(cp_config);
-
 	TEST_ASSERT_NULL(
 		ADDR_OF(&agent_b->prev),
-		"final generation release did not reclaim agent A"
+		"final release did not drop the retired generation's "
+		"references and reclaim agent A"
 	);
 
 	return TEST_SUCCESS;
@@ -245,9 +240,9 @@ run_reinsert_count_test(struct yanet_shm *shm) {
 		err ? yanet_error_message(err) : "?"
 	);
 	TEST_ASSERT_EQUAL(
-		agent->loaded_device_count,
+		agent->loaded_entity_count,
 		1,
-		"device count should be one after the first install"
+		"loaded count should be one after the first install"
 	);
 
 	// Re-insert the SAME pointer: the upsert's reference gain and its
@@ -259,7 +254,7 @@ run_reinsert_count_test(struct yanet_shm *shm) {
 		err ? yanet_error_message(err) : "?"
 	);
 	TEST_ASSERT_EQUAL(
-		agent->loaded_device_count,
+		agent->loaded_entity_count,
 		1,
 		"re-inserting the same device must not double-count"
 	);

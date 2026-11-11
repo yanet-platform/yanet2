@@ -9,7 +9,7 @@ if [ "$branch" = "main" ]; then
 fi
 
 # Rejects commits that violate one of this repository's Go style
-# conventions in CLAUDE.md: the options-pattern rule for loggers,
+# conventions in .agents/conventions/go.md: the options-pattern rule for loggers,
 # call-site encapsulation (reaching into a private field or method
 # outside the receiver m, or an internal _test.go package), receiver
 # naming, loop index naming, map literal construction, gRPC dialing,

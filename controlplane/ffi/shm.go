@@ -1,15 +1,6 @@
 package ffi
 
 //#cgo CFLAGS: -I../../
-//#cgo LDFLAGS: -L../../build/lib/controlplane/agent -lagent
-//#cgo LDFLAGS: -L../../build/lib/controlplane/agent -lagent_counters
-//#cgo LDFLAGS: -L../../build/lib/controlplane/config -lconfig_cp
-//#cgo LDFLAGS: -L../../build/lib/counters -lcounters
-//#cgo LDFLAGS: -L../../build/lib/dataplane/config -lconfig_dp
-//#cgo LDFLAGS: -L../../build/lib/dataplane/pipeline -lpipeline
-//#cgo LDFLAGS: -L../../build/lib/errors -lerrors
-//#cgo LDFLAGS: -L../../build/lib/counters -lcounter_pattern
-//#cgo LDFLAGS: -L../../build/lib/counters -lrure
 //#include "api/agent.h"
 //#include "api/counter.h"
 import "C"
@@ -18,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"runtime"
+	"strings"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
@@ -113,6 +106,23 @@ func (m *SharedMemory) AgentAttach(
 	instanceIdx uint32,
 	size datasize.ByteSize,
 ) (*Agent, error) {
+	if strings.IndexByte(name, 0) >= 0 {
+		return nil, fmt.Errorf("failed to attach agent %q: name contains NUL byte", name)
+	}
+
+	// Acquire the first instance's publication before reading its count.
+	if !m.DataplaneReady(0) {
+		return nil, fmt.Errorf("failed to attach agent %q: dataplane shared memory is not ready", name)
+	}
+
+	instanceCount := uint32(C.yanet_shm_instance_count(m.ptr))
+	if instanceIdx >= instanceCount {
+		return nil, fmt.Errorf(
+			"failed to attach agent %q: instance index %d out of range [0, %d)",
+			name, instanceIdx, instanceCount,
+		)
+	}
+
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
@@ -141,6 +151,10 @@ func (m *SharedMemory) ExtendAgent(
 	name string,
 	size datasize.ByteSize,
 ) (datasize.ByteSize, error) {
+	if strings.IndexByte(name, 0) >= 0 {
+		return 0, fmt.Errorf("failed to extend agent %q: name contains NUL byte", name)
+	}
+
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
@@ -349,7 +363,7 @@ func (m *DPConfig) Agents() []AgentInfo {
 			}
 
 			nodeCount := uint64(instanceInfo.memory_node_count)
-			memoryTree := make([]AgentMemoryNode, nodeCount)
+			memoryTree := make([]MemoryNode, nodeCount)
 			if nodeCount > 0 {
 				cNodes := unsafe.Slice(
 					(*C.struct_cp_memory_node_info)(
@@ -362,7 +376,7 @@ func (m *DPConfig) Agents() []AgentInfo {
 				)
 				for nodeIdx := range memoryTree {
 					n := &cNodes[nodeIdx]
-					memoryTree[nodeIdx] = AgentMemoryNode{
+					memoryTree[nodeIdx] = MemoryNode{
 						Name:        C.GoString(&n.name[0]),
 						ParentIdx:   uint32(n.parent_idx),
 						BAllocCount: uint64(n.balloc_count),
@@ -377,6 +391,7 @@ func (m *DPConfig) Agents() []AgentInfo {
 				PID:         uint32(instanceInfo.pid),
 				MemoryLimit: uint64(instanceInfo.memory_limit),
 				FreeBytes:   uint64(instanceInfo.free_bytes),
+				Allocator:   allocatorStats(&instanceInfo.allocator),
 				Gen:         uint64(instanceInfo.gen),
 				MemoryTree:  memoryTree,
 			}
@@ -389,6 +404,93 @@ func (m *DPConfig) Agents() []AgentInfo {
 	}
 
 	return out
+}
+
+// CPMemory returns the controlplane zone's own memory snapshot: the
+// allocator's free byte count and the memory-context tree holding every
+// context placed in the zone outside agent arenas.
+//
+// Nil means the snapshot could not be taken; callers stay silent rather
+// than report values a reader could mistake for an empty zone.
+func (m *DPConfig) CPMemory() *CPMemoryInfo {
+	memoryInfo := C.yanet_get_cp_memory_info(m.ptr)
+	if memoryInfo == nil {
+		return nil
+	}
+	defer C.cp_memory_info_free(memoryInfo)
+
+	nodeCount := uint64(memoryInfo.memory_node_count)
+	memoryTree := make([]MemoryNode, nodeCount)
+	if nodeCount > 0 {
+		cNodes := unsafe.Slice(
+			(*C.struct_cp_memory_node_info)(
+				unsafe.Add(
+					unsafe.Pointer(memoryInfo),
+					unsafe.Sizeof(*memoryInfo),
+				),
+			),
+			nodeCount,
+		)
+		for nodeIdx := range memoryTree {
+			n := &cNodes[nodeIdx]
+			memoryTree[nodeIdx] = MemoryNode{
+				Name:        C.GoString(&n.name[0]),
+				ParentIdx:   uint32(n.parent_idx),
+				BAllocCount: uint64(n.balloc_count),
+				BFreeCount:  uint64(n.bfree_count),
+				BAllocSize:  uint64(n.balloc_size),
+				BFreeSize:   uint64(n.bfree_size),
+			}
+		}
+	}
+
+	return &CPMemoryInfo{
+		FreeBytes:  uint64(memoryInfo.free_bytes),
+		MemoryTree: memoryTree,
+	}
+}
+
+// CPAllocatorStats returns a lock-consistent snapshot of the shared
+// control-plane allocator, including space not reserved by any agent.
+func (m *DPConfig) CPAllocatorStats() AllocatorStats {
+	var stats C.struct_cp_allocator_info
+	var pinner runtime.Pinner
+	pinner.Pin(&stats)
+	defer pinner.Unpin()
+	C.yanet_get_cp_allocator_stats(m.ptr, &stats)
+	return allocatorStats(&stats)
+}
+
+func allocatorStats(stats *C.struct_cp_allocator_info) AllocatorStats {
+	pools := make([]AllocatorPoolStats, len(stats.pools))
+	for idx := range pools {
+		pools[idx] = AllocatorPoolStats{
+			BlockSizeBytes: uint64(stats.pools[idx].block_size_bytes),
+			FreeBlocks:     uint64(stats.pools[idx].free_blocks),
+		}
+	}
+	return AllocatorStats{
+		FreeBytes:             uint64(stats.free_bytes),
+		LargestFreeBlockBytes: uint64(stats.largest_free_block_bytes),
+		Pools:                 pools,
+	}
+}
+
+// AllocatorStats is a consistent free-capacity snapshot of one allocator.
+//
+// Sizes include allocator rounding and sanitizer red zones, so the largest
+// free block is not necessarily the maximum user payload.
+type AllocatorStats struct {
+	FreeBytes             uint64
+	LargestFreeBlockBytes uint64
+	Pools                 []AllocatorPoolStats
+}
+
+// AllocatorPoolStats describes one power-of-two size class, including empty
+// classes so monitoring can distinguish zero capacity from missing data.
+type AllocatorPoolStats struct {
+	BlockSizeBytes uint64
+	FreeBlocks     uint64
 }
 
 // DPModule represents a dataplane module in the YANET configuration.
@@ -417,12 +519,12 @@ type AgentInfo struct {
 	Instances []AgentInstanceInfo
 }
 
-// AgentMemoryNode is one entry in a flat depth-first snapshot of an agent's
+// MemoryNode is one entry in a flat depth-first snapshot of a
 // memory-context tree.
 //
 // Copied from shared memory by the C info API; the caller never accesses
 // shared memory directly through this type.
-type AgentMemoryNode struct {
+type MemoryNode struct {
 	Name        string
 	ParentIdx   uint32
 	BAllocCount uint64
@@ -436,6 +538,7 @@ type AgentInstanceInfo struct {
 	PID         uint32
 	MemoryLimit uint64
 	FreeBytes   uint64
+	Allocator   AllocatorStats
 	Gen         uint64
 	// MemoryTree is a flat depth-first snapshot of the agent's
 	// memory-context tree.
@@ -443,7 +546,23 @@ type AgentInstanceInfo struct {
 	// Index 0 is the root; each later node references its parent via
 	// ParentIdx. Best-effort: a concurrent update may make a node appear or
 	// vanish between traversal passes.
-	MemoryTree []AgentMemoryNode
+	MemoryTree []MemoryNode
+}
+
+// CPMemoryInfo is a snapshot of the controlplane zone's own memory: the
+// allocator state and the memory-context tree rooted at the "cp" bootstrap
+// context, which holds the ectx and counter-storage contexts and every
+// context spawned outside agent arenas.
+type CPMemoryInfo struct {
+	// FreeBytes is the byte count still available in the zone's allocator.
+	FreeBytes uint64
+	// MemoryTree is a flat depth-first snapshot of the zone's
+	// memory-context tree.
+	//
+	// Index 0 is the "cp" root; each later node references its parent via
+	// ParentIdx. Best-effort: a concurrent update may make a node appear or
+	// vanish between traversal passes.
+	MemoryTree []MemoryNode
 }
 
 // Name returns the name of the dataplane module.

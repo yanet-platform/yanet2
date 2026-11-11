@@ -2,6 +2,8 @@ package operator
 
 import (
 	"net/netip"
+	"sync"
+	"time"
 
 	"github.com/yanet-platform/yanet2/common/go/maptrie"
 	"github.com/yanet-platform/yanet2/operators/route/internal/rib"
@@ -12,9 +14,9 @@ type routeSnapshot interface {
 	Snapshot() map[string]*rib.RIB
 }
 
-// RouteSnapshot is the desired state for one reconcile pass: the
-// per-module RIB dumps and the neighbour view each gateway needs to build
-// its FIB.
+// RouteSnapshot is the desired state the gateways apply until the next
+// build: the per-module RIB dumps and the neighbour view each gateway needs
+// to build its FIB.
 type RouteSnapshot struct {
 	// RIBs maps each module config name to its route dump.
 	RIBs map[string]maptrie.MapTrie[netip.Prefix, netip.Addr, rib.RoutesList]
@@ -22,28 +24,20 @@ type RouteSnapshot struct {
 	Neighbours neigh.NexthopCacheView
 }
 
-// RouteSource is the operator.StateSource[RouteSnapshot] used by the route
-// operator.
-//
-// On every Snapshot it pulls a fresh dump of the RIBs from the route
-// reader and the current neighbour-table view, which each gateway actuator
-// turns into its own FIB.
-//
-// Wake is signalled by the wake callbacks wired into RouteService and
-// the neighbour table whenever their state mutates — it preempts the
-// reconcile loop's sleep so the next pass picks up the change without
-// waiting for the steady-state interval.
+// RouteSource builds the route operator's desired state: a fresh dump of
+// the RIBs and the current neighbour-table view, which each gateway
+// actuator turns into its own FIB.
 type RouteSource struct {
 	routeReader routeSnapshot
 	neighTable  *neigh.NeighTable
-	wakeCh      chan struct{}
+
+	mu sync.Mutex
+	// built holds the change time of every RIB as the last build saw it.
+	built map[string]time.Time
 }
 
-// NewRouteSource constructs a RouteSource bound to the supplied
-// neighbour table with its own buffered wake channel.
-//
-// It reads RIB snapshots from the supplied reader and uses it for all
-// reconcile targets.
+// NewRouteSource constructs a RouteSource reading the RIBs from the
+// supplied reader and the neighbours from the supplied table.
 func NewRouteSource(
 	neighTable *neigh.NeighTable,
 	ribReader routeSnapshot,
@@ -51,46 +45,54 @@ func NewRouteSource(
 	return &RouteSource{
 		routeReader: ribReader,
 		neighTable:  neighTable,
-		wakeCh:      make(chan struct{}, 1),
 	}
 }
 
-// Snapshot returns the current desired state: the per-module RIB dumps
-// and the neighbour view.
+// Build returns the current desired state: the per-module RIB dumps and the
+// neighbour view.
 //
-// It always reports ok=true, even with no RIBs: the operator republishes
-// its network function on every reconcile pass, and an empty state would
-// otherwise make the framework skip the pass and never republish.
-func (m *RouteSource) Snapshot() (RouteSnapshot, bool) {
-	select {
-	case <-m.wakeCh:
-	default:
-	}
-
+// Empty desired state remains actionable so failed applies refresh readiness
+// and keep retrying until current input permits forwarding publication.
+func (m *RouteSource) Build() RouteSnapshot {
 	ribs := m.routeReader.Snapshot()
 
+	// A change time is read before its dump, so a change in between lands
+	// in this build and still counts as a change afterwards.
+	built := make(map[string]time.Time, len(ribs))
 	dumps := make(map[string]maptrie.MapTrie[netip.Prefix, netip.Addr, rib.RoutesList], len(ribs))
 	for name, ribRef := range ribs {
+		built[name] = ribRef.Stats().ChangedAt
 		dumps[name] = ribRef.DumpRoutes()
 	}
-	return RouteSnapshot{RIBs: dumps, Neighbours: m.neighTable.View()}, true
+	m.setBuilt(built)
+
+	return RouteSnapshot{RIBs: dumps, Neighbours: m.neighTable.View()}
 }
 
-func (m *RouteSource) Wake() <-chan struct{} {
-	return m.wakeCh
-}
+// Changed reports whether a RIB changed since the last build, reported or
+// not.
+func (m *RouteSource) Changed() bool {
+	ribs := m.routeReader.Snapshot()
 
-func (m *RouteSource) Advance(snapshot RouteSnapshot) {}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-// WakeFunc returns a non-blocking sender suitable for wiring into the
-// RouteService and neighbour table change callbacks.
-func (m *RouteSource) WakeFunc() func() {
-	wakeCh := m.wakeCh
-
-	return func() {
-		select {
-		case wakeCh <- struct{}{}:
-		default:
+	if len(ribs) != len(m.built) {
+		return true
+	}
+	for name, ribRef := range ribs {
+		changedAt, ok := m.built[name]
+		if !ok || !ribRef.Stats().ChangedAt.Equal(changedAt) {
+			return true
 		}
 	}
+	return false
+}
+
+// setBuilt records the change times the last build saw.
+func (m *RouteSource) setBuilt(built map[string]time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.built = built
 }

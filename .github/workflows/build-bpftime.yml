@@ -1,0 +1,95 @@
+name: Build bpftime Runtime
+
+# Manual only, and kept apart from build-deb.yml: publishing the runtime needs
+# contents: write, which a reusable workflow may not request from release
+# callers that grant contents: read.
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: "Architecture to build and test the bpftime runtime for"
+        type: choice
+        options: [amd64, arm64]
+        default: amd64
+
+permissions:
+  contents: read
+
+jobs:
+  build-bpftime:
+    name: Build ${{ inputs.arch }} bpftime runtime
+    runs-on: ${{ inputs.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+          persist-credentials: false
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: eunomia-bpf/bpftime
+          ref: 6bde654abce3649fe8e6943b16419dfdf71ebf38
+          path: scripts/uprobe/.deps/upstream
+          submodules: recursive
+          persist-credentials: false
+
+      - uses: ./.github/actions/apt-failover
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: ci/go-version
+          cache: false
+
+      - name: Install runtime build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang-19 clang-16 llvm-16-dev cmake make libboost-dev \
+            libelf-dev zlib1g-dev libncurses-dev libbpf-dev \
+            meson ninja-build pkg-config python3-pyelftools \
+            libnuma-dev libpcap-dev libyaml-dev libibverbs-dev
+
+      - name: Build runtime and test userspace lock probes
+        shell: bash
+        run: .github/scripts/build-bpftime.sh 2>&1 | tee "bpftime-${{ inputs.arch }}.log"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: bpftime-${{ inputs.arch }}-log
+          path: bpftime-${{ inputs.arch }}.log
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bpftime-${{ inputs.arch }}
+          path: scripts/uprobe/.deps/bpftime-${{ inputs.arch }}.tar.gz*
+          include-hidden-files: true
+          if-no-files-found: error
+
+  # The build job runs third-party code, so it never holds a write token:
+  # only this job, which runs nothing but the release upload, does.
+  publish:
+    name: Publish ${{ inputs.arch }} bpftime runtime
+    needs: build-bpftime
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: bpftime-${{ inputs.arch }}
+
+      - name: Publish tested runtime
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARCH: ${{ inputs.arch }}
+        run: |
+          sha256sum --check "bpftime-$ARCH.tar.gz.sha256"
+          gh release create "bpftime-v0.9.0-$ARCH-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            "bpftime-$ARCH.tar.gz" "bpftime-$ARCH.tar.gz.sha256" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" --prerelease --latest=false \
+            --title "bpftime v0.9.0 $ARCH runtime" \
+            --notes 'Pinned upstream v0.9.0 (6bde654), LLVM JIT; validated with yanet-uprobe userspace probes. See bundled notices.'

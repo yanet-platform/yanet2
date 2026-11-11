@@ -240,11 +240,11 @@ func Test_SetupExampleUsesSourceTreeForwardFlow(t *testing.T) {
 	require.NoError(t, err)
 	scriptPath := filepath.Join(scriptDirectory, "setup-example.sh")
 	require.NoError(t, os.WriteFile(scriptPath, script, 0o755))
-	forwardPath := filepath.Join(temporaryRoot, "forward.yaml")
+	forwardPath := filepath.Join(scriptDirectory, "forward.yaml")
 	require.NoError(t, os.WriteFile(forwardPath, nil, 0o644))
 	resolvedRoot, err := filepath.EvalSymlinks(temporaryRoot)
 	require.NoError(t, err)
-	resolvedForwardPath := filepath.Join(resolvedRoot, "forward.yaml")
+	resolvedForwardPath := filepath.Join(resolvedRoot, "scripts", "forward.yaml")
 
 	stub := []byte("#!/bin/sh\nprintf '%s' \"${0##*/}\" >> \"$YANET_TEST_LOG\"\nfor argument do\n    printf '\\t%s' \"$argument\" >> \"$YANET_TEST_LOG\"\ndone\nprintf '\\n' >> \"$YANET_TEST_LOG\"\n")
 	for _, name := range []string{

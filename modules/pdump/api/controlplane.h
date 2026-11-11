@@ -3,16 +3,15 @@
 #include <stdint.h>
 
 #include "lib/errors/errors.h"
+#include "limit.h"
 #include "mode.h"
-#include "ring.h"
+#include "record.h"
 
 struct agent;
 struct cp_module;
-struct ring_buffer;
 
 extern const uint32_t default_snaplen;
-extern const uint32_t max_ring_size;
-extern const uint32_t ring_msg_magic;
+extern const uint32_t pdump_record_magic;
 
 // From rte_log.h
 /* Can't use 0, as it gives compiler warnings */
@@ -61,6 +60,15 @@ pdump_module_config_set_filter(
 int
 pdump_module_config_set_mode(struct cp_module *module, enum pdump_mode mode);
 
+// Set the aggregate packet capture rate; zero leaves capture unlimited.
+//
+// Rates above 1,000,000 are rejected with EINVAL before any mutation.
+// Only unpublished configs may be changed; setting a rate starts fresh credit.
+// Nonzero rates use published dataplane time; until available, EAGAIN is
+// returned without allocation or mutation. Zero needs no published time.
+int
+pdump_module_config_set_rate(struct cp_module *module, uint64_t rate_pps);
+
 // Set the maximum packet length to be captured by the pdump module.
 // If a filter is already set, setting the snaplen will trigger filter
 // recompilation. This triggers a call to pdump_module_config_set_filter.
@@ -69,15 +77,14 @@ pdump_module_config_set_snaplen(
 	struct cp_module *module, uint32_t snaplen, uintptr_t cb
 );
 
-// Initialize worker ring buffers for packet dumping.
-struct ring_buffer *
-pdump_module_config_set_per_worker_ring(
-	struct cp_module *module,
-	uint32_t size,
-	uint64_t *worker_count,
-	uintptr_t cb
+// Link the module's capture ring by name.
+//
+// Records an object link on the module config; the dataplane handler finds
+// the ring through this link when the execution contexts are built.
+// Whether a ring by this name exists is resolved later, not by this call.
+// Returns 0 on success, or -1 with err set when the link cannot be
+// recorded.
+int
+pdump_module_config_link_ring(
+	struct cp_module *module, const char *ring_name, yanet_error **err
 );
-
-// Converts a shared memory offset to a direct memory address.
-uint8_t *
-pdump_module_config_addr_of(uint8_t **offset);

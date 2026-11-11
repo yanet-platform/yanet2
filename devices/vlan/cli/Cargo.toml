@@ -1,25 +1,23 @@
 [package]
 name = "yanet-cli-device-vlan"
-version = "0.1.0"
-edition = "2024"
-publish = false
-
-rust-version = "1.88"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+rust-version.workspace = true
 
 [lints]
 workspace = true
 
 [dependencies]
-commonpb = { path = "../../../common/rust/commonpb", version = "0.1", package = "yanet-commonpb" }
-ynpb = { path = "../../../common/rust/ynpb", version = "0.1", package = "yanet-ynpb" }
-ync = { path = "../../../cli/core", version = "0.1", package = "yanet-cli" }
-clap = { version = "4.5", features = ["derive", "wrap_help"] }
-clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
-prost = "0.14"
-serde = { version = "1", features = ["derive"] }
-tabled = { version = "0.21", default-features = false, features = ["ansi"] }
-tonic = { version = "0.14", features = ["gzip"] }
-tonic-prost = "0.14"
+commonpb.workspace = true
+ynpb.workspace = true
+ync.workspace = true
+clap = { workspace = true, features = ["wrap_help"] }
+clap_complete.workspace = true
+prost.workspace = true
+serde = { workspace = true, features = ["derive"] }
+tabled.workspace = true
+tonic.workspace = true
 
 [build-dependencies]
-ync-build = { path = "../../../cli/ync-build", version = "0.1", package = "yanet-cli-build" }
+ync-build.workspace = true

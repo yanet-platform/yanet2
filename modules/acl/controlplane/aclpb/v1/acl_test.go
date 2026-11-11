@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
@@ -42,6 +43,11 @@ func Test_ShowConfigRequest_Validate(t *testing.T) {
 // Test_UpdateConfigRequest_Validate verifies that update-only request rules
 // report their own field-level errors.
 func Test_UpdateConfigRequest_Validate(t *testing.T) {
+	excessActions := make([]*aclpb.Action, 9)
+	for idx := range excessActions {
+		excessActions[idx] = &aclpb.Action{Kind: aclpb.ActionKind_ACTION_KIND_COUNT}
+	}
+
 	cases := []struct {
 		name    string
 		request *aclpb.UpdateConfigRequest
@@ -67,18 +73,6 @@ func Test_UpdateConfigRequest_Validate(t *testing.T) {
 				Rules: []*aclpb.Rule{},
 			},
 			message: "rules must contain at least one rule",
-		},
-		{
-			name: "deprecated sync config",
-			request: &aclpb.UpdateConfigRequest{
-				Name: "acl0",
-				Rules: []*aclpb.Rule{{
-					Sources4:      []*commonpb.IPv4Network{{}},
-					Destinations4: []*commonpb.IPv4Network{{}},
-				}},
-				SyncConfig: &aclpb.SyncConfig{},
-			},
-			message: "sync_config belongs to fwstate",
 		},
 		{
 			name: "v4 map name contains NUL",
@@ -129,6 +123,65 @@ func Test_UpdateConfigRequest_Validate(t *testing.T) {
 			message: "fwtable_name_v6 must be shorter than 80 bytes",
 		},
 		{
+			name: "device name contains NUL at repeated indices",
+			request: &aclpb.UpdateConfigRequest{
+				Name: "acl0",
+				Rules: []*aclpb.Rule{
+					{},
+					{
+						Devices: []*filterpb.Device{
+							{Name: "eth0"},
+							{Name: "eth0\x00suffix"},
+						},
+					},
+				},
+			},
+			message: "rules[1]: devices[1]: name must not contain NUL",
+		},
+		{
+			name: "counter contains NUL at repeated index",
+			request: &aclpb.UpdateConfigRequest{
+				Name: "acl0",
+				Rules: []*aclpb.Rule{
+					{},
+					{Counter: "allow\x00suffix"},
+				},
+			},
+			message: "rules[1]: counter must not contain NUL",
+		},
+		{
+			name: "counter reaches byte limit at repeated index",
+			request: &aclpb.UpdateConfigRequest{
+				Name: "acl0",
+				Rules: []*aclpb.Rule{
+					{},
+					{Counter: strings.Repeat("c", commonpb.MaxCounterNameLen)},
+				},
+			},
+			message: "rules[1]: counter must be shorter than 128 bytes",
+		},
+		{
+			name: "nine valid actions exceed storage at repeated index",
+			request: &aclpb.UpdateConfigRequest{
+				Name: "acl0",
+				Rules: []*aclpb.Rule{
+					{},
+					{Actions: excessActions},
+				},
+			},
+			message: "rules[1]: actions must contain at most 8 actions",
+		},
+		{
+			name: "unknown action kind",
+			request: &aclpb.UpdateConfigRequest{
+				Name: "acl0",
+				Rules: []*aclpb.Rule{{
+					Actions: []*aclpb.Action{{Kind: aclpb.ActionKind(3)}},
+				}},
+			},
+			message: "rules[0]: actions[0]: kind unknown value 3",
+		},
+		{
 			name: "rule without networks accepted",
 			request: &aclpb.UpdateConfigRequest{
 				Name:  "acl0",
@@ -170,6 +223,29 @@ func Test_UpdateConfigRequest_Validate(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Test_UpdateConfigRequest_DecodeLegacyWireForm pins the wire contract of the
+// reserved sync slots: an update an old client still fills carries the removed
+// sync_config in field 5; the decoder must skip the slot and the request must
+// stay valid, so the cutover never strands an old client on a decode error.
+func Test_UpdateConfigRequest_DecodeLegacyWireForm(t *testing.T) {
+	base := &aclpb.UpdateConfigRequest{
+		Name:  "acl0",
+		Rules: []*aclpb.Rule{{}},
+	}
+	wire, err := proto.Marshal(base)
+	require.NoError(t, err)
+
+	// Field 5, wire type 2 (tag 0x2a), wrapping an embedded message with
+	// field 2 set to 1000: the shape of the removed SyncConfig - a source
+	// address with a multicast port - an old client still sends.
+	wire = append(wire, 0x2a, 0x03, 0x10, 0xe8, 0x07)
+
+	var request aclpb.UpdateConfigRequest
+	require.NoError(t, proto.Unmarshal(wire, &request))
+	require.NoError(t, request.Validate())
+	require.Equal(t, "acl0", request.GetName())
 }
 
 // Test_DeleteConfigRequest_Validate verifies that an empty configuration name

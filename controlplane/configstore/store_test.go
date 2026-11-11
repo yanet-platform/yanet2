@@ -161,6 +161,25 @@ func Test_Store_Delete_MissingName(t *testing.T) {
 	assert.False(t, called)
 }
 
+// Test_Store_DeleteOr_RunsAbsentForUnknownName verifies that deleting a
+// name nothing is published under runs the fallback callback instead of
+// the unpublishing one and returns its result.
+func Test_Store_DeleteOr_RunsAbsentForUnknownName(t *testing.T) {
+	store := configstore.NewStore[*freeSequence]()
+
+	unpublished := false
+	err := store.DeleteOr("a",
+		func(*freeSequence) error {
+			unpublished = true
+			return nil
+		},
+		func() error { return errInjected },
+	)
+	require.ErrorIs(t, err, errInjected)
+	assert.False(t, unpublished)
+	assert.Empty(t, store.Names())
+}
+
 // Test_Store_Delete_UnpublishFailureKeepsEntry verifies that a refused
 // delete returns its error unchanged and leaves the entry published and
 // unfreed.
@@ -203,6 +222,44 @@ func Test_Store_Delete_ParksRefusedThenReclaims(t *testing.T) {
 
 	require.NoError(t, store.Delete("b", unpublishing(nil)))
 	assert.Equal(t, int64(1), refusing.freed.Load())
+}
+
+// Test_Store_FailedMutation_ReclaimsParked verifies that a mutation that
+// fails still releases a parked entry whose generation has drained, so
+// memory held by parked entries comes back without a successful mutation.
+func Test_Store_FailedMutation_ReclaimsParked(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(store *configstore.Store[*freeSequence]) error
+	}{
+		{
+			name: "failed update",
+			mutate: func(store *configstore.Store[*freeSequence]) error {
+				return store.Update("a", func(*freeSequence, bool) (*freeSequence, error) {
+					return nil, errInjected
+				})
+			},
+		},
+		{
+			name: "delete of a missing name",
+			mutate: func(store *configstore.Store[*freeSequence]) error {
+				return store.Delete("missing", unpublishing(nil))
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := configstore.NewStore[*freeSequence]()
+			refusing := newFreeSequence(ffi.ErrStillReferenced)
+			require.NoError(t, store.Update("a", publishing(refusing)))
+			require.NoError(t, store.Update("a", publishing(newFreeSequence())))
+			require.Equal(t, int64(0), refusing.freed.Load())
+
+			require.Error(t, tc.mutate(store))
+			assert.Equal(t, int64(1), refusing.freed.Load())
+		})
+	}
 }
 
 // Test_Store_ReclaimDeferred_RetriesUntilDrained verifies that an
@@ -392,6 +449,7 @@ func Test_Store_Delete_WaitsBehindInFlightCreate(t *testing.T) {
 
 			_, ok := store.Get("a")
 			assert.False(t, ok, "an in-flight create must not be visible to readers")
+			assert.Empty(t, store.Names(), "an in-flight create must not be listed")
 
 			deleteStarted := make(chan struct{})
 			deleteDone := make(chan error, 1)

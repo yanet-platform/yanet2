@@ -127,6 +127,26 @@ stress_worker(void *arg) {
 				free_size,
 				ARENA_ALIGN
 			);
+			struct block_allocator_stats stats;
+			block_allocator_get_stats(ba, &stats);
+			uint64_t total = 0;
+			uint64_t largest = 0;
+			for (size_t idx = 0; idx < MEMORY_BLOCK_ALLOCATOR_EXP;
+			     ++idx) {
+				uint64_t size =
+					block_allocator_pool_size(ba, idx);
+				total += stats.free_blocks[idx] * size;
+				if (stats.free_blocks[idx] != 0) {
+					largest = size;
+				}
+			}
+			THREAD_CHECK(
+				total == stats.free_bytes &&
+					total <= ARENA_ALIGN &&
+					largest ==
+						stats.largest_free_block_bytes,
+				"allocator snapshot is inconsistent"
+			);
 		}
 	}
 

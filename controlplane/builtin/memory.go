@@ -3,6 +3,7 @@ package builtin
 import (
 	"context"
 	"errors"
+	"strconv"
 
 	"github.com/c2h5oh/datasize"
 	"google.golang.org/grpc"
@@ -91,6 +92,10 @@ func (m *Memory) ExtendAgent(
 	switch {
 	case errors.Is(err, ffi.ErrAgentNotFound):
 		return nil, status.Errorf(codes.NotFound, "agent %q is not attached", name)
+	case errors.Is(err, ffi.ErrFailedPrecondition):
+		return nil, status.Error(codes.FailedPrecondition, err.Error())
+	case errors.Is(err, ffi.ErrInvalidArgument):
+		return nil, status.Error(codes.InvalidArgument, err.Error())
 	case errors.Is(err, ffi.ErrResourceExhausted):
 		return nil, status.Error(codes.ResourceExhausted, err.Error())
 	case err != nil:
@@ -102,17 +107,48 @@ func (m *Memory) ExtendAgent(
 	}, nil
 }
 
-// Collect returns arena occupancy and memory-context attribution gauges
-// for every agent.
+// Collect returns shared and per-agent allocator capacity, arena occupancy
+// and memory-context attribution gauges.
 //
 // The free-byte count is the authoritative measure of how full an arena
-// is: the buddy allocator behind the memory-context tree rounds each
+// is: the block allocator behind the memory-context tree rounds each
 // request up to a pool size, and an out-of-order module teardown can
 // drop a live subtree from the tree walk, so the tree is attribution
 // only.
 func (m *Memory) Collect() []*commonpb.Metric {
 	dpConfig := m.shm.DPConfig(m.instanceID)
-	return MemoryMetrics(dpConfig.Agents())
+	metrics := MemoryMetrics(dpConfig.Agents())
+	if cp := dpConfig.CPMemory(); cp != nil {
+		metrics = append(metrics, CPMemoryMetrics(*cp)...)
+	}
+	return append(metrics, CPAllocatorMetrics(dpConfig.CPAllocatorStats())...)
+}
+
+// CPAllocatorMetrics reports shared control-plane capacity independently of
+// whether any agent has attached.
+func CPAllocatorMetrics(stats ffi.AllocatorStats) []*commonpb.Metric {
+	return allocatorMetrics("cp", "", stats)
+}
+
+func allocatorMetrics(scope string, agent string, stats ffi.AllocatorStats) []*commonpb.Metric {
+	labels := []*commonpb.Label{
+		commonpb.NewLabel("scope", scope),
+		commonpb.NewLabel("agent", agent),
+	}
+	metrics := []*commonpb.Metric{
+		commonpb.NewMetricGauge("memory_allocator_free_bytes", float64(stats.FreeBytes), labels...),
+		commonpb.NewMetricGauge("memory_allocator_largest_free_block_bytes", float64(stats.LargestFreeBlockBytes), labels...),
+	}
+	for _, pool := range stats.Pools {
+		metrics = append(metrics, commonpb.NewMetricGauge(
+			"memory_allocator_free_blocks",
+			float64(pool.FreeBlocks),
+			labels[0],
+			labels[1],
+			commonpb.NewLabel("block_size_bytes", strconv.FormatUint(pool.BlockSizeBytes, 10)),
+		))
+	}
+	return metrics
 }
 
 // MemoryMetrics converts a shared-memory agent snapshot into gauges.
@@ -138,6 +174,7 @@ func MemoryMetrics(agents []ffi.AgentInfo) []*commonpb.Metric {
 			commonpb.NewMetricGauge("memory_retired_arena_bytes", float64(retiredBytes), agentLabel),
 		)
 		metrics = append(metrics, contextUsedMetrics(agent.Name, live.MemoryTree)...)
+		metrics = append(metrics, allocatorMetrics("agent", agent.Name, live.Allocator)...)
 	}
 
 	return metrics
@@ -151,10 +188,59 @@ func MemoryMetrics(agents []ffi.AgentInfo) []*commonpb.Metric {
 // stay distinguishable. Nodes that still resolve to an identical path
 // are summed into one series instead of being emitted as duplicates,
 // which a scraper would otherwise reject.
-func contextUsedMetrics(agent string, tree []ffi.AgentMemoryNode) []*commonpb.Metric {
+func contextUsedMetrics(agent string, tree []ffi.MemoryNode) []*commonpb.Metric {
+	usage := contextPathUsed(tree)
+
+	metrics := make([]*commonpb.Metric, 0, len(usage))
+	for _, entry := range usage {
+		metrics = append(metrics, commonpb.NewMetricGauge(
+			"memory_context_used_bytes",
+			float64(entry.Used),
+			commonpb.NewLabel("agent", agent),
+			commonpb.NewLabel("path", entry.Path),
+		))
+	}
+
+	return metrics
+}
+
+// CPMemoryMetrics converts the controlplane zone's own memory snapshot
+// into gauges.
+//
+// The zone is not an agent arena, and a path key alone cannot separate it
+// from an agent of the same name, so its gauges live under memory_cp_*
+// names instead of the agent-labelled memory_* ones.
+func CPMemoryMetrics(cp ffi.CPMemoryInfo) []*commonpb.Metric {
+	usage := contextPathUsed(cp.MemoryTree)
+
+	metrics := make([]*commonpb.Metric, 0, len(usage)+1)
+	metrics = append(metrics,
+		commonpb.NewMetricGauge("memory_cp_free_bytes", float64(cp.FreeBytes)),
+	)
+	for _, entry := range usage {
+		metrics = append(metrics, commonpb.NewMetricGauge(
+			"memory_cp_context_used_bytes",
+			float64(entry.Used),
+			commonpb.NewLabel("path", entry.Path),
+		))
+	}
+
+	return metrics
+}
+
+// contextUsage is one summed per-path live-byte total.
+type contextUsage struct {
+	Path string
+	Used uint64
+}
+
+// contextPathUsed sums live bytes (balloc minus bfree) per full
+// root-to-node path over a depth-first tree snapshot, preserving first
+// appearance order.
+func contextPathUsed(tree []ffi.MemoryNode) []contextUsage {
 	paths := make([]string, len(tree))
-	used := make(map[string]uint64, len(tree))
-	order := make([]string, 0, len(tree))
+	index := make(map[string]int, len(tree))
+	usage := make([]contextUsage, 0, len(tree))
 
 	for idx, node := range tree {
 		path := "/" + node.Name
@@ -168,21 +254,13 @@ func contextUsedMetrics(agent string, tree []ffi.AgentMemoryNode) []*commonpb.Me
 			nodeUsed = node.BAllocSize - node.BFreeSize
 		}
 
-		if _, ok := used[path]; !ok {
-			order = append(order, path)
+		if entryIdx, ok := index[path]; ok {
+			usage[entryIdx].Used += nodeUsed
+			continue
 		}
-		used[path] += nodeUsed
+		index[path] = len(usage)
+		usage = append(usage, contextUsage{Path: path, Used: nodeUsed})
 	}
 
-	metrics := make([]*commonpb.Metric, 0, len(order))
-	for _, path := range order {
-		metrics = append(metrics, commonpb.NewMetricGauge(
-			"memory_context_used_bytes",
-			float64(used[path]),
-			commonpb.NewLabel("agent", agent),
-			commonpb.NewLabel("path", path),
-		))
-	}
-
-	return metrics
+	return usage
 }

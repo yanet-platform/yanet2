@@ -2,6 +2,7 @@
 
 #include <errno.h>
 #include <sched.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -133,7 +134,8 @@ cp_config_gen_new_from(
 	new_config_gen->config_gen_ectx_count = 0;
 	new_config_gen->config_gen_ectxs = NULL;
 	// Starts pinned by its own eventual current-published status, the
-	// same pin publish later transfers rather than adds to.
+	// same pin the publish later spends rather than adds to. Only one
+	// writer builds at a time, so the plain store needs no ordering.
 	new_config_gen->refcnt = 1;
 
 	SET_OFFSET_OF(
@@ -246,12 +248,26 @@ void
 cp_config_gen_release(
 	struct cp_config *cp_config, struct cp_config_gen *config_gen
 ) {
-	cp_config_assert_locked(cp_config);
-
-	if (--config_gen->refcnt == 0) {
-		cp_config_gen_free(cp_config, config_gen);
-		cp_config_reclaim_unused_agents_locked(cp_config);
+	// The release that observes the count reach zero is the sole owner
+	// of the teardown: every earlier holder's walk is ordered before its
+	// own decrement by the acquire-release exchange, and no new holder
+	// can appear — a retired generation is no longer published, and
+	// pinning goes through the publication lock.
+	uint64_t remaining =
+		__atomic_sub_fetch(&config_gen->refcnt, 1, __ATOMIC_ACQ_REL);
+	if (remaining != 0) {
+		return;
 	}
+
+	cp_config_gen_free(cp_config, config_gen);
+
+	// The teardown may have left a superseded agent unreferenced, and
+	// this release is the last event guaranteed to observe it, so the
+	// release reclaims it itself rather than leaving the reclamation
+	// to a later mutation. A thread already holding the configuration
+	// lock is an install, whose update path sweeps before releasing
+	// it.
+	cp_config_reclaim_unused_agents(cp_config);
 }
 
 // Publishes a fully built configuration generation and retires the one it
@@ -261,7 +277,10 @@ cp_config_gen_release(
 // leaves the configuration in use untouched and the generation being
 // installed unobserved by any worker, so the caller may reclaim it.
 // Success is reported only once every worker has taken the new generation,
-// so the replaced one is executed nowhere and is safe to reclaim.
+// so the replaced one is executed nowhere and its publication pin may be
+// dropped here — freeing it at once unless an unlocked reader still holds
+// a pin, in which case that reader's later release frees it. Superseded
+// agents are reclaimed by the sweep below in either case.
 static inline int
 cp_config_gen_install(
 	struct dp_config *dp_config,
@@ -269,8 +288,7 @@ cp_config_gen_install(
 	struct cp_config_gen *new_config_gen,
 	yanet_error **err
 ) {
-	struct cp_config_gen *old_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *old_config_gen = cp_config_current_gen(cp_config);
 
 	uint64_t worker_count = dp_config->worker_count;
 
@@ -284,17 +302,16 @@ cp_config_gen_install(
 	SET_OFFSET_OF(&new_config_gen->config_gen_ectxs, new_config_gen_ectxs);
 	new_config_gen->config_gen_ectx_count = worker_count;
 
-	// Release-publish the new generation so workers never observe this
-	// pointer before its contents are fully written.
-	ATOMIC_SET_OFFSET_OF(&cp_config->cp_config_gen, new_config_gen);
+	// Swap under the publication lock: a reader either names and pins the
+	// old generation before this, or observes the new one after, so the
+	// old generation's pin count can only shrink from here on.
+	cp_config_publish_gen(cp_config, new_config_gen);
 	dp_config_wait_for_gen(dp_config, new_config_gen);
 
-	// The new generation already carries the pin it was created with, so
-	// publishing it as current spends that pin rather than adding one.
-	// Dropping the old generation's own matching pin here frees it
-	// immediately, unless an unlocked reader is still pinning it too, in
-	// which case that reader's later release finishes the teardown.
 	cp_config_gen_release(cp_config, old_config_gen);
+	spinlock_lock(&cp_config->agent_lock);
+	cp_config_reclaim_unused_agents_locked(cp_config);
+	spinlock_unlock(&cp_config->agent_lock);
 
 	return 0;
 }
@@ -309,8 +326,7 @@ cp_config_delete_module(
 ) {
 	cp_config_lock(cp_config);
 
-	struct cp_config_gen *old_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *old_config_gen = cp_config_current_gen(cp_config);
 
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_new_from(cp_config, old_config_gen, err);
@@ -342,6 +358,11 @@ cp_config_delete_module(
 error_free:
 	cp_config_gen_free(cp_config, new_config_gen);
 error_unlock:
+	// Every completed hold of the configuration lock sweeps, failed
+	// builds included.
+	spinlock_lock(&cp_config->agent_lock);
+	cp_config_reclaim_unused_agents_locked(cp_config);
+	spinlock_unlock(&cp_config->agent_lock);
 	cp_config_unlock(cp_config);
 	return -1;
 }
@@ -356,8 +377,100 @@ cp_config_update_modules(
 ) {
 	cp_config_lock(cp_config);
 
-	struct cp_config_gen *old_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct agent **owners = NULL;
+
+	if (module_count > 0) {
+		owners =
+			(struct agent **)malloc(sizeof(*owners) * module_count);
+		if (owners == NULL) {
+			yanet_error_add_kind(
+				err,
+				YANET_ERROR_RESOURCE_EXHAUSTED,
+				"failed to allocate owner holds"
+			);
+			goto error_unlock;
+		}
+	}
+
+	// Refuse modules owned by a superseded agent: creating through a
+	// superseded agent would raise a predecessor's loaded count from
+	// zero and race the sweep's reclamation, and the superseding attach
+	// already ended the owner's lifetime anyway. The owner and its name
+	// live in the predecessor's arena, which the sweep may free under
+	// the agent lock alone, so the reads take that lock too.
+	//
+	// Each validated owner also gains a registration hold on the spot:
+	// the count gain for a first registration lands only when the
+	// upserts run, and without the hold a same-name attach could
+	// supersede and sweep the still-zero owner between this validation
+	// and that gain, leaving the upserts to touch freed arenas. Every
+	// exit of the update drops the holds again.
+	spinlock_lock(&cp_config->agent_lock);
+	for (uint64_t idx = 0; idx < module_count; ++idx) {
+		struct agent *owner = ADDR_OF(&cp_modules[idx]->entity.agent);
+		if (owner != NULL && !agent_is_current(cp_config, owner)) {
+			yanet_error_add_kind(
+				err,
+				YANET_ERROR_FAILED_PRECONDITION,
+				"module '%s:%s' is owned by superseded agent "
+				"'%s'",
+				cp_modules[idx]->type,
+				cp_modules[idx]->name,
+				owner->name
+			);
+			agent_unload_references(owners, idx);
+			spinlock_unlock(&cp_config->agent_lock);
+			free(owners);
+			owners = NULL;
+			goto error_unlock;
+		}
+		owners[idx] = owner;
+		if (owner != NULL) {
+			__atomic_add_fetch(
+				&owner->loaded_entity_count, 1, __ATOMIC_RELEASE
+			);
+		}
+	}
+
+	// A repeated identity would replace the item this same update just
+	// installed, so the second item's counters link from the first without
+	// a published generation between the two links. Counter value slots
+	// are only reused once the generation that last counted into them has
+	// been installed and retired, so the repetition is refused rather
+	// than allowed to shorten that grace. The check reads the items
+	// under the agent lock for the same reason the owner validation
+	// above does.
+	for (uint64_t idx = 0; idx < module_count; ++idx) {
+		for (uint64_t prev = 0; prev < idx; ++prev) {
+			if (!strncmp(
+				    cp_modules[idx]->type,
+				    cp_modules[prev]->type,
+				    CP_MODULE_TYPE_LEN
+			    ) &&
+			    !strncmp(
+				    cp_modules[idx]->name,
+				    cp_modules[prev]->name,
+				    CP_MODULE_NAME_LEN
+			    )) {
+				yanet_error_add_kind(
+					err,
+					YANET_ERROR_FAILED_PRECONDITION,
+					"module '%s:%s' appears more than once "
+					"in one update",
+					cp_modules[idx]->type,
+					cp_modules[idx]->name
+				);
+				agent_unload_references(owners, module_count);
+				spinlock_unlock(&cp_config->agent_lock);
+				free(owners);
+				owners = NULL;
+				goto error_unlock;
+			}
+		}
+	}
+	spinlock_unlock(&cp_config->agent_lock);
+
+	struct cp_config_gen *old_config_gen = cp_config_current_gen(cp_config);
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_new_from(cp_config, old_config_gen, err);
 	if (new_config_gen == NULL) {
@@ -421,6 +534,14 @@ cp_config_update_modules(
 		}
 	}
 
+	// The holds outlive the upserts' own gains but not the install:
+	// a displaced owner whose hold was the last reference drains here,
+	// and the install's sweep reclaims it at once instead of leaving
+	// the reclamation to an unrelated later mutation.
+	agent_unload_references(owners, module_count);
+	free(owners);
+	owners = NULL;
+
 	if (cp_config_gen_install(dp_config, cp_config, new_config_gen, err)) {
 		goto error_free;
 	}
@@ -431,6 +552,15 @@ cp_config_update_modules(
 error_free:
 	cp_config_gen_free(cp_config, new_config_gen);
 error_unlock:
+	if (owners != NULL) {
+		agent_unload_references(owners, module_count);
+		free(owners);
+	}
+	// Every completed hold of the configuration lock sweeps, failed
+	// builds included.
+	spinlock_lock(&cp_config->agent_lock);
+	cp_config_reclaim_unused_agents_locked(cp_config);
+	spinlock_unlock(&cp_config->agent_lock);
 	cp_config_unlock(cp_config);
 	return -1;
 }
@@ -448,8 +578,31 @@ cp_config_update_functions(
 ) {
 	cp_config_lock(cp_config);
 
-	struct cp_config_gen *old_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	// A repeated identity would link the second function's chain counters
+	// from the first without a published generation between the two
+	// links, which counter value slot reuse cannot allow; see the module
+	// update path.
+	for (uint64_t idx = 0; idx < function_count; ++idx) {
+		for (uint64_t prev = 0; prev < idx; ++prev) {
+			if (!strncmp(
+				    cp_function_configs[idx]->name,
+				    cp_function_configs[prev]->name,
+				    CP_FUNCTION_NAME_LEN
+			    )) {
+				yanet_error_add_kind(
+					err,
+					YANET_ERROR_FAILED_PRECONDITION,
+					"function '%s' appears more than once "
+					"in "
+					"one update",
+					cp_function_configs[idx]->name
+				);
+				goto error_unlock;
+			}
+		}
+	}
+
+	struct cp_config_gen *old_config_gen = cp_config_current_gen(cp_config);
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_new_from(cp_config, old_config_gen, err);
 	if (new_config_gen == NULL) {
@@ -511,6 +664,11 @@ cp_config_update_functions(
 error_free:
 	cp_config_gen_free(cp_config, new_config_gen);
 error_unlock:
+	// Every completed hold of the configuration lock sweeps, failed
+	// builds included.
+	spinlock_lock(&cp_config->agent_lock);
+	cp_config_reclaim_unused_agents_locked(cp_config);
+	spinlock_unlock(&cp_config->agent_lock);
 	cp_config_unlock(cp_config);
 	return -1;
 }
@@ -524,8 +682,7 @@ cp_config_delete_function(
 ) {
 	cp_config_lock(cp_config);
 
-	struct cp_config_gen *old_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *old_config_gen = cp_config_current_gen(cp_config);
 
 	uint64_t index;
 	if (cp_config_gen_lookup_function_index(old_config_gen, name, &index)) {
@@ -561,6 +718,11 @@ cp_config_delete_function(
 error_free:
 	cp_config_gen_free(cp_config, new_config_gen);
 error_unlock:
+	// Every completed hold of the configuration lock sweeps, failed
+	// builds included.
+	spinlock_lock(&cp_config->agent_lock);
+	cp_config_reclaim_unused_agents_locked(cp_config);
+	spinlock_unlock(&cp_config->agent_lock);
 	cp_config_unlock(cp_config);
 	return -1;
 }
@@ -578,8 +740,30 @@ cp_config_update_pipelines(
 ) {
 	cp_config_lock(cp_config);
 
-	struct cp_config_gen *old_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	// A repeated identity would link the second pipeline's counters from
+	// the first without a published generation between the two links,
+	// which counter value slot reuse cannot allow; see the module update
+	// path.
+	for (uint64_t idx = 0; idx < pipeline_count; ++idx) {
+		for (uint64_t prev = 0; prev < idx; ++prev) {
+			if (!strncmp(
+				    cp_pipeline_configs[idx]->name,
+				    cp_pipeline_configs[prev]->name,
+				    CP_PIPELINE_NAME_LEN
+			    )) {
+				yanet_error_add_kind(
+					err,
+					YANET_ERROR_FAILED_PRECONDITION,
+					"pipeline '%s' appears more than once "
+					"in one update",
+					cp_pipeline_configs[idx]->name
+				);
+				goto error_unlock;
+			}
+		}
+	}
+
+	struct cp_config_gen *old_config_gen = cp_config_current_gen(cp_config);
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_new_from(cp_config, old_config_gen, err);
 
@@ -641,6 +825,11 @@ cp_config_update_pipelines(
 error_free:
 	cp_config_gen_free(cp_config, new_config_gen);
 error_unlock:
+	// Every completed hold of the configuration lock sweeps, failed
+	// builds included.
+	spinlock_lock(&cp_config->agent_lock);
+	cp_config_reclaim_unused_agents_locked(cp_config);
+	spinlock_unlock(&cp_config->agent_lock);
 	cp_config_unlock(cp_config);
 	return -1;
 }
@@ -654,8 +843,7 @@ cp_config_delete_pipeline(
 ) {
 	cp_config_lock(cp_config);
 
-	struct cp_config_gen *old_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *old_config_gen = cp_config_current_gen(cp_config);
 
 	uint64_t index;
 	if (cp_config_gen_lookup_pipeline_index(old_config_gen, name, &index)) {
@@ -691,6 +879,11 @@ cp_config_delete_pipeline(
 error_free:
 	cp_config_gen_free(cp_config, new_config_gen);
 error_unlock:
+	// Every completed hold of the configuration lock sweeps, failed
+	// builds included.
+	spinlock_lock(&cp_config->agent_lock);
+	cp_config_reclaim_unused_agents_locked(cp_config);
+	spinlock_unlock(&cp_config->agent_lock);
 	cp_config_unlock(cp_config);
 	return -1;
 }
@@ -774,8 +967,86 @@ cp_config_update_devices(
 	// TODO weight clamp
 	cp_config_lock(cp_config);
 
-	struct cp_config_gen *old_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct agent **owners = NULL;
+
+	if (device_count > 0) {
+		owners =
+			(struct agent **)malloc(sizeof(*owners) * device_count);
+		if (owners == NULL) {
+			yanet_error_add_kind(
+				err,
+				YANET_ERROR_RESOURCE_EXHAUSTED,
+				"failed to allocate owner holds"
+			);
+			goto error_unlock;
+		}
+	}
+
+	// Refuse devices owned by a superseded agent; see the module update
+	// path for why creation through a predecessor is refused and why
+	// the owner reads take the agent lock.
+	//
+	// Each validated owner also gains a registration hold on the spot:
+	// the count gain for a first registration lands only when the
+	// upserts run, and without the hold a same-name attach could
+	// supersede and sweep the still-zero owner between this validation
+	// and that gain, leaving the upserts to touch freed arenas. Every
+	// exit of the update drops the holds again.
+	spinlock_lock(&cp_config->agent_lock);
+	for (uint64_t idx = 0; idx < device_count; ++idx) {
+		struct agent *owner = ADDR_OF(&devices[idx]->entity.agent);
+		if (owner != NULL && !agent_is_current(cp_config, owner)) {
+			yanet_error_add_kind(
+				err,
+				YANET_ERROR_FAILED_PRECONDITION,
+				"device '%s' is owned by superseded agent '%s'",
+				devices[idx]->name,
+				owner->name
+			);
+			agent_unload_references(owners, idx);
+			spinlock_unlock(&cp_config->agent_lock);
+			free(owners);
+			owners = NULL;
+			goto error_unlock;
+		}
+		owners[idx] = owner;
+		if (owner != NULL) {
+			__atomic_add_fetch(
+				&owner->loaded_entity_count, 1, __ATOMIC_RELEASE
+			);
+		}
+	}
+
+	// A repeated identity would link the second device's counters from
+	// the first without a published generation between the two links,
+	// which counter value slot reuse cannot allow; the check reads the
+	// items under the agent lock for the same reason the owner
+	// validation above does.
+	for (uint64_t idx = 0; idx < device_count; ++idx) {
+		for (uint64_t prev = 0; prev < idx; ++prev) {
+			if (!strncmp(
+				    devices[idx]->name,
+				    devices[prev]->name,
+				    CP_DEVICE_NAME_LEN
+			    )) {
+				yanet_error_add_kind(
+					err,
+					YANET_ERROR_FAILED_PRECONDITION,
+					"device '%s' appears more than once in "
+					"one update",
+					devices[idx]->name
+				);
+				agent_unload_references(owners, device_count);
+				spinlock_unlock(&cp_config->agent_lock);
+				free(owners);
+				owners = NULL;
+				goto error_unlock;
+			}
+		}
+	}
+	spinlock_unlock(&cp_config->agent_lock);
+
+	struct cp_config_gen *old_config_gen = cp_config_current_gen(cp_config);
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_new_from(cp_config, old_config_gen, err);
 	if (new_config_gen == NULL) {
@@ -799,6 +1070,14 @@ cp_config_update_devices(
 		}
 	}
 
+	// The holds outlive the upserts' own gains but not the install:
+	// a displaced owner whose hold was the last reference drains here,
+	// and the install's sweep reclaims it at once instead of leaving
+	// the reclamation to an unrelated later mutation.
+	agent_unload_references(owners, device_count);
+	free(owners);
+	owners = NULL;
+
 	if (cp_config_gen_install(dp_config, cp_config, new_config_gen, err)) {
 		goto error_free;
 	}
@@ -809,6 +1088,15 @@ cp_config_update_devices(
 error_free:
 	cp_config_gen_free(cp_config, new_config_gen);
 error_unlock:
+	if (owners != NULL) {
+		agent_unload_references(owners, device_count);
+		free(owners);
+	}
+	// Every completed hold of the configuration lock sweeps, failed
+	// builds included.
+	spinlock_lock(&cp_config->agent_lock);
+	cp_config_reclaim_unused_agents_locked(cp_config);
+	spinlock_unlock(&cp_config->agent_lock);
 	cp_config_unlock(cp_config);
 	return -1;
 }
@@ -839,8 +1127,7 @@ cp_config_delete_device(
 
 	cp_config_lock(cp_config);
 
-	struct cp_config_gen *old_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *old_config_gen = cp_config_current_gen(cp_config);
 
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_new_from(cp_config, old_config_gen, err);
@@ -868,6 +1155,11 @@ cp_config_delete_device(
 error_free:
 	cp_config_gen_free(cp_config, new_config_gen);
 error_unlock:
+	// Every completed hold of the configuration lock sweeps, failed
+	// builds included.
+	spinlock_lock(&cp_config->agent_lock);
+	cp_config_reclaim_unused_agents_locked(cp_config);
+	spinlock_unlock(&cp_config->agent_lock);
 	cp_config_unlock(cp_config);
 	return -1;
 }
@@ -882,8 +1174,94 @@ cp_config_update_objects(
 ) {
 	cp_config_lock(cp_config);
 
-	struct cp_config_gen *old_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct agent **owners = NULL;
+
+	if (object_count > 0) {
+		owners =
+			(struct agent **)malloc(sizeof(*owners) * object_count);
+		if (owners == NULL) {
+			yanet_error_add_kind(
+				err,
+				YANET_ERROR_RESOURCE_EXHAUSTED,
+				"failed to allocate owner holds"
+			);
+			goto error_unlock;
+		}
+	}
+
+	// Refuse objects owned by a superseded agent; see the module update
+	// path for why creation through a predecessor is refused and why
+	// the owner reads take the agent lock.
+	//
+	// Each validated owner also gains a registration hold on the spot:
+	// the count gain for a first registration lands only when the
+	// upserts run, and without the hold a same-name attach could
+	// supersede and sweep the still-zero owner between this validation
+	// and that gain, leaving the upserts to touch freed arenas. Every
+	// exit of the update drops the holds again.
+	spinlock_lock(&cp_config->agent_lock);
+	for (uint64_t idx = 0; idx < object_count; ++idx) {
+		struct agent *owner = ADDR_OF(&objects[idx]->entity.agent);
+		if (owner != NULL && !agent_is_current(cp_config, owner)) {
+			yanet_error_add_kind(
+				err,
+				YANET_ERROR_FAILED_PRECONDITION,
+				"object '%s:%s' is owned by superseded agent "
+				"'%s'",
+				objects[idx]->type,
+				objects[idx]->name,
+				owner->name
+			);
+			agent_unload_references(owners, idx);
+			spinlock_unlock(&cp_config->agent_lock);
+			free(owners);
+			owners = NULL;
+			goto error_unlock;
+		}
+		owners[idx] = owner;
+		if (owner != NULL) {
+			__atomic_add_fetch(
+				&owner->loaded_entity_count, 1, __ATOMIC_RELEASE
+			);
+		}
+	}
+
+	// A repeated identity would link the second item's counters from the
+	// first without a published generation between the two links, which
+	// counter value slot reuse cannot allow; the check reads the items
+	// under the agent lock for the same reason the owner validation
+	// above does.
+	for (uint64_t idx = 0; idx < object_count; ++idx) {
+		for (uint64_t prev = 0; prev < idx; ++prev) {
+			if (!strncmp(
+				    objects[idx]->type,
+				    objects[prev]->type,
+				    CP_OBJECT_TYPE_LEN
+			    ) &&
+			    !strncmp(
+				    objects[idx]->name,
+				    objects[prev]->name,
+				    CP_OBJECT_NAME_LEN
+			    )) {
+				yanet_error_add_kind(
+					err,
+					YANET_ERROR_FAILED_PRECONDITION,
+					"object '%s:%s' appears more than once "
+					"in one update",
+					objects[idx]->type,
+					objects[idx]->name
+				);
+				agent_unload_references(owners, object_count);
+				spinlock_unlock(&cp_config->agent_lock);
+				free(owners);
+				owners = NULL;
+				goto error_unlock;
+			}
+		}
+	}
+	spinlock_unlock(&cp_config->agent_lock);
+
+	struct cp_config_gen *old_config_gen = cp_config_current_gen(cp_config);
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_new_from(cp_config, old_config_gen, err);
 	if (new_config_gen == NULL) {
@@ -908,6 +1286,14 @@ cp_config_update_objects(
 		}
 	}
 
+	// The holds outlive the upserts' own gains but not the install:
+	// a displaced owner whose hold was the last reference drains here,
+	// and the install's sweep reclaims it at once instead of leaving
+	// the reclamation to an unrelated later mutation.
+	agent_unload_references(owners, object_count);
+	free(owners);
+	owners = NULL;
+
 	if (cp_config_gen_install(dp_config, cp_config, new_config_gen, err)) {
 		goto error_free;
 	}
@@ -918,6 +1304,15 @@ cp_config_update_objects(
 error_free:
 	cp_config_gen_free(cp_config, new_config_gen);
 error_unlock:
+	if (owners != NULL) {
+		agent_unload_references(owners, object_count);
+		free(owners);
+	}
+	// Every completed hold of the configuration lock sweeps, failed
+	// builds included.
+	spinlock_lock(&cp_config->agent_lock);
+	cp_config_reclaim_unused_agents_locked(cp_config);
+	spinlock_unlock(&cp_config->agent_lock);
 	cp_config_unlock(cp_config);
 	return -1;
 }
@@ -932,8 +1327,7 @@ cp_config_delete_object(
 ) {
 	cp_config_lock(cp_config);
 
-	struct cp_config_gen *old_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *old_config_gen = cp_config_current_gen(cp_config);
 
 	uint64_t index;
 	if (cp_config_gen_lookup_object_index(
@@ -1015,6 +1409,11 @@ cp_config_delete_object(
 error_free:
 	cp_config_gen_free(cp_config, new_config_gen);
 error_unlock:
+	// Every completed hold of the configuration lock sweeps, failed
+	// builds included.
+	spinlock_lock(&cp_config->agent_lock);
+	cp_config_reclaim_unused_agents_locked(cp_config);
+	spinlock_unlock(&cp_config->agent_lock);
 	cp_config_unlock(cp_config);
 	return -1;
 }
@@ -1044,10 +1443,6 @@ cp_config_gen_new(struct agent *agent, yanet_error **err) {
 	cp_config_gen->gen = 0;
 	cp_config_gen->config_gen_ectx_count = 0;
 	cp_config_gen->config_gen_ectxs = NULL;
-	// The bootstrap generation is installed directly by its caller
-	// rather than through the publish path, so it starts pinned by its
-	// own current-published status just like every later generation.
-	cp_config_gen->refcnt = 1;
 	SET_OFFSET_OF(
 		&cp_config_gen->dp_config, ADDR_OF(&cp_config->dp_config)
 	);
@@ -1166,6 +1561,12 @@ cp_config_gen_new(struct agent *agent, yanet_error **err) {
 			goto error;
 		}
 	}
+
+	// The bootstrap generation is installed directly by its caller
+	// rather than through the publish path, before any unlocked reader
+	// exists, so it starts pinned by its own current-published status
+	// just like every later generation.
+	cp_config_gen->refcnt = 1;
 
 	return cp_config_gen;
 

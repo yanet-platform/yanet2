@@ -3,9 +3,9 @@
 set positional-arguments := true
 
 # Project configuration
-TAG := "yanet2-dev"
+export TAG := env_var_or_default("TAG", "yanet2-dev")
 ROOT_DIR := justfile_directory()
-DOCKER_CACHE_DIR := "/tmp"
+export DOCKER_CACHE_DIR := env_var_or_default("DOCKER_CACHE_DIR", "/tmp")
 
 
 # Show available commands
@@ -13,22 +13,24 @@ default:
     @just --list
 
 # === Build Targets ===
+#
+# The build, build-debug and fuzz recipes call the make targets, which also
+# pass the private modules to meson. Separate make runs keep setup before the
+# build even under a parallel MAKEFLAGS.
 
 # Build all targets
 build:
-    @go clean -cache
-    @meson setup build
-    @meson compile -C build
+    @make setup
+    @make build
 
-# Build all targets in debug
+# Build all targets in debug with ASan and UBSan
 build-debug:
-    @go clean -cache
-    @meson setup -Dbuildtype=debug -Doptimization=0 -Db_sanitize=address,undefined build
-    @meson compile -C build
+    @make setup-asan
+    @make build
 
 # Setup build environment with optional coverage
 setup COVERAGE_MODE="false":
-    @meson setup build -Dbuildtype=debug -Db_coverage={{ COVERAGE_MODE }}
+    @make setup MESON_SETUP_FLAGS="-Dbuildtype=debug -Db_sanitize=none -Db_lundef=true -Dfuzzing=disabled -Ddataplane_only=false -Db_coverage={{ COVERAGE_MODE }}"
 
 # === Test Targets ===
 
@@ -53,24 +55,7 @@ lab *ARGS:
 # Usage: just fuzz [MODULE]
 # Example: just fuzz dscp
 fuzz MODULE="":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if [ -d build ] && ! meson introspect build --buildoptions | jq -er '.[] | select(.name=="fuzzing") | .value' | grep -q enabled; then
-        echo "Wiping build for fuzzing..."
-        rm -rf build
-    fi
-    if [ ! -d build ]; then
-        env CC=clang CXX=clang++ meson setup -Dbuildtype=debug -Doptimization=0 -Dfuzzing=enabled build
-    else
-        env CC=clang CXX=clang++ meson setup -Dbuildtype=debug -Doptimization=0 -Dfuzzing=enabled --reconfigure build
-    fi
-    env CC=clang CXX=clang++ meson compile -C build
-    echo "Ready to fuzz the following modules:"
-    find build/tests/fuzzing/ -type f -executable -printf '%f\n'
-    if [ -n "{{ MODULE }}" ]; then
-        mkdir -p corpus
-        ./build/tests/fuzzing/{{ MODULE }} corpus/
-    fi
+    @make fuzz MODULE={{ MODULE }}
 
 # Clean coverage data
 # clean *.gcno file manually after remove c file
@@ -129,7 +114,11 @@ _docker_run IT *COMMAND:
     # Add working directory to safe list to avoid it.
 
     set -euo pipefail
+    mkdir -p "${DOCKER_CACHE_DIR}/gomodcache" "${DOCKER_CACHE_DIR}/gocache" "${DOCKER_CACHE_DIR}/ccache"
     docker_mounts=(-v "{{ ROOT_DIR }}:/yanet2")
+    if [ "{{ ROOT_DIR }}" != /yanet2 ]; then
+        docker_mounts+=(-v "{{ ROOT_DIR }}:{{ ROOT_DIR }}")
+    fi
     if [ -f "{{ ROOT_DIR }}/.git" ]; then
         # Linked worktrees reference Git metadata outside the source mount.
         git_common_dir="$(git -C "{{ ROOT_DIR }}" rev-parse --path-format=absolute --git-common-dir)"
@@ -141,21 +130,38 @@ _docker_run IT *COMMAND:
         printf 'gitdir: %s\n' "$git_dir" > "$gitfile"
         docker_mounts+=(-v "${gitfile}:/yanet2/.git:ro")
     fi
+    # Cache entries written as root must stay manageable by the invoking host
+    # user.
+    #
+    # ccache applies this umask only when creating entries in its cache
+    # directory and restores the umask before running the compiler, so
+    # compile outputs keep default permissions.
     docker run {{ IT }} --rm \
         --platform linux/amd64 \
         --network=host \
         "${docker_mounts[@]}" \
-        -v {{ DOCKER_CACHE_DIR }}/gomodcache:/tmp/gomodcache:rw \
-        -v {{ DOCKER_CACHE_DIR }}/gocache:/tmp/gocache:rw \
+        -v "${DOCKER_CACHE_DIR}/gomodcache:/tmp/gomodcache:rw" \
+        -v "${DOCKER_CACHE_DIR}/gocache:/tmp/gocache:rw" \
+        -v "${DOCKER_CACHE_DIR}/ccache:/ccache:rw" \
         {{ TAG }} \
-        sh -c 'cd /yanet2 && git config --global --add safe.directory /yanet2 && {{ COMMAND }}'
+        sh -c 'cd "$1" && git config --global --add safe.directory /yanet2 && git config --global --add safe.directory "$1" && export CCACHE_UMASK=000 && shift && sh -c "$*"' sh "{{ ROOT_DIR }}" "${@:2}"
 
 dsetup COVERAGE_MODE="false":
     @just _docker_run -it "just setup {{ COVERAGE_MODE }}"
 
-# Run tests in Docker
-dtest:
-    @just _docker_run -it "just setup false test"
+# Smoke-check that disposable containers share the host compiler cache through
+# the shared Docker runner; guards the cache bind mount before the suite runs
+dtest-ccache-probe:
+    @bash "{{ justfile_directory() }}/scripts/verify-docker-ccache.sh" "{{ justfile() }}"
+
+_ccache_setup *OPTIONS:
+    @test ! -f build/build.ninja || python3 scripts/check-meson-ccache.py build
+    @meson setup build {{ OPTIONS }}
+    @python3 scripts/check-meson-ccache.py build
+
+# Run the complete Go and Meson suites after building their dependencies.
+dtest: dtest-ccache-probe
+    @just _docker_run -it "python3 scripts/test-meson-ccache.py && { test ! -f build/build.ninja || python3 scripts/check-meson-ccache.py build; } && just setup false && python3 scripts/check-meson-ccache.py build && make build && make test GO_TEST_PACKAGES="
 
 # Run clang-tidy in Docker
 dtidy *FILES:
@@ -167,7 +173,7 @@ dbloody *FILES:
 
 # Build in Docker
 dbuild:
-    @just _docker_run -it "just build"
+    @just _docker_run -it "just _ccache_setup && meson compile -C build"
 
 # Build in Docker
 dbuild-debug:

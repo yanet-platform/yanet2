@@ -56,8 +56,11 @@ gateways:
   - name: numa0
     endpoint: "[::1]:8080"
     tls:
-      cert_file: /etc/yanet2/tls/operator.pem
+      key_pairs:
+        - type: file
+          config:
+            cert_file: /etc/yanet2/tls/operator.pem
 `), &cfg)
 
-	require.ErrorContains(t, err, "cert_file and key_file must be set together")
+	require.ErrorContains(t, err, "cert_file and key_file are both required under config")
 }

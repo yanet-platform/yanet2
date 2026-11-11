@@ -1,7 +1,6 @@
 package croute
 
 //#cgo CFLAGS: -I../../../../../
-//#cgo LDFLAGS: -L../../../../../build/modules/route/api -lroute_cp
 //
 //#include "api/agent.h"
 //#include "lib/counters/counters.h"

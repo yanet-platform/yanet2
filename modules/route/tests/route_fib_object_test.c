@@ -244,7 +244,7 @@ run_publish_lifecycle_test(struct yanet_shm *shm) {
 	);
 
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
-	struct cp_config_gen *gen = ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *gen = cp_config_current_gen(cp_config);
 	uint64_t idx;
 	TEST_ASSERT_SUCCESS(
 		cp_config_gen_lookup_object_index(

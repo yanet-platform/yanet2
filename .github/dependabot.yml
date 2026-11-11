@@ -1,0 +1,32 @@
+version: 2
+updates:
+  # Workflows pin every action to a commit SHA with its tag in a comment;
+  # this keeps those pins current in one weekly pull request.
+  - package-ecosystem: github-actions
+    directories:
+      - /
+      - /.github/actions/*
+    schedule:
+      interval: weekly
+    # A freshly published release waits a week, so a compromised tag is
+    # likely caught before it is adopted.
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        patterns: ["*"]
+    ignore:
+      # The toolchain versions are deliberate pins: the stable release and
+      # the rustfmt nightly move only with the code.
+      - dependency-name: dtolnay/rust-toolchain
+
+  # The CI image pins its Ubuntu base by codename and digest.
+  #
+  # A codename tag has no version to bump, so an update is only the newer
+  # digest of the same release; it starts the bump described in ci/README.md.
+  - package-ecosystem: docker
+    directory: /ci
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7

@@ -121,15 +121,6 @@ void
 log_disable_id(enum log_id lid);
 
 /**
- * Disables all log levels currently enabled.
- *
- * This function iterates through the array of loggers and sets the 'enable'
- * field of each logger to 0, effectively disabling all logging.
- */
-void
-log_reset(void);
-
-/**
  * Enable logging for a specified log name.
  *
  * This function searches for the specified log name in the list of loggers

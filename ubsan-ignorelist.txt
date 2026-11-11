@@ -1,0 +1,18 @@
+# DPDK code that clang's undefined behaviour checks report and gcc's do not.
+#
+# Each entry stays until the DPDK base fixes the code it names.
+
+# Trace point registration calls every handler through void (*)(void).
+#
+# The handlers then read arguments nobody passed; upstream DPDK 25.03 fixed it
+# in 856aef55de ("trace: fix undefined behavior in register").
+[function]
+src:*/subprojects/dpdk/lib/eal/common/eal_common_trace.c
+[alignment]
+src:*/subprojects/dpdk/lib/*trace*.h
+
+# The sizing pass of the classic BPF converter advances a null pointer.
+#
+# Upstream DPDK still does this.
+[pointer-overflow]
+src:*/subprojects/dpdk/lib/bpf/bpf_convert.c

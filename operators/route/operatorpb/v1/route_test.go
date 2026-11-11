@@ -68,6 +68,8 @@ func Test_LookupRouteRequest_Validate(t *testing.T) {
 
 // Test_InsertRouteRequest_Validate verifies that route insertion requires
 // nexthops and limits non-static routes to one nexthop.
+//
+// An unset or unknown route source is rejected.
 func Test_InsertRouteRequest_Validate(t *testing.T) {
 	nexthops := []*commonpb.IPAddress{{}, {}}
 
@@ -108,11 +110,21 @@ func Test_InsertRouteRequest_Validate(t *testing.T) {
 			},
 		},
 		{
-			name: "unset source defaults to static",
+			name: "unset source",
 			request: &operatorpb.InsertRouteRequest{
 				Name:         "route0",
 				NexthopAddrs: nexthops,
 			},
+			message: "source_id is required",
+		},
+		{
+			name: "source outside enum",
+			request: &operatorpb.InsertRouteRequest{
+				Name:         "route0",
+				NexthopAddrs: nexthops,
+				SourceId:     3,
+			},
+			message: "source_id unknown value 3",
 		},
 		{name: "nil request", request: nil, message: "name is required"},
 	}
@@ -148,6 +160,7 @@ func Test_DeleteRouteRequest_Validate(t *testing.T) {
 			request: &operatorpb.DeleteRouteRequest{
 				Name:         "route0",
 				NexthopAddrs: []*commonpb.IPAddress{{}},
+				SourceId:     operatorpb.RouteSourceID_ROUTE_SOURCE_ID_STATIC,
 			},
 		},
 		{name: "nil request", request: nil, message: "name is required"},

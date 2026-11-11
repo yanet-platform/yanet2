@@ -16,36 +16,55 @@ import (
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/controlplane/configstore"
+	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/devices/trafgen/bindings/go/ctrafgen"
 	trafgenpb "github.com/yanet-platform/yanet2/devices/trafgen/controlplane/trafgenpb/v1"
 )
 
-// recordingBackend captures the arguments of the most recent UpdateDevice call.
+// recordingBackend captures the payload of the most recent update call and,
+// like the dataplane, reports a delete of a device it does not run as not
+// found.
 type recordingBackend struct {
-	frames  []byte
-	lengths []uint32
+	packets [][]byte
 	ratePps uint64
-	input   []Pipeline
-	output  []Pipeline
+	input   []commonpb.Pipeline
+	output  []commonpb.Pipeline
 	calls   int
 	err     error
+
+	running      map[string]bool
+	deletedNames []string
+	deleteErr    error
 }
 
-func (m *recordingBackend) UpdateDevice(
-	name string,
-	input, output []Pipeline,
-	frames []byte,
-	lengths []uint32,
-	ratePps uint64,
-) (*ctrafgen.DeviceConfig, error) {
+func (m *recordingBackend) Delete(name string) error {
+	if !m.running[name] {
+		return ffi.ErrNotFound
+	}
+	m.deletedNames = append(m.deletedNames, name)
+	if m.deleteErr != nil {
+		return m.deleteErr
+	}
+	delete(m.running, name)
+	return nil
+}
+
+func (m *recordingBackend) Update(name string, payload *DeviceState) (crud.Handle, error) {
 	m.calls++
-	m.frames = frames
-	m.lengths = lengths
-	m.ratePps = ratePps
-	m.input = input
-	m.output = output
-	return nil, m.err
+	m.packets = payload.Packets
+	m.ratePps = payload.RatePps
+	m.input = payload.Input
+	m.output = payload.Output
+	if m.err != nil {
+		return nil, m.err
+	}
+
+	if m.running == nil {
+		m.running = map[string]bool{}
+	}
+	m.running[name] = true
+	return nil, nil
 }
 
 // buildPcap encodes the given ethernet frames into an in-memory pcap file.
@@ -87,8 +106,9 @@ func Test_TrafgenService_UploadSetRateShow(t *testing.T) {
 		Pcap: buildPcap(t, frames),
 	})
 	require.NoError(t, err)
-	require.Equal(t, []uint32{20, 30}, backend.lengths)
-	require.Len(t, backend.frames, 50)
+	require.Len(t, backend.packets, 2)
+	require.Len(t, backend.packets[0], 20)
+	require.Len(t, backend.packets[1], 30)
 
 	_, err = svc.SetRate(ctx, &trafgenpb.SetRateRequest{
 		Name:    "trafgen0",
@@ -117,8 +137,8 @@ func Test_TrafgenService_SetRateKeepsPcap(t *testing.T) {
 	// Changing the rate must republish the same frames without a re-upload.
 	_, err = svc.SetRate(ctx, &trafgenpb.SetRateRequest{Name: "trafgen0", RatePps: 500})
 	require.NoError(t, err)
-	require.Equal(t, []uint32{64}, backend.lengths)
-	require.Len(t, backend.frames, 64)
+	require.Len(t, backend.packets, 1)
+	require.Len(t, backend.packets[0], 64)
 	require.Equal(t, uint64(500), backend.ratePps)
 
 	show, err := svc.ShowConfig(ctx, &trafgenpb.ShowConfigRequest{Name: "trafgen0"})
@@ -149,16 +169,17 @@ func Test_TrafgenService_UpdateDeviceKeepsFramesAndRate(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	require.Equal(t, []Pipeline{{Name: "p0", Weight: 1}}, backend.input)
-	require.Equal(t, []Pipeline{{Name: "p1", Weight: 2}}, backend.output)
-	require.Len(t, backend.frames, 64)
+	require.Equal(t, []commonpb.Pipeline{{Name: "p0", Weight: 1}}, backend.input)
+	require.Equal(t, []commonpb.Pipeline{{Name: "p1", Weight: 2}}, backend.output)
+	require.Len(t, backend.packets, 1)
+	require.Len(t, backend.packets[0], 64)
 	require.Equal(t, uint64(700), backend.ratePps)
 
 	// A later rate change must preserve the bound pipelines.
 	_, err = svc.SetRate(ctx, &trafgenpb.SetRateRequest{Name: "trafgen0", RatePps: 900})
 	require.NoError(t, err)
-	require.Equal(t, []Pipeline{{Name: "p0", Weight: 1}}, backend.input)
-	require.Equal(t, []Pipeline{{Name: "p1", Weight: 2}}, backend.output)
+	require.Equal(t, []commonpb.Pipeline{{Name: "p0", Weight: 1}}, backend.input)
+	require.Equal(t, []commonpb.Pipeline{{Name: "p1", Weight: 2}}, backend.output)
 }
 
 func Test_TrafgenService_SetRateBeforeUpload(t *testing.T) {
@@ -342,4 +363,56 @@ func Test_TrafgenService_RefusedWrite(t *testing.T) {
 			})
 		}
 	}
+}
+
+// Test_TrafgenService_DeleteDevice_RemovesConfig verifies that deleting a
+// device removes its name from the listed configs and reaches the
+// dataplane through the backend.
+func Test_TrafgenService_DeleteDevice_RemovesConfig(t *testing.T) {
+	svc, backend := newTestService()
+	ctx := t.Context()
+
+	_, err := svc.UpdateDevice(ctx, &trafgenpb.UpdateDeviceRequest{Name: "trafgen0"})
+	require.NoError(t, err)
+
+	list, err := svc.ListConfigs(ctx, &trafgenpb.ListConfigsRequest{})
+	require.NoError(t, err)
+	require.Equal(t, []string{"trafgen0"}, list.Configs)
+
+	require.NoError(t, svc.DeleteDevice("trafgen0"))
+
+	require.Equal(t, []string{"trafgen0"}, backend.deletedNames)
+	list, err = svc.ListConfigs(ctx, &trafgenpb.ListConfigsRequest{})
+	require.NoError(t, err)
+	require.Empty(t, list.Configs)
+	_, err = svc.ShowConfig(ctx, &trafgenpb.ShowConfigRequest{Name: "trafgen0"})
+	require.Equal(t, codes.NotFound, status.Code(err))
+}
+
+// Test_TrafgenService_DeleteDevice_MissingConfig verifies that deleting a
+// name neither this service nor the dataplane holds reports not found.
+func Test_TrafgenService_DeleteDevice_MissingConfig(t *testing.T) {
+	svc, _ := newTestService()
+
+	err := svc.DeleteDevice("absent")
+
+	require.ErrorIs(t, err, configstore.ErrNotFound)
+}
+
+// Test_TrafgenService_DeleteDevice_RefusedDeleteKeepsConfig verifies that
+// a delete the dataplane refuses leaves the config listed.
+func Test_TrafgenService_DeleteDevice_RefusedDeleteKeepsConfig(t *testing.T) {
+	svc, backend := newTestService()
+	ctx := t.Context()
+
+	_, err := svc.UpdateDevice(ctx, &trafgenpb.UpdateDeviceRequest{Name: "trafgen0"})
+	require.NoError(t, err)
+
+	backend.deleteErr = ffi.ErrFailedPrecondition
+	err = svc.DeleteDevice("trafgen0")
+	require.ErrorIs(t, err, ffi.ErrFailedPrecondition)
+
+	list, err := svc.ListConfigs(ctx, &trafgenpb.ListConfigsRequest{})
+	require.NoError(t, err)
+	require.Equal(t, []string{"trafgen0"}, list.Configs)
 }

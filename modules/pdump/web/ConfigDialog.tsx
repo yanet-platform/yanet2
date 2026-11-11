@@ -1,9 +1,12 @@
-import React, { useState, useEffect } from 'react';
-import { pdumpApi, parseModeFlags, modeFlagsToNumber, type PdumpConfig } from '@yanet/core/api/pdump';
+import React, { useState, useEffect, useMemo, useId } from 'react';
+import { Select } from '@gravity-ui/uikit';
+import { pdumpApi, parseModeFlags, modeFlagsToNumber, PDUMP_RATE_PPS_MAX, type PdumpConfig } from '@yanet/core/api/pdump';
+import type { RingInfo } from '@yanet/core/api/ring';
 import { toaster } from '@yanet/core/utils';
 import BpfTokens from './BpfTokens';
 import PdumpModal from './PdumpModal';
 import { loadRecentFilters, pushRecentFilter } from './recentFilters';
+import { buildRingOptions, isRingSelectionValid, resolveRingNameForSubmit } from './ringSelection';
 import './pdump.scss';
 
 const BPF_SUGGESTIONS = [
@@ -26,6 +29,14 @@ interface ConfigDialogProps {
     initialConfig?: PdumpConfig;
     onSaved: () => void;
     isCreate?: boolean;
+    /** Rings available to bind, owned by the page so the list loads once and
+     * every open dialog shares the same error-toast path. */
+    rings: RingInfo[];
+    ringsLoading: boolean;
+    /** Refetches the shared ring list; called each time the dialog opens, so
+     * a ring created elsewhere (e.g. from the CLI) since the page loaded
+     * still shows up in the selector. */
+    onRefreshRings: () => void;
 }
 
 export const ConfigDialog: React.FC<ConfigDialogProps> = ({
@@ -35,14 +46,29 @@ export const ConfigDialog: React.FC<ConfigDialogProps> = ({
     initialConfig,
     onSaved,
     isCreate = false,
+    rings,
+    ringsLoading,
+    onRefreshRings,
 }) => {
     const [configName, setConfigName] = useState('');
     const [filter, setFilter] = useState('');
     const [modes, setModes] = useState<string[]>([]);
     const [snaplen, setSnaplen] = useState('');
-    const [ringSize, setRingSize] = useState('');
+    // The ring bound to the config as loaded (edit only); unchanged selection
+    // omits ring_name on save so the binding is kept.
+    const [boundRingName, setBoundRingName] = useState('');
+    const [selectedRing, setSelectedRing] = useState('');
+    const [ratePps, setRatePps] = useState('');
     const [loading, setLoading] = useState(false);
     const [recent, setRecent] = useState<string[]>([]);
+    const initialRatePps = initialConfig?.rate_pps;
+    const rateInputId = useId();
+    const rateHelpId = useId();
+
+    const ringOptions = useMemo(
+        () => buildRingOptions(rings, isCreate, boundRingName),
+        [rings, isCreate, boundRingName],
+    );
 
     useEffect(() => {
         if (open) {
@@ -52,22 +78,38 @@ export const ConfigDialog: React.FC<ConfigDialogProps> = ({
                 setFilter('');
                 setModes(['INPUT']);
                 setSnaplen('');
-                setRingSize('');
+                setBoundRingName('');
+                setSelectedRing('');
+                setRatePps('');
             } else if (initialConfig) {
                 setConfigName(initialConfigName ?? '');
                 setFilter(initialConfig.filter ?? '');
                 setModes(initialConfig.mode ? parseModeFlags(initialConfig.mode) : []);
                 setSnaplen(initialConfig.snaplen?.toString() ?? '');
-                setRingSize(initialConfig.ring_size?.toString() ?? '');
+                setBoundRingName(initialConfig.ring_name ?? '');
+                setSelectedRing(initialConfig.ring_name ?? '');
+                setRatePps(initialRatePps?.toString() ?? '');
             } else {
                 setConfigName(initialConfigName ?? '');
                 setFilter('');
                 setModes(['INPUT']);
                 setSnaplen('');
-                setRingSize('');
+                setBoundRingName('');
+                setSelectedRing('');
+                setRatePps('');
             }
         }
-    }, [open, initialConfig, initialConfigName, isCreate]);
+    }, [open, initialConfig, initialConfigName, isCreate, initialRatePps]);
+
+    useEffect(() => {
+        if (open) {
+            onRefreshRings();
+        }
+        // Fires once per open, not whenever the ring list or the refresh
+        // callback changes identity, so a background refetch from
+        // elsewhere does not loop.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open]);
 
     const handleModeToggle = (mode: string) => {
         setModes(prev =>
@@ -84,11 +126,17 @@ export const ConfigDialog: React.FC<ConfigDialogProps> = ({
 
         setLoading(true);
         try {
+            if (ratePps !== '' && (!/^(0|[1-9]\d*)$/.test(ratePps) || Number(ratePps) > PDUMP_RATE_PPS_MAX)) {
+                toaster.error('pdump-config-error', `Rate must be an integer between 0 and ${PDUMP_RATE_PPS_MAX}`, new Error('Invalid rate'));
+                return;
+            }
+
             const config: PdumpConfig = {
                 filter: filter || '',
                 mode: modeFlagsToNumber(modes),
                 snaplen: snaplen ? parseInt(snaplen, 10) : undefined,
-                ring_size: ringSize ? parseInt(ringSize, 10) : undefined,
+                ring_name: resolveRingNameForSubmit(isCreate, selectedRing, boundRingName),
+                rate_pps: ratePps === '' ? undefined : Number(ratePps),
             };
 
             await pdumpApi.setConfig(targetConfigName, config);
@@ -107,7 +155,10 @@ export const ConfigDialog: React.FC<ConfigDialogProps> = ({
         }
     };
 
-    const valid = (isCreate ? configName.trim().length > 0 : true) && filter.trim().length > 0 && modes.length > 0;
+    const valid = (isCreate ? configName.trim().length > 0 : true)
+        && filter.trim().length > 0
+        && modes.length > 0
+        && isRingSelectionValid(selectedRing);
     const title = isCreate ? 'Create Pdump Configuration' : `Edit ${initialConfigName}`;
 
     if (!open) return null;
@@ -228,16 +279,41 @@ export const ConfigDialog: React.FC<ConfigDialogProps> = ({
                     <span className="pdump-field__hint">Max bytes captured per packet</span>
                 </div>
                 <div className="pdump-field">
-                    <label className="pdump-field__label">Ring Size</label>
-                    <input
-                        className="pdump-input pdump-input--mono"
-                        type="number"
-                        value={ringSize}
-                        placeholder="1048576"
-                        onChange={e => setRingSize(e.target.value)}
+                    <label className="pdump-field__label">
+                        Ring{isCreate && <span className="pdump-field__req">*</span>}
+                    </label>
+                    <Select
+                        size="m"
+                        placeholder={ringsLoading ? 'Loading rings…' : 'Select a ring'}
+                        value={selectedRing ? [selectedRing] : []}
+                        onUpdate={(v) => setSelectedRing(v[0] ?? '')}
+                        options={ringOptions}
+                        disabled={ringsLoading}
+                        width="max"
                     />
-                    <span className="pdump-field__hint">Per-worker ring buffer (bytes)</span>
+                    <span className="pdump-field__hint">
+                        {isCreate
+                            ? 'The ring this config captures into'
+                            : 'Leave unchanged to keep the bound ring'}
+                    </span>
                 </div>
+            </div>
+            <div className="pdump-field">
+                <label className="pdump-field__label" htmlFor={rateInputId}>Capture limit (pps)</label>
+                <input
+                    id={rateInputId}
+                    aria-describedby={rateHelpId}
+                    className="pdump-input pdump-input--mono"
+                    type="text"
+                    inputMode="numeric"
+                    value={ratePps}
+                    placeholder="0"
+                    onChange={e => setRatePps(e.target.value)}
+                />
+                <span id={rateHelpId} className="pdump-field__hint">
+                    Shared best-effort budget across all workers, up to {PDUMP_RATE_PPS_MAX.toLocaleString()} pps.
+                    {' '}Burst: max(32, ceil(rate/1000)). Zero disables the limit; blank preserves it on update.
+                </span>
             </div>
         </PdumpModal>
     );

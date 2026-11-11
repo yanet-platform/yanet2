@@ -122,7 +122,8 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
         CountersServiceClient::new(channel)
             .max_decoding_message_size(256 * 1024 * 1024)
             .max_encoding_message_size(256 * 1024 * 1024)
-            .send_compressed(CompressionEncoding::Gzip)
+            .send_compressed(CompressionEncoding::Zstd)
+            .accept_compressed(CompressionEncoding::Zstd)
             .accept_compressed(CompressionEncoding::Gzip)
     })
     .await?;
@@ -213,6 +214,8 @@ struct WorkerRow {
     device: u32,
     #[tabled(rename = "Queue")]
     queue: u32,
+    #[tabled(rename = "Weight")]
+    weight: u32,
     #[tabled(rename = "Iterations")]
     iterations: String,
     #[tabled(rename = "RX")]
@@ -260,6 +263,7 @@ impl From<&WorkerCounter> for WorkerRow {
             core: w.core_id,
             device: w.device_id,
             queue: w.queue_id,
+            weight: w.assignments.first().map(|a| display_weight(a.weight)).unwrap_or(1),
             iterations: format_compact(w.iterations),
             rx: if w.rx_bytes > 0 {
                 format!("{} ({})", format_compact(w.rx_packets), ByteSize::b(w.rx_bytes))
@@ -306,8 +310,41 @@ fn format_worker_counters(response: &WorkerCountersResponse) {
     display::print_table_from_entries(rows);
 
     for worker in &response.workers {
+        print_worker_assignments(worker);
         print_worker_histogram(worker);
     }
+}
+
+/// Renders an assignment's rx service weight.
+///
+/// A control plane from before the field existed leaves it absent, which
+/// arrives as zero; every valid configuration carries at least one burst
+/// per round.
+fn display_weight(weight: u32) -> u32 {
+    weight.max(1)
+}
+
+/// Prints one worker's device assignments when it polls more than one
+/// queue; a single-assignment worker is already fully described by the
+/// table's Device and Queue columns.
+fn print_worker_assignments(worker: &WorkerCounter) {
+    if worker.assignments.len() <= 1 {
+        return;
+    }
+
+    let parts: Vec<String> = worker
+        .assignments
+        .iter()
+        .map(|a| {
+            format!(
+                "device {} queue {} weight {}",
+                a.device_id,
+                a.queue_id,
+                display_weight(a.weight)
+            )
+        })
+        .collect();
+    println!("worker {} assignments: {}", worker.worker_idx, parts.join("; "));
 }
 
 /// Prints the rx-burst histogram for one worker in the metrics style.
@@ -341,7 +378,8 @@ fn format_compact(n: u64) -> String {
 
     let n_f = n as f64;
 
-    // Use compact notation for numbers >= 100,000 to keep table width manageable
+    // Use compact notation for numbers >= 100,000 to keep table width
+    // manageable
     if n_f >= TRILLION {
         format!("{:.2}T", n_f / TRILLION)
     } else if n_f >= BILLION {

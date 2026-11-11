@@ -5,7 +5,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
-	cpffi "github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/modulebase"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1"
 )
 
@@ -18,23 +18,11 @@ const (
 )
 
 // Option configures the RouteModule constructor.
-type Option func(*moduleOptions)
-
-type moduleOptions struct {
-	Log *zap.Logger
-}
-
-func newModuleOptions() *moduleOptions {
-	return &moduleOptions{
-		Log: zap.NewNop(),
-	}
-}
+type Option = modulebase.Option
 
 // WithLog sets the logger for the route module.
 func WithLog(log *zap.Logger) Option {
-	return func(o *moduleOptions) {
-		o.Log = log
-	}
+	return modulebase.WithLog(log)
 }
 
 // RouteModule is the slim route-module shim that owns shared memory and
@@ -44,26 +32,17 @@ func WithLog(log *zap.Logger) Option {
 // yanet-route-operator agent rebuilds the FIB and pushes it via
 // UpdateFIB.
 type RouteModule struct {
-	cfg            *Config
-	attachment     *cpffi.Attachment
-	service        *RouteService
-	metricsService *MetricsService
+	*modulebase.Base
+
+	service *RouteService
 }
 
 // NewRouteModule creates a new RouteModule.
 func NewRouteModule(cfg *Config, options ...Option) (*RouteModule, error) {
-	opts := newModuleOptions()
-	for _, o := range options {
-		o(opts)
-	}
-
-	log := opts.Log.With(zap.String("module", routepb.RouteService_ServiceDesc.ServiceName))
-
-	attachment, err := cpffi.Attach(cfg.AttachConfig, agentName, log)
+	base, err := modulebase.NewBase(cfg.AttachConfig, agentName, cfg.Endpoint.Unwrap(), options...)
 	if err != nil {
 		return nil, err
 	}
-	agent := attachment.Agent
 
 	serviceOptions := []RouteServiceOption{
 		WithMetrics(grpcmetrics.NewFactory(
@@ -74,40 +53,17 @@ func NewRouteModule(cfg *Config, options ...Option) (*RouteModule, error) {
 		serviceOptions = append(serviceOptions, WithNexthopCountersDisabled())
 	}
 
-	service := NewRouteService(NewBackend(agent), serviceOptions...)
-
+	service := NewRouteService(NewBackend(base.Agent()), serviceOptions...)
 	metricsService := NewMetricsService(service)
 
-	return &RouteModule{
-		cfg:            cfg,
-		attachment:     attachment,
-		service:        service,
-		metricsService: metricsService,
-	}, nil
-}
+	base.AddService(routepb.RouteService_ServiceDesc.ServiceName, func(server *grpc.Server) {
+		routepb.RegisterRouteServiceServer(server, service)
+	})
+	base.AddService(routepb.MetricsService_ServiceDesc.ServiceName, func(server *grpc.Server) {
+		routepb.RegisterMetricsServiceServer(server, metricsService)
+	})
 
-// Name returns the module name.
-func (m *RouteModule) Name() string {
-	return moduleType
-}
-
-// Endpoint returns the gRPC endpoint for the route module shim.
-func (m *RouteModule) Endpoint() string {
-	return m.cfg.Endpoint.Unwrap()
-}
-
-// ServicesNames returns the gRPC service names exposed by the module.
-func (m *RouteModule) ServicesNames() []string {
-	return []string{
-		routepb.RouteService_ServiceDesc.ServiceName,
-		routepb.MetricsService_ServiceDesc.ServiceName,
-	}
-}
-
-// RegisterService registers the route module's gRPC service.
-func (m *RouteModule) RegisterService(server *grpc.Server) {
-	routepb.RegisterRouteServiceServer(server, m.service)
-	routepb.RegisterMetricsServiceServer(server, m.metricsService)
+	return &RouteModule{Base: base, service: service}, nil
 }
 
 // UnaryServerInterceptors returns the gRPC unary interceptors for this
@@ -119,9 +75,4 @@ func (m *RouteModule) UnaryServerInterceptors() []grpc.UnaryServerInterceptor {
 	}
 
 	return []grpc.UnaryServerInterceptor{interceptor}
-}
-
-// Close closes the module.
-func (m *RouteModule) Close() error {
-	return m.attachment.Close()
 }

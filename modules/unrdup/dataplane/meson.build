@@ -1,8 +1,8 @@
 dp_dependencies = [
   lib_common_dep,
-  lib_filter_query_dep,
   lib_packet_dp_dep,
-  lib_module_dp_dep,
+  lib_worker_dp_dep,
+  libdpdk_inc_dep,
 ]
 
 dp_sources = files(
@@ -12,17 +12,17 @@ dp_sources = files(
 lib_unrdup_dp = static_library(
     'unrdup_dp',
     dp_sources,
-    c_args: yanet_c_args,
-    link_args: yanet_link_args,
     dependencies: dp_dependencies,
     install: false,
 )
 
 lib_unrdup_dp_dep = declare_dependency(
     link_with: lib_unrdup_dp,
+    dependencies: dp_dependencies,
     link_args: [
-        '-Wl,--defsym',
-        '-Wl,new_module_unrdup=new_module_unrdup',
+        '-Wl,--require-defined=new_module_unrdup',
         '-Wl,--export-dynamic-symbol=new_module_unrdup',
     ],
 )
+
+dataplane_module_deps += lib_unrdup_dp_dep

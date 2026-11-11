@@ -24,9 +24,9 @@ act --container-architecture linux/amd64 --artifact-server-path ./artifacts
 or
 
 #+begin_src shell
-act --container-architecture linux/amd64 --artifact-server-path ./artifacts -j build-deb
+act workflow_dispatch --container-architecture linux/amd64 --artifact-server-path ./artifacts -j build-deb
 #+end_src
 
-for run only =build-deb= job.
+for run only =build-deb= job. The packaging workflow does not run on push, so it needs the =workflow_dispatch= event.
 
 Note: --container-architecture linux/amd64 is usually only needed on macOS.

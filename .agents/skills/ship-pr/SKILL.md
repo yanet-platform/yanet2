@@ -10,14 +10,15 @@ description: >-
 
 # ship-pr
 
-Land a verified, reviewer-approved change on `main`. Invoking this skill is the publish authorization: "create a PR" authorizes commit + push + PR + CI + addressing findings; "create and merge" / "влей в main" also authorizes merge + cleanup. You drive git and `gh` yourself; coders never commit.
+Land a verified, review-approved change on `main`. Invoking this skill is the publish authorization: "create a PR" authorizes commit + push + PR + CI + addressing findings; "create and merge" / "влей в main" also authorizes merge + cleanup. You drive git and `gh` yourself; coders never commit.
 
 ## Non-negotiables
 
-- Ship only a change that passed its gates and has a reviewer `APPROVED` on the complete current candidate. Any file change after approval → rerun the affected gates and get a fresh review of what changed.
+- Ship only a change that passed its gates and has a `review-change` `APPROVED` on the complete current candidate. Any file change after approval → rerun the affected gates and get a fresh review of what changed.
 - Branch from **confirmed** `origin/main` (`git fetch origin main` first), never from the session's current HEAD. Publish from a dedicated worktree unless the user waived isolation for this task.
 - Stage exactly the publish manifest: `git add <paths>` per file, never `git add -A`; never stage pre-existing dirty files or local-only ignored config; `git diff --cached --stat` before committing.
 - Verify `git branch --show-current` before every commit, amend and push — a parallel actor can switch branches under you.
+- Format C with the exact version the `C formatting` CI pins — the version named in the digest-pin comment in `.github/actions/clang-format/action.yml`; the pip `clang-format` package provides that version — never the system clang-format, which rewraps committed code the pinned one accepts and fails the CI. Before every push, dry-run the pinned binary (`clang-format --dry-run -Werror`) over the changed `.c`/`.h` files. When the pinned version cannot be installed or run, C changes are not ready to push: fix the environment or run the pinned docker image instead of substituting a manual format.
 - No destructive git on a dirty tree (`reset --hard`, `checkout`, `restore`, `stash`); recovery recipes are in `references/branching-and-recovery.md`.
 - Subjects: `<type>(<scope>): <brief>` (see `AGENTS.md` → Commits & PRs); the PR title is the same; body = capitalized, period-ended, high-level bullets, `Closes #<n>.` when applicable, no `## Summary`, no test plan, no AI footers.
 - One logical change = one PR; out-of-scope prerequisites ship first in their own PR.
@@ -27,9 +28,16 @@ Land a verified, reviewer-approved change on `main`. Invoking this skill is the 
 
 ## Phases
 
-0. **Ready?** Gates green in the candidate tree; reviewer APPROVED exists for this exact content. If not, do that first.
+0. **Ready?** Gates green in the candidate tree; `review-change` APPROVED exists for this exact content. If not, do that first. Before the first push, audit the diff as its reviewer — these are the recurring automated-review findings, and each is cheaper to catch here:
+   - Comments state invariants the code cannot: no internal identifiers in prose, no rejected alternatives; a doc block still documents its own symbol after insertions — with the exceptions `.agents/conventions/comments.md` allows (a doc comment opening with its own symbol, genuine cross-references, contract identifiers).
+   - Tests match the form their language requires (`.agents/conventions/tests.md` — Go needs both the structured name and its doc comment) and claim exactly what is asserted, not the setup. For a behaviour change, the new test must fail with the production code reverted and the test kept.
+   - Index, hash or capacity arithmetic is exercised at the boundaries it can actually reach: a probing ring covers a non-power-of-two modulus, the wraparound and the overflow edge, and an input rejected up front has its rejection tested — unreachable boundaries are not invented.
+   - Cross-cutting: a changed struct embedded in the `dp_config`/`cp_config` shared zone bumps `DP_CONFIG_READY_MAGIC`; a change crossing the dataplane–plugin boundary bumps `YANET_MODULE_ABI_VERSION` — one module's private config struct does not cross it.
+   - Lifetime and reclamation: walk the error, destroy and failed-`try_lock` paths, not the happy one — a deferred sweep dropped there leaks permanently; refcount zero-transitions need release/acquire ordering; no dereference of owner/name storage in the window before the lock is taken.
+   - Renames reach every consumer in every language: frozen proto fields are never renamed (add a new field, populate both, read `new ?? old` on mixed versions); grep the old name through generated code, CLI help, web UI (not type-checked by default) and doc comments.
+   - Full walkthrough with the failure scenarios behind these bullets: `.agents/skills/review-change/references/recurring-findings.md`.
 1. **Branch.** `git fetch origin main`; worktree: `git worktree add .claude/worktrees/<name> -b <type>/<scope>-<what> origin/main`; primary (waiver only, clean, on main): `git switch -c <branch> origin/main`. Shell-safe names, no parentheses.
-2. **Transfer & stage.** Bring the approved files over (`git diff <base>..<coder-branch> -- <paths> | git apply --index`, or `git add` in place); confirm `git diff --cached --stat` equals the manifest.
+2. **Transfer & stage.** Bring the approved files over (`git diff <base>..<work-branch> -- <paths> | git apply --index`, or `git add` in place); confirm `git diff --cached --stat` equals the manifest.
 3. **Commit.** Conventional subject, high-level body, no footers; `make lint-commit` must pass (the `commit-msg` hook runs it).
 4. **Push & PR.** `git push -u origin <branch>`; `gh pr create --title "<subject>" --body "<bullets>"` (add `--draft` if the user asked); pushes touching `.github/workflows/` need the git token's `workflow` scope — ask the user if refused.
 5. **CI & review.** `gh pr checks <n> --watch`; on a failure attributable to the change → fix, gates, re-review, `git commit --amend` or a fixup, force-with-lease; on a flake → compare the same workflow on latest `origin/main` runs, then `gh run rerun <id> --failed`. Read every review thread (`gh api repos/{owner}/{repo}/pulls/<n>/comments`, `gh pr view --comments`) and PR-level review; Codex may post findings as an issue comment with no review. Fix or answer each; after any push to a reviewed PR post `@codex review`; resolve addressed threads (`gh api graphql` `resolveReviewThread`).

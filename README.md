@@ -65,13 +65,14 @@ YANET employs a multi-language approach to leverage the strengths of different p
 
 ### Dependencies
 
-- Go 1.21+.
-- Rust 1.88+.
+- Go 1.27.1+.
+- Rust 1.99+.
 - Protobuf compiler 3.0+.
-- Meson 0.61+.
+- Meson 1.3+ (on Ubuntu 22.04, `pip install meson==1.3.2`).
 - Ninja build system.
 - CMake 3.5+.
 - GCC/Clang.
+- For `make test-asan`: clang 19 or newer with its sanitizer runtime, as `clang` or named by `ASAN_CC` and `ASAN_CXX` (the CI image takes it from apt.llvm.org).
 
 ### Build Instructions
 
@@ -97,6 +98,39 @@ YANET employs a multi-language approach to leverage the strengths of different p
    ```bash
    meson install -C build
    ```
+
+Meson rebuilds native inputs and refreshes CGO dependency fingerprints. After
+changing C code, project headers or linked archives, run `make go-test-prepare`
+(equivalent to `meson compile -C build go-test-prepare`) before direct Go
+commands. Use the same CGO flags as the configured build: the build writes its
+preprocessor flags to `build/yanet_cgo_cppflags`, and a sanitized build also
+needs its sanitizer flags and, when clang built it, `CC=clang`. For an
+unsanitized build:
+
+```bash
+make go-test-prepare
+CGO_CPPFLAGS="$(cat build/yanet_cgo_cppflags)" go test -count=1 ./modules/route/...
+```
+
+The root `make test`, `make test-asan` and `make bench` targets prepare these
+dependencies and CGO flags automatically and reuse the Go build cache.
+
+Custom Meson modules must append their existing protobuf targets to
+`go_proto_targets` when declaring them and register CGO native dependencies in
+`cgo_packages` during module configuration, before the root creates fingerprints.
+`build_by_default: true` alone does not add a generator to the Go test preparation
+closure.
+
+A package's `libraries`, with the project libraries they depend on, and its
+`archives`, external archives such as DPDK's linked as they are, become the link
+flags of its generated `zz_yanet_cgo.go`, so no tracked Go file names a build
+directory. Only `build/` in the top-level source tree writes these files
+(`-Dgo_cgo_flags=enabled` makes another build directory write them). A Go target
+outside this project that builds its CGO packages must depend on
+`cgo_controlplane_deps`, or `cgo_test_deps` for the test packages: these run
+after the generated flags and every archive they name. Before building a
+revision older than the generated flags in the same checkout, remove them with
+`find . -name zz_yanet_cgo.go -delete`.
 
 ### Testing
 

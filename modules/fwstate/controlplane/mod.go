@@ -6,12 +6,20 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/modulebase"
 	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
 	fwstatemap "github.com/yanet-platform/yanet2/objects/fwstate/controlplane"
 )
 
 const agentName = moduleType
+
+// ModuleOption configures the FWStateModule constructor.
+type ModuleOption = modulebase.Option
+
+// WithModuleLog sets the logger for the fwstate module.
+func WithModuleLog(log *zap.Logger) ModuleOption {
+	return modulebase.WithLog(log)
+}
 
 // FWStateModule is a control-plane component of the firewall-state sync
 // module.
@@ -20,41 +28,34 @@ const agentName = moduleType
 // objects: the map service publishes them into the instance-wide config
 // generation, where module configs of any agent resolve them by name.
 type FWStateModule struct {
+	*modulebase.Base
+
 	cfg                   *Config
-	attachment            *ffi.Attachment
 	fwstateService        *FWStateService
 	fwstateMetricsService *MetricsService
 	mapService            *fwstatemap.FWStateMapService
 }
 
 // NewFWStateModule creates a new fwstate module instance.
-func NewFWStateModule(cfg *Config, options ...Option) (*FWStateModule, error) {
-	opts := newOptions()
-	for _, o := range options {
-		o(opts)
-	}
-
-	log := opts.Log.With(zap.String("module", moduleType))
-
-	attachment, err := ffi.Attach(cfg.AttachConfig, agentName, log)
+func NewFWStateModule(cfg *Config, options ...ModuleOption) (*FWStateModule, error) {
+	base, err := modulebase.NewBase(cfg.AttachConfig, agentName, cfg.Endpoint.Unwrap(), options...)
 	if err != nil {
 		return nil, err
 	}
-	agent := attachment.Agent
 
 	// The map service owns the fwstate-map objects both this module's
 	// configs and ACL configs link by name; a published object resolves
 	// through the shared config generation regardless of the linking
 	// module's agent.
 	mapService := fwstatemap.NewFWStateMapService(
-		agent,
-		fwstatemap.WithLog(log),
+		base.Agent(),
+		fwstatemap.WithLog(base.Log()),
 		fwstatemap.WithMetrics(fwstatemap.NewMetricsFactory()),
 	)
 
 	fwstateService := NewFWStateService(
-		agent,
-		WithLog(log),
+		base.Agent(),
+		WithLog(base.Log()),
 		WithMetrics(NewMetricsFactory()),
 	)
 	// The metrics endpoint aggregates the fwstate and map services, so
@@ -62,35 +63,23 @@ func NewFWStateModule(cfg *Config, options ...Option) (*FWStateModule, error) {
 	// reachable through the module's metrics RPC.
 	fwstateMetricsService := NewMetricsService(fwstateService, mapService)
 
+	base.AddService(FWStateServiceName, func(server *grpc.Server) {
+		fwstatepb.RegisterFWStateServiceServer(server, fwstateService)
+	})
+	base.AddService(FWStateMetricsServiceName, func(server *grpc.Server) {
+		fwstatepb.RegisterMetricsServiceServer(server, fwstateMetricsService)
+	})
+	base.AddService(fwstatemap.ServiceName, func(server *grpc.Server) {
+		mapService.Register(server)
+	})
+
 	return &FWStateModule{
+		Base:                  base,
 		cfg:                   cfg,
-		attachment:            attachment,
 		fwstateService:        fwstateService,
 		fwstateMetricsService: fwstateMetricsService,
 		mapService:            mapService,
 	}, nil
-}
-
-func (m *FWStateModule) Name() string {
-	return moduleType
-}
-
-func (m *FWStateModule) Endpoint() string {
-	return m.cfg.Endpoint.Unwrap()
-}
-
-func (m *FWStateModule) ServicesNames() []string {
-	return []string{
-		FWStateServiceName,
-		FWStateMetricsServiceName,
-		fwstatemap.ServiceName,
-	}
-}
-
-func (m *FWStateModule) RegisterService(server *grpc.Server) {
-	fwstatepb.RegisterFWStateServiceServer(server, m.fwstateService)
-	fwstatepb.RegisterMetricsServiceServer(server, m.fwstateMetricsService)
-	m.mapService.Register(server)
 }
 
 // UnaryServerInterceptors returns the gRPC unary interceptors for this module.
@@ -114,9 +103,4 @@ func (m *FWStateModule) UnaryServerInterceptors() []grpc.UnaryServerInterceptor 
 func (m *FWStateModule) Run(ctx context.Context) error {
 	m.mapService.RunStaleLayerSweeper(ctx, m.cfg.StaleLayerSweepInterval)
 	return nil
-}
-
-// Close closes the module.
-func (m *FWStateModule) Close() error {
-	return m.attachment.Close()
 }

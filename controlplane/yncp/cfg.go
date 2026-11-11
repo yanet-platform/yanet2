@@ -3,6 +3,7 @@ package yncp
 import (
 	"go.uber.org/zap/zapcore"
 
+	"github.com/yanet-platform/yanet2/common/go/debugserver"
 	"github.com/yanet-platform/yanet2/common/go/logging"
 	"github.com/yanet-platform/yanet2/controlplane/bundle"
 	"github.com/yanet-platform/yanet2/controlplane/gateway"
@@ -12,6 +13,8 @@ import (
 type Config struct {
 	// Logging configuration.
 	Logging logging.Config `json:"logging" yaml:"logging"`
+	// Debug configures the debug server, disabled by default.
+	Debug debugserver.Config `json:"debug" yaml:"debug"`
 	// MemoryPath is the path to the shared-memory file that is used to
 	// communicate with dataplane.
 	MemoryPath string `yaml:"memory_path"`

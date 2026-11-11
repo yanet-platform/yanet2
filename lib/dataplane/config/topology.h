@@ -34,6 +34,13 @@ struct dp_port {
 	// to be confused with dp_config->worker_count, the instance-wide
 	// total across every device.
 	uint64_t worker_count;
+
+	// Count of the device's queues the RSS table spreads traffic over.
+	//
+	// Queues, not workers: one worker may own several queues of a device.
+	// It equals the device's queue count unless some queues are kept out
+	// of the RSS table and receive only traffic steered to them.
+	uint64_t rss_queue_count;
 };
 
 struct dp_topology {
@@ -100,16 +107,24 @@ dp_topology_set_device_rss(
 	uint16_t reta_size
 );
 
-// Set the count of workers bound to device_id, across every instance, so
-// dp_config_device_worker_count can answer in O(1).
+// Set device_id's worker count and RSS queue count together, so
+// dp_config_device_worker_count and dp_config_device_rss_queue_count can
+// answer in O(1).
 //
-// Must be the device-wide count, not a single instance's tally: queue ids
-// are handed out per device across every instance, so a device spanning
-// more than one instance would otherwise be undercounted.
+// The worker count is the count of workers bound to the device, across
+// every instance, not a single instance's tally: queue ids are handed out
+// per device across every instance, so a device spanning more than one
+// instance would otherwise be undercounted. The RSS queue count is the
+// count of the device's queues the RSS table spreads traffic over. Both
+// are set in one call so a producer cannot publish one and leave the other
+// at zero.
 //
 // Returns non-zero if device_id is out of range for dp_topology, leaving
-// the count untouched.
+// both counts untouched.
 int
-dp_topology_set_device_worker_count(
-	struct dp_config *dp_config, uint32_t device_id, uint64_t worker_count
+dp_topology_set_device_queue_counts(
+	struct dp_config *dp_config,
+	uint32_t device_id,
+	uint64_t worker_count,
+	uint64_t rss_queue_count
 );

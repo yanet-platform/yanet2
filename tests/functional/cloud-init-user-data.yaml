@@ -54,6 +54,11 @@ packages:
   - libarchive13t64
   - ibverbs-providers
   - libibverbs1
+  # yanet-uprobe: libbpf for its loader, libncurses for the bpftime attach
+  # tool and binutils for addr2line, which names lock call sites.
+  - libbpf1
+  - libncurses6
+  - binutils
   - gdb
   - kmod
   - procps

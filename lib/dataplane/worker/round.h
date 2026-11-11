@@ -4,6 +4,7 @@
 #include "lib/controlplane/config/econtext.h"
 #include "lib/controlplane/config/zone.h"
 #include "lib/dataplane/config/zone.h"
+#include "lib/dataplane/pipeline/schedule.h"
 
 // State shared by the preparation and processing parts of one worker round.
 struct worker_round {

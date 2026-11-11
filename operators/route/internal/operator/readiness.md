@@ -1,11 +1,12 @@
 # Route operator readiness
 
 The route operator exposes four readiness dimensions, each as its own scope:
-FIB programming per gateway, kernel neighbour resolution, the RIB content, and
-(optionally) the BIRD FeedRIB transport session.
+FIB apply and configured static-path resolution per gateway, neighbour
+observations, the RIB content, and (optionally) the BIRD FeedRIB transport session.
 
 - gRPC FQN: `operators.route.operatorpb.v1.ReadinessService`
-- Service implementation: `readiness_service.go` (`ReadinessService`).
+- Service implementation: the operator framework (`common/go/operator`)
+  serves the shared readiness contract under the operator's name.
 - Scope logic: `operator.go` (tracker construction and the FIB/neighbour
   wiring), `rib_readiness.go` (the RIB/BIRD helper).
 
@@ -13,8 +14,8 @@ FIB programming per gateway, kernel neighbour resolution, the RIB content, and
 
 | Scope                    | Meaning                                              |
 | ------------------------ | --------------------------------------------------- |
-| `fib:<gateway>:<module>` | Per-gateway FIB apply outcome into the dataplane module. |
-| `neighbours`             | Kernel neighbour (ARP/ND) resolution state.          |
+| `fib:<gateway>:<module>` | Per-gateway FIB apply and configured static-path resolution. |
+| `neighbours`             | Local neighbour discovery or accepted external snapshots. |
 | `rib`                    | Routing information base content readiness.          |
 | `bird-session`           | BIRD FeedRIB transport liveness (only when `readiness.expect_bird`). |
 
@@ -24,17 +25,97 @@ One `fib` scope per gateway, named `fib:<gateway.name>:<function.module>`.
 
 ### `fib:<gateway>:<module>`
 
-Driven by the apply outcome recorded through `Observe` (via
-`NewObservedActuator`):
+Driven by the apply outcome the framework records for the gateway's target:
 
 - Apply succeeded: `STATE_READY`.
 - Apply failed, previously READY or DEGRADED: `STATE_DEGRADED` (`APPLY_FAILED`).
 - Apply failed, never applied: `STATE_NOT_READY` (`APPLY_FAILED`).
 
+Before its first FIB or function write, each gateway builds and validates the
+whole update. An empty merged neighbour view, no RIBs, a present module dump
+without actual route records, or an empty computed local FIB rejects the entire
+gateway update. Every present module must have routes and a nonempty local FIB;
+a valid module cannot publish alongside an invalid one. Diagnostics identify
+the gateway and affected module or missing input, plus missing configured static
+prefixes. Module candidates are evaluated in sorted name order, keeping joined
+diagnostics stable across identical retries. Completed builds still refresh their
+metrics, including zero classifications for empty dumps or refreshed unresolved
+counts after a complete neighbour withdrawal.
+
+When `readiness.expect_bird` is true (the default), every present module must
+also contain BIRD route records and at least one BIRD path resolved through a
+neighbour on an allowed device. Surviving static routes cannot satisfy either
+requirement or mask the loss of all local BIRD forwarding. Neighbour provenance
+does not matter: statically supplied neighbours may resolve BIRD nexthops.
+This gate checks route content and local resolution, not FeedRIB session state.
+Set `readiness.expect_bird: false` for static-only deployments; nonempty static
+forwarding may then publish without BIRD, while all general empty-state guards
+remain active.
+
+**Upgrade impact:** `readiness.expect_bird` now also gates FIB/function
+publication, not just readiness reporting. The programmatic `DefaultConfig()`
+and YAML loading default it to `true` when omitted; the shipped example
+explicitly sets `false`. Static-only deployments must set it to `false`.
+
+Rejection performs no FIB or function writes, retaining the last successfully
+installed forwarding and function without rollback. Before a successful whole
+apply the FIB scope remains `STATE_NOT_READY`; after success, repeated failures
+keep it `STATE_DEGRADED`, always with `APPLY_FAILED`. Gateways validate their
+local candidates independently, so a gateway with no eligible paths does not
+prevent a healthy gateway from publishing.
+
+An apply succeeds only after preflight and programming succeed and every
+distinct canonical exact prefix in `static.routes` has at least one configured
+static path still present in the managed module's RIB with a locally resolvable
+nexthop. Paths configured for the same prefix are alternatives; not every
+alternative must resolve. Host bits are masked for prefix matching, and
+IPv4-mapped nexthops are normalized to native IPv4.
+
+Resolution and FIB construction look up nexthops in the complete neighbour
+snapshot and share the same normalized `gateway_devices` eligibility policy,
+constructed once per gateway actuator. Static validation looks up only configured
+paths still present in the managed RIB; it does not copy the neighbour cache.
+Each gateway is evaluated independently. A BGP path or an
+unconfigured static nexthop cannot satisfy a configured-path requirement, even
+if that fallback is published for the same prefix. Runtime route deletion does
+not remove the configured requirement. Diagnostics identify the gateway,
+module, and missing prefixes in deterministic order.
+
+Configured static-path validation stays after publication: when preflight passes,
+available routes, including fallback paths, are pushed and function updates are
+attempted even if a configured static path is unresolved.
+Programming and resolution failures are joined under the existing `APPLY_FAILED`
+reason. Desired-state withdrawals are retained, not replaced by cached good input.
+Empty snapshots remain actionable for readiness observations and retries.
+Neighbour or route changes wake reconciliation; valid nonempty input and a
+successful whole apply restore `STATE_READY` without a restart. Partially
+resolved dynamic routes retain their omission behaviour as long as every present
+module still produces a nonempty FIB and, when BIRD is expected, at least one
+local BIRD path survives. Unresolved configured static paths alone never block
+fallback publication that passes preflight.
+
+These rejection rules affect only the per-gateway FIB scopes. The independent
+`rib`, `neighbours`, and `bird-session` observation semantics are unchanged.
+
+An intentional total withdrawal has the same rejection behavior as an accidental
+empty snapshot: installed forwarding and the function are retained indefinitely
+while desired input remains invalid. Desired-state mutation RPCs can succeed
+because they accept route/neighbour changes; success does not mean that the
+resulting empty state was installed. Rejected applies keep retrying with backoff
+and reporting `APPLY_FAILED`; they do not time out into a forwarding removal.
+Intentional traffic draining or removal must use the owning pipeline/function
+control plane, not an empty desired route or neighbour snapshot. The independent
+`rib` scope continues to reflect current RIB content, and `neighbours` continues
+to reflect discovery or accepted external observations, not retained forwarding.
+
+This condition establishes local neighbour-cache resolution only. It adds no
+active probes, stricter MAC or neighbour-state validation, peer-liveness checks,
+or packet-delivery guarantee, and does not change route selection.
+
 ### `neighbours`
 
-Driven by the netlink neighbour monitor. When the monitor is enabled
-(`netlink_monitor.disabled` is false, the default):
+Driven by local discovery or external publications. When the netlink monitor is
+enabled (`netlink_monitor.disabled` is false, the default):
 
 - Before the first sync: `STATE_NOT_READY`, reason `SYNCING` (seeded at
   construction). Refresh errors are ignored until the first successful sync, so
@@ -44,18 +125,25 @@ Driven by the netlink neighbour monitor. When the monitor is enabled
 - Refresh error: `STATE_DEGRADED`, reason `RESYNC`.
 
 When the monitor is disabled (`netlink_monitor.disabled: true`), the scope is
-latched to `STATE_READY` once at construction and never updated again.
+seeded at `STATE_READY` at construction. Accepted complete `SwapNeighbours`
+publications refresh `observed_at` without changing state, reason, or
+`last_transition_time`. See the external-publication freshness contract below.
 
 ### `rib`
 
 Reflects route-content readiness. Two modes depending on `readiness.expect_bird`:
 
 BIRD mode (`expect_bird` true, the default): gates READY on both a settled
-update rate and a non-empty RIB. The bulk-settle gate clears once the update
-rate stays below `readiness.rate_threshold` for `readiness.stability_window`.
-States depend on whether a FeedRIB session is active:
+update rate and a non-empty RIB. The bulk-settle gate clears once the session
+has applied at least one route update and the update rate then stays below
+`readiness.rate_threshold` for `readiness.stability_window`. Any first message
+starts a session, including the heartbeat an adapter sends about a second
+after its stream opens, so a session can be active before its table arrives;
+routes left by an older session never settle it on their own. States depend on
+whether a FeedRIB session is active:
 
-- No session active (cold start before BIRD connects, or after a session ended):
+- No session active (cold start before an adapter connects, or after a session
+  ended):
   `STATE_NOT_READY` reason `NO_ROUTES` when the RIB is empty, or
   `STATE_DEGRADED` reason `SESSION_ENDED` when routes remain. The scope is seeded
   `STATE_NOT_READY` reason `SYNCING` at construction, but the first tick moves it
@@ -65,7 +153,13 @@ States depend on whether a FeedRIB session is active:
   `STATE_NOT_READY` when empty (the value tracks route presence, not prior
   readiness).
 - Session active and settled: `STATE_READY` when non-empty, otherwise
-  `STATE_NOT_READY` reason `NO_ROUTES`.
+  `STATE_NOT_READY` reason `NO_ROUTES` (the session delivered updates that left
+  the RIB empty).
+
+A session whose BIRD table is empty delivers no update, so it never settles: it
+reports reason `SYNCING` for its whole life — `STATE_DEGRADED` while an older
+session's routes remain, `STATE_NOT_READY` once the RIB TTL has swept them.
+Without an end-of-feed marker this cannot be told from a table still on its way.
 
 Static mode (`expect_bird` false): `STATE_READY` when routes are present,
 otherwise `STATE_NOT_READY` (`NO_ROUTES`). Session events are ignored.
@@ -87,10 +181,10 @@ During normal operation it never reaches `STATE_NOT_READY`; only the shutdown
 drain forces it there.
 
 On shutdown `Drain` flips every route scope to `STATE_NOT_READY` with reason
-`SHUTTING_DOWN`, including `fib`, `neighbours`, `rib`, and `bird-session`.
-This is best-effort: the operator tracker is not drain-latched, so an apply in
-flight when shutdown begins can overwrite the `SHUTTING_DOWN` value before the
-reconciler stops.
+`SHUTTING_DOWN`, including `fib`, `neighbours`, `rib`, and `bird-session`,
+before the reconciler and the readiness workers stop, while the service still
+answers. The tracker is drain-latched, so neither an apply cut off by the
+shutdown nor a late neighbour or RIB update moves a scope off `SHUTTING_DOWN`.
 
 ## `observed_at` freshness
 
@@ -107,7 +201,8 @@ without changing state.
 
 ### `fib:<gateway>:<module>`
 
-Advances on every reconcile apply attempt via `Observe`, regardless of success.
+Advances on every reconcile apply attempt the framework records, regardless of
+success.
 
 Config parameters (under `reconcile:`):
 
@@ -139,17 +234,31 @@ neighbour cache refresh, which happens in two ways:
 
 Config parameters (under `netlink_monitor:`):
 
-- `netlink_monitor.disabled` (bool, default false): when true the scope
-  becomes a latch (see below) and `observed_at` stops advancing entirely. The
-  event-driven and periodic refresh paths have no separate config knobs.
+- `netlink_monitor.disabled` (bool, default false): when true, local discovery
+  is disabled and accepted external publications refresh the scope instead
+  (see below). The event-driven and periodic local refresh paths have no
+  separate config knobs.
 
-A quiet network therefore shows up to ~5min of age. The scope publishes that
-5min periodic interval; a multiplier of 2-3 gives a 10-15min threshold. An
-active network stays near-real-time.
+A quiet network with local monitoring enabled therefore shows up to ~5min of
+age. The scope publishes that 5min periodic interval; a multiplier of 2-3 gives
+a 10-15min threshold. An active network stays near-real-time.
 
-When the monitor is disabled, the scope is set READY once and never refreshed,
-so a staleness check is **not applicable** (treat READY as fresh regardless of
-`observed_at`, as for the gateway scope).
+When the monitor is disabled, `observed_at` starts at construction and advances
+after every accepted complete `SwapNeighbours` publication. Identical and empty
+snapshots also refresh it; a forwarding change is not required. Rejected
+publications, requests cancelled before replacement, and table-metadata changes
+do not refresh it.
+
+Timestamp-only refreshes leave `last_transition_time` unchanged and do not emit
+`Watch` events, so consumers checking freshness must poll `Ready`.
+
+The receiving route operator does not know the external publisher's cadence and
+does not advertise `expected_observation_interval` for this mode. Consumers
+checking external-publication staleness must configure an explicit age threshold
+appropriate to that publisher rather than derive one from an advertised
+interval. Startup READY alone does not confirm that an external snapshot has
+been received; without accepted publications, `observed_at` remains at its
+construction timestamp.
 
 ### `rib` and `bird-session`
 
@@ -162,7 +271,8 @@ Config parameters (under `readiness:`):
 - `readiness.sample_interval` (default 1s): the sampling tick that drives
   `observed_at` for both scopes.
 - `readiness.expect_bird` (bool, default true): selects BIRD vs static mode
-  for `rib` and whether `bird-session` exists at all, but does **not** change
+  for `rib`, whether `bird-session` exists at all, and whether FIB preflight
+  requires BIRD route content and local BIRD forwarding. It does **not** change
   the tick cadence — both modes tick at `sample_interval`.
 
 Both scopes publish

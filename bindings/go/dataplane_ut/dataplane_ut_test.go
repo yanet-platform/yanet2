@@ -1,6 +1,7 @@
 package dataplaneut
 
 import (
+	"math"
 	"net"
 	"testing"
 	"time"
@@ -14,7 +15,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
+	cplain "github.com/yanet-platform/yanet2/devices/plain/bindings/go/cplain"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 )
@@ -502,7 +503,7 @@ func TestNewHarness_WorkerDeviceIDOutOfRange(t *testing.T) {
 }
 
 // TestHandleSegmentedPacketsOnDevice_InvalidDeviceID verifies that
-// HandleSegmentedPacketsOnDevice rejects an rxDeviceID at or beyond the
+// HandleSegmentedPacketsOnDevice rejects a deviceID at or beyond the
 // harness's registered device count instead of stamping a packet that
 // would index the C-side per-device scheduling arrays out of bounds.
 func TestHandleSegmentedPacketsOnDevice_InvalidDeviceID(t *testing.T) {
@@ -563,6 +564,141 @@ func TestHandlePacketsOnWorker_InvalidWorker(t *testing.T) {
 	require.Nil(t, result)
 }
 
+// Test_HandleSegmentedPackets_ReportsParsedOffsets verifies that a result
+// reports, beside the bytes of each packet, the header offsets the parser set
+// on it.
+func Test_HandleSegmentedPackets_ReportsParsedOffsets(t *testing.T) {
+	h, err := NewHarness(Config{
+		CPMemory:    uint64(datasize.MB * 32),
+		DPMemory:    uint64(datasize.MB * 4),
+		WorkerCount: 1,
+	})
+	require.NoError(t, err)
+	t.Cleanup(h.Free)
+	packet := xpacket.LayersToPacket(
+		t,
+		&layers.Ethernet{
+			SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+			DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+			EthernetType: layers.EthernetTypeIPv4,
+		},
+		&layers.IPv4{
+			Version:  4,
+			TTL:      64,
+			Protocol: layers.IPProtocolICMPv4,
+			SrcIP:    net.ParseIP("1.2.3.4"),
+			DstIP:    net.ParseIP("10.0.0.5"),
+		},
+		&layers.ICMPv4{
+			TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoRequest, 0),
+		},
+	)
+
+	result, err := h.HandleSegmentedPackets([][]byte{packet.Data()})
+
+	require.NoError(t, err)
+	require.Empty(t, result.Output)
+	require.Len(t, result.DropDescriptors, 1)
+	require.Equal(t, uint16(14), result.DropDescriptors[0].NetworkOffset)
+	require.Equal(t, uint16(34), result.DropDescriptors[0].TransportOffset)
+}
+
+// Test_HandleSegmentedPacketsWithHeadroom_LeavesAskedHeadroom verifies that
+// a packet enters the round with the headroom asked for it and its bytes
+// intact, and that a packet without an entry keeps the default.
+func Test_HandleSegmentedPacketsWithHeadroom_LeavesAskedHeadroom(t *testing.T) {
+	h, err := NewHarness(Config{
+		CPMemory:    uint64(datasize.MB * 32),
+		DPMemory:    uint64(datasize.MB * 4),
+		WorkerCount: 1,
+	})
+	require.NoError(t, err)
+	t.Cleanup(h.Free)
+	frames := make([][]byte, 3)
+	for idx := range frames {
+		frames[idx] = make([]byte, 60)
+		frames[idx][0] = byte(0x42 + idx)
+	}
+	built, err := h.HandleSegmentedPackets([][]byte{frames[2]})
+	require.NoError(t, err)
+	require.Len(t, built.DropDescriptors, 1)
+
+	result, err := h.HandleSegmentedPacketsWithHeadroom(
+		[]uint16{0, 40},
+		[][]byte{frames[0]}, [][]byte{frames[1]}, [][]byte{frames[2]},
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, frames, result.Drop)
+	headroom := make([]uint16, 0, len(result.DropDescriptors))
+	for _, descriptor := range result.DropDescriptors {
+		headroom = append(headroom, descriptor.Headroom)
+	}
+	require.Equal(
+		t, []uint16{0, 40, built.DropDescriptors[0].Headroom}, headroom,
+	)
+}
+
+// Test_HandleSegmentedPacketsWithHeadroom_RejectsInvalidHeadroom verifies
+// that a round is refused when the headroom asked for cannot be left.
+func Test_HandleSegmentedPacketsWithHeadroom_RejectsInvalidHeadroom(t *testing.T) {
+	cases := []struct {
+		name     string
+		headroom []uint16
+		message  string
+	}{
+		{
+			name:     "more entries than packets",
+			headroom: []uint16{0, 0},
+			message:  "exceeds packets length",
+		},
+		{
+			name:     "more headroom than a packet is built with",
+			headroom: []uint16{math.MaxUint16},
+			message:  "failed to limit packet headroom",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, err := NewHarness(Config{
+				CPMemory:    uint64(datasize.MB * 32),
+				DPMemory:    uint64(datasize.MB * 4),
+				WorkerCount: 1,
+			})
+			require.NoError(t, err)
+			t.Cleanup(h.Free)
+
+			result, err := h.HandleSegmentedPacketsWithHeadroom(
+				tc.headroom, [][]byte{make([]byte, 60)},
+			)
+
+			require.ErrorContains(t, err, tc.message)
+			require.Nil(t, result)
+		})
+	}
+}
+
+// Test_HandleSegmentedPackets_ReclaimLostPackets_KeepsListedPackets verifies
+// that a round which reclaims the packets it left on no list still returns,
+// and does not free, the packets it left on a list.
+func Test_HandleSegmentedPackets_ReclaimLostPackets_KeepsListedPackets(t *testing.T) {
+	h, err := NewHarness(Config{
+		CPMemory:           uint64(datasize.MB * 32),
+		DPMemory:           uint64(datasize.MB * 4),
+		WorkerCount:        1,
+		ReclaimLostPackets: true,
+	})
+	require.NoError(t, err)
+	t.Cleanup(h.Free)
+	frame := make([]byte, 60)
+	frame[0] = 0x42
+
+	result, err := h.HandleSegmentedPackets([][]byte{frame})
+
+	require.NoError(t, err)
+	require.Equal(t, [][]byte{frame}, result.Drop)
+}
+
 // TestHandleSegmentedPacketsOnDevice_ForwardDeviceScopedRule verifies that
 // Config.Workers assigns each worker's own device and that
 // HandleSegmentedPacketsOnDevice stamps the injected packet's ingress
@@ -611,7 +747,7 @@ func TestHandleSegmentedPacketsOnDevice_ForwardDeviceScopedRule(t *testing.T) {
 		Counter: "port1_rule",
 		Devices: filter.Devices{{Name: "port1"}},
 	}
-	moduleHandle, err := backend.UpdateModule("demux", []cforward.ForwardRule{rule})
+	moduleHandle, err := backend.Update("demux", forward.RuleSet{Compiled: []cforward.ForwardRule{rule}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = moduleHandle.Free() })
 
@@ -633,7 +769,7 @@ func TestHandleSegmentedPacketsOnDevice_ForwardDeviceScopedRule(t *testing.T) {
 
 	// Port 0 has no output pipeline: the rule never targets it, so an
 	// unmatched packet has nowhere to go but drop.
-	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{
+	_, err = cplain.UpdateDevices(agent, []ffi.DeviceConfig{
 		{
 			Name:  "port0",
 			Input: []ffi.DevicePipelineConfig{{Name: "demux", Weight: 1}},

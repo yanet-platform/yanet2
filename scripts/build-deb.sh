@@ -70,16 +70,23 @@ trap 'exit 143' TERM
 # an argument so dch never tries to open an editor.
 dch --newversion "$PKG_VERSION" --distribution unstable --force-bad-version "Automatic CI build."
 
-# Install build deps with verbose output
 apt-get update
 apt-get -o Debug::pkgProblemResolver=yes --no-install-recommends -y --allow-downgrades --allow-remove-essential --allow-change-held-packages build-dep . 2>&1 | tee build-deps.log
 
 echo "Current PATH during build: $PATH" > build-path.log
-# Build binary-only, skipping the source package. Nothing downstream consumes
-# it, and every path takes only the resulting .deb and .ddeb files. Skipping
-# it also avoids xz-compressing the whole working tree, DPDK submodule included.
-# Preserve environment variables for cargo (order matters in dpkg-buildpackage)
-echo y | debuild --preserve-envvar=PATH -us -uc -b 2>&1 | tee build.log
+# Build binary packages while preserving the toolchain path and build profiles.
+#
+# Downstream steps consume only binaries. Skipping the source package also
+# avoids compressing the whole working tree and its bundled dependencies.
+debuild_args=(-us -uc -b)
+# A build that reuses restored compiler caches skips the pre-build clean.
+#
+# The clean target empties the Rust target directory, so it would discard the
+# restored dependencies before the build starts.
+if [[ ${DEB_KEEP_BUILD_CACHES:-} == 1 ]]; then
+    debuild_args+=(-nc)
+fi
+echo y | debuild --preserve-envvar=PATH --preserve-envvar=DEB_BUILD_PROFILES "${debuild_args[@]}" 2>&1 | tee build.log
 
 mkdir -p outdeb
 dcmd cp ../*.changes outdeb/

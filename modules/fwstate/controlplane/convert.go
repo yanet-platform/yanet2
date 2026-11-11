@@ -1,0 +1,77 @@
+package fwstate
+
+import (
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
+	fwstatepb "github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
+)
+
+// SyncConfigToC copies sync settings without applying defaults or
+// validation. An absent config yields the zero native value.
+func SyncConfigToC(syncConfig *fwstatepb.SyncConfig) (cfwstate.SyncConfig, error) {
+	if syncConfig == nil {
+		return cfwstate.SyncConfig{}, nil
+	}
+
+	var nativeConfig cfwstate.SyncConfig
+	for _, endpoint := range syncConfig.GetEndpoints() {
+		var native cfwstate.SyncEndpoint
+		copy(native.SrcAddr[:], ipv6AddrBytes(endpoint.GetSrcAddr()))
+		copy(native.DstAddr[:], ipv6AddrBytes(endpoint.GetDstAddr()))
+		native.Port = uint16(endpoint.GetPort())
+		nativeConfig.Endpoints = append(nativeConfig.Endpoints, native)
+	}
+	for _, listener := range syncConfig.GetListeners() {
+		var native cfwstate.SyncListenEndpoint
+		copy(native.DstAddr[:], ipv6AddrBytes(listener.GetDstAddr()))
+		native.Port = uint16(listener.GetPort())
+		nativeConfig.Listeners = append(nativeConfig.Listeners, native)
+	}
+	nativeConfig.TcpSynAck = syncConfig.GetTcpSynAck()
+	nativeConfig.TcpSyn = syncConfig.GetTcpSyn()
+	nativeConfig.TcpFin = syncConfig.GetTcpFin()
+	nativeConfig.Tcp = syncConfig.GetTcp()
+	nativeConfig.Udp = syncConfig.GetUdp()
+	nativeConfig.Default = syncConfig.GetDefault()
+	nativeConfig.SyncSuppressTimeout = syncConfig.GetSyncSuppressTimeout()
+	nativeConfig.SyncMTU = uint16(syncConfig.GetSyncMtu())
+	return nativeConfig, nil
+}
+
+// ipv6AddrBytes renders one endpoint address in the raw wire form the
+// bindings carry; an absent address renders the zero address.
+func ipv6AddrBytes(addr *commonpb.IPv6Address) []byte {
+	raw := addr.ToAddr().As16()
+	return raw[:]
+}
+
+// SyncConfigFromC makes every scalar present and lists the stored endpoints
+// and listeners verbatim.
+func SyncConfigFromC(nativeConfig cfwstate.SyncConfig) *fwstatepb.SyncConfig {
+	syncConfig := &fwstatepb.SyncConfig{
+		Endpoints:           make([]*fwstatepb.SyncEndpoint, 0, len(nativeConfig.Endpoints)),
+		Listeners:           make([]*fwstatepb.SyncListenEndpoint, 0, len(nativeConfig.Listeners)),
+		TcpSynAck:           new(uint64(nativeConfig.TcpSynAck)),
+		TcpSyn:              new(uint64(nativeConfig.TcpSyn)),
+		TcpFin:              new(uint64(nativeConfig.TcpFin)),
+		Tcp:                 new(uint64(nativeConfig.Tcp)),
+		Udp:                 new(uint64(nativeConfig.Udp)),
+		Default:             new(uint64(nativeConfig.Default)),
+		SyncSuppressTimeout: new(uint64(nativeConfig.SyncSuppressTimeout)),
+		SyncMtu:             new(uint32(nativeConfig.SyncMTU)),
+	}
+	for _, endpoint := range nativeConfig.Endpoints {
+		syncConfig.Endpoints = append(syncConfig.Endpoints, &fwstatepb.SyncEndpoint{
+			SrcAddr: commonpb.NewIPv6Address(endpoint.SrcAddr),
+			DstAddr: commonpb.NewIPv6Address(endpoint.DstAddr),
+			Port:    new(uint32(endpoint.Port)),
+		})
+	}
+	for _, listener := range nativeConfig.Listeners {
+		syncConfig.Listeners = append(syncConfig.Listeners, &fwstatepb.SyncListenEndpoint{
+			DstAddr: commonpb.NewIPv6Address(listener.DstAddr),
+			Port:    new(uint32(listener.Port)),
+		})
+	}
+	return syncConfig
+}

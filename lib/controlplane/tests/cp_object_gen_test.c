@@ -9,12 +9,14 @@
 
 #include "common/memory.h"
 #include "common/memory_block.h"
+#include "common/strutils.h"
 #include "common/test_assert.h"
 
 #include "lib/controlplane/agent/agent.h"
 #include "lib/controlplane/config/cp_object.h"
 #include "lib/controlplane/config/econtext.h"
 #include "lib/controlplane/config/zone.h"
+#include "lib/dataplane/object/object.h"
 
 #include "lib/counters/counters.h"
 
@@ -87,14 +89,14 @@ test_cp_object_gen_update_and_lookup(struct yanet_shm *shm) {
 		err ? yanet_error_message(err) : "?"
 	);
 	TEST_ASSERT_EQUAL(
-		agent->loaded_object_count,
+		agent->loaded_entity_count,
 		2,
-		"loaded_object_count must be 2 after update installs both "
+		"loaded_entity_count must be 2 after update installs both "
 		"objects"
 	);
 
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
-	struct cp_config_gen *gen = ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *gen = cp_config_current_gen(cp_config);
 
 	TEST_ASSERT(
 		cp_config_gen_lookup_object(gen, "test", "lookup-1") == obj1,
@@ -145,7 +147,7 @@ test_cp_object_gen_update_and_lookup(struct yanet_shm *shm) {
 	// Deleting each object from the live generation drops its last
 	// generation reference (the prior generation is freed by the
 	// install), so each delete mirrors the drop into
-	// loaded_object_count.
+	// loaded_entity_count.
 	TEST_ASSERT_SUCCESS(
 		agent_delete_object(agent, "test", "lookup-1", &err),
 		"delete_object(lookup-1) failed: %s",
@@ -157,9 +159,9 @@ test_cp_object_gen_update_and_lookup(struct yanet_shm *shm) {
 		err ? yanet_error_message(err) : "?"
 	);
 	TEST_ASSERT_EQUAL(
-		agent->loaded_object_count,
+		agent->loaded_entity_count,
 		0,
-		"loaded_object_count must balance to 0 after both objects "
+		"loaded_entity_count must balance to 0 after both objects "
 		"are deleted"
 	);
 
@@ -187,7 +189,7 @@ test_cp_object_gen_update_and_lookup(struct yanet_shm *shm) {
 // the replacement's counter registry inherits the prior object's counter
 // definitions via counter_registry_link. Delete removes the object from
 // the live generation. Across the update/replace/delete gen swaps each
-// swap mirrors its generation-reference changes into loaded_object_count,
+// swap mirrors its generation-reference changes into loaded_entity_count,
 // so the count returns to zero once every object retires; the arena is
 // then returned to its pre-test size by tearing each object down
 // explicitly.
@@ -241,13 +243,13 @@ test_cp_object_gen_replace_delete(struct yanet_shm *shm) {
 		err ? yanet_error_message(err) : "?"
 	);
 	TEST_ASSERT_EQUAL(
-		agent->loaded_object_count,
+		agent->loaded_entity_count,
 		2,
-		"loaded_object_count must be 2 after the initial update"
+		"loaded_entity_count must be 2 after the initial update"
 	);
 
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
-	struct cp_config_gen *gen = ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *gen = cp_config_current_gen(cp_config);
 
 	uint64_t idx1;
 	TEST_ASSERT_SUCCESS(
@@ -261,7 +263,7 @@ test_cp_object_gen_replace_delete(struct yanet_shm *shm) {
 	// is preserved and the replacement inherits obj1's counter. obj1 is
 	// still referenced by the prior generation until that generation is
 	// freed by the install; the replace and the retire each mirror their
-	// reference change into loaded_object_count and the two cancel.
+	// reference change into loaded_entity_count and the two cancel.
 	struct cp_object *new_obj1 = (struct cp_object *)memory_balloc(
 		&agent->memory_context, sizeof(struct cp_object)
 	);
@@ -279,13 +281,13 @@ test_cp_object_gen_replace_delete(struct yanet_shm *shm) {
 		err ? yanet_error_message(err) : "?"
 	);
 	TEST_ASSERT_EQUAL(
-		agent->loaded_object_count,
+		agent->loaded_entity_count,
 		2,
-		"loaded_object_count must stay 2 after replace: new_obj1 "
+		"loaded_entity_count must stay 2 after replace: new_obj1 "
 		"gains a reference while obj1 loses its last one"
 	);
 
-	gen = ADDR_OF(&cp_config->cp_config_gen);
+	gen = cp_config_current_gen(cp_config);
 	uint64_t new_idx1;
 	TEST_ASSERT_SUCCESS(
 		cp_config_gen_lookup_object_index(
@@ -316,12 +318,12 @@ test_cp_object_gen_replace_delete(struct yanet_shm *shm) {
 		err ? yanet_error_message(err) : "?"
 	);
 	TEST_ASSERT_EQUAL(
-		agent->loaded_object_count,
+		agent->loaded_entity_count,
 		1,
-		"loaded_object_count must be 1 after delete-me retires"
+		"loaded_entity_count must be 1 after delete-me retires"
 	);
 
-	gen = ADDR_OF(&cp_config->cp_config_gen);
+	gen = cp_config_current_gen(cp_config);
 	TEST_ASSERT_NULL(
 		cp_config_gen_lookup_object(gen, "test", "delete-me"),
 		"deleted object must not be findable in the live generation"
@@ -334,9 +336,9 @@ test_cp_object_gen_replace_delete(struct yanet_shm *shm) {
 		err ? yanet_error_message(err) : "?"
 	);
 	TEST_ASSERT_EQUAL(
-		agent->loaded_object_count,
+		agent->loaded_entity_count,
 		0,
-		"loaded_object_count must balance to 0 after every object is "
+		"loaded_entity_count must balance to 0 after every object is "
 		"retired"
 	);
 
@@ -411,7 +413,7 @@ test_cp_object_gen_ectx_counter_storage(struct yanet_shm *shm) {
 	);
 
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
-	struct cp_config_gen *gen = ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *gen = cp_config_current_gen(cp_config);
 
 	uint64_t idx;
 	TEST_ASSERT_SUCCESS(
@@ -526,7 +528,9 @@ test_cp_module_link_object(struct yanet_shm *shm) {
 	TEST_ASSERT_NOT_NULL(module, "module allocation failed");
 	memset(module, 0, sizeof(struct cp_module));
 	memory_context_init_from(
-		&module->memory_context, &agent->memory_context, "test-module"
+		&module->entity.memory_context,
+		&agent->memory_context,
+		"test-module"
 	);
 
 	uint64_t idx1;
@@ -767,7 +771,7 @@ test_module_object_link_ectx(struct yanet_shm *shm) {
 
 	// The link counter storage is registered under tags combining the
 	// module's path and the linked object's identity.
-	struct cp_config_gen *gen = ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *gen = cp_config_current_gen(cp_config);
 	struct config_gen_ectx *ectx = cp_config_gen_worker_ectx(gen, 0);
 	TEST_ASSERT_NOT_NULL(ectx, "worker 0 execution context must exist");
 
@@ -858,7 +862,7 @@ test_module_object_link_missing_fails(struct yanet_shm *shm) {
 
 	// The rejected update leaves the prior generation live and the
 	// module uninstalled.
-	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *config_gen = cp_config_current_gen(cp_config);
 	TEST_ASSERT_NULL(
 		cp_config_gen_lookup_module(
 			config_gen, "forward", "fwd-missing"
@@ -868,6 +872,18 @@ test_module_object_link_missing_fails(struct yanet_shm *shm) {
 
 	agent_detach(agent);
 	return TEST_SUCCESS;
+}
+
+// Constructor of the "test" object type, which the harness resolves from
+// this executable: it declares no hook and no prepared buffer.
+struct object *
+new_object_test(void) {
+	struct object *object =
+		(struct object *)calloc(1, sizeof(struct object));
+	if (object != NULL) {
+		strtcpy(object->name, "test", sizeof(object->name));
+	}
+	return object;
 }
 
 int

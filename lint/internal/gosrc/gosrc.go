@@ -159,8 +159,8 @@ func gitIgnored(paths []string) (map[string]bool, error) {
 
 	runErr := cmd.Run()
 	if runErr != nil {
-		var exitErr *exec.ExitError
-		if !errors.As(runErr, &exitErr) {
+		exitErr, ok := errors.AsType[*exec.ExitError](runErr)
+		if !ok {
 			return nil, fmt.Errorf("failed to run git check-ignore: %w", runErr)
 		}
 		// Exit code 1 means none of the candidates are ignored, which is

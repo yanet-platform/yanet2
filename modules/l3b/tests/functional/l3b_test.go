@@ -25,12 +25,13 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
+	cplain "github.com/yanet-platform/yanet2/devices/plain/bindings/go/cplain"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	"github.com/yanet-platform/yanet2/modules/l3b/bindings/go/cl3b"
 	l3b "github.com/yanet-platform/yanet2/modules/l3b/controlplane"
-	cl3bobject "github.com/yanet-platform/yanet2/objects/l3b/bindings/go/cl3bobject"
+	"github.com/yanet-platform/yanet2/modules/l3b/tests/internal/probe"
+	"github.com/yanet-platform/yanet2/objects/l3b/bindings/go/cl3bobject"
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
 )
 
@@ -114,7 +115,7 @@ func wirePipeline(
 
 	sinkName := configName + "-sink"
 	sinkBackend := forward.NewBackend(agent)
-	sinkHandle, err := sinkBackend.UpdateModule(sinkName, catchAllForwardRules(deviceName))
+	sinkHandle, err := sinkBackend.Update(sinkName, forward.RuleSet{Compiled: catchAllForwardRules(deviceName)})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sinkHandle.Free() })
 
@@ -138,7 +139,7 @@ func wirePipeline(
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
 		Name: "dummy",
 	}))
-	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	_, err = cplain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   deviceName,
 		Input:  []ffi.DevicePipelineConfig{{Name: configName, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
@@ -261,11 +262,11 @@ func TestL3b_DropsTcpWithoutVirtualService(t *testing.T) {
 // encapsulated inner packet with the original frame.
 const ethHeaderLen = 14
 
-// newVirtualService creates a session table and a virtual service borrowing
-// it, leaving the scheduler ring and the publish to the caller.
+// newVirtualService creates a session table and a virtual service with every
+// configured real server enabled.
 //
-// Tearndown is wired so cleanup attempts to free the service before the table
-// it borrows.
+// The caller installs the scheduler ring and publishes the service. Teardown
+// attempts to free the service before the session table it borrows.
 func newVirtualService(
 	t *testing.T,
 	agent *ffi.Agent,
@@ -281,6 +282,9 @@ func newVirtualService(
 	service, err := cl3bobject.CreateVirtualService(agent, name, config, table)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = service.Free() })
+	for idx := range config.RealServers {
+		require.NoError(t, service.SetRealServerState(uint32(idx), true))
+	}
 
 	return service, table
 }
@@ -811,6 +815,9 @@ func TestL3b_SessionSurvivesServiceUpdate(t *testing.T) {
 	replacement, err := cl3bobject.CreateVirtualService(agent, "svc", serviceConfig, table)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = replacement.Free() })
+	for idx := range serviceConfig.RealServers {
+		require.NoError(t, replacement.SetRealServerState(uint32(idx), true))
+	}
 	require.NoError(t, replacement.UpdateRing([]uint32{1}))
 	require.NoError(t, replacement.Publish(agent))
 	require.NoError(t, service.Free())
@@ -866,6 +873,9 @@ func TestL3b_SessionSurvivesServiceUpdate(t *testing.T) {
 	relisted, err := cl3bobject.CreateVirtualService(agent, "svc", replacementConfig, table)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = relisted.Free() })
+	for idx := range replacementConfig.RealServers {
+		require.NoError(t, relisted.SetRealServerState(uint32(idx), true))
+	}
 	require.NoError(t, relisted.UpdateRing([]uint32{0}))
 	require.NoError(t, relisted.Publish(agent))
 	require.NoError(t, replacement.Free())
@@ -975,6 +985,9 @@ func TestL3b_FailedReplacementKeepsSessionTable(t *testing.T) {
 	replacement, err := cl3bobject.CreateVirtualService(agent, "svc", serviceConfig, table)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = replacement.Free() })
+	for idx := range serviceConfig.RealServers {
+		require.NoError(t, replacement.SetRealServerState(uint32(idx), true))
+	}
 	require.NoError(t, replacement.UpdateRing([]uint32{1}))
 	require.NoError(t, replacement.Publish(agent))
 	require.NoError(t, service.Free())
@@ -1222,9 +1235,10 @@ type echoPCAPPair struct {
 	reply   gopacket.Packet
 }
 
-// loadEchoPCAPPairs adapts pinned Ethernet fixtures without rewriting L3 bytes.
+// loadEchoPCAPPairs adapts pinned fixtures to the local Echo handoff contract.
 //
 // VLAN tags are removed; reply MACs follow the request in the local harness.
+// Reply TTL/Hop Limit becomes 65, with the IPv4 header checksum corrected.
 // The captures, not the upstream generator, define identifiers and payloads.
 func loadEchoPCAPPairs(t *testing.T, batch string) []echoPCAPPair {
 	t.Helper()
@@ -1268,6 +1282,17 @@ func loadEchoPCAPPairs(t *testing.T, batch string) []echoPCAPPair {
 				copy(adapted[:12], pairs[idx].request.Data()[:12])
 			}
 			require.Equal(t, frame[18:], adapted[14:])
+			if direction == 1 {
+				if adapted[14]>>4 == 4 {
+					require.EqualValues(t, 64, adapted[22])
+					adapted[22] = 65
+					adapted[24], adapted[25] = 0, 0
+					binary.BigEndian.PutUint16(adapted[24:26], echoChecksum(adapted[14:14+int(adapted[14]&15)*4]))
+				} else {
+					require.EqualValues(t, 64, adapted[21])
+					adapted[21] = 65
+				}
+			}
 			packet := gopacket.NewPacket(adapted, layers.LayerTypeEthernet, gopacket.Default)
 			require.Nil(t, packet.ErrorLayer())
 			if direction == 0 {
@@ -1560,7 +1585,7 @@ func Test_L3b_ConfiguredRealsGateEcho(t *testing.T) {
 								&layers.ICMPv4{TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoRequest, 0), Id: 0x1234, Seq: 7}, payload,
 							)
 							reply = xpacket.LayersToPacket(t, &ethernet,
-								&layers.IPv4{Version: 4, TTL: 64, Protocol: layers.IPProtocolICMPv4, SrcIP: destination, DstIP: net.ParseIP("10.0.0.1")},
+								&layers.IPv4{Version: 4, TTL: 65, Protocol: layers.IPProtocolICMPv4, SrcIP: destination, DstIP: net.ParseIP("10.0.0.1")},
 								&layers.ICMPv4{TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoReply, 0), Id: 0x1234, Seq: 7}, payload,
 							)
 						} else {
@@ -1575,7 +1600,7 @@ func Test_L3b_ConfiguredRealsGateEcho(t *testing.T) {
 							request = xpacket.LayersToPacket(t, &ethernet, &requestIP, &requestICMP,
 								&layers.ICMPv6Echo{Identifier: 0x1234, SeqNumber: 7}, payload,
 							)
-							replyIP := layers.IPv6{Version: 6, HopLimit: 64, NextHeader: layers.IPProtocolICMPv6, SrcIP: destination, DstIP: net.ParseIP("2001:db8::1")}
+							replyIP := layers.IPv6{Version: 6, HopLimit: 65, NextHeader: layers.IPProtocolICMPv6, SrcIP: destination, DstIP: net.ParseIP("2001:db8::1")}
 							replyICMP := layers.ICMPv6{TypeCode: layers.CreateICMPv6TypeCode(layers.ICMPv6TypeEchoReply, 0)}
 							require.NoError(t, replyICMP.SetNetworkLayerForChecksum(&replyIP))
 							reply = xpacket.LayersToPacket(t, &ethernet, &replyIP, &replyICMP,
@@ -1652,6 +1677,169 @@ func Test_L3b_ConfiguredRealsGateEcho(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+// echoChecksum computes the Internet checksum over complete wire bytes.
+func echoChecksum(data []byte) uint16 {
+	var sum uint32
+	for len(data) >= 2 {
+		sum += uint32(binary.BigEndian.Uint16(data))
+		data = data[2:]
+	}
+	if len(data) != 0 {
+		sum += uint32(data[0]) << 8
+	}
+	for sum>>16 != 0 {
+		sum = sum&0xffff + sum>>16
+	}
+	return ^uint16(sum)
+}
+
+// Test_L3b_EchoReplyRetainsBytes verifies that admitted Echo replies change only
+// contracted fields, without enabling reals, seeding traffic or creating sessions.
+func Test_L3b_EchoReplyRetainsBytes(t *testing.T) {
+	harness, agent := setupL3bHarness(t, "port0", "test")
+	wirePipeline(t, agent, "port0", "test")
+	harness.SetCurrentTime(time.Unix(1700000000, 0))
+	service, _ := newVirtualService(t, agent, "svc", cl3bobject.VirtualServiceConfig{
+		RealServers: []cl3bobject.RealServer{{
+			Type: cl3bobject.IPv4, DestinationAddress: netip.MustParseAddr("172.16.0.10"),
+			SourceNet: xnetip.MustParseNetwork("192.0.2.0/24"),
+		}},
+		RingCapacity: 1000,
+	})
+	require.NoError(t, service.SetRealServerState(0, false))
+	require.NoError(t, service.UpdateRing(nil))
+	require.NoError(t, service.Publish(agent))
+	info, err := service.Inspect()
+	require.NoError(t, err)
+	require.Len(t, info.RealServers, 1)
+	require.False(t, info.RealServers[0].Enabled)
+	module, err := cl3b.NewModuleConfig(agent, "test")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = module.Free() })
+	require.NoError(t, module.Update([]cl3b.DestinationFilterRule{{
+		Net4s:          []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("192.168.1.1/32")},
+		ProtoRanges:    filter.ProtoRanges{filter.NewProtoRange(1, filter.ExactSubtype(8))},
+		VirtualService: "svc",
+	}, {
+		Net6s:          []xnetip.BiContiguous{xnetip.MustParseBiContiguous("2001:db8:1::1/128")},
+		ProtoRanges:    filter.ProtoRanges{filter.NewProtoRange(58, filter.ExactSubtype(128))},
+		VirtualService: "svc",
+	}}))
+	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}))
+	executionContext, err := harness.PublishedExecutionContext(0)
+	require.NoError(t, err)
+	for _, family := range []string{"IPv4", "IPv6"} {
+		for _, code := range []byte{0, 1, 255} {
+			for _, extended := range []bool{false, true} {
+				for _, payload := range [][]byte{nil, {0, 0xff, 0x80, 0, 1, 2, 3}} {
+					name := fmt.Sprintf("%s/code_%d/extended_%t/payload_%d", family, code, extended, len(payload))
+					t.Run(name, func(t *testing.T) {
+						request := classifyFrame("10.0.0.1", "192.168.1.1", 0, 0, 1, 8, payload)
+						headerLength := 20
+						replyType := byte(0)
+						if family == "IPv6" {
+							request = classifyFrame("2001:db8::1", "2001:db8:1::1", 0, 0, 58, 128, payload)
+							headerLength, replyType = 40, 129
+						}
+						if extended {
+							extensions := []byte{1, 1, 0, 0}
+							if family == "IPv6" {
+								// Hop-by-Hop, Routing SL0, Destination Options, atomic fragment.
+								extensions = []byte{
+									43, 0, 1, 4, 0, 0, 0, 0,
+									60, 0, 253, 0, 0, 0, 0, 0,
+									44, 0, 1, 4, 0, 0, 0, 0,
+									58, 0, 0, 0, 0x12, 0x34, 0x56, 0x78,
+								}
+								request[20] = 0
+							}
+							request = append(request[:ethHeaderLen+headerLength], append(extensions, request[ethHeaderLen+headerLength:]...)...)
+							headerLength += len(extensions)
+						}
+						network := request[ethHeaderLen:]
+						message := network[headerLength:]
+						message[1] = code
+						binary.BigEndian.PutUint16(message[4:6], 0xa1b2)
+						binary.BigEndian.PutUint16(message[6:8], 0xc3d4)
+						var pseudoHeader []byte
+						if family == "IPv4" {
+							network[0], network[1], network[8] = 0x40|byte(headerLength/4), 0xab, 1
+							binary.BigEndian.PutUint16(network[2:4], uint16(len(network)))
+							binary.BigEndian.PutUint16(network[4:6], 0x9876)
+							binary.BigEndian.PutUint16(network[6:8], 0x4000)
+							binary.BigEndian.PutUint16(network[10:12], echoChecksum(network[:headerLength]))
+						} else {
+							binary.BigEndian.PutUint32(network[:4], 0x6ab12345)
+							binary.BigEndian.PutUint16(network[4:6], uint16(len(network)-40))
+							network[7] = 1
+							pseudoHeader = make([]byte, 40)
+							copy(pseudoHeader, network[8:40])
+							binary.BigEndian.PutUint32(pseudoHeader[32:36], uint32(len(message)))
+							pseudoHeader[39] = 58
+						}
+						binary.BigEndian.PutUint16(message[2:4], echoChecksum(append(bytes.Clone(pseudoHeader), message...)))
+						for _, split := range []string{"contiguous", "inside_echo_header"} {
+							t.Run(split, func(t *testing.T) {
+								segments := [][]byte{request}
+								if split != "contiguous" {
+									boundary := ethHeaderLen + headerLength + 7
+									segments = [][]byte{request[:boundary], request[boundary:]}
+								}
+								repliedBefore, _, err := cl3bobject.ReadServiceCounter(executionContext, "svc", "icmp_replied")
+								require.NoError(t, err)
+								result, err := harness.HandleSegmentedPackets(segments)
+								require.NoError(t, err)
+								repliedAfter, _, err := cl3bobject.ReadServiceCounter(executionContext, "svc", "icmp_replied")
+								require.NoError(t, err)
+								if split == "inside_echo_header" {
+									require.Empty(t, result.Output)
+									// Chained drop observations expose only the head segment.
+									require.Equal(t, [][]byte{segments[0]}, result.Drop)
+									require.Equal(t, repliedBefore, repliedAfter)
+								} else {
+									require.Empty(t, result.Drop)
+									require.Len(t, result.Output, 1)
+									require.Equal(t, repliedBefore+1, repliedAfter)
+									reply := result.Output[0]
+									require.Len(t, reply, len(request))
+									expected := bytes.Clone(request)
+									replyNetwork := reply[ethHeaderLen:]
+									if family == "IPv4" {
+										require.Zero(t, echoChecksum(replyNetwork[:headerLength]))
+										expected[22] = 65
+										copy(expected[26:30], request[30:34])
+										copy(expected[30:34], request[26:30])
+										copy(expected[24:26], reply[24:26])
+									} else {
+										expected[21] = 65
+										copy(expected[22:38], request[38:54])
+										copy(expected[38:54], request[22:38])
+										copy(pseudoHeader, replyNetwork[8:40])
+									}
+									require.Zero(t, echoChecksum(append(bytes.Clone(pseudoHeader), replyNetwork[headerLength:]...)))
+									offset := ethHeaderLen + headerLength
+									expected[offset], expected[offset+1] = replyType, 0
+									copy(expected[offset+2:offset+4], reply[offset+2:offset+4])
+									require.Equal(t, expected, reply)
+								}
+								sessions, cursors := readEchoSessions(t, agent, service, harness.CurrentTime())
+								require.Empty(t, sessions)
+								require.Equal(t, []uint64{0}, cursors)
+								for _, counter := range []string{"real/0", "ring_empty", "real_disabled"} {
+									packets, bytes, err := cl3bobject.ReadServiceCounter(executionContext, "svc", counter)
+									require.NoError(t, err)
+									require.Zero(t, packets, counter)
+									require.Zero(t, bytes, counter)
+								}
+							})
+						}
+					})
+				}
+			}
+		}
 	}
 }
 
@@ -1912,4 +2100,1014 @@ func TestL3b_MarksOuterDscp(t *testing.T) {
 	publish("default", cl3bobject.DSCPFlagsOf(cl3bobject.DSCPMark, 40))
 	require.EqualValues(t, 0xA0, outerTOS(packetWithTOS(0x00), 2000))
 	require.EqualValues(t, 0x88, outerTOS(packetWithTOS(0x88), 2001))
+}
+
+// newCapacityAgent returns an initially unpublished harness agent with
+// the l3b objects loaded for capacity accounting.
+//
+// Callers may publish services when checking destination links.
+func newCapacityAgent(t *testing.T) *ffi.Agent {
+	t.Helper()
+
+	harness, err := dataplaneut.NewHarness(dataplaneut.Config{
+		CPMemory:      uint64(64 * datasize.MB),
+		DPMemory:      uint64(4 * datasize.MB),
+		WorkerCount:   1,
+		Modules:       []string{"l3b"},
+		ObjectsToLoad: []string{"l3b_virtual_service", "l3b_session_table"},
+	})
+	require.NoError(t, err)
+	t.Cleanup(harness.Free)
+
+	agent, err := harness.SharedMemory().AgentAttach(
+		"l3b-capacity-test", 0, 16*datasize.MB,
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = agent.CleanUp() })
+
+	return agent
+}
+
+// Test_L3bVirtualService_RealServerFamilies verifies that tunnel types and
+// address families agree before construction, without normalizing valid inputs.
+func Test_L3bVirtualService_RealServerFamilies(t *testing.T) {
+	agent := newCapacityAgent(t)
+	table, err := cl3bobject.CreateSessionTable(agent, "families", 1, 64)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, table.Free()) })
+	source4 := xnetip.MustParseNetwork("192.0.2.0/24")
+	source6 := xnetip.MustParseNetwork("2001:db8::/64")
+	mappedSource := xnetip.MustParseNetwork("::ffff:192.0.2.0/120")
+	destination4 := netip.MustParseAddr("198.51.100.1")
+	destination6 := netip.MustParseAddr("2001:db8:1::1")
+	mappedDestination := netip.MustParseAddr("::ffff:198.51.100.1")
+	for _, tc := range []struct {
+		name        string
+		family      cl3bobject.IPFamily
+		destination netip.Addr
+		source      xnetip.Network
+		valid       bool
+	}{
+		{"native IPv4", cl3bobject.IPv4, destination4, source4, true},
+		{"native IPv6", cl3bobject.IPv6, destination6, source6, true},
+		{"mapped IPv6", cl3bobject.IPv6, mappedDestination, mappedSource, true},
+		{"mapped destination native IPv6 source", cl3bobject.IPv6, mappedDestination, source6, true},
+		{"native IPv6 destination mapped source", cl3bobject.IPv6, destination6, mappedSource, true},
+		{"zero IPv6 network", cl3bobject.IPv6, destination6, xnetip.Network{}, true},
+		{"IPv4 zero mask", cl3bobject.IPv4, destination4, xnetip.MustParseNetwork("0.0.0.0/0"), true},
+		{"IPv4 arbitrary mask", cl3bobject.IPv4, destination4, xnetip.MustParseNetwork("192.0.2.0/255.0.255.0"), true},
+		{"IPv6 arbitrary mask", cl3bobject.IPv6, destination6, xnetip.MustParseNetwork("2001:db8::/ffff:0:ffff::"), true},
+		{"IPv4 source IPv6 destination", cl3bobject.IPv6, destination6, source4, false},
+		{"IPv6 source IPv4 destination", cl3bobject.IPv4, destination4, source6, false},
+		{"IPv4 source mapped destination", cl3bobject.IPv4, mappedDestination, source4, false},
+		{"mapped source IPv4 destination", cl3bobject.IPv6, destination4, mappedSource, false},
+		{"IPv4 addresses IPv6 type", cl3bobject.IPv6, destination4, source4, false},
+		{"IPv6 addresses IPv4 type", cl3bobject.IPv4, destination6, source6, false},
+		{"unsupported type", cl3bobject.IPFamily(99), destination4, source4, false},
+		{"invalid destination IPv4 source", cl3bobject.IPv4, netip.Addr{}, source4, false},
+		{"invalid destination IPv6 source", cl3bobject.IPv6, netip.Addr{}, source6, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			config := cl3bobject.VirtualServiceConfig{RealServers: []cl3bobject.RealServer{{
+				Type: tc.family, DestinationAddress: tc.destination, SourceNet: tc.source,
+			}}}
+			capacity := agent.BlockAllocatorFreeSize()
+			var candidate *cl3bobject.VirtualServiceObject
+			var err error
+			require.NotPanics(t, func() {
+				candidate, err = cl3bobject.CreateVirtualService(agent, "families", config, table)
+			})
+			if candidate != nil {
+				t.Cleanup(func() { require.NoError(t, candidate.Free()) })
+			}
+			if !tc.valid {
+				require.ErrorContains(t, err, "real server 0")
+				require.Nil(t, candidate)
+				require.Equal(t, capacity, agent.BlockAllocatorFreeSize())
+				return
+			}
+			require.NoError(t, err)
+			info, err := candidate.Inspect()
+			require.NoError(t, err)
+			require.Equal(t, []cl3bobject.RealServerInfo{{
+				Family: tc.family, DestinationAddress: tc.destination, SourceNet: tc.source,
+			}}, info.RealServers)
+		})
+	}
+	t.Run("empty real collection", func(t *testing.T) {
+		candidate, err := cl3bobject.CreateVirtualService(agent, "empty", cl3bobject.VirtualServiceConfig{}, table)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, candidate.Free()) })
+		info, err := candidate.Inspect()
+		require.NoError(t, err)
+		require.Empty(t, info.RealServers)
+	})
+}
+
+// Test_L3bProbe_ServiceSmoke verifies that included constructors compile both
+// address families while leaving their caller-owned table intact on release.
+func Test_L3bProbe_ServiceSmoke(t *testing.T) {
+	agent := newCapacityAgent(t)
+	table, err := probe.NewTable(agent, "probe-table")
+	require.NoError(t, err)
+	require.True(t, probe.SeedTable(table))
+	service, witness, err := probe.NewService(agent, table, "probe-service", probe.Masks{}, false)
+	require.NoError(t, err)
+	require.Equal(t, probe.Witness{IPv4Decoded: true, IPv6Entered: true}, witness)
+	require.NoError(t, probe.FreeService(&service))
+	require.True(t, probe.HasSentinel(table))
+	require.NoError(t, probe.FreeTable(&table))
+}
+
+// Test_L3bProbe_RawMasks verifies that both production entrypoints reject holes
+// inside either half while accepting independently contiguous IPv6 halves.
+func Test_L3bProbe_RawMasks(t *testing.T) {
+	cases := []struct {
+		name  string
+		masks probe.Masks
+		valid bool
+	}{
+		{name: "IPv4 hole", masks: probe.Masks{IPv4: [4]byte{0xff, 0x7f}}},
+		{name: "IPv6 first half hole", masks: probe.Masks{IPv6: [16]byte{0xff, 0x7f}}},
+		{name: "IPv6 second half hole", masks: probe.Masks{IPv6: [16]byte{8: 0xff, 9: 0x7f}}},
+		{name: "IPv6 cross boundary gap", masks: probe.Masks{IPv6: [16]byte{0xff, 0xff, 8: 0xff, 9: 0xff}}, valid: true},
+		{name: "valid first IPv4 network then invalid second", masks: probe.Masks{AdditionalIPv4: [][4]byte{{0xff, 0x7f}}}},
+		{name: "valid first IPv6 network then second with first half hole", masks: probe.Masks{AdditionalIPv6: [][16]byte{{0xff, 0x7f}}}},
+		{name: "valid first IPv6 network then second with second half hole", masks: probe.Masks{AdditionalIPv6: [][16]byte{{8: 0xff, 9: 0x7f}}}},
+		{name: "two valid IPv4 networks", masks: probe.Masks{AdditionalIPv4: [][4]byte{{0xff, 0xff}}}, valid: true},
+		{name: "two valid IPv6 networks", masks: probe.Masks{AdditionalIPv6: [][16]byte{{0xff, 0xff}}}, valid: true},
+		{name: "valid first IPv6 network then second with cross boundary gap", masks: probe.Masks{AdditionalIPv6: [][16]byte{{0xff, 0xff, 8: 0xff, 9: 0xff}}}, valid: true},
+		{name: "second rule IPv4 hole", masks: probe.Masks{InSecondRule: true, IPv4: [4]byte{0xff, 0x7f}}},
+		{name: "second rule IPv6 first half hole", masks: probe.Masks{InSecondRule: true, IPv6: [16]byte{0xff, 0x7f}}},
+		{name: "second rule IPv6 second half hole", masks: probe.Masks{InSecondRule: true, IPv6: [16]byte{8: 0xff, 9: 0x7f}}},
+		{name: "valid second rule IPv4 prefix and IPv6 cross boundary gap", masks: probe.Masks{InSecondRule: true, IPv4: [4]byte{0xff, 0xff}, IPv6: [16]byte{0xff, 0xff, 8: 0xff, 9: 0xff}}, valid: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			agent := newCapacityAgent(t)
+			table, err := probe.NewTable(agent, "raw-table")
+			require.NoError(t, err)
+			require.True(t, probe.SeedTable(table))
+			published, witness, err := probe.NewService(agent, table, "published-service", probe.Masks{}, false)
+			require.NoError(t, err)
+			require.Equal(t, probe.Witness{IPv4Decoded: true, IPv6Entered: true}, witness)
+			require.NoError(t, agent.UpdateObjects([]ffi.ObjectConfig{published}))
+			capacity := agent.BlockAllocatorFreeSize()
+			service, witness, err := probe.NewService(agent, table, "raw-service", tc.masks, false)
+			if tc.valid {
+				require.NoError(t, err)
+				require.Equal(t, probe.Witness{IPv4Decoded: true, IPv6Entered: true}, witness)
+				require.NoError(t, probe.FreeService(&service))
+			} else {
+				require.Error(t, err)
+				require.Nil(t, service.AsRawPtr())
+				require.Equal(t, probe.Witness{}, witness)
+			}
+			require.Equal(t, capacity, agent.BlockAllocatorFreeSize())
+			require.True(t, probe.HasSentinel(table))
+			module, err := probe.NewModule(agent, "raw-module")
+			require.NoError(t, err)
+			witness, err = probe.UpdateModule(module, "published-service", tc.masks, false)
+			if tc.valid {
+				require.NoError(t, err)
+				require.Equal(t, probe.Witness{IPv4Decoded: true, IPv6Entered: true}, witness)
+			} else {
+				require.Error(t, err)
+				require.Equal(t, probe.Witness{}, witness)
+			}
+			// Failed preflight still owns the earlier service link allocations.
+			require.NoError(t, probe.FreeModule(&module))
+			require.Equal(t, capacity, agent.BlockAllocatorFreeSize())
+			require.True(t, probe.HasSentinel(table))
+		})
+	}
+}
+
+// Test_L3bProbe_SourceFailureRestoresCapacity verifies that a fault after IPv4
+// decode releases partial state without destroying a borrowed live table.
+func Test_L3bProbe_SourceFailureRestoresCapacity(t *testing.T) {
+	agent := newCapacityAgent(t)
+	table, err := probe.NewTable(agent, "source-table")
+	require.NoError(t, err)
+	require.True(t, probe.SeedTable(table))
+	service, witness, err := probe.NewService(agent, table, "source-service", probe.Masks{}, false)
+	require.NoError(t, err)
+	require.Equal(t, probe.Witness{IPv4Decoded: true, IPv6Entered: true}, witness)
+	require.NoError(t, probe.FreeService(&service))
+	capacity := agent.BlockAllocatorFreeSize()
+	for range 3 {
+		service, witness, err = probe.NewService(agent, table, "source-service", probe.Masks{}, true)
+		require.Error(t, err)
+		require.Nil(t, service.AsRawPtr())
+		require.Equal(t, probe.Witness{IPv4Decoded: true, IPv6Entered: true, Faults: 1}, witness)
+		require.Equal(t, capacity, agent.BlockAllocatorFreeSize())
+		require.True(t, probe.HasSentinel(table))
+		service, witness, err = probe.NewService(agent, table, "source-service", probe.Masks{}, false)
+		require.NoError(t, err)
+		require.Equal(t, probe.Witness{IPv4Decoded: true, IPv6Entered: true}, witness)
+		require.NoError(t, probe.FreeService(&service))
+		require.Equal(t, capacity, agent.BlockAllocatorFreeSize())
+		require.True(t, probe.HasSentinel(table))
+	}
+	require.NoError(t, probe.FreeTable(&table))
+}
+
+// Test_L3bProbe_DestinationFailureRestoresCapacity verifies that successful and
+// faulted dual-family updates release all candidate-owned classifiers and links.
+func Test_L3bProbe_DestinationFailureRestoresCapacity(t *testing.T) {
+	agent := newCapacityAgent(t)
+	table, err := probe.NewTable(agent, "destination-table")
+	require.NoError(t, err)
+	require.True(t, probe.SeedTable(table))
+	service, witness, err := probe.NewService(agent, table, "destination-service", probe.Masks{}, false)
+	require.NoError(t, err)
+	require.Equal(t, probe.Witness{IPv4Decoded: true, IPv6Entered: true}, witness)
+	require.NoError(t, agent.UpdateObjects([]ffi.ObjectConfig{service}))
+	module, err := probe.NewModule(agent, "destination-module")
+	require.NoError(t, err)
+	witness, err = probe.UpdateModule(module, "destination-service", probe.Masks{}, false)
+	require.NoError(t, err)
+	require.Equal(t, probe.Witness{IPv4Decoded: true, IPv6Entered: true}, witness)
+	require.NoError(t, probe.FreeModule(&module))
+	capacity := agent.BlockAllocatorFreeSize()
+	for range 3 {
+		module, err = probe.NewModule(agent, "destination-module")
+		require.NoError(t, err)
+		witness, err = probe.UpdateModule(module, "destination-service", probe.Masks{}, true)
+		require.Error(t, err)
+		require.Equal(t, probe.Witness{IPv4Decoded: true, IPv6Entered: true, Faults: 1}, witness)
+		require.NoError(t, probe.FreeModule(&module))
+		require.Equal(t, capacity, agent.BlockAllocatorFreeSize())
+		require.True(t, probe.HasSentinel(table))
+		module, err = probe.NewModule(agent, "destination-module")
+		require.NoError(t, err)
+		witness, err = probe.UpdateModule(module, "destination-service", probe.Masks{}, false)
+		require.NoError(t, err)
+		require.Equal(t, probe.Witness{IPv4Decoded: true, IPv6Entered: true}, witness)
+		require.NoError(t, probe.FreeModule(&module))
+		require.Equal(t, capacity, agent.BlockAllocatorFreeSize())
+		require.True(t, probe.HasSentinel(table))
+	}
+}
+
+// Test_L3bVirtualService_RepeatedCreateReturnsAgentCapacity verifies that
+// alternating compiled and rule-less services preserve post-warm-up capacity.
+//
+// Each round creates and frees a dual-family service, then a rule-less service.
+func Test_L3bVirtualService_RepeatedCreateReturnsAgentCapacity(t *testing.T) {
+	agent := newCapacityAgent(t)
+
+	dualFamily := cl3bobject.VirtualServiceConfig{
+		SourceFilterRules: []cl3bobject.SourceFilterRule{{
+			Net4s:      []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			Net6s:      []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+			PortRanges: filter.PortRanges{{From: 1, To: 65535}},
+		}},
+		RingCapacity: 4,
+	}
+
+	createAndFree := func(config cl3bobject.VirtualServiceConfig) {
+		table, err := cl3bobject.CreateSessionTable(
+			agent, "capacity", 1, 64,
+		)
+		require.NoError(t, err)
+
+		service, err := cl3bobject.CreateVirtualService(
+			agent, "capacity", config, table,
+		)
+		require.NoError(t, err)
+
+		// The service borrows the table, so it must go away first.
+		require.NoError(t, service.Free())
+		require.NoError(t, table.Free())
+	}
+
+	// The capacity reference is measured after one compiled/rule-less warm-up round.
+	createAndFree(dualFamily)
+	createAndFree(cl3bobject.VirtualServiceConfig{})
+
+	base := agent.BlockAllocatorFreeSize()
+	for range 3 {
+		createAndFree(dualFamily)
+		createAndFree(cl3bobject.VirtualServiceConfig{})
+	}
+	require.Equal(
+		t,
+		base,
+		agent.BlockAllocatorFreeSize(),
+		"repeated create and free cycles lost agent capacity",
+	)
+}
+
+// classifyFrame builds an unpadded frame with declared transport and IP lengths.
+//
+// Checksums remain zero because the harness does not validate them.
+func classifyFrame(
+	source, destination string,
+	sourcePort, destinationPort uint16,
+	protocol, subtype byte,
+	payload []byte,
+) []byte {
+	transportLength := 8
+	if protocol == 6 {
+		transportLength = 20
+	}
+	header := make([]byte, transportLength)
+	switch protocol {
+	case 6, 17:
+		binary.BigEndian.PutUint16(header[0:2], sourcePort)
+		binary.BigEndian.PutUint16(header[2:4], destinationPort)
+		if protocol == 6 {
+			header[12] = 5 << 4
+			header[13] = subtype
+			binary.BigEndian.PutUint16(header[14:16], 1024)
+		} else {
+			binary.BigEndian.PutUint16(header[4:6], uint16(transportLength+len(payload)))
+		}
+	case 1, 58:
+		header[0] = subtype
+		binary.BigEndian.PutUint16(header[4:6], 0x1234)
+		binary.BigEndian.PutUint16(header[6:8], 7)
+	}
+	sourceAddress := netip.MustParseAddr(source)
+	destinationAddress := netip.MustParseAddr(destination)
+	networkLength := 20
+	if sourceAddress.Is6() {
+		networkLength = 40
+	}
+	frame := make([]byte, ethHeaderLen+networkLength+transportLength+len(payload))
+	copy(frame[0:6], []byte{0x11, 0x22, 0x33, 0x44, 0x55, 0x66})
+	copy(frame[6:12], []byte{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff})
+	if sourceAddress.Is4() {
+		binary.BigEndian.PutUint16(frame[12:14], 0x0800)
+		frame[14] = 0x45
+		binary.BigEndian.PutUint16(frame[16:18], uint16(networkLength+transportLength+len(payload)))
+		frame[22], frame[23] = 64, protocol
+		copy(frame[26:30], sourceAddress.AsSlice())
+		copy(frame[30:34], destinationAddress.AsSlice())
+	} else {
+		binary.BigEndian.PutUint16(frame[12:14], 0x86dd)
+		frame[14] = 0x60
+		binary.BigEndian.PutUint16(frame[18:20], uint16(transportLength+len(payload)))
+		frame[20], frame[21] = protocol, 64
+		copy(frame[22:38], sourceAddress.AsSlice())
+		copy(frame[38:54], destinationAddress.AsSlice())
+	}
+	copy(frame[ethHeaderLen+networkLength:], header)
+	copy(frame[ethHeaderLen+networkLength+transportLength:], payload)
+	return frame
+}
+
+// publishClassifyService publishes a service with one usable IPv4 real and ring.
+func publishClassifyService(
+	t *testing.T,
+	agent *ffi.Agent,
+	name, realIP string,
+	rules []cl3bobject.SourceFilterRule,
+) *cl3bobject.VirtualServiceObject {
+	t.Helper()
+	object, _ := newVirtualService(t, agent, name, cl3bobject.VirtualServiceConfig{
+		SourceFilterRules: rules,
+		RealServers: []cl3bobject.RealServer{{
+			Type:               cl3bobject.IPv4,
+			DestinationAddress: xerror.Unwrap(netip.ParseAddr(realIP)),
+			SourceNet:          xnetip.MustParseNetwork("192.0.2.0/24"),
+		}},
+		HashMask:     0,
+		IndexMask:    0,
+		RingCapacity: 1000,
+	})
+	require.NoError(t, object.UpdateRing([]uint32{0}))
+	require.NoError(t, object.Publish(agent))
+	return object
+}
+
+// publishClassifyModule installs destination rules in the published pipeline.
+func publishClassifyModule(
+	t *testing.T,
+	agent *ffi.Agent,
+	configName string,
+	rules []cl3b.DestinationFilterRule,
+) *cl3b.ModuleConfig {
+	t.Helper()
+	module, err := cl3b.NewModuleConfig(agent, configName)
+	require.NoError(t, err)
+	require.NoError(t, module.Update(rules))
+	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}))
+	t.Cleanup(func() { _ = module.Free() })
+	return module
+}
+
+// counterOf reads a published service's packet and byte counter pair.
+func counterOf(t *testing.T, harness *dataplaneut.Harness, service, name string) (uint64, uint64) {
+	t.Helper()
+	ctx, err := harness.PublishedExecutionContext(0)
+	require.NoError(t, err)
+	packets, byteCount, err := cl3bobject.ReadServiceCounter(ctx, service, name)
+	require.NoError(t, err)
+	return packets, byteCount
+}
+
+// Test_L3b_ClassifyOmittedSourcePortRanges verifies that omitted ports admit
+// every service port while restrictive source networks still reject outsiders.
+func Test_L3b_ClassifyOmittedSourcePortRanges(t *testing.T) {
+	harness, agent := setupL3bHarness(t, "port0", "test")
+	wirePipeline(t, agent, "port0", "test")
+	publishClassifyService(t, agent, "svc", "172.16.0.10", []cl3bobject.SourceFilterRule{{
+		Net4s: []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("10.0.0.0/24")},
+		Net6s: []xnetip.BiContiguous{xnetip.MustParseBiContiguous("2001:db8:1::/48")},
+	}})
+	publishClassifyModule(t, agent, "test", []cl3b.DestinationFilterRule{{
+		Net4s: []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("192.168.1.0/24")},
+		Net6s: []xnetip.BiContiguous{xnetip.MustParseBiContiguous("2001:db8:2::/48")},
+		ProtoRanges: filter.ProtoRanges{
+			filter.NewProtoRange(6, filter.AnySubtype()),
+			filter.NewProtoRange(17, filter.AnySubtype()),
+		},
+		VirtualService: "svc",
+	}})
+	for _, tc := range []struct {
+		name, allowed, foreign, destination string
+	}{
+		{"IPv4", "10.0.0.1", "10.9.9.1", "192.168.1.1"},
+		{"IPv6", "2001:db8:1::1", "2001:db8:9::1", "2001:db8:2::1"},
+	} {
+		for _, protocol := range []byte{6, 17} {
+			for _, port := range []uint16{0, 80, 40000, 65535} {
+				t.Run(fmt.Sprintf("%s/protocol%d/servicePort%d", tc.name, protocol, port), func(t *testing.T) {
+					allowed := classifyFrame(tc.allowed, tc.destination, 12345, port, protocol, 2, nil)
+					foreign := classifyFrame(tc.foreign, tc.destination, 12345, port, protocol, 2, nil)
+					before, _ := counterOf(t, harness, "svc", "filter_rejected")
+					result, err := harness.HandleSegmentedPackets([][]byte{allowed}, [][]byte{foreign})
+					require.NoError(t, err)
+					require.Len(t, result.Output, 1)
+					require.Equal(t, [][]byte{foreign}, result.Drop)
+					info, err := framework.NewPacketParser().ParsePacket(result.Output[0])
+					require.NoError(t, err)
+					require.True(t, info.IsTunneled)
+					require.Equal(t, "172.16.0.10", info.DstIP.String())
+					after, _ := counterOf(t, harness, "svc", "filter_rejected")
+					require.Equal(t, before+1, after)
+				})
+			}
+		}
+	}
+}
+
+// Test_L3b_ClassifyRestrictedSourcePortRanges verifies that source admission
+// restricts the destination service port, not the client's source port.
+func Test_L3b_ClassifyRestrictedSourcePortRanges(t *testing.T) {
+	for _, tc := range []struct {
+		name, source, destination string
+	}{
+		{"IPv4", "10.0.0.1", "192.168.1.1"},
+		{"IPv6", "2001:db8:1::1", "2001:db8:2::1"},
+	} {
+		for _, protocol := range []byte{6, 17} {
+			t.Run(fmt.Sprintf("%s/protocol%d", tc.name, protocol), func(t *testing.T) {
+				harness, agent := setupL3bHarness(t, "port0", "test")
+				wirePipeline(t, agent, "port0", "test")
+				publishClassifyService(t, agent, "svc", "172.16.0.10", []cl3bobject.SourceFilterRule{{
+					Net4s:      []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+					Net6s:      []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+					PortRanges: filter.PortRanges{{From: 80, To: 80}},
+				}})
+				publishClassifyModule(t, agent, "test", []cl3b.DestinationFilterRule{{
+					Net4s:          []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+					Net6s:          []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+					ProtoRanges:    filter.ProtoRanges{filter.NewProtoRange(protocol, filter.AnySubtype())},
+					VirtualService: "svc",
+				}})
+				allowed := classifyFrame(tc.source, tc.destination, 12345, 80, protocol, 2, nil)
+				foreign := classifyFrame(tc.source, tc.destination, 80, 12345, protocol, 2, nil)
+				result, err := harness.HandleSegmentedPackets([][]byte{allowed}, [][]byte{foreign})
+				require.NoError(t, err)
+				require.Len(t, result.Output, 1)
+				require.Equal(t, [][]byte{foreign}, result.Drop)
+				packets, _ := counterOf(t, harness, "svc", "filter_rejected")
+				require.EqualValues(t, 1, packets)
+			})
+		}
+	}
+}
+
+// Test_L3b_DirectPathPortRanges verifies that reversed ranges cover nothing
+// and do not interfere with valid ranges through the direct binding.
+func Test_L3b_DirectPathPortRanges(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		ranges   filter.PortRanges
+		admitted bool
+	}{
+		{"mixed valid and reversed", filter.PortRanges{{From: 100, To: 200}, {From: 100, To: 50}}, true},
+		{"reversed only", filter.PortRanges{{From: 100, To: 50}}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			harness, agent := setupL3bHarness(t, "port0", "test")
+			wirePipeline(t, agent, "port0", "test")
+			publishClassifyService(t, agent, "svc", "172.16.0.10", []cl3bobject.SourceFilterRule{{
+				Net4s:      []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+				Net6s:      []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+				PortRanges: tc.ranges,
+			}})
+			publishClassifyModule(t, agent, "test", []cl3b.DestinationFilterRule{{
+				Net4s:          []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+				Net6s:          []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+				ProtoRanges:    filter.ProtoRanges{filter.NewProtoRange(6, filter.AnySubtype()), filter.NewProtoRange(17, filter.AnySubtype())},
+				VirtualService: "svc",
+			}})
+			for _, family := range []struct{ source, destination string }{
+				{"10.0.0.1", "192.168.1.1"}, {"2001:db8:1::1", "2001:db8:2::1"},
+			} {
+				for _, protocol := range []byte{6, 17} {
+					for _, port := range []uint16{0, 50, 60, 99, 100, 150, 200, 201, 65535} {
+						frame := classifyFrame(family.source, family.destination, 12345, port, protocol, 2, nil)
+						result, err := harness.HandleSegmentedPackets([][]byte{frame})
+						require.NoError(t, err)
+						if tc.admitted && port >= 100 && port <= 200 {
+							require.Len(t, result.Output, 1)
+							require.Empty(t, result.Drop)
+						} else {
+							require.Empty(t, result.Output)
+							require.Equal(t, [][]byte{frame}, result.Drop)
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
+// Test_L3b_ClassifyEmptyPredicates verifies that missing networks and empty
+// destination protocols match no traffic.
+//
+// Rule-less services reject ordinary transport at source admission.
+func Test_L3b_ClassifyEmptyPredicates(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		sourceRules      []cl3bobject.SourceFilterRule
+		destination      cl3b.DestinationFilterRule
+		filterRejections uint64
+	}{
+		{"rule-less source service", nil, cl3b.DestinationFilterRule{
+			Net4s:       []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			Net6s:       []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+			ProtoRanges: filter.ProtoRanges{filter.NewProtoRange(6, filter.AnySubtype()), filter.NewProtoRange(17, filter.AnySubtype())},
+		}, 4},
+		{"empty destination protocols", []cl3bobject.SourceFilterRule{{
+			Net4s: []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			Net6s: []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+		}}, cl3b.DestinationFilterRule{
+			Net4s: []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			Net6s: []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+		}, 0},
+		{"missing destination families", []cl3bobject.SourceFilterRule{{
+			Net4s: []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			Net6s: []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+		}}, cl3b.DestinationFilterRule{
+			ProtoRanges: filter.ProtoRanges{filter.NewProtoRange(6, filter.AnySubtype()), filter.NewProtoRange(17, filter.AnySubtype())},
+		}, 0},
+		{"missing source families", []cl3bobject.SourceFilterRule{{PortRanges: filter.PortRanges{{From: 0, To: 65535}}}}, cl3b.DestinationFilterRule{
+			Net4s:       []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			Net6s:       []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+			ProtoRanges: filter.ProtoRanges{filter.NewProtoRange(6, filter.AnySubtype()), filter.NewProtoRange(17, filter.AnySubtype())},
+		}, 4},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			harness, agent := setupL3bHarness(t, "port0", "test")
+			wirePipeline(t, agent, "port0", "test")
+			publishClassifyService(t, agent, "svc", "172.16.0.10", tc.sourceRules)
+			tc.destination.VirtualService = "svc"
+			publishClassifyModule(t, agent, "test", []cl3b.DestinationFilterRule{tc.destination})
+			for _, family := range []struct{ source, destination string }{
+				{"10.0.0.1", "192.168.1.1"}, {"2001:db8:1::1", "2001:db8:2::1"},
+			} {
+				for _, protocol := range []byte{6, 17} {
+					frame := classifyFrame(family.source, family.destination, 12345, 80, protocol, 2, nil)
+					result, err := harness.HandleSegmentedPackets([][]byte{frame})
+					require.NoError(t, err)
+					require.Empty(t, result.Output)
+					require.Equal(t, [][]byte{frame}, result.Drop)
+				}
+			}
+			packets, _ := counterOf(t, harness, "svc", "filter_rejected")
+			require.Equal(t, tc.filterRejections, packets)
+		})
+	}
+}
+
+// Test_L3b_FirstMatchBatchBoundary verifies that first-match service decoding
+// survives the 256-packet family boundary in an interleaved dual-family batch.
+func Test_L3b_FirstMatchBatchBoundary(t *testing.T) {
+	harness, agent := setupL3bHarness(t, "port0", "test")
+	wirePipeline(t, agent, "port0", "test")
+	for _, tc := range []struct{ name, real string }{{"narrow", "172.16.0.10"}, {"broad", "172.16.0.11"}} {
+		publishClassifyService(t, agent, tc.name, tc.real, []cl3bobject.SourceFilterRule{{
+			Net4s: []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			Net6s: []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+		}})
+	}
+	publishClassifyModule(t, agent, "test", []cl3b.DestinationFilterRule{
+		{
+			Net4s:          []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("192.168.1.1/32")},
+			Net6s:          []xnetip.BiContiguous{xnetip.MustParseBiContiguous("2001:db8:2::1/128")},
+			ProtoRanges:    filter.ProtoRanges{filter.NewProtoRange(6, filter.AnySubtype())},
+			VirtualService: "narrow",
+		},
+		{
+			Net4s:          []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("192.168.1.0/24")},
+			Net6s:          []xnetip.BiContiguous{xnetip.MustParseBiContiguous("2001:db8:2::/48")},
+			ProtoRanges:    filter.ProtoRanges{filter.NewProtoRange(6, filter.AnySubtype())},
+			VirtualService: "broad",
+		},
+	})
+	packets := make([][][]byte, 0, 514)
+	for idx := range 257 {
+		destination4, destination6 := "192.168.1.1", "2001:db8:2::1"
+		if idx%2 != 0 || idx == 256 {
+			destination4, destination6 = "192.168.1.2", "2001:db8:2::2"
+		}
+		packets = append(packets,
+			[][]byte{classifyFrame("10.0.0.1", destination4, uint16(10000+idx), 80, 6, 2, nil)},
+			[][]byte{classifyFrame("2001:db8:1::1", destination6, uint16(10000+idx), 80, 6, 2, nil)},
+		)
+	}
+	result, err := harness.HandleSegmentedPackets(packets...)
+	require.NoError(t, err)
+	require.Empty(t, result.Drop)
+	require.Len(t, result.Output, 514)
+	for idx, frame := range result.Output {
+		info, err := framework.NewPacketParser().ParsePacket(frame)
+		require.NoError(t, err)
+		require.True(t, info.IsTunneled)
+		// Packet order identifies the service expected at each family boundary.
+		expected := "172.16.0.10"
+		if (idx/2)%2 != 0 || idx/2 == 256 {
+			expected = "172.16.0.11"
+		}
+		require.Equal(t, expected, info.DstIP.String(), "packet %d", idx)
+	}
+}
+
+// Test_L3b_TCPFlagsSubtypeMatching verifies that readable SYN and ACK flags
+// select distinct services while flags zero match neither rule.
+func Test_L3b_TCPFlagsSubtypeMatching(t *testing.T) {
+	harness, agent := setupL3bHarness(t, "port0", "test")
+	wirePipeline(t, agent, "port0", "test")
+	for _, tc := range []struct{ name, real string }{{"syn", "172.16.0.10"}, {"ack", "172.16.0.11"}} {
+		publishClassifyService(t, agent, tc.name, tc.real, []cl3bobject.SourceFilterRule{{
+			Net4s: []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			Net6s: []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+		}})
+	}
+	publishClassifyModule(t, agent, "test", []cl3b.DestinationFilterRule{
+		{Net4s: []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4}, Net6s: []xnetip.BiContiguous{filter.UnspecifiedIPv6}, ProtoRanges: filter.ProtoRanges{filter.NewProtoRange(6, filter.ExactSubtype(2))}, VirtualService: "syn"},
+		{Net4s: []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4}, Net6s: []xnetip.BiContiguous{filter.UnspecifiedIPv6}, ProtoRanges: filter.ProtoRanges{filter.NewProtoRange(6, filter.ExactSubtype(16))}, VirtualService: "ack"},
+	})
+	for _, family := range []struct{ source, destination string }{
+		{"10.0.0.1", "192.168.1.1"}, {"2001:db8:1::1", "2001:db8:2::1"},
+	} {
+		for _, tc := range []struct {
+			name, real string
+			flags      byte
+		}{
+			{"SYN", "172.16.0.10", 2}, {"ACK", "172.16.0.11", 16}, {"zero flags", "", 0},
+		} {
+			t.Run(family.source+"/"+tc.name, func(t *testing.T) {
+				frame := classifyFrame(family.source, family.destination, 12345+uint16(tc.flags), 80, 6, tc.flags, nil)
+				result, err := harness.HandleSegmentedPackets([][]byte{frame})
+				require.NoError(t, err)
+				if tc.real == "" {
+					require.Empty(t, result.Output)
+					require.Equal(t, [][]byte{frame}, result.Drop)
+				} else {
+					require.Empty(t, result.Drop)
+					require.Len(t, result.Output, 1)
+					info, err := framework.NewPacketParser().ParsePacket(result.Output[0])
+					require.NoError(t, err)
+					require.Equal(t, tc.real, info.DstIP.String())
+				}
+			})
+		}
+	}
+}
+
+// Test_L3b_SegmentedHeadersFailClosed verifies that nonresident headers reject
+// while full-header controls retain their dispositions in the same batch.
+//
+// Raw observations expose only the head segment, not chained tail bytes.
+func Test_L3b_SegmentedHeadersFailClosed(t *testing.T) {
+	harness, agent := setupL3bHarness(t, "port0", "test")
+	wirePipeline(t, agent, "port0", "test")
+	publishClassifyService(t, agent, "svc", "172.16.0.10", []cl3bobject.SourceFilterRule{{
+		Net4s: []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Net6s: []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+	}})
+	publishClassifyModule(t, agent, "test", []cl3b.DestinationFilterRule{{
+		Net4s: []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Net6s: []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+		ProtoRanges: filter.ProtoRanges{
+			filter.NewProtoRange(6, filter.AnySubtype()), filter.NewProtoRange(17, filter.AnySubtype()),
+			filter.NewProtoRange(1, filter.ExactSubtype(8)), filter.NewProtoRange(58, filter.ExactSubtype(128)),
+		},
+		VirtualService: "svc",
+	}})
+	for _, tc := range []struct {
+		name, source, destination string
+		protocol, subtype         byte
+		splitOffset               int
+	}{
+		{"IPv4 TCP IP header", "10.0.0.1", "192.168.1.1", 6, 2, 24},
+		{"IPv6 TCP IP header", "2001:db8:1::1", "2001:db8:2::1", 6, 2, 24},
+		{"IPv4 TCP flags", "10.0.0.1", "192.168.1.1", 6, 2, 47},
+		{"IPv6 TCP flags", "2001:db8:1::1", "2001:db8:2::1", 6, 2, 67},
+		{"IPv4 TCP fixed header 19 of 20 bytes", "10.0.0.1", "192.168.1.1", 6, 2, 53},
+		{"IPv6 TCP fixed header 19 of 20 bytes", "2001:db8:1::1", "2001:db8:2::1", 6, 2, 73},
+		{"IPv4 UDP ports", "10.0.0.1", "192.168.1.1", 17, 0, 36},
+		{"IPv6 UDP ports", "2001:db8:1::1", "2001:db8:2::1", 17, 0, 56},
+		{"IPv4 UDP fixed header 7 of 8 bytes", "10.0.0.1", "192.168.1.1", 17, 0, 41},
+		{"IPv6 UDP fixed header 7 of 8 bytes", "2001:db8:1::1", "2001:db8:2::1", 17, 0, 61},
+		{"IPv4 ICMP echo", "10.0.0.1", "192.168.1.1", 1, 8, 36},
+		{"IPv6 ICMP echo", "2001:db8:1::1", "2001:db8:2::1", 58, 128, 56},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			frame := classifyFrame(tc.source, tc.destination, 12345, 80, tc.protocol, tc.subtype, nil)
+			result, err := harness.HandleSegmentedPackets([][]byte{frame[:tc.splitOffset], frame[tc.splitOffset:]}, [][]byte{frame})
+			require.NoError(t, err)
+			require.Equal(t, [][]byte{frame[:tc.splitOffset]}, result.Drop)
+			require.Len(t, result.Output, 1)
+			info, err := framework.NewPacketParser().ParsePacket(result.Output[0])
+			require.NoError(t, err)
+			if tc.protocol == 1 || tc.protocol == 58 {
+				require.Equal(t, tc.destination, info.SrcIP.String())
+			} else {
+				require.True(t, info.IsTunneled)
+				require.Equal(t, "172.16.0.10", info.DstIP.String())
+			}
+		})
+	}
+	// Echo only rewrites resident headers, making its payload chain a safe control.
+	for _, tc := range []struct {
+		name, source, destination string
+		protocol, subtype         byte
+		headerLength              int
+	}{
+		{"IPv4 echo payload", "10.0.0.1", "192.168.1.1", 1, 8, 42},
+		{"IPv6 echo payload", "2001:db8:1::1", "2001:db8:2::1", 58, 128, 62},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := []byte{0xab, 0xcd, 1, 2}
+			frame := classifyFrame(tc.source, tc.destination, 0, 0, tc.protocol, tc.subtype, payload)
+			result, err := harness.HandleSegmentedPackets([][]byte{frame[:tc.headerLength], frame[tc.headerLength:]})
+			require.NoError(t, err)
+			require.Empty(t, result.Drop)
+			require.Len(t, result.Output, 1)
+			outputHead := result.Output[0]
+			require.Len(t, outputHead, tc.headerLength)
+			if tc.protocol == 1 {
+				require.Equal(t, netip.MustParseAddr(tc.destination).AsSlice(), outputHead[26:30])
+				require.Equal(t, netip.MustParseAddr(tc.source).AsSlice(), outputHead[30:34])
+				require.EqualValues(t, 0, outputHead[34])
+				require.EqualValues(t, len(frame)-ethHeaderLen, binary.BigEndian.Uint16(outputHead[16:18]))
+			} else {
+				require.Equal(t, netip.MustParseAddr(tc.destination).AsSlice(), outputHead[22:38])
+				require.Equal(t, netip.MustParseAddr(tc.source).AsSlice(), outputHead[38:54])
+				require.EqualValues(t, 129, outputHead[54])
+				require.EqualValues(t, 8+len(payload), binary.BigEndian.Uint16(outputHead[18:20]))
+			}
+			require.Zero(t, outputHead[tc.headerLength-7])
+			require.Equal(t, frame[tc.headerLength-4:tc.headerLength], outputHead[tc.headerLength-4:])
+		})
+	}
+}
+
+// Test_L3b_SegmentedICMPErrorsPassthrough verifies that readable non-Echo types
+// pass unchanged, absent types drop, and following TCP still tunnels.
+//
+// Chained packet comparisons cover only the observable head bytes.
+func Test_L3b_SegmentedICMPErrorsPassthrough(t *testing.T) {
+	harness, agent := setupL3bHarness(t, "port0", "test")
+	wirePipeline(t, agent, "port0", "test")
+	publishClassifyService(t, agent, "svc", "172.16.0.10", []cl3bobject.SourceFilterRule{{
+		Net4s: []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Net6s: []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+	}})
+	publishClassifyModule(t, agent, "test", []cl3b.DestinationFilterRule{{
+		Net4s: []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Net6s: []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+		ProtoRanges: filter.ProtoRanges{
+			filter.NewProtoRange(1, filter.AnySubtype()),
+			filter.NewProtoRange(58, filter.AnySubtype()),
+			filter.NewProtoRange(6, filter.AnySubtype()),
+		},
+		VirtualService: "svc",
+	}})
+	for _, tc := range []struct {
+		name, source, destination string
+		protocol, subtype, code   byte
+		networkLength             int
+	}{
+		{"IPv4 fragmentation needed", "10.0.0.1", "192.168.1.1", 1, 3, 4, 20},
+		{"IPv6 packet too big", "2001:db8:1::1", "2001:db8:2::1", 58, 2, 0, 40},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			quoted := classifyFrame(tc.destination, tc.source, 80, 12345, 6, 2, nil)
+			frame := classifyFrame(
+				tc.source, tc.destination, 0, 0, tc.protocol, tc.subtype,
+				quoted[ethHeaderLen:],
+			)
+			transportOffset := ethHeaderLen + tc.networkLength
+			frame[transportOffset+1] = tc.code
+			binary.BigEndian.PutUint32(frame[transportOffset+4:transportOffset+8], 1280)
+			packets := [][][]byte{}
+			for _, headBytes := range []int{1, 4, 7} {
+				splitOffset := transportOffset + headBytes
+				packets = append(packets, [][]byte{frame[:splitOffset], frame[splitOffset:]})
+			}
+			control := classifyFrame(tc.source, tc.destination, 12345, 80, 6, 2, nil)
+			packets = append(packets,
+				[][]byte{frame[:transportOffset], frame[transportOffset:]},
+				[][]byte{frame},
+				[][]byte{control},
+			)
+			result, err := harness.HandleSegmentedPackets(packets...)
+			require.NoError(t, err)
+			require.Equal(t, [][]byte{frame[:transportOffset]}, result.Drop)
+			require.Len(t, result.Output, 5)
+			for idx, headBytes := range []int{1, 4, 7} {
+				require.Equal(t, frame[:transportOffset+headBytes], result.Output[idx], "ICMP bytes in head: %d", headBytes)
+			}
+			require.Equal(t, frame, result.Output[3])
+			info, err := framework.NewPacketParser().ParsePacket(result.Output[4])
+			require.NoError(t, err)
+			require.True(t, info.IsTunneled)
+			require.Equal(t, "172.16.0.10", info.DstIP.String())
+		})
+	}
+}
+
+// Test_L3b_ClassifyExemptPacketsPassthrough verifies that globally short ICMP
+// and unread protocols pass unchanged even with a published matching service.
+//
+// Admitted TCP and UDP tunnel to the real, and a readable Echo request is
+// answered locally.
+func Test_L3b_ClassifyExemptPacketsPassthrough(t *testing.T) {
+	harness, agent := setupL3bHarness(t, "port0", "test")
+	wirePipeline(t, agent, "port0", "test")
+	publishClassifyService(t, agent, "svc", "172.16.0.10", []cl3bobject.SourceFilterRule{{
+		Net4s:      []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("10.0.0.0/24")},
+		Net6s:      []xnetip.BiContiguous{xnetip.MustParseBiContiguous("2001:db8:1::/48")},
+		PortRanges: filter.PortRanges{{From: 0, To: 65535}},
+	}})
+	publishClassifyModule(t, agent, "test", []cl3b.DestinationFilterRule{{
+		Net4s: []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Net6s: []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+		ProtoRanges: filter.ProtoRanges{
+			filter.NewProtoRange(1, filter.AnySubtype()),
+			filter.NewProtoRange(58, filter.AnySubtype()),
+			filter.NewProtoRange(47, filter.AnySubtype()),
+			filter.NewProtoRange(6, filter.AnySubtype()),
+			filter.NewProtoRange(17, filter.AnySubtype()),
+		},
+		VirtualService: "svc",
+	}})
+	for _, tc := range []struct {
+		name, source, destination string
+		protocol, subtype         byte
+		networkLength             int
+		transportLength           int
+		splitOffset               int
+	}{
+		{"IPv4 short ICMP", "10.0.0.1", "192.168.1.1", 1, 0, 20, 0, 0},
+		{"IPv6 short ICMP", "2001:db8:1::1", "2001:db8:2::1", 58, 0, 40, 0, 0},
+		{"IPv4 truncated Echo passes through unanswered", "10.0.0.1", "192.168.1.1", 1, 8, 20, 1, 0},
+		{"IPv6 truncated Echo passes through unanswered", "2001:db8:1::1", "2001:db8:2::1", 58, 128, 40, 1, 0},
+		{"IPv4 one-byte non-Echo passes through", "10.0.0.1", "192.168.1.1", 1, 3, 20, 1, 0},
+		{"IPv6 one-byte non-Echo passes through", "2001:db8:1::1", "2001:db8:2::1", 58, 2, 40, 1, 0},
+		{"IPv4 unread protocol", "10.0.0.1", "192.168.1.1", 47, 0, 20, 0, 0},
+		{"IPv6 unread protocol", "2001:db8:1::1", "2001:db8:2::1", 47, 0, 40, 0, 0},
+		{"IPv4 unread protocol IP header split", "10.0.0.1", "192.168.1.1", 47, 0, 20, 0, 24},
+		{"IPv6 unread protocol IP header split", "2001:db8:1::1", "2001:db8:2::1", 47, 0, 40, 0, 24},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			frame := classifyFrame(tc.source, tc.destination, 0, 0, tc.protocol, tc.subtype, nil)
+			frame = frame[:ethHeaderLen+tc.networkLength+tc.transportLength]
+			if tc.networkLength == 20 {
+				binary.BigEndian.PutUint16(frame[16:18], uint16(tc.networkLength+tc.transportLength))
+			} else {
+				binary.BigEndian.PutUint16(frame[18:20], uint16(tc.transportLength))
+			}
+			input := [][][]byte{{frame}}
+			if tc.splitOffset != 0 {
+				input = append(input, [][]byte{frame[:tc.splitOffset], frame[tc.splitOffset:]})
+			}
+			incomingBefore, incomingBytesBefore := counterOf(t, harness, "svc", "incoming")
+			rejectedBefore, rejectedBytesBefore := counterOf(t, harness, "svc", "filter_rejected")
+			result, err := harness.HandleSegmentedPackets(input...)
+			require.NoError(t, err)
+			require.Empty(t, result.Drop)
+			require.Len(t, result.Output, len(input))
+			for idx, output := range result.Output {
+				// Only the readable head is observable for chained passthrough.
+				require.Equal(t, input[idx][0], output)
+			}
+			incomingAfter, incomingBytesAfter := counterOf(t, harness, "svc", "incoming")
+			rejectedAfter, rejectedBytesAfter := counterOf(t, harness, "svc", "filter_rejected")
+			require.Equal(t, incomingBefore, incomingAfter)
+			require.Equal(t, incomingBytesBefore, incomingBytesAfter)
+			require.Equal(t, rejectedBefore, rejectedAfter)
+			require.Equal(t, rejectedBytesBefore, rejectedBytesAfter)
+		})
+	}
+	for _, tc := range []struct {
+		name, source, destination string
+		protocol, subtype         byte
+	}{
+		{"IPv4 TCP tunnels to real", "10.0.0.1", "192.168.1.1", 6, 2},
+		{"IPv6 TCP tunnels to real", "2001:db8:1::1", "2001:db8:2::1", 6, 2},
+		{"IPv4 UDP tunnels to real", "10.0.0.1", "192.168.1.1", 17, 0},
+		{"IPv6 UDP tunnels to real", "2001:db8:1::1", "2001:db8:2::1", 17, 0},
+		{"IPv4 Echo replies locally", "10.0.0.1", "192.168.1.1", 1, 8},
+		{"IPv6 Echo replies locally", "2001:db8:1::1", "2001:db8:2::1", 58, 128},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			frame := classifyFrame(tc.source, tc.destination, 12345, 80, tc.protocol, tc.subtype, nil)
+			// Request lifetime stays below the reply value to pin a restart, not a copy.
+			if tc.protocol == 1 {
+				frame[22] = 1
+			} else if tc.protocol == 58 {
+				frame[21] = 1
+			}
+			incomingBefore, incomingBytesBefore := counterOf(t, harness, "svc", "incoming")
+			repliedBefore, repliedBytesBefore := counterOf(t, harness, "svc", "icmp_replied")
+			result, err := harness.HandleSegmentedPackets([][]byte{frame})
+			require.NoError(t, err)
+			require.Empty(t, result.Drop)
+			require.Len(t, result.Output, 1)
+			info, err := framework.NewPacketParser().ParsePacket(result.Output[0])
+			require.NoError(t, err)
+			incomingAfter, incomingBytesAfter := counterOf(t, harness, "svc", "incoming")
+			require.Equal(t, incomingBefore+1, incomingAfter)
+			require.Equal(t, incomingBytesBefore+uint64(len(frame)), incomingBytesAfter)
+			if tc.protocol == 6 || tc.protocol == 17 {
+				require.True(t, info.IsTunneled)
+				require.Equal(t, "172.16.0.10", info.DstIP.String())
+				return
+			}
+			require.False(t, info.IsTunneled)
+			require.Equal(t, tc.destination, info.SrcIP.String())
+			require.Equal(t, tc.source, info.DstIP.String())
+			require.Len(t, result.Output[0], len(frame))
+			if tc.protocol == 1 {
+				require.EqualValues(t, 0, result.Output[0][34])
+				require.EqualValues(t, 65, result.Output[0][22])
+			} else {
+				require.EqualValues(t, 129, result.Output[0][54])
+				require.EqualValues(t, 65, result.Output[0][21])
+			}
+			repliedAfter, repliedBytesAfter := counterOf(t, harness, "svc", "icmp_replied")
+			require.Equal(t, repliedBefore+1, repliedAfter)
+			require.Equal(t, repliedBytesBefore+uint64(len(result.Output[0])), repliedBytesAfter)
+		})
+	}
+}
+
+// Test_L3b_ClassifyMatchesByDestination verifies that reversing source and
+// destination networks does not select a service for outbound traffic.
+func Test_L3b_ClassifyMatchesByDestination(t *testing.T) {
+	harness, agent := setupL3bHarness(t, "port0", "test")
+	wirePipeline(t, agent, "port0", "test")
+	publishClassifyService(t, agent, "svc", "172.16.0.10", []cl3bobject.SourceFilterRule{{
+		Net4s: []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Net6s: []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+	}})
+	publishClassifyModule(t, agent, "test", []cl3b.DestinationFilterRule{{
+		Net4s:          []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("192.168.1.0/24")},
+		Net6s:          []xnetip.BiContiguous{xnetip.MustParseBiContiguous("2001:db8:2::/48")},
+		ProtoRanges:    filter.ProtoRanges{filter.NewProtoRange(6, filter.AnySubtype())},
+		VirtualService: "svc",
+	}})
+	for _, tc := range []struct{ source, destination string }{
+		{"10.0.0.1", "192.168.1.1"}, {"2001:db8:1::1", "2001:db8:2::1"},
+	} {
+		inbound := classifyFrame(tc.source, tc.destination, 12345, 80, 6, 2, nil)
+		outbound := classifyFrame(tc.destination, tc.source, 12345, 80, 6, 2, nil)
+		result, err := harness.HandleSegmentedPackets([][]byte{inbound}, [][]byte{outbound})
+		require.NoError(t, err)
+		require.Len(t, result.Output, 1)
+		require.Equal(t, [][]byte{outbound}, result.Drop)
+	}
+}
+
+// Test_L3b_RulelessConfigDropsTcp verifies that an empty destination config
+// drops ordinary transport without querying an uninitialized classifier.
+func Test_L3b_RulelessConfigDropsTcp(t *testing.T) {
+	harness, agent := setupL3bHarness(t, "port0", "test")
+	wirePipeline(t, agent, "port0", "test")
+	publishClassifyModule(t, agent, "test", nil)
+	frame := classifyFrame("10.0.0.1", "192.168.1.1", 12345, 80, 6, 2, nil)
+	result, err := harness.HandleSegmentedPackets([][]byte{frame})
+	require.NoError(t, err)
+	require.Empty(t, result.Output)
+	require.Equal(t, [][]byte{frame}, result.Drop)
 }

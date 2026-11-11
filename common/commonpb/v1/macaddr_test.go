@@ -55,6 +55,15 @@ func Test_MACAddress_MarshalJSON_RejectsUpperBits(t *testing.T) {
 	require.Error(t, err)
 }
 
+// Test_MACAddress_MarshalJSON_NilReceiver verifies that directly marshaling
+// a nil address preserves the zero-address representation.
+func Test_MACAddress_MarshalJSON_NilReceiver(t *testing.T) {
+	var address *commonpb.MACAddress
+	data, err := address.MarshalJSON()
+	require.NoError(t, err)
+	require.JSONEq(t, `"00:00:00:00:00:00"`, string(data))
+}
+
 // Test_MACAddress_UnmarshalJSON verifies that only the colon- and
 // hyphen-separated EUI-48 layouts are accepted.
 func Test_MACAddress_UnmarshalJSON(t *testing.T) {
@@ -80,6 +89,11 @@ func Test_MACAddress_UnmarshalJSON(t *testing.T) {
 			want: [6]byte{0x3a, 0xac, 0x26, 0x9b, 0x5b, 0xf9},
 		},
 		{
+			name: "uppercase hyphen-separated",
+			json: `"3A-AC-26-9B-5B-F9"`,
+			want: [6]byte{0x3a, 0xac, 0x26, 0x9b, 0x5b, 0xf9},
+		},
+		{
 			name:    "dot-separated is rejected",
 			json:    `"3aac.269b.5bf9"`,
 			wantErr: true,
@@ -95,6 +109,16 @@ func Test_MACAddress_UnmarshalJSON(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:    "invalid hex octet is rejected",
+			json:    `"3a:ac:26:9b:5b:fg"`,
+			wantErr: true,
+		},
+		{
+			name:    "EUI-64 is rejected",
+			json:    `"3a:ac:26:ff:fe:9b:5b:f9"`,
+			wantErr: true,
+		},
+		{
 			name:    "legacy object form is rejected",
 			json:    `{"addr":"3a:ac:26:9b:5b:f9"}`,
 			wantErr: true,
@@ -102,6 +126,11 @@ func Test_MACAddress_UnmarshalJSON(t *testing.T) {
 		{
 			name:    "empty string",
 			json:    `""`,
+			wantErr: true,
+		},
+		{
+			name:    "null is rejected",
+			json:    `null`,
 			wantErr: true,
 		},
 		{
@@ -128,6 +157,15 @@ func Test_MACAddress_UnmarshalJSON(t *testing.T) {
 			require.Equal(t, tt.want, mac.EUI48())
 		})
 	}
+}
+
+// Test_MACAddress_UnmarshalJSON_PreservesAddressOnError verifies that
+// malformed address text leaves the prior wire value intact.
+func Test_MACAddress_UnmarshalJSON_PreservesAddressOnError(t *testing.T) {
+	address := commonpb.MACAddress{Addr: 0x00003aac269b5bf9}
+	err := json.Unmarshal([]byte(`"3a:ac:26:9b:5b:fg"`), &address)
+	require.Error(t, err)
+	require.Equal(t, uint64(0x00003aac269b5bf9), address.GetAddr())
 }
 
 // Test_MACAddress_JSONRoundTrip verifies that a marshalled address
@@ -182,6 +220,10 @@ func Test_MACAddress_AsLogValue(t *testing.T) {
 			want: "00:00:00:00:00:00",
 		},
 		{
+			name: "nil message",
+			want: "00:00:00:00:00:00",
+		},
+		{
 			name: "upper bits set",
 			mac:  &commonpb.MACAddress{Addr: 0x1_0000_0000_0000},
 			want: "invalid",
@@ -195,11 +237,34 @@ func Test_MACAddress_AsLogValue(t *testing.T) {
 	}
 }
 
-// Test_MACAddress_EUI48 verifies that the wire value decodes to the
-// octets in network order.
+// Test_MACAddress_EUI48 verifies that extraction keeps the lower 48 wire
+// bits in network order and treats a nil address as zero.
 func Test_MACAddress_EUI48(t *testing.T) {
-	mac := &commonpb.MACAddress{Addr: 0x00003aac269b5bf9}
-	require.Equal(t, [6]byte{0x3a, 0xac, 0x26, 0x9b, 0x5b, 0xf9}, mac.EUI48())
+	cases := []struct {
+		name    string
+		address *commonpb.MACAddress
+		want    [6]byte
+	}{
+		{
+			name:    "network order",
+			address: &commonpb.MACAddress{Addr: 0x00003aac269b5bf9},
+			want:    [6]byte{0x3a, 0xac, 0x26, 0x9b, 0x5b, 0xf9},
+		},
+		{
+			name: "nil message",
+		},
+		{
+			name:    "upper bits are truncated",
+			address: &commonpb.MACAddress{Addr: 0xffff3aac269b5bf9},
+			want:    [6]byte{0x3a, 0xac, 0x26, 0x9b, 0x5b, 0xf9},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, tc.address.EUI48())
+		})
+	}
 }
 
 // Test_NewMACAddressEUI48_WireValue verifies that the octets encode into

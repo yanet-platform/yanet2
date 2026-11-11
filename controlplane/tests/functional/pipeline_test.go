@@ -18,7 +18,7 @@ import (
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
+	cplain "github.com/yanet-platform/yanet2/devices/plain/bindings/go/cplain"
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
 )
@@ -114,7 +114,7 @@ func attach(t *testing.T, agent *ffi.Agent, input string) {
 	t.Helper()
 
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "egress"}))
-	_, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	_, err := cplain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: input, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "egress", Weight: 1}},
@@ -226,7 +226,7 @@ func Test_UpdateDevice_MissingPipeline_FailedPrecondition(t *testing.T) {
 	agent := newAgent(t, "device-dangling")
 
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "egress"}))
-	_, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	_, err := cplain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: "ghost", Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "egress", Weight: 1}},

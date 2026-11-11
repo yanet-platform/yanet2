@@ -2,57 +2,6 @@ package dataplaneut
 
 /*
 #cgo CFLAGS: -I../../../
-#cgo CFLAGS: -I../../../build/subprojects/dpdk/lib
-#cgo CFLAGS: -I../../../build/lib/dataplane_ut
-
-// Library search paths — modules, devices, and support libs.
-#cgo LDFLAGS: -L../../../build/modules/blackhole/dataplane
-#cgo LDFLAGS: -L../../../build/modules/l3b/dataplane
-#cgo LDFLAGS: -L../../../build/modules/decap/dataplane
-#cgo LDFLAGS: -L../../../build/modules/dscp/dataplane
-#cgo LDFLAGS: -L../../../build/modules/acl/dataplane
-#cgo LDFLAGS: -L../../../build/modules/fwstate/dataplane
-#cgo LDFLAGS: -L../../../build/objects/fwstate/api
-#cgo LDFLAGS: -L../../../build/objects/l3b/api
-#cgo LDFLAGS: -L../../../build/modules/forward/dataplane
-#cgo LDFLAGS: -L../../../build/modules/mirror/dataplane
-#cgo LDFLAGS: -L../../../build/modules/route/dataplane
-#cgo LDFLAGS: -L../../../build/modules/route-mpls/dataplane
-#cgo LDFLAGS: -L../../../build/modules/nat64/dataplane
-#cgo LDFLAGS: -L../../../build/modules/pdump/dataplane
-#cgo LDFLAGS: -L../../../build/modules/unrdup/dataplane
-#cgo LDFLAGS: -L../../../build/devices/plain/dataplane
-#cgo LDFLAGS: -L../../../build/devices/vlan/dataplane
-#cgo LDFLAGS: -L../../../build/lib/dataplane_ut
-#cgo LDFLAGS: -L../../../build/lib/dataplane/pipeline
-#cgo LDFLAGS: -L../../../build/lib/dataplane/module
-#cgo LDFLAGS: -L../../../build/lib/dataplane/worker
-#cgo LDFLAGS: -L../../../build/lib/dataplane/config
-#cgo LDFLAGS: -L../../../build/lib/dataplane/packet
-#cgo LDFLAGS: -L../../../build/lib/logging
-#cgo LDFLAGS: -L../../../build/lib/controlplane/agent
-#cgo LDFLAGS: -L../../../build/lib/controlplane/config
-#cgo LDFLAGS: -L../../../build/lib/counters
-#cgo LDFLAGS: -L../../../build/lib/errors
-#cgo LDFLAGS: -L../../../build/lib/filter
-#cgo LDFLAGS: -L../../../build/lib/fwstate
-#cgo LDFLAGS: -L../../../build/lib/utils
-
-// Link all static libs inside a group so the linker resolves circular
-// references between them (fwstate->acl, worker->pipeline, etc.).
-// fwstate depends on acl — acl must come first inside the group.
-#cgo LDFLAGS: -Wl,--start-group
-#cgo LDFLAGS: -L../../../build/lib/statemap
-#cgo LDFLAGS: -L../../../build/lib/l3state
-#cgo LDFLAGS: -lblackhole_dp -ll3b_dp -ldecap_dp -ldscp_dp -lacl_dp -lfwstate_dp -lfwstate_objects -ll3b_objects -lforward_dp -lmirror_dp -lroute_dp -lroute_mpls_dp -lnat64_dp -lpdump_dp -lunrdup_dp
-#cgo LDFLAGS: -lplain_dp -lvlan_dp
-#cgo LDFLAGS: -ldataplane_ut -lpipeline -lmodule -lworker_dp -lconfig_dp -lpacket
-#cgo LDFLAGS: -llogging -lagent -lconfig_cp -lcounters -lerrors -lfilter_compiler -lfwstate -lstatemap -ll3state -llib_utils
-#cgo LDFLAGS: -lagent_counters -lcounter_pattern -lrure
-#cgo LDFLAGS: -Wl,--end-group
-
-#cgo LDFLAGS: -lnuma
-#cgo LDFLAGS: -ldl
 
 #cgo LDFLAGS: -Wl,-E
 
@@ -135,6 +84,14 @@ keep_refs(void **ptrs) {
 
 	extern struct device *new_device_plain(void);
 	extern struct device *new_device_vlan(void);
+	extern struct device *new_device_vxlan(void);
+
+	extern struct object *new_object_fwstate_map_v4(void);
+	extern struct object *new_object_fwstate_map_v6(void);
+	extern struct object *new_object_l3b_session_table(void);
+	extern struct object *new_object_l3b_virtual_service(void);
+	extern struct object *new_object_ring(void);
+	extern struct object *new_object_route_fib(void);
 
 	static void *funcs[] = {
 		new_module_blackhole,
@@ -153,6 +110,14 @@ keep_refs(void **ptrs) {
 
 		new_device_plain,
 		new_device_vlan,
+		new_device_vxlan,
+
+		new_object_fwstate_map_v4,
+		new_object_fwstate_map_v6,
+		new_object_l3b_session_table,
+		new_object_l3b_virtual_service,
+		new_object_ring,
+		new_object_route_fib,
 	};
 
 	*ptrs = funcs;
@@ -160,6 +125,7 @@ keep_refs(void **ptrs) {
 */
 import "C"
 import (
+	"bytes"
 	"fmt"
 	"runtime"
 	"sync"
@@ -199,10 +165,14 @@ type Config struct {
 	Devices           []string
 	Modules           []string
 	DevicesToLoad     []string
-	// ObjectsToLoad registers standalone shared-memory object types (e.g. "fwstate_map_v4") in the dataplane config.
+	// ObjectsToLoad lists object types (e.g. "fwstate_map_v4") loaded through
+	// their constructors; a repeated name loads once.
+	//
+	// A name with no constructor in the test binary or a plugin fails
+	// harness creation.
 	ObjectsToLoad []string
-	// PluginDir is the directory scanned for module .so plugins. An empty
-	// value loads only the statically-linked built-ins.
+	// PluginDir is the directory scanned for .so plugins providing modules or
+	// object types. An empty value loads only the statically-linked built-ins.
 	PluginDir string
 	// Workers optionally assigns each worker's device and queue.
 	//
@@ -210,6 +180,13 @@ type Config struct {
 	// its index — the harness's long-standing single-device behavior.
 	// When set, its length must equal WorkerCount.
 	Workers []WorkerSpec
+	// ReclaimLostPackets makes the HandleSegmentedPackets* rounds free the
+	// input packets a round leaves on neither the output nor the drop list.
+	//
+	// For a module that forgets packets on purpose, which would leak them
+	// otherwise. Leave it off for a module that keeps packets beyond the
+	// round: it would free what the module still holds.
+	ReclaimLostPackets bool
 }
 
 // Result of one pipeline round.
@@ -226,6 +203,23 @@ type Result struct {
 type RawResult struct {
 	Output [][]byte
 	Drop   [][]byte
+	// OutputDescriptors and DropDescriptors hold the descriptor of each packet
+	// of Output and Drop, in the same order.
+	OutputDescriptors []PacketDescriptor
+	DropDescriptors   []PacketDescriptor
+}
+
+// PacketDescriptor is what the dataplane keeps about a packet beside its
+// bytes.
+type PacketDescriptor struct {
+	// NetworkOffset and TransportOffset are where the parser put the headers,
+	// from the start of the frame.
+	NetworkOffset   uint16
+	TransportOffset uint16
+	// RecircRemaining is what is left of the packet's recirculation budget.
+	RecircRemaining uint16
+	// Headroom is the bytes of headers a module can still prepend.
+	Headroom uint16
 }
 
 // Harness is a handle to an in-process dataplane harness.
@@ -241,6 +235,8 @@ type Harness struct {
 	// Registered worker count. Worker indices passed to run calls must
 	// stay below it.
 	workerCount int
+	// Whether a segmented round frees the input packets left on no list.
+	reclaimLostPackets bool
 }
 
 // NewHarness constructs a Harness from cfg.
@@ -270,7 +266,7 @@ func NewHarness(cfg Config) (*Harness, error) {
 	}
 
 	// The dp_worker->device_id field feeds the same per-device scheduling arrays
-	// as packet->tx_device_id in the real dataplane. An id outside the registered
+	// as packet->device_id in the real dataplane. An id outside the registered
 	// topology would corrupt memory on the C side.
 	for idx, worker := range cfg.Workers {
 		if int(worker.DeviceID) >= deviceCount {
@@ -355,7 +351,12 @@ func NewHarness(cfg Config) (*Harness, error) {
 		return nil, fmt.Errorf("failed to create dataplane harness: dataplane_ut_new returned NULL")
 	}
 
-	return &Harness{ptr: ptr, deviceCount: deviceCount, workerCount: int(cfg.WorkerCount)}, nil
+	return &Harness{
+		ptr:                ptr,
+		deviceCount:        deviceCount,
+		workerCount:        int(cfg.WorkerCount),
+		reclaimLostPackets: cfg.ReclaimLostPackets,
+	}, nil
 }
 
 // Free tears down the harness. Nil-safe.
@@ -508,13 +509,13 @@ func (m *Harness) AdvanceTime(d time.Duration) time.Time {
 
 // HandlePackets runs packets through worker 0 for one pipeline round.
 func (m *Harness) HandlePackets(packets ...gopacket.Packet) (*Result, error) {
-	return m.handlePackets(0, nil, packets...)
+	return m.handlePackets(0, 0, nil, packets...)
 }
 
 // HandlePacketsOnWorker runs packets through the given worker index for one
 // pipeline round.
 func (m *Harness) HandlePacketsOnWorker(worker int, packets ...gopacket.Packet) (*Result, error) {
-	return m.handlePackets(worker, nil, packets...)
+	return m.handlePackets(worker, 0, nil, packets...)
 }
 
 // HandlePacketsWithHashes runs one pipeline round with caller-supplied per-packet hash values.
@@ -535,7 +536,7 @@ func (m *Harness) HandlePacketsWithHashes(
 			len(packets),
 		)
 	}
-	return m.handlePackets(0, hashes, packets...)
+	return m.handlePackets(0, 0, hashes, packets...)
 }
 
 // HandleSegmentedPackets runs one pipeline round on worker 0 where each input
@@ -543,42 +544,85 @@ func (m *Harness) HandlePacketsWithHashes(
 // multi-segment mbuf. The result is returned unparsed so callers can inspect
 // packets that gopacket cannot decode.
 func (m *Harness) HandleSegmentedPackets(packets ...[][]byte) (*RawResult, error) {
-	return m.handleSegmentedPackets(0, 0, 0, packets...)
+	return m.handleSegmentedPackets(0, 0, nil, packets...)
+}
+
+// HandleSegmentedPacketsWithHeadroom runs one pipeline round on worker 0, as
+// HandleSegmentedPackets does, over packets left with less room for
+// prepended headers.
+//
+// headroom[i] is the bytes a module can still prepend to packets[i]. A packet
+// enters a real pipeline with the default headroom and loses it to every
+// header prepended on the way, so here a test shows what a module does when
+// its header no longer fits. headroom may be shorter than packets — entries
+// past len(headroom) keep the default. Returns an error if len(headroom) >
+// len(packets) or an entry exceeds the default.
+func (m *Harness) HandleSegmentedPacketsWithHeadroom(
+	headroom []uint16,
+	packets ...[][]byte,
+) (*RawResult, error) {
+	if len(headroom) > len(packets) {
+		return nil, fmt.Errorf(
+			"headroom length %d exceeds packets length %d",
+			len(headroom),
+			len(packets),
+		)
+	}
+	return m.handleSegmentedPackets(0, 0, headroom, packets...)
 }
 
 // HandleSegmentedPacketsOnDevice runs one pipeline round on the given worker
 // where each input packet is supplied as an ordered list of byte segments,
-// producing a chained multi-segment mbuf stamped with rxDeviceID as both its
-// ingress and egress device.
+// producing a chained multi-segment mbuf that enters the pipeline of the
+// given device.
 //
-// This mirrors the real dataplane's ingress stamp, where the polling
-// worker's own device becomes both the packet's rx and tx device (see
-// dataplane/worker.c), letting a test exercise device-keyed module behavior
-// instead of the harness default of device 0 on every packet.
+// This mirrors the real dataplane's ingress, where the polling worker
+// deposits its batch on its own device's entry (see dataplane/worker.c),
+// letting a test exercise device-keyed module behavior instead of the
+// harness default of device 0 on every packet. A packet the round later
+// routes elsewhere executes on that device's entry.
 func (m *Harness) HandleSegmentedPacketsOnDevice(
 	worker int,
-	rxDeviceID uint16,
+	deviceID uint16,
 	packets ...[][]byte,
 ) (*RawResult, error) {
 	// The round dispatch indexes per-device scheduling arrays by the
 	// packet device id, so an id outside the registered topology would
 	// corrupt memory on the C side.
-	if int(rxDeviceID) >= m.deviceCount {
+	if int(deviceID) >= m.deviceCount {
 		return nil, fmt.Errorf(
 			"device id %d exceeds topology device count %d",
-			rxDeviceID,
+			deviceID,
 			m.deviceCount,
 		)
 	}
+	return m.handleSegmentedPackets(worker, deviceID, nil, packets...)
+}
 
-	return m.handleSegmentedPackets(worker, rxDeviceID, rxDeviceID, packets...)
+// freeLostPackets frees the packets that are on neither list.
+func freeLostPackets(packets []*dataplane.Packet, lists ...*dataplane.PacketList) {
+	listed := map[*dataplane.Packet]struct{}{}
+	for _, list := range lists {
+		for packet := list.First(); packet != nil; packet = packet.Next() {
+			listed[packet] = struct{}{}
+		}
+	}
+	for _, packet := range packets {
+		if _, ok := listed[packet]; !ok {
+			packet.Free()
+		}
+	}
 }
 
 // handleSegmentedPackets is the shared implementation for the
 // HandleSegmentedPackets* variants.
+//
+// It builds the packets, optionally limits their headroom, then runs one
+// pipeline round on the given worker index.
 func (m *Harness) handleSegmentedPackets(
 	worker int,
-	txDeviceID, rxDeviceID uint16,
+	deviceID uint16,
+	headroom []uint16,
 	packets ...[][]byte,
 ) (*RawResult, error) {
 	// The dataplane_ut_run call indexes ut->dp_config->workers[worker] directly.
@@ -596,7 +640,7 @@ func (m *Harness) handleSegmentedPackets(
 
 	builtPackets := make([]*dataplane.Packet, 0, len(packets))
 	for idx := range packets {
-		pkt, err := dataplane.NewPacketFromSegments(packets[idx], txDeviceID, rxDeviceID)
+		pkt, err := dataplane.NewPacketFromSegments(packets[idx])
 		if err != nil {
 			return nil, fmt.Errorf("failed to build segmented packet at index %d: %w", idx, err)
 		}
@@ -606,12 +650,36 @@ func (m *Harness) handleSegmentedPackets(
 
 	packetList := dataplane.NewPacketList(&pinner, builtPackets)
 
+	if len(headroom) > 0 {
+		pinner.Pin(&headroom[0])
+		rc := C.dataplane_ut_limit_headroom(
+			(*C.struct_packet_list)(unsafe.Pointer(packetList)),
+			(*C.uint16_t)(unsafe.Pointer(&headroom[0])),
+			C.size_t(len(headroom)),
+		)
+		if rc != 0 {
+			packetList.Free()
+			return nil, fmt.Errorf("failed to limit packet headroom: rc=%d", rc)
+		}
+	}
+
 	pinner.Pin(m)
+
+	devices := make([]uint16, len(packets))
+	for idx := range devices {
+		devices[idx] = deviceID
+	}
+	devicesPtr := (*C.uint16_t)(nil)
+	if len(devices) > 0 {
+		devicesPtr = (*C.uint16_t)(&devices[0])
+		pinner.Pin(&devices[0])
+	}
 
 	var result C.struct_dataplane_ut_round_result
 	C.dataplane_ut_run(
 		m.ptr,
 		C.size_t(worker),
+		devicesPtr,
 		(*C.struct_packet_list)(unsafe.Pointer(packetList)),
 		&result,
 	)
@@ -621,6 +689,10 @@ func (m *Harness) handleSegmentedPackets(
 
 	output := (*dataplane.PacketList)(unsafe.Pointer(&result.output))
 	drop := (*dataplane.PacketList)(unsafe.Pointer(&result.drop))
+
+	if m.reclaimLostPackets {
+		freeLostPackets(builtPackets, output, drop)
+	}
 
 	rawBytes := func(list *dataplane.PacketList) [][]byte {
 		data := list.Data()
@@ -633,9 +705,25 @@ func (m *Harness) handleSegmentedPackets(
 		return out
 	}
 
+	descriptors := func(list *dataplane.PacketList) []PacketDescriptor {
+		out := make([]PacketDescriptor, 0, list.Count())
+		for packet := list.First(); packet != nil; packet = packet.Next() {
+			cPacket := (*C.struct_packet)(unsafe.Pointer(packet))
+			out = append(out, PacketDescriptor{
+				NetworkOffset:   uint16(cPacket.network_header.offset),
+				TransportOffset: uint16(cPacket.transport_header.offset),
+				RecircRemaining: uint16(cPacket.recirc_remaining),
+				Headroom:        uint16(C.dataplane_ut_headroom(cPacket)),
+			})
+		}
+		return out
+	}
+
 	return &RawResult{
-		Output: rawBytes(output),
-		Drop:   rawBytes(drop),
+		Output:            rawBytes(output),
+		Drop:              rawBytes(drop),
+		OutputDescriptors: descriptors(output),
+		DropDescriptors:   descriptors(drop),
 	}, nil
 }
 
@@ -645,6 +733,7 @@ func (m *Harness) handleSegmentedPackets(
 // then runs one pipeline round on the given worker index.
 func (m *Harness) handlePackets(
 	worker int,
+	deviceID uint16,
 	hashes []uint32,
 	packets ...gopacket.Packet,
 ) (*Result, error) {
@@ -665,9 +754,7 @@ func (m *Harness) handlePackets(
 	data := make([]dataplane.PacketData, 0, len(payloads))
 	for idx := range payloads {
 		data = append(data, dataplane.PacketData{
-			Payload:    payloads[idx],
-			TxDeviceId: 0,
-			RxDeviceId: 0,
+			Payload: payloads[idx],
 		})
 	}
 
@@ -687,10 +774,21 @@ func (m *Harness) handlePackets(
 
 	pinner.Pin(m)
 
+	devices := make([]uint16, len(packets))
+	for idx := range devices {
+		devices[idx] = deviceID
+	}
+	devicesPtr := (*C.uint16_t)(nil)
+	if len(devices) > 0 {
+		devicesPtr = (*C.uint16_t)(&devices[0])
+		pinner.Pin(&devices[0])
+	}
+
 	var result C.struct_dataplane_ut_round_result
 	C.dataplane_ut_run(
 		m.ptr,
 		C.size_t(worker),
+		devicesPtr,
 		(*C.struct_packet_list)(unsafe.Pointer(packetList)),
 		&result,
 	)
@@ -698,27 +796,84 @@ func (m *Harness) handlePackets(
 
 	pinner.Pin(&result)
 
-	output := (*dataplane.PacketList)(unsafe.Pointer(&result.output))
-	drop := (*dataplane.PacketList)(unsafe.Pointer(&result.drop))
+	output, err := parsePackets((*dataplane.PacketList)(unsafe.Pointer(&result.output)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse output packets: %w", err)
+	}
+	drop, err := parsePackets((*dataplane.PacketList)(unsafe.Pointer(&result.drop)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse dropped packets: %w", err)
+	}
 
 	return &Result{
-		Output: output.Info(),
-		Drop:   drop.Info(),
+		Output: output,
+		Drop:   drop,
 	}, nil
 }
 
+// parsePackets parses a copy of every packet, so the result outlives the
+// packet list that the round frees.
+func parsePackets(list *dataplane.PacketList) ([]*framework.PacketInfo, error) {
+	data := list.Data()
+	packets := make([]*framework.PacketInfo, 0, len(data))
+	for idx := range data {
+		packet, err := framework.NewPacketParser().ParsePacket(bytes.Clone(data[idx].Payload))
+		if err != nil {
+			return nil, fmt.Errorf("packet %d: %w", idx, err)
+		}
+		packets = append(packets, packet)
+	}
+
+	return packets, nil
+}
+
 // warnUnoptimizedOnce guards the non-optimized build warning so it prints
-// at most once per process regardless of how many benchmarks call Bench.
+// at most once per process regardless of how many benchmarks run.
 var warnUnoptimizedOnce sync.Once
+
+// warnUnoptimized warns, once per process, that benchmark numbers of a
+// build without optimizations or with sanitizers are not representative.
+func warnUnoptimized(b *testing.B) {
+	warnUnoptimizedOnce.Do(func() {
+		if C.dataplane_ut_build_optimized() == 0 {
+			b.Logf("WARNING: dataplane built without optimizations (or with sanitizers); benchmark numbers are NOT representative — rebuild meson with buildtype=debugoptimized or release and b_sanitize=none.")
+		}
+	})
+}
+
+// reportThroughput reports the rate of b.N rounds over packets carrying
+// totalBytes in total, in Gbit/s and Mpps.
+func reportThroughput(b *testing.B, totalBytes int64, packets int) {
+	elapsed := b.Elapsed()
+	if elapsed > 0 {
+		bits := float64(totalBytes) * float64(b.N) * 8
+		handled := float64(packets) * float64(b.N)
+		b.ReportMetric(bits/elapsed.Seconds()/1e9, "Gbit/s")
+		b.ReportMetric(handled/elapsed.Seconds()/1e6, "Mpps")
+	}
+}
 
 // benchOptions configures a Bench run.
 type benchOptions struct {
-	ResetPayload bool
-	DeviceIDs    []uint16
+	ResetPayload  bool
+	ResetGeometry bool
+	DeviceIDs     []uint16
 }
 
 func newBenchOptions() *benchOptions {
 	return &benchOptions{}
+}
+
+// reset returns what the rounds of the run put back into every packet.
+func (m *benchOptions) reset() C.int {
+	reset := C.int(0)
+	if m.ResetPayload {
+		reset |= C.DATAPLANE_UT_RESET_PAYLOAD
+	}
+	if m.ResetGeometry {
+		reset |= C.DATAPLANE_UT_RESET_GEOMETRY
+	}
+	return reset
 }
 
 // BenchOption customizes a Bench run.
@@ -729,15 +884,29 @@ type BenchOption func(*benchOptions)
 //
 // Required for modules that rewrite packet contents in place, such as
 // route decrementing TTL — costs one payload copy per packet per round.
-// Only the bytes are restored, so geometry-changing modules stay out of
-// scope.
+// Only the bytes are restored: a module that moves headers needs
+// WithGeometryReset as well.
 func WithPayloadReset() BenchOption {
 	return func(opts *benchOptions) {
 		opts.ResetPayload = true
 	}
 }
 
-// WithDeviceIDs assigns per-packet rx/tx device ids before the run.
+// WithGeometryReset restores the data offset and the lengths of every
+// packet's first segment to their captured state between rounds.
+//
+// Required for modules that prepend or strip headers, such as an
+// encapsulation. They overwrite bytes of the frame as well, so the run
+// takes WithPayloadReset beside it. A module that changes the segment
+// chain stays out of scope.
+func WithGeometryReset() BenchOption {
+	return func(opts *benchOptions) {
+		opts.ResetGeometry = true
+	}
+}
+
+// WithDeviceIDs assigns each packet's executing device id before the
+// run.
 //
 // ids[i] is written into packets[i]. Packets past len(ids) keep device 0.
 // The round dispatch then splits the burst into per-device fronts the way
@@ -747,6 +916,33 @@ func WithDeviceIDs(ids []uint16) BenchOption {
 	return func(opts *benchOptions) {
 		opts.DeviceIDs = ids
 	}
+}
+
+// benchDevices returns the executing device id of each of count packets:
+// the ids the options give, then device 0.
+//
+// The round dispatch indexes per-device scheduling arrays by the packet
+// device id, so an id outside the registered topology would corrupt memory
+// on the C side and fails the benchmark here.
+func (m *Harness) benchDevices(
+	b *testing.B, opts *benchOptions, count int,
+) []uint16 {
+	b.Helper()
+
+	for idx, deviceID := range opts.DeviceIDs {
+		if int(deviceID) >= m.deviceCount {
+			b.Fatalf(
+				"device id %d at packet %d exceeds topology device count %d",
+				deviceID,
+				idx,
+				m.deviceCount,
+			)
+		}
+	}
+
+	devices := make([]uint16, count)
+	copy(devices, opts.DeviceIDs)
+	return devices
 }
 
 // Bench runs b.N pipeline rounds over the given packets on worker 0,
@@ -765,38 +961,17 @@ func (m *Harness) Bench(
 		o(opts)
 	}
 
-	warnUnoptimizedOnce.Do(func() {
-		if C.dataplane_ut_build_optimized() == 0 {
-			b.Logf("WARNING: dataplane built without optimizations (or with sanitizers); benchmark numbers are NOT representative — rebuild meson with buildtype=debugoptimized or release and b_sanitize=none.")
-		}
-	})
+	warnUnoptimized(b)
 
 	pinner := runtime.Pinner{}
 	defer pinner.Unpin()
 
-	// The round dispatch indexes per-device scheduling arrays by the
-	// packet device id, so an id outside the registered topology would
-	// corrupt memory on the C side.
-	for idx, deviceID := range opts.DeviceIDs {
-		if int(deviceID) >= m.deviceCount {
-			b.Fatalf(
-				"device id %d at packet %d exceeds topology device count %d",
-				deviceID,
-				idx,
-				m.deviceCount,
-			)
-		}
-	}
+	devices := m.benchDevices(b, opts, len(packets))
 
 	payloads := xpacket.PacketsGoPayload(packets...)
 	data := make([]dataplane.PacketData, 0, len(payloads))
 	for idx := range payloads {
-		packetData := dataplane.PacketData{Payload: payloads[idx]}
-		if idx < len(opts.DeviceIDs) {
-			packetData.TxDeviceId = opts.DeviceIDs[idx]
-			packetData.RxDeviceId = opts.DeviceIDs[idx]
-		}
-		data = append(data, packetData)
+		data = append(data, dataplane.PacketData{Payload: payloads[idx]})
 	}
 
 	packetList, err := dataplane.NewPacketListFromData(&pinner, data...)
@@ -813,31 +988,26 @@ func (m *Harness) Bench(
 	}
 	numPkts := len(payloads)
 
-	reset := C.int(0)
-	if opts.ResetPayload {
-		reset = C.int(1)
+	var devicesPtr *C.uint16_t
+	if len(devices) > 0 {
+		devicesPtr = (*C.uint16_t)(&devices[0])
 	}
 
 	b.ResetTimer()
 	rc := C.dataplane_ut_run_rounds(
 		m.ptr,
 		C.size_t(0),
+		devicesPtr,
 		(*C.struct_packet_list)(unsafe.Pointer(packetList)),
 		C.uint64_t(b.N),
-		reset,
+		opts.reset(),
 	)
 	b.StopTimer()
 	if rc != 0 {
 		b.Fatalf("failed to recycle benchmark packets: rc=%d", rc)
 	}
 
-	elapsed := b.Elapsed()
-	if elapsed > 0 {
-		bits := float64(totalBytes) * float64(b.N) * 8
-		pkts := float64(numPkts) * float64(b.N)
-		b.ReportMetric(bits/elapsed.Seconds()/1e9, "Gbit/s")
-		b.ReportMetric(pkts/elapsed.Seconds()/1e6, "Mpps")
-	}
+	reportThroughput(b, totalBytes, numPkts)
 }
 
 // toCStringArray converts a Go string slice to a slice of *C.char values and

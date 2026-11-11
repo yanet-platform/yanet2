@@ -14,6 +14,7 @@
 #include <stdint.h>
 
 #include "classify.h"
+#include "rule_table.h"
 
 /*
  * Joins the classes of two classifier fields through one value table.
@@ -34,6 +35,45 @@ classify_joint_lookup(
 		classes[idx] = value_table_get(
 			joint, left_classes[idx], right_classes[idx]
 		);
+	}
+}
+
+// Resolves the first-match rule indices out of an immutable joint of
+// rule rows: one directory read and one row read per packet.
+static inline void
+classify_rule_table_lookup(
+	const struct rule_table *joint,
+	const uint32_t *left_classes,
+	const uint32_t *right_classes,
+	uint32_t *rules,
+	uint32_t count
+) {
+	for (uint32_t idx = 0; idx < count; ++idx) {
+		rules[idx] = rule_table_get(
+			joint, left_classes[idx], right_classes[idx]
+		);
+	}
+}
+
+/*
+ * Joins one constant class of a classifier field with the classes of
+ * another through one value table.
+ *
+ * Some attributes resolve once for a whole execution context — the
+ * device attribute of a module, for one — so one side of the join is a
+ * single class for the entire batch.
+ */
+static inline void
+classify_joint_lookup_const(
+	const struct value_table *joint,
+	uint32_t left_class,
+	const uint32_t *right_classes,
+	uint32_t *classes,
+	uint32_t count
+) {
+	for (uint32_t idx = 0; idx < count; ++idx) {
+		classes[idx] =
+			value_table_get(joint, left_class, right_classes[idx]);
 	}
 }
 
@@ -78,5 +118,41 @@ classify_resolve(
 	for (uint32_t idx = 0; idx < count; ++idx) {
 		results[idx] =
 			vline_get((struct vline *)rule_map, classes[idx]);
+	}
+}
+
+/*
+ * Merges a second decoding into the results, keeping the first match
+ * by rule order: each decoder resolves its own projection to the
+ * first rule covering the packet, so the global first match is the
+ * smaller of the two rule indices. An invalid mark on either side
+ * leaves the other untouched.
+ */
+static inline void
+classify_results_min(uint32_t *results, const uint32_t *extra, uint32_t count) {
+	for (uint32_t idx = 0; idx < count; ++idx) {
+		if (extra[idx] != FILTER_RULE_INVALID &&
+		    (results[idx] == FILTER_RULE_INVALID ||
+		     extra[idx] < results[idx])) {
+			results[idx] = extra[idx];
+		}
+	}
+}
+
+/*
+ * Translates the classes of one side into the compacted identifiers
+ * of a joint built over coverage classes: uncovered classes read the
+ * zero row, which the joint leaves at the empty value.
+ */
+static inline void
+classify_compact_classes(
+	const struct vline *compact_map,
+	const uint32_t *classes,
+	uint32_t *compacted,
+	uint32_t count
+) {
+	for (uint32_t idx = 0; idx < count; ++idx) {
+		compacted[idx] =
+			vline_get((struct vline *)compact_map, classes[idx]);
 	}
 }

@@ -26,7 +26,7 @@ func sourceIsSet(source xnetip.Network) bool {
 	return addr.IsValid() && !addr.IsUnspecified()
 }
 
-func configFromProto(request *unrduppb.Config) (*config, error) {
+func configFromProto(request *unrduppb.Config) (*ModuleConfig, error) {
 	sourceV4, err := sourceV4FromProto(request.GetSourceV4())
 	if err != nil {
 		return nil, err
@@ -65,7 +65,7 @@ func configFromProto(request *unrduppb.Config) (*config, error) {
 		services = append(services, converted)
 	}
 
-	return &config{
+	return &ModuleConfig{
 		SourceV4: sourceV4,
 		SourceV6: sourceV6,
 		Services: services,
@@ -116,15 +116,8 @@ func serviceFromProto(
 	}
 
 	endpoints := make([]cunrdup.Endpoint, 0, len(service.GetEndpoints()))
-	seenEndpoints := map[cunrdup.Endpoint]struct{}{}
 	for _, endpoint := range service.GetEndpoints() {
 		converted := endpointFromProto(endpoint)
-
-		if _, ok := seenEndpoints[converted]; ok {
-			return cunrdup.Service{}, fmt.Errorf("endpoint %d is listed twice", converted.Port)
-		}
-		seenEndpoints[converted] = struct{}{}
-
 		endpoints = append(endpoints, converted)
 	}
 
@@ -194,7 +187,7 @@ func checkSource(source xnetip.Network) (xnetip.Network, error) {
 	return source, nil
 }
 
-func (m *config) ToProto() *unrduppb.Config {
+func (m *ModuleConfig) ToProto() *unrduppb.Config {
 	services := make([]*unrduppb.Service, 0, len(m.Services))
 	for idx := range m.Services {
 		services = append(services, serviceToProto(&m.Services[idx]))

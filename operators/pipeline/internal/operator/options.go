@@ -2,8 +2,6 @@ package operator
 
 import (
 	"go.uber.org/zap"
-
-	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 )
 
 type options struct {
@@ -26,26 +24,13 @@ func WithLog(log *zap.Logger) Option {
 	}
 }
 
-// noopMetricsCollector is the default MetricsCollector wired into
-// service options when the caller does not pass a real one.
-type noopMetricsCollector struct{}
-
-func (noopMetricsCollector) Collect() []*commonpb.Metric {
-	return nil
-}
-
 type serviceOptions struct {
-	// Metrics supplies snapshots for the metrics service.
-	//
-	// It defaults to an empty collector when no sink is configured.
-	Metrics MetricsCollector
-	Log     *zap.Logger
+	Log *zap.Logger
 }
 
 func newServiceOptions() *serviceOptions {
 	return &serviceOptions{
-		Metrics: noopMetricsCollector{},
-		Log:     zap.NewNop(),
+		Log: zap.NewNop(),
 	}
 }
 
@@ -59,31 +44,32 @@ func WithServiceLog(log *zap.Logger) ServiceOption {
 	}
 }
 
-// WithServiceMetrics attaches the metrics sink that GetMetrics serves
-// from. When unset, GetMetrics returns an empty response.
-func WithServiceMetrics(m MetricsCollector) ServiceOption {
-	return func(o *serviceOptions) {
-		o.Metrics = m
-	}
-}
-
 // noopGatewayActuatorMetricsObserver is the default
 // GatewayActuatorMetricsObserver wired into gateway-actuator options
 // when no metrics sink is attached.
 type noopGatewayActuatorMetricsObserver struct{}
 
-func (noopGatewayActuatorMetricsObserver) OnApplyCompleted(error)          {}
 func (noopGatewayActuatorMetricsObserver) OnResourceUpdated(string, error) {}
 func (noopGatewayActuatorMetricsObserver) OnGC(int, int, error)            {}
 
+// noopGatewayActuatorStageObserver is the default
+// GatewayActuatorStageObserver wired into gateway-actuator options when no
+// stage queue listens.
+type noopGatewayActuatorStageObserver struct{}
+
+func (noopGatewayActuatorStageObserver) OnStageApplying(string, *StageConfig)       {}
+func (noopGatewayActuatorStageObserver) OnStageApplied(string, *StageConfig, error) {}
+
 type gatewayActuatorOptions struct {
 	Metrics GatewayActuatorMetricsObserver
+	Stages  GatewayActuatorStageObserver
 	Log     *zap.Logger
 }
 
 func newGatewayActuatorOptions() *gatewayActuatorOptions {
 	return &gatewayActuatorOptions{
 		Metrics: noopGatewayActuatorMetricsObserver{},
+		Stages:  noopGatewayActuatorStageObserver{},
 		Log:     zap.NewNop(),
 	}
 }
@@ -102,5 +88,13 @@ func WithGatewayActuatorLog(log *zap.Logger) GatewayActuatorOption {
 func WithGatewayActuatorMetrics(metrics GatewayActuatorMetricsObserver) GatewayActuatorOption {
 	return func(o *gatewayActuatorOptions) {
 		o.Metrics = metrics
+	}
+}
+
+// WithGatewayActuatorStageObserver attaches the observer of the stages the
+// gateway applies.
+func WithGatewayActuatorStageObserver(stages GatewayActuatorStageObserver) GatewayActuatorOption {
+	return func(o *gatewayActuatorOptions) {
+		o.Stages = stages
 	}
 }

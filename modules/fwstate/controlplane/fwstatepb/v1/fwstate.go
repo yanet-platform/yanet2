@@ -1,18 +1,20 @@
 package fwstatepb
 
 import (
-	"errors"
 	"fmt"
 	"net/netip"
+	"time"
 
-	"github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
 	fwstatemappb "github.com/yanet-platform/yanet2/objects/fwstate/controlplane/fwstatemappb/v1"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 )
 
 const (
-	// maxSyncPort is the highest value accepted for either sync port,
+	// TTL48Max is the largest timeout value storable in the 48-bit field.
+	TTL48Max uint64 = (1 << 48) - 1
+
+	// maxSyncPort is the highest value accepted for a sync port,
 	// matching the width of the C-side uint16 port fields.
 	maxSyncPort uint32 = 65535
 
@@ -34,7 +36,40 @@ const (
 
 	// maxSyncMTU matches the width of the C-side uint16 sync_mtu field.
 	maxSyncMTU uint32 = 65535
+
+	// defaultTCPTimeout is the timeout of every TCP state in a new config.
+	// It mirrors the C FW_STATE_DEFAULT_TIMEOUT.
+	defaultTCPTimeout = uint64(120 * time.Second)
+
+	// defaultUDPTimeout and defaultTimeout are the UDP and fallback
+	// timeouts of a new config.
+	defaultUDPTimeout = uint64(30 * time.Second)
+	defaultTimeout    = uint64(16 * time.Second)
+
+	// defaultSyncMTU is the sync MTU of a new config, which a zero sync MTU
+	// also selects. It mirrors the C FWSTATE_SYNC_DEFAULT_MTU.
+	defaultSyncMTU uint32 = 1500
 )
+
+// DefaultSyncConfig returns the sync settings a new module config starts
+// with.
+//
+// It names no endpoint and carries the production timeouts and sync MTU,
+// with every scalar present, as the module reports a fresh config. The
+// values mirror the defaults the C module installs, so a consumer can build
+// a complete config on them without the native bindings.
+func DefaultSyncConfig() *SyncConfig {
+	return &SyncConfig{
+		TcpSynAck:           new(defaultTCPTimeout),
+		TcpSyn:              new(defaultTCPTimeout),
+		TcpFin:              new(defaultTCPTimeout),
+		Tcp:                 new(defaultTCPTimeout),
+		Udp:                 new(defaultUDPTimeout),
+		Default:             new(defaultTimeout),
+		SyncSuppressTimeout: new(uint64(0)),
+		SyncMtu:             new(defaultSyncMTU),
+	}
+}
 
 // Validate checks the values an update carries.
 //
@@ -104,13 +139,9 @@ func (m *SyncConfig) ValidateTimeouts() error {
 
 	var invalid []string
 	for _, field := range fields {
-		if field.Value > cfwstate.TTL48Max {
-			invalid = append(invalid, field.Name)
-			continue
-		}
 		// Guard against uint64 wraparound: compare the delta instead of
 		// summing, so a huge suppress window cannot slip past the limit.
-		if suppress > cfwstate.TTL48Max-field.Value {
+		if suppress > TTL48Max || field.Value > TTL48Max-suppress {
 			invalid = append(
 				invalid,
 				fmt.Sprintf("%s+sync_suppress_timeout", field.Name),
@@ -125,134 +156,162 @@ func (m *SyncConfig) ValidateTimeouts() error {
 	return nil
 }
 
-// ValidateFields rejects sync values an update states in a form the config
-// cannot store.
-//
-// A zero port clears its endpoint, so it cannot come with an address for
-// that endpoint.
-func (m *SyncConfig) ValidateFields() error {
-	if m == nil {
-		return nil
+// validateIPv6Addr checks one endpoint address: the sync wire format is
+// IPv6 only - an IPv4 address, including the IPv4-mapped IPv6 form,
+// cannot name an endpoint.
+func validateIPv6Addr(field string, addr *commonpb.IPv6Address) error {
+	if addr == nil {
+		return fmt.Errorf("%s must be an IPv6 address", field)
 	}
-
-	if portMulticast := m.GetPortMulticast(); portMulticast > maxSyncPort {
-		return fmt.Errorf(
-			"port_multicast %d exceeds maximum allowed value %d",
-			portMulticast, maxSyncPort,
-		)
+	if parsed := addr.ToAddr(); parsed.Is4In6() {
+		return fmt.Errorf("%s must not be an IPv4-mapped IPv6 address", field)
 	}
-	if portUnicast := m.GetPortUnicast(); portUnicast > maxSyncPort {
-		return fmt.Errorf(
-			"port_unicast %d exceeds maximum allowed value %d",
-			portUnicast, maxSyncPort,
-		)
-	}
-	if err := validateAddrWidth("src_addr", m.GetSrcAddr().GetAddr()); err != nil {
-		return err
-	}
-	if err := validateAddrWidth("dst_addr_multicast", m.GetDstAddrMulticast().GetAddr()); err != nil {
-		return err
-	}
-	if err := validateAddrWidth("dst_addr_unicast", m.GetDstAddrUnicast().GetAddr()); err != nil {
-		return err
-	}
-	if dstEther := m.GetDstEther(); dstEther != nil && dstEther.GetAddr()>>48 != 0 {
-		return fmt.Errorf("dst_ether must be an EUI-48 address")
-	}
-
-	if m.PortMulticast != nil && m.GetPortMulticast() == 0 && len(m.GetDstAddrMulticast().GetAddr()) != 0 {
-		return errors.New("dst_addr_multicast cannot be combined with a zero port_multicast")
-	}
-	if m.PortUnicast != nil && m.GetPortUnicast() == 0 && len(m.GetDstAddrUnicast().GetAddr()) != 0 {
-		return errors.New("dst_addr_unicast cannot be combined with a zero port_unicast")
-	}
-
 	return nil
 }
 
-// ValidateMerged reports whether the settings are installable as they stand,
-// which is what the request merged over the config it replaces must be.
+// validateSyncEndpoint checks one update-carried endpoint's form.
+func validateSyncEndpoint(idx int, endpoint *SyncEndpoint) error {
+	if err := validateIPv6Addr(
+		fmt.Sprintf("endpoints[%d].src_addr", idx),
+		endpoint.GetSrcAddr(),
+	); err != nil {
+		return err
+	}
+	// RFC 4291 forbids a multicast source; the destination may name a
+	// multicast group, the source stamps the router itself.
+	if src := endpoint.GetSrcAddr().ToAddr(); src.IsMulticast() {
+		return fmt.Errorf(
+			"endpoints[%d].src_addr must not be a multicast address",
+			idx,
+		)
+	}
+	if err := validateIPv6Addr(
+		fmt.Sprintf("endpoints[%d].dst_addr", idx),
+		endpoint.GetDstAddr(),
+	); err != nil {
+		return err
+	}
+	if port := endpoint.GetPort(); port == 0 || port > maxSyncPort {
+		return fmt.Errorf(
+			"endpoints[%d].port must be in 1..%d, got %d",
+			idx, maxSyncPort, port,
+		)
+	}
+	return nil
+}
+
+// validateSyncListener checks one update-carried listener's form.
+func validateSyncListener(idx int, listener *SyncListenEndpoint) error {
+	if err := validateIPv6Addr(
+		fmt.Sprintf("listeners[%d].dst_addr", idx),
+		listener.GetDstAddr(),
+	); err != nil {
+		return err
+	}
+	if port := listener.GetPort(); port == 0 || port > maxSyncPort {
+		return fmt.Errorf(
+			"listeners[%d].port must be in 1..%d, got %d",
+			idx, maxSyncPort, port,
+		)
+	}
+	return nil
+}
+
+// validateEndpointLists checks the form of the lists an update states.
+func (m *SyncConfig) validateEndpointLists() error {
+	for idx, endpoint := range m.GetEndpoints() {
+		if err := validateSyncEndpoint(idx, endpoint); err != nil {
+			return err
+		}
+	}
+	for idx, listener := range m.GetListeners() {
+		if err := validateSyncListener(idx, listener); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ValidateFields rejects sync values an update states in a form the config
+// cannot store.
 //
-// Synchronization is optional. A config naming no destination leaves external
-// traffic in ordinary processing, while locally stashed events are applied
-// without emission. Naming only part of an endpoint is refused because it
-// cannot be matched or emitted safely.
-func (m *SyncConfig) ValidateMerged() error {
+// Every endpoint an update carries must be complete: full-width source and
+// destination addresses and a port in 1..65535.
+func (m *SyncConfig) ValidateFields() error {
 	if m == nil {
 		return nil
-	}
-
-	if err := validateAddrWidth("src_addr", m.GetSrcAddr().GetAddr()); err != nil {
-		return err
-	}
-	if err := validateAddrWidth("dst_addr_multicast", m.GetDstAddrMulticast().GetAddr()); err != nil {
-		return err
-	}
-	if err := validateAddrWidth("dst_addr_unicast", m.GetDstAddrUnicast().GetAddr()); err != nil {
-		return err
-	}
-	if dstEther := m.GetDstEther(); dstEther != nil && dstEther.GetAddr()>>48 != 0 {
-		return fmt.Errorf("dst_ether must be an EUI-48 address")
 	}
 
 	if err := validateSyncMTU(m.GetSyncMtu()); err != nil {
 		return err
 	}
 
-	srcAddrSet := isAddrSet(m.GetSrcAddr().GetAddr())
-	multicastAddrSet := isAddrSet(m.GetDstAddrMulticast().GetAddr())
-	multicastPortSet := m.GetPortMulticast() != 0
-	unicastAddrSet := isAddrSet(m.GetDstAddrUnicast().GetAddr())
-	unicastPortSet := m.GetPortUnicast() != 0
+	timeoutFields := []struct {
+		Name  string
+		Value uint64
+	}{
+		{"tcp_syn_ack", m.GetTcpSynAck()},
+		{"tcp_syn", m.GetTcpSyn()},
+		{"tcp_fin", m.GetTcpFin()},
+		{"tcp", m.GetTcp()},
+		{"udp", m.GetUdp()},
+		{"default", m.GetDefault()},
+		{"sync_suppress_timeout", m.GetSyncSuppressTimeout()},
+	}
+	for _, field := range timeoutFields {
+		if field.Value > TTL48Max {
+			return fmt.Errorf(
+				"%s %d exceeds maximum allowed value %d",
+				field.Name, field.Value, TTL48Max,
+			)
+		}
+	}
 
-	// A zero address and zero port mean that endpoint is disabled. This is
-	// also the representation produced for a config created without sync
-	// settings, so external traffic remains ordinary while locally stashed
-	// events are applied without emission.
-	multicastConfigured := multicastAddrSet || multicastPortSet
-	unicastConfigured := unicastAddrSet || unicastPortSet
-	if !multicastConfigured && !unicastConfigured {
-		return m.ValidateTimeouts()
+	return m.validateEndpointLists()
+}
+
+// ValidateMerged reports whether the settings are installable as they stand,
+// which is what the request merged over the config it replaces must be.
+//
+// Both lists are optional. A config naming no endpoint emits nothing while
+// locally stashed events are still applied, and a config naming no listener
+// leaves external traffic in ordinary processing. An entry naming only part
+// of its fields is refused because it cannot be matched or emitted safely.
+func (m *SyncConfig) ValidateMerged() error {
+	if m == nil {
+		return nil
+	}
+
+	if err := m.validateEndpointLists(); err != nil {
+		return err
 	}
 
 	var missing []string
-	if !srcAddrSet {
-		missing = append(missing, "src_addr")
-	}
-	if dstEther := m.GetDstEther(); dstEther == nil || dstEther.GetAddr()&macAddrMask == 0 {
-		missing = append(missing, "dst_ether")
-	}
-	if multicastConfigured {
-		if !multicastAddrSet {
-			missing = append(missing, "dst_addr_multicast")
+	for idx, endpoint := range m.GetEndpoints() {
+		if !isIPv6AddrSet(endpoint.GetSrcAddr()) {
+			missing = append(missing, fmt.Sprintf("endpoints[%d].src_addr", idx))
 		}
-		if !multicastPortSet {
-			missing = append(missing, "port_multicast")
+		if !isIPv6AddrSet(endpoint.GetDstAddr()) {
+			missing = append(missing, fmt.Sprintf("endpoints[%d].dst_addr", idx))
+		}
+		if endpoint.GetPort() == 0 {
+			missing = append(missing, fmt.Sprintf("endpoints[%d].port", idx))
 		}
 	}
-	if unicastConfigured {
-		if !unicastAddrSet {
-			missing = append(missing, "dst_addr_unicast")
+	for idx, listener := range m.GetListeners() {
+		if !isIPv6AddrSet(listener.GetDstAddr()) {
+			missing = append(missing, fmt.Sprintf("listeners[%d].dst_addr", idx))
 		}
-		if !unicastPortSet {
-			missing = append(missing, "port_unicast")
+		if listener.GetPort() == 0 {
+			missing = append(missing, fmt.Sprintf("listeners[%d].port", idx))
 		}
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("missing required sync config fields: %v", missing)
 	}
 
-	if unicastAddrSet {
-		unicast := netip.AddrFrom16([16]byte(m.GetDstAddrUnicast().GetAddr()))
-		if unicast.IsMulticast() {
-			return fmt.Errorf("dst_addr_unicast must not be a multicast address")
-		}
-	}
-
 	return m.ValidateTimeouts()
 }
-
-const macAddrMask uint64 = (1 << 48) - 1
 
 // validateSyncMTU accepts zero, which selects the default, and any value
 // that holds one frame and fits the C field.
@@ -269,22 +328,16 @@ func validateSyncMTU(mtu uint32) error {
 	return nil
 }
 
-// validateAddrWidth accepts empty addresses and full-width IPv6 addresses.
-func validateAddrWidth(field string, addr []byte) error {
-	if len(addr) == 0 || len(addr) == syncAddrLen {
-		return nil
-	}
-
-	return fmt.Errorf(
-		"%s must be a %d-byte IPv6 address, got %d bytes",
-		field, syncAddrLen, len(addr),
-	)
-}
-
 // isAddrSet reports whether an address is stored at full width and is
 // not the all-zero one that stands for unset.
 func isAddrSet(addr []byte) bool {
 	return len(addr) == syncAddrLen && !isAllZeroBytes(addr)
+}
+
+// isIPv6AddrSet reports whether an endpoint address is present and is
+// not the zero address that stands for unset.
+func isIPv6AddrSet(addr *commonpb.IPv6Address) bool {
+	return addr != nil && addr.ToAddr() != netip.MustParseAddr("::")
 }
 
 // isAllZeroBytes reports whether every byte of the slice is zero.

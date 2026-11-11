@@ -1,0 +1,1 @@
+../../.agents/conventions/go.md

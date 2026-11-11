@@ -116,6 +116,27 @@ packet_front_drop(struct packet_front *packet_front, struct packet *packet) {
 	packet_front->drop_bytes += packet->data_len;
 }
 
+// Collects up to the given number of packets from the front's input
+// list without consuming them.
+//
+// A handler working through an unbounded front in fixed batches
+// collects a batch, classifies it, and then consumes exactly that many
+// packets from the head; the remainder stays listed for the next batch.
+static inline uint32_t
+packet_front_collect_input(
+	struct packet_front *packet_front,
+	struct packet **packets,
+	uint32_t capacity
+) {
+	uint32_t count = 0;
+	for (struct packet *packet = packet_list_first(&packet_front->input);
+	     packet != NULL && count < capacity;
+	     packet = packet->next) {
+		packets[count++] = packet;
+	}
+	return count;
+}
+
 // Inter-module handoff: move output into input for the next module. Stage
 // entry is by packet_front_input, not a switch.
 static inline void

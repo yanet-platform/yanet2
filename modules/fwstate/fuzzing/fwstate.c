@@ -13,7 +13,6 @@
 
 #include "lib/counters/counters.h"
 #include "lib/dataplane/time/clock.h"
-#include "lib/fwstate/config.h"
 #include "lib/fwstate/stash.h"
 #include "lib/fwstate/types.h"
 #include "lib/statemap/fwmap.h"
@@ -105,10 +104,31 @@ fwstate_fuzz_cleanup(void) {
 
 	struct fwstate_module_config *config =
 		(struct fwstate_module_config *)fuzz_params.cp_module;
-	struct memory_context *ctx = &config->cp_module.memory_context;
+	struct memory_context *ctx = &config->cp_module.entity.memory_context;
 
 	fwstate_fuzz_free_chain(&fuzz_map_v4.table, ctx);
 	fwstate_fuzz_free_chain(&fuzz_map_v6.table, ctx);
+
+	struct fwstate_sync_endpoint *endpoints =
+		ADDR_OF(&config->sync_config.endpoints);
+	if (endpoints != NULL) {
+		memory_bfree(
+			ctx,
+			endpoints,
+			sizeof(struct fwstate_sync_endpoint) *
+				config->sync_config.endpoint_count
+		);
+	}
+	struct fwstate_sync_listen_endpoint *listeners =
+		ADDR_OF(&config->sync_config.listeners);
+	if (listeners != NULL) {
+		memory_bfree(
+			ctx,
+			listeners,
+			sizeof(struct fwstate_sync_listen_endpoint) *
+				config->sync_config.listener_count
+		);
+	}
 
 	struct counter_storage *counter_storage =
 		ADDR_OF(&fuzz_params.module_ectx.counter_storage);
@@ -139,13 +159,13 @@ fwstate_test_config(struct cp_module **cp_module) {
 		"fwstate_test",
 		sizeof(config->cp_module.name));
 	memory_context_init_from(
-		&config->cp_module.memory_context,
+		&config->cp_module.entity.memory_context,
 		&fuzz_params.mctx,
 		"fwstate_test"
 	);
 
 	config->cp_module.dp_module_idx = 0;
-	config->cp_module.agent = NULL;
+	config->cp_module.entity.agent = NULL;
 
 	// The fwstate handler unconditionally resolves per-worker counter
 	// addresses via counter_get_address(), so a valid counter_registry and
@@ -154,8 +174,7 @@ fwstate_test_config(struct cp_module **cp_module) {
 	// [packets].
 	if (counter_registry_init(
 		    &config->cp_module.counter_registry,
-		    &config->cp_module.memory_context,
-		    0
+		    &config->cp_module.entity.memory_context
 	    )) {
 		goto error_config;
 	}
@@ -246,7 +265,7 @@ fwstate_test_config(struct cp_module **cp_module) {
 	if (fwtable_insert_layer_cp(
 		    &fuzz_map_v4.table,
 		    &fw4config,
-		    &config->cp_module.memory_context
+		    &config->cp_module.entity.memory_context
 	    )) {
 		goto error_storage;
 	}
@@ -268,7 +287,7 @@ fwstate_test_config(struct cp_module **cp_module) {
 	if (fwtable_insert_layer_cp(
 		    &fuzz_map_v6.table,
 		    &fw6config,
-		    &config->cp_module.memory_context
+		    &config->cp_module.entity.memory_context
 	    )) {
 		goto error_table_v4;
 	}
@@ -324,12 +343,50 @@ fwstate_test_config(struct cp_module **cp_module) {
 		&fuzz_params.module_ectx, &config->cp_module
 	);
 
-	// Configure sync settings
+	// Configure sync settings: one multicast emission endpoint and one
+	// listener on the same address, so the wrapper packets are received
+	// and the stash consumer emits.
+	uint8_t src_addr[16] = {
+		0xfd, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
+	};
 	uint8_t multicast_addr[16] = {
 		0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01
 	};
-	memcpy(config->sync_config.dst_addr_multicast, multicast_addr, 16);
-	config->sync_config.port_multicast = rte_cpu_to_be_16(9999);
+	struct fwstate_sync_endpoint *endpoint =
+		(struct fwstate_sync_endpoint *)memory_balloc(
+			&fuzz_params.mctx, sizeof(struct fwstate_sync_endpoint)
+		);
+	struct fwstate_sync_listen_endpoint *listener =
+		(struct fwstate_sync_listen_endpoint *)memory_balloc(
+			&fuzz_params.mctx,
+			sizeof(struct fwstate_sync_listen_endpoint)
+		);
+	if (endpoint == NULL || listener == NULL) {
+		if (endpoint != NULL) {
+			memory_bfree(
+				&fuzz_params.mctx,
+				endpoint,
+				sizeof(struct fwstate_sync_endpoint)
+			);
+		}
+		if (listener != NULL) {
+			memory_bfree(
+				&fuzz_params.mctx,
+				listener,
+				sizeof(struct fwstate_sync_listen_endpoint)
+			);
+		}
+		return -ENOMEM;
+	}
+	memcpy(endpoint->src_addr, src_addr, 16);
+	memcpy(endpoint->dst_addr, multicast_addr, 16);
+	endpoint->port = rte_cpu_to_be_16(9999);
+	SET_OFFSET_OF(&config->sync_config.endpoints, endpoint);
+	config->sync_config.endpoint_count = 1;
+	memcpy(listener->dst_addr, multicast_addr, 16);
+	listener->port = rte_cpu_to_be_16(9999);
+	SET_OFFSET_OF(&config->sync_config.listeners, listener);
+	config->sync_config.listener_count = 1;
 
 	// Set timeouts
 	config->sync_config.timeouts.tcp_syn_ack = 120000000000ULL;
@@ -349,7 +406,7 @@ fwstate_test_config(struct cp_module **cp_module) {
 
 error_table_v4:
 	fwstate_fuzz_free_chain(
-		&fuzz_map_v4.table, &config->cp_module.memory_context
+		&fuzz_map_v4.table, &config->cp_module.entity.memory_context
 	);
 
 error_storage:
@@ -506,8 +563,6 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) { // NOLINT
 				break;
 			}
 			memcpy(&record->frame, frame, sizeof(record->frame));
-			record->rx_device_id = frame->fib;
-			record->tx_device_id = frame->proto & 1;
 			record->status = FWSTATE_SYNC_RECORD_PENDING;
 			fwstate_stash_slot_commit(slot);
 		}

@@ -2,21 +2,17 @@ test_deps = [
   lib_common_dep,
   lib_packet_dp_dep,
   lib_filter_compiler_dep,
-  lib_filter_query_dep,
   lib_lib_utils_dep,
+  lib_errors_dep,
+  lib_logging_dep,
   libdpdk_inc_dep,
-  libdpdk_dep,
 ]
 
 # test basic ports
 test_filter_basic_ports = executable(
   'basic_ports',
   ['basic_ports.c'],
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
   dependencies: test_deps,
-  link_language: 'c',
-  include_directories: include_directories('..'),
 )
 test('basic_ports', test_filter_basic_ports, suite: ['filter'])
 
@@ -24,9 +20,7 @@ test('basic_ports', test_filter_basic_ports, suite: ['filter'])
 test_filter_basic_net4 = executable('basic_net4',
 ['basic_net4.c'],
   c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
   dependencies: test_deps,
-  link_language: 'c'
 )
 test('basic_net4', test_filter_basic_net4, suite: ['filter'])
 
@@ -34,9 +28,7 @@ test('basic_net4', test_filter_basic_net4, suite: ['filter'])
 test_filter_basic_net6 = executable('basic_net6',
 ['basic_net6.c'],
   c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
   dependencies: test_deps,
-  link_language: 'c'
 )
 test('basic_net6', test_filter_basic_net6, suite: ['filter'])
 
@@ -45,9 +37,7 @@ test_filter_corner = executable(
     'corner', 
   ['corner.c'],
   c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
   dependencies: test_deps,
-  link_language: 'c'
 )
 test('corner', test_filter_corner, suite: ['filter'])
 
@@ -56,18 +46,14 @@ test_filter_net4_ports = executable(
     'net4_ports', 
   ['net4_ports.c'],
   c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
   dependencies: test_deps,
-  link_language: 'c'
 )
 test('net4_ports', test_filter_net4_ports, suite: ['filter'])
 
 test_filter_net6_overlap = executable('net6_overlap',
   ['net6_overlap.c'],
   c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
   dependencies: test_deps,
-  link_language: 'c'
 )
 test('net6_overlap', test_filter_net6_overlap, suite: ['filter'])
 
@@ -75,9 +61,7 @@ test('net6_overlap', test_filter_net6_overlap, suite: ['filter'])
 test_filter_memory = executable('memory',
   ['memory.c'],
   c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
   dependencies: test_deps,
-  link_language: 'c'
 )
 test('memory', test_filter_memory, suite: ['filter'])
 
@@ -85,9 +69,13 @@ test('memory', test_filter_memory, suite: ['filter'])
 test_filter_context_names = executable('context_names',
   ['context_names.c'],
   c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
-  dependencies: test_deps,
-  link_language: 'c'
+  dependencies: [
+    lib_common_dep,
+    lib_filter_compiler_dep,
+    lib_errors_dep,
+    lib_logging_dep,
+    libdpdk_inc_dep,
+  ],
 )
 test('context_names', test_filter_context_names, suite: ['filter'])
 
@@ -95,9 +83,7 @@ test('context_names', test_filter_context_names, suite: ['filter'])
 test_filter_vlan = executable('basic_vlan',
   ['basic_vlan.c'],
   c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
   dependencies: test_deps,
-  link_language: 'c'
 )
 test('basic_vlan', test_filter_vlan, suite: ['filter'])
 
@@ -105,39 +91,28 @@ test('basic_vlan', test_filter_vlan, suite: ['filter'])
 filter_macros = executable(
   'macros',
   ['macros.c'],
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
   dependencies: test_deps,
-  link_language: 'c',
-  include_directories: include_directories('..'),
 )
 test('macros', filter_macros, suite: ['filter'])
 
 basic_proto_range = executable('basic_proto_range',
   ['basic_proto_range.c'],
   c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
   dependencies: test_deps,
-  link_language: 'c'
 )
 test('basic_proto_range', basic_proto_range, suite: ['filter'])
 
 subdir('shm')
 
+# Run by hand only: each maps about 11 GiB of hugepages (some 5,500 2 MiB pages).
 executable('bench_net4',
   ['bench_net4.c'], 
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
   dependencies: test_deps,
-  link_language: 'c'
 )
 
 executable('bench_net6',
   ['bench_net6.c'],
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
   dependencies: test_deps,
-  link_language: 'c'
 )
 
 # Allocation-failure injection sweep. The compiler sources are recompiled
@@ -149,28 +124,23 @@ oom_shim_c_args = yanet_test_c_args + [
 
 filter_compiler_oom_shim = static_library(
   'filter_compiler_oom_shim',
-  compiler_sources,
+  filter_compiler_sources,
   c_args: oom_shim_c_args,
-  link_args: yanet_link_args,
-  include_directories: include_directories('..'),
   dependencies: [lib_common_dep, lib_errors_dep],
   install: false,
 )
 
 filter_compiler_oom_shim_dep = declare_dependency(
   link_with: filter_compiler_oom_shim,
-  include_directories: include_directories('..'),
-  dependencies: [lib_errors_dep],
+  dependencies: [lib_common_dep, lib_errors_dep],
 )
 
 oom_sweep_deps = [
   lib_common_dep,
-  lib_packet_dp_dep,
   filter_compiler_oom_shim_dep,
-  lib_filter_query_dep,
-  lib_lib_utils_dep,
+  lib_errors_dep,
+  lib_logging_dep,
   libdpdk_inc_dep,
-  libdpdk_dep,
 ]
 
 # The sweep test itself inlines part of the compile path (filter_init is a
@@ -178,8 +148,6 @@ oom_sweep_deps = [
 test_filter_oom_sweep = executable('oom_sweep',
   ['oom_sweep.c'],
   c_args: oom_shim_c_args,
-  link_args: yanet_link_args,
   dependencies: oom_sweep_deps,
-  link_language: 'c'
 )
 test('oom_sweep', test_filter_oom_sweep, suite: ['filter'])

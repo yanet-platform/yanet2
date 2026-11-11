@@ -89,14 +89,6 @@ log_disable_id(enum log_id lid) {
 }
 
 inline void
-log_reset(void) {
-	for (uint64_t idx = 0; idx < sizeof(loggers) / sizeof(struct logger);
-	     idx++) {
-		__atomic_store_n(&loggers[idx].enable, 0, __ATOMIC_RELAXED);
-	}
-}
-
-inline void
 log_enable_name(const char *log_name) {
 	enum log_id lid = LOG_ID_MAX;
 	for (uint64_t idx = 0; idx < sizeof(loggers) / sizeof(struct logger);

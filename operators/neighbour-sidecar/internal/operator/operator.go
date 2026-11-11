@@ -1,7 +1,6 @@
 package operator
 
 import (
-	"context"
 	"fmt"
 
 	"go.uber.org/zap"
@@ -43,10 +42,6 @@ func NewOperator(cfg *Config, options ...Option) (*operator.Operator[neigh.Nexth
 	if err != nil {
 		return nil, fmt.Errorf("failed to create neighbour source: %w", err)
 	}
-	publisher, err := NewPublisher(cfg)
-	if err != nil {
-		return nil, err
-	}
 	tracker := readiness.NewTracker(
 		[]readiness.ScopeSpec{{
 			Name:                        publicationScope,
@@ -55,29 +50,28 @@ func NewOperator(cfg *Config, options ...Option) (*operator.Operator[neigh.Nexth
 		readiness.WithDrainLatch(),
 		readiness.WithLog(opts.Log),
 	)
-	source := NewNeighbourSource(table, tracker)
+	publisher, err := NewPublisher(cfg, tracker, WithPublisherLog(opts.Log))
+	if err != nil {
+		return nil, err
+	}
+	// Every committed discovery is published whole; nothing is published
+	// before the first one.
+	desired := operator.NewLatest[neigh.NexthopCacheView]()
 	monitor := neigh.NewNeighMonitor(table, kernel,
 		neigh.WithLog(opts.Log),
 		neigh.WithLinkMap(cfg.LinkMap),
 		neigh.WithUpdateInterval(cfg.UpdateInterval.Unwrap()),
-		neigh.WithOnHealthy(source.OnHealthy),
+		neigh.WithOnHealthy(func() { desired.Publish(table.View()) }),
 	)
+	// The gateways are alternative transports to one receiver, so the
+	// publisher is the only target, and it reports its readiness itself.
 	return operator.NewOperator(
-		publisher,
-		source,
+		[]operator.Target[neigh.NexthopCacheView]{{Name: "receiver", Actuator: publisher}},
+		desired,
 		operator.WithLog(opts.Log),
 		operator.WithReconcile(cfg.Reconcile),
-		operator.WithGRPCServer(
-			cfg.Server,
-			operator.NewReadinessServiceRegistrar("neighbour_sidecar", tracker),
-		),
-		operator.WithWorkers(
-			monitor.Run,
-			func(ctx context.Context) error {
-				<-ctx.Done()
-				tracker.Drain()
-				return nil
-			},
-		),
+		operator.WithGRPCServer(cfg.Server),
+		operator.WithReadiness("neighbour_sidecar", tracker),
+		operator.WithWorkers(monitor.Run),
 	), nil
 }

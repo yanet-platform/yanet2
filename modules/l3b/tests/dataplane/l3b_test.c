@@ -17,6 +17,7 @@
 #include <netinet/in.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -170,10 +171,17 @@ register_object_types(struct dp_config *dp_config) {
 		return -1;
 	}
 
+	// Zero the slots so the commit hook and prepared size start unset,
+	// like a constructor-allocated descriptor would.
+	memset(dp_objects, 0, sizeof(struct dp_object) * count);
+
 	for (size_t idx = 0; idx < count; ++idx) {
-		strtcpy(dp_objects[idx].name,
-			types[idx],
-			sizeof(dp_objects[idx].name));
+		snprintf(
+			dp_objects[idx].name,
+			sizeof(dp_objects[idx].name),
+			"%s",
+			types[idx]
+		);
 	}
 	SET_OFFSET_OF(&dp_config->dp_objects, dp_objects);
 	dp_config->object_count = count;
@@ -224,7 +232,7 @@ publish_service(void) {
 		cp_config_unlock(cp_config);
 		return -1;
 	}
-	SET_OFFSET_OF(&cp_config->cp_config_gen, config_gen);
+	cp_config_publish_gen(cp_config, config_gen);
 	cp_config_unlock(cp_config);
 
 	dp_config_mark_ready(dp_config);
@@ -276,6 +284,12 @@ publish_service(void) {
 	service_object = l3b_virtual_service_create(&config, &err);
 	if (service_object == NULL) {
 		log_error(&err, "failed to create the virtual service");
+		return -1;
+	}
+	if (l3b_virtual_service_set_real_server_state(
+		    service_object, 0, true, &err
+	    )) {
+		log_error(&err, "failed to enable the real server");
 		return -1;
 	}
 
@@ -505,11 +519,6 @@ test_pinned_path_counts_through_second_mapping(void) {
 
 int
 main(void) {
-	// The module-level destination queries stay in the shared header, but
-	// the narrow service entry point tested here never consults them.
-	(void)l3b_destination_filter_ip4;
-	(void)l3b_destination_filter_ip6;
-
 	log_enable_name("info");
 
 	LOG(INFO, "=== Starting l3b shm test suite ===");

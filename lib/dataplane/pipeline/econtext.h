@@ -22,6 +22,26 @@ struct cp_config_gen;
 struct cp_config_counter_storage_registry;
 struct dp_config;
 
+struct device_entry_ectx;
+
+// One routing target of a module device, joining the generation-global
+// device id with the target device's entries so the packet hot path
+// routes with a single table load.
+//
+// A device absent from the generation keeps the invalid id and null
+// entries; a present device always carries both entries, because its
+// context is created as an input/output pair. The entry fields follow
+// the offset/absolute pairing of the context structs: linking fills the
+// offset twins, the publishing process derives the absolute ones, and
+// the packet hot path loads only those.
+struct module_device_target {
+	uint16_t device_id;
+	struct device_entry_ectx *input_entry;
+	struct device_entry_ectx *output_entry;
+	struct device_entry_ectx *abs_input_entry;
+	struct device_entry_ectx *abs_output_entry;
+};
+
 struct module_ectx {
 	module_handler handler;
 	struct cp_module *cp_module;
@@ -88,25 +108,32 @@ struct module_ectx {
 	struct config_gen_ectx *abs_config_gen_ectx;
 	uint16_t packet_recirc_limit;
 
-	uint64_t mc_index_size;
-	// Offset pointer to the module-to-config device index table,
-	// owned by the control plane.
-	uint64_t *mc_index;
-	// The same table, as an absolute address for the packet hot path.
-	//
-	// The publishing process copies it from the relative field before
-	// the context is released to workers; it is zero until then.
-	uint64_t *abs_mc_index;
+	// The module device id of the device whose entry this context
+	// executes under, resolved when the context is linked. Packets
+	// placement the module executes on occupies this slot, so
+	// per-device classification reads it instead of a per-packet
+	// device. Zero when the placement's device names no device of
+	// the module — the classifiers' fallback id.
+	uint32_t module_device_id;
 
-	uint64_t cm_index_size;
-	// Offset pointer to the config-to-module device index table,
-	// owned by the control plane.
-	uint64_t *cm_index;
+	// The registry device of the pipeline this context executes in.
+	//
+	// Stamped at creation from the owning device, independent of the
+	// module's own device table: a module without device constraints
+	// still learns here which device's pipeline placed it.
+	uint16_t registry_device_id;
+
+	uint64_t device_target_count;
+	// Offset pointer to the module's per-device routing targets,
+	// parallel to the module's device list, owned by the control
+	// plane.
+	struct module_device_target *device_targets;
 	// The same table, as an absolute address for the packet hot path.
 	//
-	// The publishing process copies it from the relative field before
-	// the context is released to workers; it is zero until then.
-	uint64_t *abs_cm_index;
+	// The publishing process copies it from the relative field above
+	// before the context is released to workers; it is zero until
+	// then.
+	struct module_device_target *abs_device_targets;
 
 	// One entry per object this module links to. Each entry owns a counter
 	// storage spawned from the linked object's link counter registry and
@@ -171,9 +198,25 @@ module_ectx_counter_storage(struct module_ectx *module_ectx, uint64_t index) {
 	return module_ectx->abs_runtime_counter_storages_base[index];
 }
 
-static inline uint64_t
-module_ectx_encode_device(struct module_ectx *module_ectx, uint64_t index) {
-	return module_ectx->abs_mc_index[index];
+// Return the routing target of a module device, or NULL when the index
+// is out of range or the device is absent from this generation.
+static inline struct module_device_target *
+module_ectx_device_target(struct module_ectx *module_ectx, uint64_t index) {
+	if (index >= module_ectx->device_target_count) {
+		return NULL;
+	}
+	struct module_device_target *target =
+		module_ectx->abs_device_targets + index;
+	if (target->device_id == (uint16_t)-1) {
+		return NULL;
+	}
+	return target;
+}
+
+// The registry device id of the pipeline this context executes in.
+static inline uint16_t
+module_ectx_global_device_id(struct module_ectx *module_ectx) {
+	return module_ectx->registry_device_id;
 }
 
 struct chain_ectx {
@@ -320,6 +363,12 @@ struct device_entry_ectx {
 	struct rlist schedule_node;
 	uint8_t schedule_list;
 	uint8_t direction;
+	// The device this entry belongs to, as an index into the
+	// generation's device table.
+	//
+	// The output-entry terminal resolves the entry's whole output
+	// through the egress backing table by this index.
+	uint16_t device_id;
 	// Offset pointer to the owning device, kept by the control plane.
 	struct device_ectx *device_ectx;
 	// The same device, as an absolute address for the packet hot
@@ -402,6 +451,12 @@ struct device_ectx {
 	// until then, and the packet hot path loads them directly.
 	struct device_entry_ectx *abs_input_pipelines;
 	struct device_entry_ectx *abs_output_pipelines;
+	// The device's index in the generation's device table.
+	//
+	// Module contexts created under this device stamp it as their
+	// placement, so handlers resolve the pipeline they execute in
+	// without per-packet state.
+	uint16_t device_id;
 };
 
 // Per-worker execution context for a cp_object.
@@ -420,6 +475,24 @@ struct object_ectx {
 	// then.
 	struct cp_object *abs_cp_object;
 	struct counter_storage *counter_storage;
+	// Offset pointer to the object's private per-context buffer,
+	// allocated zeroed by the control plane when the object declares a
+	// size. Opaque to the control plane; filled by the object's
+	// execution-context commit handler during the absolutization pass.
+	void *object_prepared;
+	// The same buffer, as an absolute address for the packet hot
+	// path.
+	//
+	// The publishing process copies it from the relative field above
+	// before the context is released to workers; it is zero until
+	// then.
+	void *abs_object_prepared;
+
+	// Index of the worker this context belongs to, fixed when the
+	// context is built. A commit hook preparing worker-indexed state
+	// selects its slot through it; objects have no generation back
+	// reference to recover the index from, unlike module contexts.
+	uint64_t worker_idx;
 };
 
 struct config_gen_ectx {
@@ -472,6 +545,53 @@ struct config_gen_ectx {
 	// stay available after the tail is turned into absolute ones.
 	struct device_ectx **device_ptrs;
 	uint64_t device_count;
+	// The registry slot of each physical device.
+	//
+	// Resolved at build by reversing the egress backing table, so the
+	// receive stamp — which starts from the assignment's physical
+	// device — names a registry device without assuming any alignment
+	// between the two device namespaces. A device no registry entry
+	// backs reads as the no-port sentinel, and receive on it then
+	// drops into the absent-device path.
+	uint64_t backing_registry_count;
+	uint16_t *backing_registry;
+	// The same table, as an absolute address for the packet hot path.
+	//
+	// The publishing process copies it from the relative field above
+	// before the context is released to workers; it is zero until
+	// then.
+	uint16_t *abs_backing_registry;
+	// Registry slot to physical transmit device, resolved once at
+	// build by name against the port topology.
+	//
+	// The no-port sentinel marks a device whose egress has no port
+	// counterpart. The write stage resolves every outgoing packet
+	// through this table, so registry order never has to agree with
+	// topology order for a packet to reach the right port.
+	uint16_t *egress_backing;
+	// The same table, as an absolute address for the packet hot path.
+	//
+	// The publishing process copies it from the relative field above
+	// before the context is released to workers; it is zero until
+	// then.
+	uint16_t *abs_egress_backing;
+
+	// Transmit output buckets, one per physical device, filled by the
+	// output-entry terminals as they decide each packet's egress.
+	//
+	// A packet lands in the bucket of the port it will leave through,
+	// so the write stage drains whole buckets — its own device into the
+	// local burst, every other into that device's pipes — without
+	// reading a per-packet destination again. The lists are round
+	// scratch like the round front: empty at the end of every round.
+	uint32_t tx_bucket_count;
+	struct packet_list *tx_buckets;
+	// The same array, as an absolute address for the packet hot path.
+	//
+	// The publishing process copies it from the relative field above
+	// before the context is released to workers; it is zero until
+	// then.
+	struct packet_list *abs_tx_buckets;
 	// The generation's devices, as absolute addresses for the packet
 	// hot path.
 	//
@@ -490,3 +610,26 @@ struct config_gen_ectx {
 // dereferencing it.
 struct dp_config *
 module_ectx_dp_config(struct module_ectx *module_ectx);
+
+static inline struct device_ectx *
+config_gen_ectx_get_device(
+	struct config_gen_ectx *config_gen_ectx, uint64_t index
+) {
+	if (index >= config_gen_ectx->device_count) {
+		return NULL;
+	}
+	return config_gen_ectx->devices[index];
+}
+
+// Return the object execution context installed at the given object index, or
+// NULL when the index is out of range or no context was created for that slot.
+static inline struct object_ectx *
+config_gen_ectx_get_object(
+	struct config_gen_ectx *config_gen_ectx, uint64_t index
+) {
+	if (index >= config_gen_ectx->object_count) {
+		return NULL;
+	}
+	struct object_ectx **objects = ADDR_OF(&config_gen_ectx->objects);
+	return ADDR_OF(objects + index);
+}

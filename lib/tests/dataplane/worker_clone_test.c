@@ -9,6 +9,7 @@
 #include "lib/controlplane/config/econtext.h"
 #include "lib/dataplane/config/zone.h"
 #include "lib/dataplane/packet/packet.h"
+#include "lib/dataplane/pipeline/schedule.h"
 #include "lib/dataplane/worker/worker.h"
 #include "lib/dataplane_ut/mempool.h"
 #include "lib/logging/log.h"
@@ -77,12 +78,6 @@ assert_clone_correct(
 		src->fragment_offset,
 		"fragment_offset preserved"
 	);
-	TEST_ASSERT_EQUAL(
-		clone->rx_device_id, src->rx_device_id, "rx_device_id preserved"
-	);
-	TEST_ASSERT_EQUAL(
-		clone->tx_device_id, src->tx_device_id, "tx_device_id preserved"
-	);
 	TEST_ASSERT_NULL(clone->next, "clone chain pointer must be NULL");
 	TEST_ASSERT(
 		clone->mbuf->buf_addr != src->mbuf->buf_addr,
@@ -99,8 +94,6 @@ set_metadata(struct packet *p, uint32_t hash, uint16_t flags, uint16_t vlan) {
 	p->recirc_remaining = 5;
 	p->recirc_initialized = 1;
 	p->fragment_offset = 42;
-	p->rx_device_id = 7;
-	p->tx_device_id = 3;
 }
 
 static int
@@ -195,12 +188,6 @@ test_packet_alloc_resets_metadata(struct rte_mempool *pool) {
 	TEST_ASSERT_NOT_NULL(packet, "packet allocation must succeed");
 	TEST_ASSERT_NULL(packet->next, "new packet chain pointer must be NULL");
 	TEST_ASSERT_EQUAL(packet->hash, 0, "new packet hash must be zero");
-	TEST_ASSERT_EQUAL(
-		packet->rx_device_id, 0, "new packet rx device must be zero"
-	);
-	TEST_ASSERT_EQUAL(
-		packet->tx_device_id, 0, "new packet tx device must be zero"
-	);
 	TEST_ASSERT_EQUAL(packet->flags, 0, "new packet flags must be zero");
 	TEST_ASSERT_EQUAL(packet->vlan, 0, "new packet vlan must be zero");
 	TEST_ASSERT_EQUAL(

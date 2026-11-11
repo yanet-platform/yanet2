@@ -8,14 +8,18 @@ import (
 	"github.com/cenkalti/backoff/v5"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/common/go/xgrpc"
-	"github.com/yanet-platform/yanet2/controlplane/gateway"
+	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
 type gatewayRegRunnerOptions struct {
-	Interval time.Duration
-	Log      *zap.Logger
+	Interval    time.Duration
+	DialOptions []grpc.DialOption
+	Log         *zap.Logger
 }
 
 func newGatewayRegRunnerOptions() *gatewayRegRunnerOptions {
@@ -32,16 +36,28 @@ type GatewayRegRunner struct {
 	services []string
 	interval time.Duration
 	endpoint string
-	log      *zap.Logger
+	// dialOptions follow the defaults of every gateway connection.
+	dialOptions []grpc.DialOption
+	log         *zap.Logger
 }
 
-// GatewayRegRunnerOption configures NewGatewayRegistrationRunner.
+// GatewayRegRunnerOption configures NewGatewayRegRunner.
 type GatewayRegRunnerOption func(*gatewayRegRunnerOptions)
 
 // WithGatewayRegInterval sets the period between registration attempts.
+//
+// A non-positive period falls back to the default.
 func WithGatewayRegInterval(d time.Duration) GatewayRegRunnerOption {
 	return func(o *gatewayRegRunnerOptions) {
 		o.Interval = d
+	}
+}
+
+// WithGatewayRegDialOptions adds gRPC dial options to every gateway
+// connection of the runner; they cannot replace its transport credentials.
+func WithGatewayRegDialOptions(options ...grpc.DialOption) GatewayRegRunnerOption {
+	return func(o *gatewayRegRunnerOptions) {
+		o.DialOptions = append(o.DialOptions, options...)
 	}
 }
 
@@ -65,12 +81,21 @@ func NewGatewayRegRunner(
 		o(opts)
 	}
 
+	if opts.Interval <= 0 {
+		opts.Log.Warn("non-positive gateway registration interval, falling back to default",
+			zap.Duration("configured", opts.Interval),
+			zap.Duration("default", DefaultRegisterInterval),
+		)
+		opts.Interval = DefaultRegisterInterval
+	}
+
 	return &GatewayRegRunner{
-		gateways: gateways,
-		services: services,
-		interval: opts.Interval,
-		endpoint: endpoint,
-		log:      opts.Log,
+		gateways:    gateways,
+		services:    services,
+		interval:    opts.Interval,
+		endpoint:    endpoint,
+		dialOptions: opts.DialOptions,
+		log:         opts.Log,
 	}
 }
 
@@ -83,10 +108,6 @@ func (m *GatewayRegRunner) Run(ctx context.Context) error {
 		return nil
 	}
 
-	shortBackOff := func() backoff.BackOff {
-		return backoff.NewExponentialBackOff()
-	}
-
 	wg, ctx := errgroup.WithContext(ctx)
 	for _, cfg := range m.gateways {
 		log := m.log.With(
@@ -94,39 +115,154 @@ func (m *GatewayRegRunner) Run(ctx context.Context) error {
 			zap.String("gateway_endpoint", cfg.Endpoint.Unwrap()),
 		)
 
-		creds, err := xgrpc.ClientCredentials(cfg.TLS)
+		conn, err := DialGatewayWith(cfg, m.dialOptions, xgrpc.WithCertificateStoreLog(log))
 		if err != nil {
-			return fmt.Errorf("failed to build transport credentials for gateway %q: %w", cfg.Name, err)
+			return err
 		}
 
-		registrar, err := gateway.NewGatewayRegistrar(
-			cfg.Endpoint.Unwrap(),
-			creds,
-			gateway.WithBackOff(shortBackOff),
-			gateway.WithMaxElapsedTime(m.interval/2),
-			gateway.WithRegistrarLog(log),
-		)
-		if err != nil {
-			return fmt.Errorf("failed to create gateway registrar for %q: %w", cfg.Name, err)
+		heartbeat := &gatewayHeartbeat{
+			client:          ynpb.NewGatewayClient(conn),
+			gatewayEndpoint: cfg.Endpoint.Unwrap(),
+			services:        m.services,
+			backendEndpoint: m.endpoint,
+			interval:        m.interval,
+			log:             log,
 		}
 
 		wg.Go(func() error {
 			defer func() {
-				if err := registrar.Close(); err != nil {
-					log.Warn("failed to close gateway registrar", zap.Error(err))
+				if err := conn.Close(); err != nil {
+					log.Warn("failed to close gateway connection", zap.Error(err))
 				}
 			}()
 
-			loop := gateway.NewRegistrationLoop(
-				registrar,
-				m.services,
-				m.endpoint,
-				gateway.WithLoopInterval(m.interval),
-				gateway.WithLoopLog(log),
-			)
-			return loop.Run(ctx)
+			return heartbeat.Run(ctx)
 		})
 	}
 
 	return wg.Wait()
+}
+
+// gatewayRegisterer is the part of the gateway API the heartbeat calls.
+type gatewayRegisterer interface {
+	Register(
+		ctx context.Context,
+		request *ynpb.RegisterRequest,
+		options ...grpc.CallOption,
+	) (*ynpb.RegisterResponse, error)
+}
+
+// gatewayHeartbeat keeps a service set registered in one gateway.
+type gatewayHeartbeat struct {
+	client          gatewayRegisterer
+	gatewayEndpoint string
+	services        []string
+	backendEndpoint string
+	interval        time.Duration
+	log             *zap.Logger
+}
+
+// Run registers the services, waits interval and repeats until ctx is
+// cancelled.
+func (m *gatewayHeartbeat) Run(ctx context.Context) error {
+	log := m.log.With(zap.Strings("services", m.services))
+	defer log.Info("stopped gateway registration heartbeat")
+
+	for {
+		if err := m.registerServices(ctx); err != nil {
+			log.Warn("failed to register in gateway", zap.Error(err))
+		}
+
+		timer := time.NewTimer(m.interval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+// registerServices registers every service in the gateway concurrently.
+//
+// The attempt lasts half the interval at most, so a gateway that never
+// answers cannot hold the heartbeat past it.
+func (m *gatewayHeartbeat) registerServices(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, m.interval/2)
+	defer cancel()
+
+	wg, ctx := errgroup.WithContext(ctx)
+	for _, name := range m.services {
+		wg.Go(func() error {
+			return m.registerService(ctx, name)
+		})
+	}
+
+	return wg.Wait()
+}
+
+// registerService registers one service at the advertised endpoint,
+// retrying transient failures until the attempt ends.
+func (m *gatewayHeartbeat) registerService(ctx context.Context, name string) error {
+	request := &ynpb.RegisterRequest{
+		Backend: &ynpb.BackendDesc{
+			Name:     name,
+			Endpoint: m.backendEndpoint,
+		},
+	}
+
+	_, err := backoff.Retry(ctx, func() (*ynpb.RegisterResponse, error) {
+		return m.register(ctx, request)
+	})
+
+	return err
+}
+
+// register makes one registration call and marks a rejection that no retry
+// can fix as permanent.
+func (m *gatewayHeartbeat) register(
+	ctx context.Context,
+	request *ynpb.RegisterRequest,
+) (*ynpb.RegisterResponse, error) {
+	name := request.GetBackend().GetName()
+	log := m.log.With(zap.String("service", name))
+
+	response, err := m.client.Register(ctx, request)
+	if err != nil {
+		if isPermanentRegisterError(err) {
+			log.Error("gateway rejected registration permanently, abandoning this attempt", zap.Error(err))
+			return nil, backoff.Permanent(fmt.Errorf(
+				"gateway %q permanently rejected registration of service %q: %w",
+				m.gatewayEndpoint, name, err,
+			))
+		}
+		log.Warn("failed to register in gateway", zap.Error(err))
+		return nil, err
+	}
+
+	switch response.GetStatus() {
+	case ynpb.RegistrationStatus_REGISTRATION_STATUS_REGISTERED:
+		log.Info("registered in gateway")
+	case ynpb.RegistrationStatus_REGISTRATION_STATUS_UPDATED:
+		log.Info("updated registration in gateway")
+	case ynpb.RegistrationStatus_REGISTRATION_STATUS_RENEWED:
+		log.Debug("registration renewed in gateway")
+	default:
+		log.Info("registered in gateway")
+	}
+
+	return response, nil
+}
+
+// isPermanentRegisterError reports whether the gateway rejected the request
+// itself or the caller's identity, which a retry cannot change.
+func isPermanentRegisterError(err error) bool {
+	switch status.Code(err) {
+	case codes.InvalidArgument,
+		codes.Unauthenticated,
+		codes.PermissionDenied:
+		return true
+	default:
+		return false
+	}
 }

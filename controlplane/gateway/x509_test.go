@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/json"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -20,12 +22,13 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"gopkg.in/yaml.v3"
 
 	"github.com/yanet-platform/yanet2/common/go/testutils/tlscert"
-	"github.com/yanet-platform/yanet2/common/go/xcfg"
+	"github.com/yanet-platform/yanet2/common/go/xgrpc"
 	"github.com/yanet-platform/yanet2/controlplane/gateway"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
@@ -64,7 +67,7 @@ func newX509AuthConfig(t *testing.T, ca *tlscert.CA) auth.Config {
 	credentials := writeTestFile(t, "basic_auth.yaml", "credentials:\n"+
 		"  - username: alice\n    password_hash: "+string(hash)+"\n")
 
-	text := "disabled: false\n" +
+	text := "mode: enabled\n" +
 		"identity_providers:\n  - type: file\n    path: " + identities + "\n" +
 		"permissions_path: " + permissions + "\n" +
 		"authenticators:\n" +
@@ -78,18 +81,19 @@ func newX509AuthConfig(t *testing.T, ca *tlscert.CA) auth.Config {
 }
 
 // startX509Gateway runs a gateway serving TLS with a certificate issued by
-// ca on a pre-bound listener and returns the address to dial.
-func startX509Gateway(t *testing.T, ca *tlscert.CA, cfg gateway.Config) string {
+// ca on a pre-bound listener, with any further options, and returns the
+// address to dial.
+func startX509Gateway(t *testing.T, ca *tlscert.CA, cfg gateway.Config, options ...gateway.GatewayOption) string {
 	t.Helper()
 
 	server := ca.IssueServer(t, "127.0.0.1")
 	cfg.Server.TLS = &gateway.TLSConfig{
-		CertFile: xcfg.MustNonEmptyString(server.CertFile),
-		KeyFile:  xcfg.MustNonEmptyString(server.KeyFile),
+		KeyPairs: []xgrpc.KeyPairConfig{tlscert.FileKeyPair(t, server.CertFile, server.KeyFile)},
 	}
 
 	listener := NewTestListener(t)
-	gw, err := gateway.NewGateway(cfg, gateway.WithLog(zap.NewNop()), gateway.WithListener(listener))
+	defaults := []gateway.GatewayOption{gateway.WithLog(zap.NewNop()), gateway.WithListener(listener)}
+	gw, err := gateway.NewGateway(cfg, append(defaults, options...)...)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = gw.Close() })
 
@@ -231,49 +235,218 @@ func Test_Gateway_X509_UntrustedCertificateFailsHandshake(t *testing.T) {
 	require.Equal(t, codes.Unavailable, status.Code(err))
 }
 
-// Test_Gateway_HTTPS_NeverRequestsClientCertificate verifies that the HTTP
-// listener does not ask for a client certificate even when the gRPC one
-// does, so a browser never sees a certificate prompt.
-func Test_Gateway_HTTPS_NeverRequestsClientCertificate(t *testing.T) {
-	t.Parallel()
+// postUntilAnswered posts an empty JSON body to the given URL until the
+// gateway answers, returning the response with its body read out.
+func postUntilAnswered(t *testing.T, client *http.Client, url string) (*http.Response, []byte) {
+	t.Helper()
 
-	ca := tlscert.NewCA(t)
-	cfg := gateway.DefaultConfig()
-	cfg.Auth = newX509AuthConfig(t, ca)
-	cfg.Server.HTTPEndpoint = newFreeAddress(t)
-	startX509Gateway(t, ca, cfg)
-
-	var requested atomic.Bool
-	client := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				RootCAs:    ca.Pool(),
-				MinVersion: tls.VersionTLS12,
-				GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
-					requested.Store(true)
-					return &tls.Certificate{}, nil
-				},
-			},
-		},
-		Timeout: 5 * time.Second,
-	}
-	url := "https://" + cfg.Server.HTTPEndpoint + "/api/controlplane.ynpb.v1.Gateway/ListServices"
-
-	var statusCode int
+	var answer *http.Response
+	var body []byte
 	require.Eventually(t, func() bool {
-		response, postErr := client.Post(url, "application/json", strings.NewReader("{}"))
-		if postErr != nil {
+		response, err := client.Post(url, "application/json", strings.NewReader("{}"))
+		if err != nil {
 			return false
 		}
 		defer func() { _ = response.Body.Close() }()
 
-		_, postErr = io.ReadAll(response.Body)
-		statusCode = response.StatusCode
-		return postErr == nil
+		body, err = io.ReadAll(response.Body)
+		answer = response
+		return err == nil
 	}, 5*time.Second, 50*time.Millisecond, "HTTP proxy did not answer")
 
-	require.Equal(t, http.StatusOK, statusCode)
-	require.False(t, requested.Load(), "HTTP listener requested a client certificate")
+	return answer, body
+}
+
+// Test_Gateway_HTTPS_RequestsClientCertificateOnlyForX509 verifies that the
+// HTTPS listener asks for a client certificate only with an x509
+// authenticator, and serves a client that presents none either way.
+func Test_Gateway_HTTPS_RequestsClientCertificateOnlyForX509(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		x509 bool
+	}{
+		{name: "with an x509 authenticator", x509: true},
+		{name: "without an x509 authenticator", x509: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			ca := tlscert.NewCA(t)
+			cfg := gateway.DefaultConfig()
+			if tc.x509 {
+				cfg.Auth = newX509AuthConfig(t, ca)
+			}
+			httpListener := NewTestListener(t)
+			cfg.Server.HTTPEndpoint = httpListener.Addr().String()
+			startX509Gateway(t, ca, cfg, gateway.WithHTTPListener(httpListener))
+
+			var requested atomic.Bool
+			client := &http.Client{
+				Transport: &http.Transport{
+					TLSClientConfig: &tls.Config{
+						RootCAs:    ca.Pool(),
+						MinVersion: tls.VersionTLS12,
+						GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+							requested.Store(true)
+							return &tls.Certificate{}, nil
+						},
+					},
+				},
+				Timeout: 5 * time.Second,
+			}
+			url := "https://" + cfg.Server.HTTPEndpoint + "/api/controlplane.ynpb.v1.Gateway/ListServices"
+
+			response, body := postUntilAnswered(t, client, url)
+			require.Equal(t, http.StatusOK, response.StatusCode, string(body))
+			require.Equal(t, tc.x509, requested.Load(), "whether the HTTPS listener asked for a client certificate")
+		})
+	}
+}
+
+// Test_Gateway_HTTPS_ClientCertificateBecomesPrincipal verifies that an
+// HTTP call is authenticated as the client certificate of its HTTPS
+// connection over either HTTP version, and as anonymous without one.
+func Test_Gateway_HTTPS_ClientCertificateBecomesPrincipal(t *testing.T) {
+	t.Parallel()
+
+	ca := tlscert.NewCA(t)
+	server := ca.IssueServer(t, "127.0.0.1")
+	client := ca.IssueClient(t, "route-operator")
+	httpListener, httpsListener := NewTestListener(t), NewTestListener(t)
+	httpAddress, httpsAddress := httpListener.Addr().String(), httpsListener.Addr().String()
+	cfg := gateway.DefaultConfig()
+	cfg.Auth = newX509AuthConfig(t, ca)
+	cfg.Server.HTTP = &gateway.ListenerConfig{
+		Endpoint: httpAddress,
+		TLS:      newTLSListenerConfig(t, httpsAddress, server.CertFile, server.KeyFile),
+	}
+	runGateway(t, cfg,
+		gateway.WithListener(NewTestListener(t)),
+		gateway.WithHTTPListener(httpListener),
+		gateway.WithHTTPSListener(httpsListener),
+	)
+
+	for _, tc := range []struct {
+		name         string
+		origin       string
+		certificates []tls.Certificate
+		http2        bool
+		user         string
+	}{
+		{
+			name:         "trusted certificate over https with http/2",
+			origin:       "https://" + httpsAddress,
+			certificates: []tls.Certificate{client.Certificate},
+			http2:        true,
+			user:         "route-operator",
+		},
+		{
+			name:         "trusted certificate over https with http/1.1",
+			origin:       "https://" + httpsAddress,
+			certificates: []tls.Certificate{client.Certificate},
+			user:         "route-operator",
+		},
+		{name: "no certificate over https", origin: "https://" + httpsAddress, http2: true, user: "anonymous"},
+		{name: "plaintext http", origin: "http://" + httpAddress, user: "anonymous"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			httpClient := &http.Client{
+				Transport: &http.Transport{
+					TLSClientConfig: &tls.Config{
+						RootCAs:      ca.Pool(),
+						Certificates: tc.certificates,
+						MinVersion:   tls.VersionTLS12,
+					},
+					ForceAttemptHTTP2: tc.http2,
+				},
+				Timeout: 5 * time.Second,
+			}
+			url := tc.origin + "/api" + ynpb.AuthService_IntrospectToken_FullMethodName
+
+			response, body := postUntilAnswered(t, httpClient, url)
+			require.Equal(t, http.StatusOK, response.StatusCode, string(body))
+			require.Equal(t, tc.http2, response.ProtoMajor == 2, "whether the call went over HTTP/2")
+
+			var introspection ynpb.IntrospectTokenResponse
+			require.NoError(t, json.Unmarshal(body, &introspection))
+			require.Equal(t, tc.user, introspection.GetPrincipal().GetUser())
+		})
+	}
+}
+
+// Test_Gateway_HTTPS_ConnectionsShareTheLoopback verifies that an HTTPS
+// connection kept open after a call holds no in-process gRPC connection.
+//
+// That holds with or without a client certificate. Such a gRPC connection
+// would cost about nine goroutines and 2 MiB of buffers for as long as the
+// client keeps its HTTPS connection open, before any authentication when the
+// client presents no certificate.
+func Test_Gateway_HTTPS_ConnectionsShareTheLoopback(t *testing.T) {
+	// Not parallel: it counts the goroutines of the whole process.
+	const connections = 20
+
+	ca := tlscert.NewCA(t)
+	server := ca.IssueServer(t, "127.0.0.1")
+	client := ca.IssueClient(t, "route-operator")
+	httpsListener := NewTestListener(t)
+	cfg := gateway.DefaultConfig()
+	cfg.Auth = newX509AuthConfig(t, ca)
+	cfg.Server.HTTP = &gateway.ListenerConfig{
+		TLS: newTLSListenerConfig(t, httpsListener.Addr().String(), server.CertFile, server.KeyFile),
+	}
+	runGateway(t, cfg, gateway.WithListener(NewTestListener(t)), gateway.WithHTTPSListener(httpsListener))
+
+	url := "https://" + httpsListener.Addr().String() + "/api" + ynpb.AuthService_IntrospectToken_FullMethodName
+	// Each client has a transport of its own, so each opens a connection of
+	// its own and keeps it open until the test ends.
+	newClient := func(certificates []tls.Certificate) *http.Client {
+		transport := &http.Transport{
+			TLSClientConfig: &tls.Config{
+				RootCAs:      ca.Pool(),
+				Certificates: certificates,
+				MinVersion:   tls.VersionTLS12,
+			},
+			ForceAttemptHTTP2: true,
+		}
+		t.Cleanup(transport.CloseIdleConnections)
+
+		return &http.Client{Transport: transport, Timeout: 5 * time.Second}
+	}
+
+	// The first call opens the shared way into the loopback server.
+	response, body := postUntilAnswered(t, newClient(nil), url)
+	require.Equal(t, http.StatusOK, response.StatusCode, string(body))
+
+	for _, tc := range []struct {
+		name         string
+		certificates []tls.Certificate
+	}{
+		{name: "without a client certificate"},
+		{name: "with a client certificate", certificates: []tls.Certificate{client.Certificate}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before := runtime.NumGoroutine()
+			for range connections {
+				response, err := newClient(tc.certificates).Post(url, "application/json", strings.NewReader("{}"))
+				require.NoError(t, err)
+				_, err = io.Copy(io.Discard, response.Body)
+				require.NoError(t, err)
+				require.NoError(t, response.Body.Close())
+				require.Equal(t, http.StatusOK, response.StatusCode)
+			}
+
+			// An open HTTP/2 connection costs its client and the HTTP
+			// server about three goroutines.
+			//
+			// A way of its own into the loopback server would cost about
+			// nine more.
+			require.Less(t, runtime.NumGoroutine()-before, connections*6,
+				"goroutines added by the open HTTPS connections",
+			)
+		})
+	}
 }
 
 // Test_NewGateway_X509RequiresServerTLS verifies that an x509 authenticator
@@ -288,4 +461,53 @@ func Test_NewGateway_X509RequiresServerTLS(t *testing.T) {
 
 	_, err := gateway.NewGateway(cfg, gateway.WithLog(zap.NewNop()))
 	require.ErrorContains(t, err, "x509 authenticator requires server.tls")
+}
+
+// Test_Gateway_X509_DedicatedTLS_VerifiesCertificatesOnlyOverTLS verifies
+// that with a gRPC section serving plaintext and TLS side by side, a trusted
+// client certificate identifies its caller over TLS, while a plaintext
+// caller of the same gateway stays anonymous.
+func Test_Gateway_X509_DedicatedTLS_VerifiesCertificatesOnlyOverTLS(t *testing.T) {
+	t.Parallel()
+
+	ca := tlscert.NewCA(t)
+	cfg := gateway.DefaultConfig()
+	cfg.Auth = newX509AuthConfig(t, ca)
+	server := ca.IssueServer(t, "127.0.0.1")
+	plaintextListener, tlsListener := startDedicatedTLSGateway(t, cfg, server.CertFile, server.KeyFile)
+	plaintext := dialGateway(t, plaintextListener.Addr().String(), insecure.NewCredentials())
+	tlsAddress := tlsListener.Addr().String()
+
+	cases := []struct {
+		name       string
+		client     ynpb.AuthServiceClient
+		user       string
+		authMethod string
+		anonymous  bool
+	}{
+		{
+			name:       "trusted certificate over TLS identifies its common name",
+			client:     dialAuth(t, tlsAddress, ca, ca.IssueClient(t, "route-operator").Certificate),
+			user:       "route-operator",
+			authMethod: "x509",
+		},
+		{
+			name:       "plaintext caller is anonymous",
+			client:     ynpb.NewAuthServiceClient(plaintext),
+			user:       "anonymous",
+			authMethod: "none",
+			anonymous:  true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			principal, err := introspectSelf(t, t.Context(), tc.client)
+			require.NoError(t, err)
+
+			require.Equal(t, tc.user, principal.GetUser())
+			require.Equal(t, tc.authMethod, principal.GetAuthMethod())
+			require.Equal(t, tc.anonymous, principal.GetIsAnonymous())
+		})
+	}
 }

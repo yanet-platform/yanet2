@@ -1,8 +1,6 @@
 package cnat64
 
 //#cgo CFLAGS: -I../../../../../
-//#cgo LDFLAGS: -L../../../../../build/modules/nat64/api -lnat64_cp
-//#cgo LDFLAGS: -L../../../../../build/lib/logging/ -llogging
 //
 //#include "api/agent.h"
 //#include "modules/nat64/api/nat64cp.h"
@@ -10,6 +8,7 @@ import "C"
 
 import (
 	"fmt"
+	"runtime"
 	"unsafe"
 
 	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
@@ -58,6 +57,33 @@ func (m *ModuleConfig) Free() error {
 		rc, errno := C.nat64_module_config_free((*C.struct_cp_module)(ptr), &cErr)
 		return int(rc), unsafe.Pointer(cErr), errno
 	})
+}
+
+// MalformedPackets reads the currently published NAT64 configuration's count.
+//
+// The count resets when the module configuration is replaced. Configuration
+// locking keeps the lookup and atomic read valid during updates.
+func MalformedPackets(sharedMemory *ffi.SharedMemory, instanceIdx uint32, name string) (uint64, error) {
+	if !sharedMemory.DataplaneReady(instanceIdx) {
+		return 0, fmt.Errorf("dataplane instance %d is not ready or out of range", instanceIdx)
+	}
+
+	moduleName := C.CString(name)
+	defer C.free(unsafe.Pointer(moduleName))
+
+	var value C.uint64_t
+	pinner := runtime.Pinner{}
+	pinner.Pin(&value)
+	defer pinner.Unpin()
+	if result, err := C.nat64_module_config_malformed_packets(
+		(*C.struct_yanet_shm)(sharedMemory.AsRawPtr()),
+		C.uint32_t(instanceIdx),
+		moduleName,
+		&value,
+	); result != 0 {
+		return 0, fmt.Errorf("read NAT64 module %q diagnostic: %w", name, err)
+	}
+	return uint64(value), nil
 }
 
 // addMapping maps 1:1 to nat64_module_config_add_mapping.

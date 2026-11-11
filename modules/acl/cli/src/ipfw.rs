@@ -7,6 +7,7 @@ use core::{
 
 use commonpb::pb::{IPv4Network, IPv6Network};
 use filterpb::pb::{FragmentKind, PortRange, ProtoRange, VlanRange};
+use netip::{IpNetwork, fmt::Compact};
 use ync::output::{Paint, Painted};
 
 use crate::aclpb::{ActionKind, Rule};
@@ -59,8 +60,8 @@ impl<'a> RuleLine<'a> {
 
         let src = Side::new(&rule.sources4, &rule.sources6, true, true);
         let dst = Side::new(&rule.destinations4, &rule.destinations6, true, true);
-        let (src4, src6) = (src.nets().any(|net| net.is_v4()), src.nets().any(|net| !net.is_v4()));
-        let (dst4, dst6) = (dst.nets().any(|net| net.is_v4()), dst.nets().any(|net| !net.is_v4()));
+        let (src4, src6) = (src.nets().any(|net| net.is_ipv4()), src.nets().any(|net| net.is_ipv6()));
+        let (dst4, dst6) = (dst.nets().any(|net| net.is_ipv4()), dst.nets().any(|net| net.is_ipv6()));
 
         let has4 = src4 && dst4;
         let has6 = src6 && dst6;
@@ -409,20 +410,20 @@ impl<'a> Side<'a> {
     }
 
     /// Returns the networks of the shown families, IPv4 first.
-    fn nets(&self) -> impl Iterator<Item = Net> + Clone + 'a {
+    fn nets(&self) -> impl Iterator<Item = IpNetwork> + Clone + 'a {
         let Self { nets4, nets6, with4, with6 } = *self;
 
         nets4
             .iter()
-            .map(Net::v4)
+            .map(net4)
             .filter(move |_| with4)
-            .chain(nets6.iter().map(Net::v6).filter(move |_| with6))
+            .chain(nets6.iter().map(net6).filter(move |_| with6))
     }
 
     /// Returns whether every shown family holds a zero-mask network.
     fn is_any(&self) -> bool {
-        let full4 = self.nets().any(|net| net.is_v4() && net.is_full());
-        let full6 = self.nets().any(|net| !net.is_v4() && net.is_full());
+        let full4 = self.nets().any(|net| net.is_ipv4() && net.mask().is_unspecified());
+        let full6 = self.nets().any(|net| net.is_ipv6() && net.mask().is_unspecified());
 
         (!self.with4 || full4) && (!self.with6 || full6)
     }
@@ -433,69 +434,28 @@ impl<'a> Side<'a> {
         } else if self.nets().next().is_none() {
             out.token(Tone::Keyword, "none")
         } else {
-            let list = out.list(self.nets(), Tone::Plain);
+            let list = out.list(self.nets().map(Compact), Tone::Plain);
             out.token(Tone::Plain, list)
         }
     }
 }
 
-/// A network by address and mask.
-#[derive(Debug, Clone, Copy)]
-enum Net {
-    V4(Ipv4Addr, Ipv4Addr),
-    V6(Ipv6Addr, Ipv6Addr),
+/// The network of a wire IPv4 network, an absent address reading as
+/// 0.0.0.0 and an absent mask as a host's.
+fn net4(net: &IPv4Network) -> IpNetwork {
+    IpNetwork::V4(netip::Ipv4Network::new(
+        net.addr.as_ref().map_or(Ipv4Addr::UNSPECIFIED, Ipv4Addr::from),
+        net.mask.as_ref().map_or(Ipv4Addr::BROADCAST, Ipv4Addr::from),
+    ))
 }
 
-impl Net {
-    fn v4(net: &IPv4Network) -> Self {
-        Self::V4(
-            net.addr.as_ref().map_or(Ipv4Addr::UNSPECIFIED, Ipv4Addr::from),
-            net.mask.as_ref().map_or(Ipv4Addr::BROADCAST, Ipv4Addr::from),
-        )
-    }
-
-    fn v6(net: &IPv6Network) -> Self {
-        Self::V6(
-            net.addr.as_ref().map_or(Ipv6Addr::UNSPECIFIED, Ipv6Addr::from),
-            net.mask.as_ref().map_or(Ipv6Addr::from(u128::MAX), Ipv6Addr::from),
-        )
-    }
-
-    fn is_v4(&self) -> bool {
-        matches!(self, Self::V4(..))
-    }
-
-    fn is_full(&self) -> bool {
-        match self {
-            Self::V4(_, mask) => mask.is_unspecified(),
-            Self::V6(_, mask) => mask.is_unspecified(),
-        }
-    }
-}
-
-impl Display for Net {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
-        match *self {
-            Self::V4(addr, mask) => {
-                let bits = u32::from(mask);
-                let ones = bits.leading_ones();
-                match (ones, bits.checked_shl(ones).unwrap_or(0)) {
-                    (32, _) => write!(f, "{addr}"),
-                    (_, 0) => write!(f, "{addr}/{ones}"),
-                    _ => write!(f, "{addr}/{mask}"),
-                }
-            }
-            Self::V6(addr, mask) => {
-                let bits = u128::from(mask);
-                let ones = bits.leading_ones();
-                match (ones, bits.checked_shl(ones).unwrap_or(0)) {
-                    (128, _) => write!(f, "{addr}"),
-                    (_, 0) => write!(f, "{addr}/{ones}"),
-                    _ => write!(f, "{addr}/{mask}"),
-                }
-            }
-        }
-    }
+/// The network of a wire IPv6 network, an absent address reading as `::` and
+/// an absent mask as a host's.
+fn net6(net: &IPv6Network) -> IpNetwork {
+    IpNetwork::V6(netip::Ipv6Network::new(
+        net.addr.as_ref().map_or(Ipv6Addr::UNSPECIFIED, Ipv6Addr::from),
+        net.mask.as_ref().map_or(Ipv6Addr::from(u128::MAX), Ipv6Addr::from),
+    ))
 }
 
 /// How the protocol ranges of a rule read.

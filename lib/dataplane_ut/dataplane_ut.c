@@ -19,11 +19,13 @@
 #include "lib/dataplane/config/bootstrap.h"
 #include "lib/dataplane/config/counter_storage.h"
 #include "lib/dataplane/config/module_loader.h"
+#include "lib/dataplane/config/object_loader.h"
 #include "lib/dataplane/config/plugin_loader.h"
 #include "lib/dataplane/config/topology.h"
 #include "lib/dataplane/config/zone.h"
 #include "lib/dataplane/module/packet_front.h"
 #include "lib/dataplane/packet/data.h"
+#include "lib/dataplane/pipeline/schedule.h"
 #include "lib/dataplane/worker/counters.h"
 #include "lib/dataplane/worker/pipeline_round.h"
 #include "lib/dataplane/worker/round.h"
@@ -32,21 +34,7 @@
 #include "lib/logging/log.h"
 #include "lib/utils/packet.h"
 
-struct dataplane_ut {
-	void *arena;
-	size_t arena_size;
-	// Shared-memory handle over the arena, handed out to agents.
-	//
-	// Owned by the harness: it is never detached, because the arena is
-	// heap memory that the harness frees itself.
-	struct yanet_shm shm;
-	struct dp_config *dp_config;
-	struct cp_config *cp_config;
-	struct agent *agent;
-	struct rte_mempool *mempool;
-	uint64_t mock_time_ns;
-	struct plugin_registry plugins;
-};
+#include "dataplane_ut.inc.h"
 
 struct dataplane_ut *
 dataplane_ut_new(const struct dataplane_ut_config *cfg) {
@@ -122,7 +110,8 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 	ut->dp_config->external_worker_rounds = true;
 	pthread_mutex_init(dp_config_external_round_lock(ut->dp_config), NULL);
 
-	// Open the current binary so dlsym can resolve module/device symbols.
+	// Open the current binary so dlsym can resolve module, device and
+	// object type constructors.
 	void *bin_hndl = dlopen(NULL, RTLD_NOW | RTLD_GLOBAL);
 	if (bin_hndl == NULL) {
 		LOG(ERROR,
@@ -132,8 +121,10 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 		return NULL;
 	}
 
-	// Load module .so plugins so their symbols take priority over the
-	// statically-linked built-ins when resolving new_module_<name>.
+	// Load .so plugins; their modules take priority over the built-ins.
+	//
+	// An object type resolves from the main binary first, so a plugin
+	// adds new types without shadowing a built-in one.
 	if (dp_load_plugins(cfg->plugin_dir, &ut->plugins) == -1) {
 		LOG(ERROR,
 		    "dataplane_ut_new: failed to load plugins from %s",
@@ -171,30 +162,19 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 		}
 	}
 
-	// Register requested object types directly. The harness owns no
-	// dlsym constructor for them, so fill the dp_objects array in place
-	// rather than going through dp_load_object; cp_object_init only needs
-	// the type name resolvable via dp_config_lookup_object.
-	if (cfg->objects_to_load_count > 0) {
-		struct dp_object *dp_objects =
-			(struct dp_object *)memory_balloc(
-				&ut->dp_config->memory_context,
-				cfg->objects_to_load_count *
-					sizeof(struct dp_object)
-			);
-		if (dp_objects == NULL) {
-			LOG(ERROR,
-			    "dataplane_ut_new: failed to allocate dp_objects");
-			dataplane_ut_free(ut);
-			return NULL;
-		}
-		for (size_t idx = 0; idx < cfg->objects_to_load_count; ++idx) {
-			strtcpy(dp_objects[idx].name,
-				cfg->objects_to_load[idx],
-				sizeof(dp_objects[idx].name));
-		}
-		SET_OFFSET_OF(&ut->dp_config->dp_objects, dp_objects);
-		ut->dp_config->object_count = cfg->objects_to_load_count;
+	// Load requested object types through their constructors.
+	//
+	// Each type keeps the commit hook and prepared size it declares; a
+	// repeated name loads once, as in the dataplane.
+	if (dp_load_objects(
+		    ut->dp_config,
+		    bin_hndl,
+		    cfg->objects_to_load,
+		    cfg->objects_to_load_count
+	    ) == -1) {
+		LOG(ERROR, "dataplane_ut_new: failed to load object types");
+		dataplane_ut_free(ut);
+		return NULL;
 	}
 
 	// Populate dp_topology with the logical port names from cfg.
@@ -246,13 +226,11 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 		dataplane_ut_free(ut);
 		return NULL;
 	}
-	SET_OFFSET_OF(&ut->cp_config->cp_config_gen, cp_config_gen);
+	cp_config_publish_gen(ut->cp_config, cp_config_gen);
 	cp_config_unlock(ut->cp_config);
 
 	counter_registry_init(
-		&ut->dp_config->worker_counters,
-		&ut->dp_config->memory_context,
-		0
+		&ut->dp_config->worker_counters, &ut->dp_config->memory_context
 	);
 	struct worker_counter_ids counter_ids;
 	if (worker_counters_register(
@@ -297,6 +275,11 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 		return NULL;
 	}
 
+	ut->stage_rounds = calloc(cfg->worker_count, sizeof(*ut->stage_rounds));
+	if (ut->stage_rounds == NULL) {
+		dataplane_ut_free(ut);
+		return NULL;
+	}
 	ut->dp_config->worker_count = cfg->worker_count;
 	SET_OFFSET_OF(&ut->dp_config->workers, workers_array);
 
@@ -334,14 +317,35 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 		dp_worker->idx = idx;
 		dp_worker->rx_mempool = ut->mempool;
 		dp_worker->core_id = (uint32_t)idx;
-		if (cfg->workers != NULL) {
-			dp_worker->device_id = cfg->workers[idx].device_id;
-			dp_worker->queue_id = cfg->workers[idx].queue_id;
-		} else {
-			dp_worker->device_id = 0;
-			dp_worker->queue_id = (uint32_t)idx;
-		}
 		dp_worker->rx_burst_size = WORKER_RX_BURST_SIZE;
+		dp_worker->assignment_count = 1;
+
+		// Harness workers poll exactly one queue, mirroring the
+		// single-assignment shape the expanded configuration produces.
+		struct dp_worker_assignment *assignment =
+			(struct dp_worker_assignment *)memory_balloc(
+				&ut->dp_config->memory_context,
+				sizeof(struct dp_worker_assignment)
+			);
+		if (assignment == NULL) {
+			LOG(ERROR,
+			    "dataplane_ut_new: failed to allocate dp_worker "
+			    "%zu "
+			    "assignment",
+			    idx);
+			dataplane_ut_free(ut);
+			return NULL;
+		}
+		if (cfg->workers != NULL) {
+			assignment->device_id = cfg->workers[idx].device_id;
+			assignment->queue_id = cfg->workers[idx].queue_id;
+			assignment->weight = 1;
+		} else {
+			assignment->device_id = 0;
+			assignment->queue_id = (uint32_t)idx;
+			assignment->weight = 1;
+		}
+		SET_OFFSET_OF(&dp_worker->assignments, assignment);
 
 		SET_OFFSET_OF(dp_workers + idx, dp_worker);
 	}
@@ -403,18 +407,21 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 		}
 		for (size_t idx = 0; idx < cfg->worker_count; ++idx) {
 			struct dp_worker *dp_worker = ADDR_OF(dp_workers + idx);
-			++device_worker_counts[dp_worker->device_id];
+			struct dp_worker_assignment *assignment =
+				ADDR_OF(&dp_worker->assignments);
+			++device_worker_counts[assignment->device_id];
 		}
 		for (size_t device_idx = 0; device_idx < effective_device_count;
 		     ++device_idx) {
-			if (dp_topology_set_device_worker_count(
+			if (dp_topology_set_device_queue_counts(
 				    ut->dp_config,
 				    device_idx,
+				    device_worker_counts[device_idx],
 				    device_worker_counts[device_idx]
 			    ) != 0) {
 				LOG(ERROR,
 				    "dataplane_ut_new: failed to set "
-				    "dp_topology worker count for device "
+				    "dp_topology queue counts for device "
 				    "%zu",
 				    device_idx);
 				free(device_worker_counts);
@@ -437,6 +444,8 @@ dataplane_ut_free(struct dataplane_ut *ut) {
 	if (ut == NULL) {
 		return;
 	}
+
+	free(ut->stage_rounds);
 
 	if (ut->mempool != NULL) {
 		test_mempool_free(ut->mempool);
@@ -574,6 +583,7 @@ void
 dataplane_ut_run(
 	struct dataplane_ut *ut,
 	size_t worker_idx,
+	const uint16_t *device_ids,
 	struct packet_list *input,
 	struct dataplane_ut_round_result *result
 ) {
@@ -633,13 +643,14 @@ dataplane_ut_run(
 	// that front and the front reset for the next round.
 	struct packet_front *packet_front = &config_gen_ectx->packet_front;
 
-	// Feed input straight onto each packet's target device input entry,
-	// the same way the worker deposits its staged RX batch into the
-	// pipeline.
+	// Feed each input packet onto its named device's input entry, the
+	// same way the worker deposits its staged RX batch into the
+	// pipeline; the array parallels the input list's order.
+	size_t input_idx = 0;
 	struct packet *packet;
 	while ((packet = packet_list_pop(input)) != NULL) {
 		struct device_ectx *device_ectx = config_gen_ectx_get_device(
-			config_gen_ectx, packet->tx_device_id
+			config_gen_ectx, device_ids[input_idx++]
 		);
 		if (device_ectx == NULL) {
 			packet_front_drop(packet_front, packet);
@@ -657,6 +668,17 @@ dataplane_ut_run(
 	packet_list_concat(&result->output, &packet_front->output);
 	packet_list_concat(&result->drop, &packet_front->drop);
 	packet_front_init(packet_front);
+
+	// The write stage a real worker runs is absent here, so the
+	// transmit buckets the output-entry terminals filled are the
+	// egress set: every bucket's packets would be written out, and
+	// they become the result's output in bucket order.
+	struct packet_list *buckets = config_gen_ectx->abs_tx_buckets;
+	for (uint32_t bucket_idx = 0;
+	     bucket_idx < config_gen_ectx->tx_bucket_count;
+	     ++bucket_idx) {
+		packet_list_concat(&result->output, buckets + bucket_idx);
+	}
 
 	pthread_mutex_unlock(dp_config_external_round_lock(ut->dp_config));
 }
@@ -706,11 +728,27 @@ saved_packet_list_free_extra(
 }
 
 static int
-saved_packet_restore(struct saved_packet *saved) {
+saved_packet_restore(struct saved_packet *saved, int reset) {
 	*saved->pkt = saved->state;
 	saved->pkt->next = NULL;
 
 	struct rte_mbuf *mbuf = packet_to_mbuf(saved->pkt);
+	if (reset & DATAPLANE_UT_RESET_GEOMETRY) {
+		mbuf->data_off = saved->first_data_off;
+		mbuf->data_len = saved->first_data_len;
+		mbuf->pkt_len = saved->data_len;
+
+		// Only the first segment is put back, so the chain must still
+		// add up to the captured length.
+		uint32_t chain_len = 0;
+		for (const struct rte_mbuf *segment = mbuf; segment != NULL;
+		     segment = segment->next) {
+			chain_len += segment->data_len;
+		}
+		if (chain_len != saved->data_len) {
+			return -EINVAL;
+		}
+	}
 	if (rte_pktmbuf_pkt_len(mbuf) != saved->data_len ||
 	    mbuf->nb_segs != saved->segment_count ||
 	    mbuf->data_off != saved->first_data_off ||
@@ -737,12 +775,15 @@ saved_packet_restore(struct saved_packet *saved) {
 
 static int
 saved_packets_rebuild(
-	struct saved_packet *saved, size_t count, struct packet_list *input
+	struct saved_packet *saved,
+	size_t count,
+	struct packet_list *input,
+	int reset
 ) {
 	packet_list_init(input);
 	int result = 0;
 	for (size_t idx = 0; idx < count; ++idx) {
-		int rc = saved_packet_restore(&saved[idx]);
+		int rc = saved_packet_restore(&saved[idx], reset);
 		if (result == 0 && rc != 0) {
 			result = rc;
 		}
@@ -755,9 +796,10 @@ int
 dataplane_ut_run_rounds(
 	struct dataplane_ut *ut,
 	size_t worker,
+	const uint16_t *device_ids,
 	struct packet_list *input,
 	uint64_t rounds,
-	int reset_payload
+	int reset
 ) {
 	size_t count = (size_t)packet_list_count(input);
 	if (rounds == 0 || count == 0) {
@@ -784,7 +826,7 @@ dataplane_ut_run_rounds(
 		saved[idx].segment_count = mbuf->nb_segs;
 		saved[idx].first_data_off = mbuf->data_off;
 		saved[idx].first_data_len = mbuf->data_len;
-		if (reset_payload) {
+		if (reset & DATAPLANE_UT_RESET_PAYLOAD) {
 			saved[idx].data = malloc(saved[idx].data_len);
 			if (saved[idx].data == NULL) {
 				result = -ENOMEM;
@@ -817,13 +859,13 @@ dataplane_ut_run_rounds(
 	// every saved packet through output or drop. Newly emitted packets are
 	// reclaimed below.
 	for (uint64_t round = 0; round < rounds; ++round) {
-		result = saved_packets_rebuild(saved, count, input);
+		result = saved_packets_rebuild(saved, count, input, reset);
 		if (result != 0) {
 			break;
 		}
 
 		struct dataplane_ut_round_result round_result;
-		dataplane_ut_run(ut, worker, input, &round_result);
+		dataplane_ut_run(ut, worker, device_ids, input, &round_result);
 		saved_packet_list_free_extra(
 			&round_result.output, saved, count
 		);
@@ -833,7 +875,8 @@ dataplane_ut_run_rounds(
 	// Leave input holding all packets so the caller can free them.
 cleanup:
 	if (captured) {
-		int restore_result = saved_packets_rebuild(saved, count, input);
+		int restore_result =
+			saved_packets_rebuild(saved, count, input, reset);
 		if (result == 0) {
 			result = restore_result;
 		}
@@ -844,6 +887,42 @@ cleanup:
 
 	free(saved);
 	return result;
+}
+
+uint16_t
+dataplane_ut_headroom(const struct packet *packet) {
+	uint16_t headroom = rte_pktmbuf_headroom(packet_to_mbuf(packet));
+	// The packet descriptor's share of the headroom is never a header's.
+	if (headroom < sizeof(struct packet)) {
+		return 0;
+	}
+	return headroom - sizeof(struct packet);
+}
+
+int
+dataplane_ut_limit_headroom(
+	struct packet_list *list, const uint16_t *headroom, size_t count
+) {
+	struct packet *packet = packet_list_first(list);
+	for (size_t idx = 0; idx < count; ++idx) {
+		if (packet == NULL ||
+		    dataplane_ut_headroom(packet) < headroom[idx]) {
+			return -EINVAL;
+		}
+		packet = packet->next;
+	}
+
+	packet = packet_list_first(list);
+	for (size_t idx = 0; idx < count; ++idx) {
+		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+		uint16_t data_off = sizeof(struct packet) + headroom[idx];
+		memmove((char *)mbuf->buf_addr + data_off,
+			rte_pktmbuf_mtod(mbuf, char *),
+			mbuf->data_len);
+		mbuf->data_off = data_off;
+		packet = packet->next;
+	}
+	return 0;
 }
 
 void
@@ -908,8 +987,7 @@ dataplane_ut_worker_ectx(struct dataplane_ut *ut, size_t worker_idx) {
 
 uintptr_t
 dataplane_ut_published_ectx(struct dataplane_ut *ut, size_t worker_idx) {
-	struct cp_config_gen *config_gen =
-		ADDR_OF(&ut->cp_config->cp_config_gen);
+	struct cp_config_gen *config_gen = cp_config_current_gen(ut->cp_config);
 	if (config_gen == NULL) {
 		return 0;
 	}
@@ -927,8 +1005,7 @@ dataplane_ut_worker_gen(struct dataplane_ut *ut, size_t worker_idx) {
 
 uint64_t
 dataplane_ut_published_gen(struct dataplane_ut *ut) {
-	struct cp_config_gen *config_gen =
-		ADDR_OF(&ut->cp_config->cp_config_gen);
+	struct cp_config_gen *config_gen = cp_config_current_gen(ut->cp_config);
 	if (config_gen == NULL) {
 		return 0;
 	}

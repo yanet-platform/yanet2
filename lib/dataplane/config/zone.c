@@ -9,7 +9,7 @@
 #include "lib/controlplane/config/cp_module.h"
 #include "lib/controlplane/config/registry.h"
 #include "lib/controlplane/config/zone.h"
-#include "lib/dataplane/pipeline/pipeline.h"
+#include "lib/dataplane/config/gen_resolve.h"
 #include "lib/logging/log.h"
 
 struct dp_config *
@@ -84,24 +84,38 @@ static pthread_mutex_t commit_lock = PTHREAD_MUTEX_INITIALIZER;
 // slot index falls outside the loaded array is skipped with an error
 // logged. That path is unreachable in practice — the indices are
 // validated when the config is built — so the skip is purely
-// defensive.
+// defensive. An item the previous generation carries at the same
+// index was already committed and is skipped.
 static void
 dp_config_commit_gen_modules(
-	struct dp_config *dp_config, struct cp_config_gen *config_gen
+	struct dp_config *dp_config,
+	struct cp_config_gen *config_gen,
+	struct cp_config_gen *prev_gen
 ) {
 	struct cp_module_registry *module_registry =
 		&config_gen->module_registry;
 	struct dp_module *dp_modules = ADDR_OF(&dp_config->dp_modules);
 
-	for (uint64_t idx = 0; idx < module_registry->registry.capacity;
+	for (uint64_t idx = 0;
+	     idx < module_registry->entity_registry.registry.capacity;
 	     ++idx) {
-		struct registry_item *item =
-			registry_get(&module_registry->registry, idx);
+		struct registry_item *item = registry_get(
+			&module_registry->entity_registry.registry, idx
+		);
 		if (item == NULL) {
 			continue;
 		}
+		if (prev_gen != NULL &&
+		    idx < prev_gen->module_registry.entity_registry.registry
+				    .capacity &&
+		    registry_get(
+			    &prev_gen->module_registry.entity_registry.registry,
+			    idx
+		    ) == item) {
+			continue;
+		}
 		struct cp_module *cp_module =
-			container_of(item, struct cp_module, config_item);
+			container_of(item, struct cp_module, entity);
 		if (cp_module->dp_module_idx >= dp_config->module_count) {
 			LOG(ERROR,
 			    "commit skipped for module '%s:%s': no dataplane "
@@ -120,24 +134,38 @@ dp_config_commit_gen_modules(
 
 // Runs the device commit handlers of a generation, after every module
 // handler; devices are visited in registry order, with the same
-// defensive skip of an out-of-range slot index as the module pass.
+// defensive skip of an out-of-range slot index and the same skip of an
+// already committed item as the module pass.
 static void
 dp_config_commit_gen_devices(
-	struct dp_config *dp_config, struct cp_config_gen *config_gen
+	struct dp_config *dp_config,
+	struct cp_config_gen *config_gen,
+	struct cp_config_gen *prev_gen
 ) {
 	struct cp_device_registry *device_registry =
 		&config_gen->device_registry;
 	struct dp_device *dp_devices = ADDR_OF(&dp_config->dp_devices);
 
-	for (uint64_t idx = 0; idx < device_registry->registry.capacity;
+	for (uint64_t idx = 0;
+	     idx < device_registry->entity_registry.registry.capacity;
 	     ++idx) {
-		struct registry_item *item =
-			registry_get(&device_registry->registry, idx);
+		struct registry_item *item = registry_get(
+			&device_registry->entity_registry.registry, idx
+		);
 		if (item == NULL) {
 			continue;
 		}
+		if (prev_gen != NULL &&
+		    idx < prev_gen->device_registry.entity_registry.registry
+				    .capacity &&
+		    registry_get(
+			    &prev_gen->device_registry.entity_registry.registry,
+			    idx
+		    ) == item) {
+			continue;
+		}
 		struct cp_device *cp_device =
-			container_of(item, struct cp_device, config_item);
+			container_of(item, struct cp_device, entity);
 		if (cp_device->dp_device_idx >= dp_config->device_count) {
 			LOG(ERROR,
 			    "commit skipped for device '%s:%s': no dataplane "
@@ -171,12 +199,17 @@ dp_config_commit_gen(
 		return;
 	}
 
-	dp_config_commit_gen_modules(dp_config, config_gen);
-	dp_config_commit_gen_devices(dp_config, config_gen);
+	// The previous generation is released only after every worker
+	// acknowledged this one, which happens after this pass.
+	struct cp_config_gen *prev_gen = ADDR_OF(&dp_config->committed_gen);
+
+	dp_config_commit_gen_modules(dp_config, config_gen, prev_gen);
+	dp_config_commit_gen_devices(dp_config, config_gen, prev_gen);
 
 	// Plain store: the record is touched only under this lock, by
 	// this process's assigner threads or harness round driver; no
 	// reader in another process exists.
+	SET_OFFSET_OF(&dp_config->committed_gen, config_gen);
 	dp_config->committed_gen_seq = gen_seq;
 	pthread_mutex_unlock(&commit_lock);
 }
@@ -351,4 +384,15 @@ dp_config_device_worker_count(struct dp_config *dp_config, uint32_t device_id) {
 	}
 	struct dp_port *devices = ADDR_OF(&dp_config->dp_topology.devices);
 	return devices[device_id].worker_count;
+}
+
+uint64_t
+dp_config_device_rss_queue_count(
+	struct dp_config *dp_config, uint32_t device_id
+) {
+	if (device_id >= dp_config->dp_topology.device_count) {
+		return 0;
+	}
+	struct dp_port *devices = ADDR_OF(&dp_config->dp_topology.devices);
+	return devices[device_id].rss_queue_count;
 }

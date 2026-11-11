@@ -38,6 +38,9 @@ func (m *Pipeline) Validate() error {
 		if functionID == nil {
 			return fmt.Errorf("functions[%d] is required", idx)
 		}
+		if err := functionID.Validate(); err != nil {
+			return fmt.Errorf("functions[%d]: %w", idx, err)
+		}
 	}
 
 	return nil

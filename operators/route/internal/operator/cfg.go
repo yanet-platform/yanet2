@@ -2,10 +2,13 @@ package operator
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"go.uber.org/zap/zapcore"
 
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/common/go/debugserver"
 	"github.com/yanet-platform/yanet2/common/go/logging"
 	"github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
@@ -36,13 +39,14 @@ const (
 // Config is the top-level YAML configuration for yanet-route-operator.
 type Config struct {
 	Logging   logging.Config            `yaml:"logging"`
+	Debug     debugserver.Config        `yaml:"debug"`
 	Server    operator.GRPCServerConfig `yaml:"server"`
 	Gateways  []operator.GatewayConfig  `yaml:"gateways"`
 	Register  operator.RegisterConfig   `yaml:"register"`
 	Reconcile operator.ReconcileConfig  `yaml:"reconcile"`
 	Static    StaticConfig              `yaml:"static"`
-	// Function is the single gateway-side network function published by
-	// this operator. Re-applied every reconcile pass — idempotent updates.
+	// Function is the gateway-side network function maintained after forwarding
+	// preflight succeeds.
 	Function       FunctionConfig       `yaml:"function"`
 	LinkMap        map[string]string    `yaml:"link_map"`
 	RIBTTL         time.Duration        `yaml:"rib_ttl"`
@@ -56,12 +60,15 @@ type Config struct {
 	GatewayDevices map[string][]string `yaml:"gateway_devices"`
 }
 
-// ReadinessConfig controls the operator's readiness reporting.
+// ReadinessConfig controls readiness and BIRD forwarding requirements.
 type ReadinessConfig struct {
-	// ExpectBird gates the rib scope on BIRD connectivity.
+	// ExpectBird requires BIRD connectivity for RIB readiness and local BIRD
+	// forwarding in every present module before FIB or function publication.
 	//
-	// When false (static-only deployments with no BIRD adapter running), the rib
-	// scope becomes READY immediately at startup.
+	// Static routes cannot satisfy the BIRD forwarding requirement, but static
+	// neighbours may resolve BIRD nexthops. When false, static-only forwarding
+	// is allowed; general empty-input and empty-FIB guards still apply, and RIB
+	// readiness depends on route presence alone.
 	ExpectBird bool `yaml:"expect_bird"`
 
 	// RateThreshold is the maximum RIB-update rate (updates per second) still
@@ -99,9 +106,20 @@ func (m *Config) LoggingConfig() *logging.Config {
 	return &m.Logging
 }
 
+// DebugConfig exposes the debug server configuration to the common
+// command lifecycle.
+func (m *Config) DebugConfig() *debugserver.Config {
+	return &m.Debug
+}
+
 func (m *Config) Validate() error {
 	if len(m.Gateways) == 0 {
 		return errors.New("at least one gateway must be configured")
+	}
+	for key, device := range m.LinkMap {
+		if err := commonpb.ValidateDeviceName(fmt.Sprintf("link_map[%q]", key), device); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -176,9 +194,12 @@ type StaticConfig struct {
 	Neighbours []StaticNeighbourConfig `yaml:"neighbours"`
 }
 
-// StaticRouteConfig describes a single static-route entry to seed. The
-// route is implicitly seeded into the operator's single managed module
-// (Config.Function.Module).
+// StaticRouteConfig describes a static path seeded into the managed module.
+//
+// Paths with the same canonical exact prefix are alternatives. FIB readiness
+// requires one configured static path per prefix to remain in the RIB and
+// resolve through a neighbour on the gateway's allowed devices. Deleting a
+// seeded path at runtime does not remove that requirement.
 type StaticRouteConfig struct {
 	// Prefix is the destination prefix in CIDR notation.
 	Prefix string `yaml:"prefix"`
@@ -201,6 +222,10 @@ type StaticNeighbourConfig struct {
 	Device string `yaml:"device"`
 	// Priority overrides the table default priority when non-zero.
 	Priority uint32 `yaml:"priority"`
+}
+
+func (m *StaticNeighbourConfig) Validate() error {
+	return commonpb.ValidateDeviceName("device", m.Device)
 }
 
 // NetlinkMonitorConfig configures the kernel neighbour discovery via

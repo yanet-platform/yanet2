@@ -81,7 +81,6 @@ target/
 
 ### IDE ###
 .vscode
-.protolint.yaml
 
 # clangd
 .cache
@@ -90,10 +89,13 @@ compile_commands.json
 
 buildclang/
 build/
+build-*/
 web/dist/
 
 # generated files
 *.pb.go
+zz_yanet_cdeps.c
+zz_yanet_cgo.go
 
 # Ignore lock for subprojects
 subprojects/.wraplock
@@ -139,18 +141,15 @@ deploy/packages/
 .pi/
 /_bmad-output
 /_bmad/config.user.toml
+.agents/hooks/__pycache__/
 
 # Worktree symlinks: a worktree may symlink these trees into the main
 # checkout, and a directory-only pattern does not match a symlink.
-.claude/agent-memory
 .claude/settings.*.json
 .claude/worktrees
-/.codex
+/.codex/*
+!/.codex/hooks.json
 /.agent-state
-
-# Generated from .rulesync/subagents/*.md by 'make ai/agents'.
-.claude/agents
-.opencode/
 
 # Ignore skills by default.
 #
@@ -160,18 +159,28 @@ deploy/packages/
 !.agents/skills/bmad-*/
 !.agents/skills/autopilot
 !.agents/skills/better-comment
+!.agents/skills/bump-version
 !.agents/skills/code-cli
+!.agents/skills/hunt-bug
 !.agents/skills/issue-create
+!.agents/skills/measure-perf
+!.agents/skills/networking
 !.agents/skills/review-change
 !.agents/skills/ship-pr
+!.agents/skills/yanet-lab
 .claude/skills/*
 !.claude/skills/bmad-*
 !.claude/skills/autopilot
 !.claude/skills/better-comment
+!.claude/skills/bump-version
 !.claude/skills/code-cli
+!.claude/skills/hunt-bug
 !.claude/skills/issue-create
+!.claude/skills/measure-perf
+!.claude/skills/networking
 !.claude/skills/review-change
 !.claude/skills/ship-pr
+!.claude/skills/yanet-lab
 
 ### Uncategorized ###
 # Worktree symlinks: a worktree may symlink this tree into the main
@@ -201,3 +210,4 @@ deploy/packages/
 !/modules/route/
 !/modules/route-mpls/
 !/modules/unrdup/
+scripts/__pycache__/

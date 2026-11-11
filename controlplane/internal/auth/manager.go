@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/x509"
 	"fmt"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -63,8 +64,11 @@ type Manager struct {
 	identityProvider identity.Provider
 	authorizer       Authorizer
 	clientCAs        func() *x509.CertPool
-	disabled         bool
-	log              *zap.Logger
+	mode             Mode
+	// admissions holds, by id, the calls Admit let in that no server has
+	// taken yet.
+	admissions sync.Map
+	log        *zap.Logger
 }
 
 // NewManager creates a new auth Manager.
@@ -75,23 +79,50 @@ func NewManager(cfg *Config, options ...ManagerOption) (*Manager, error) {
 	}
 
 	log := opts.Log
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid authentication policy: %w", err)
+	}
+	mode := cfg.Mode
+	if mode == "" {
+		mode = ModeDisabled
+		if cfg.Disabled != nil && !*cfg.Disabled {
+			mode = ModeEnabled
+		}
+	}
+	if cfg.Disabled != nil {
+		log.Warn("gateway.auth.disabled is deprecated; use gateway.auth.mode",
+			zap.String("mode", string(mode)),
+		)
+	}
 
 	m := &Manager{
 		authenticators: []core.Authenticator{},
-		disabled:       cfg.Disabled,
+		mode:           mode,
 		log:            log,
 	}
 
-	// If disabled, only use NoneAuthenticator.
-	if cfg.Disabled {
-		log.Warn("authentication is DISABLED - requests will be anonymous with FULL permissions")
+	// Disabled mode admits every caller anonymously without checking credentials.
+	if m.mode == ModeDisabled {
+		log.Warn("authentication is disabled; requests are anonymous with full permissions")
 		m.authenticators = append(
 			m.authenticators, none.NewNoneAuthenticator(),
 		)
 		return m, nil
 	}
 
-	// Build CompositeIdentityProvider from config.
+	if m.mode == ModeEnabled {
+		if err := m.configureAuthorization(cfg); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := m.configureAuthenticators(cfg); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func (m *Manager) configureAuthorization(cfg *Config) error {
 	var identityProviders []identity.Provider
 	for _, providerCfg := range cfg.IdentityProviders {
 		switch providerCfg.Type {
@@ -100,29 +131,29 @@ func NewManager(cfg *Config, options ...ManagerOption) (*Manager, error) {
 				providerCfg.Path,
 			)
 			if err != nil {
-				return nil, fmt.Errorf(
+				return fmt.Errorf(
 					"failed to create file identity provider: %w", err,
 				)
 			}
 			identityProviders = append(identityProviders, fileProvider)
-			log.Info("registered identity provider",
+			m.log.Info("registered identity provider",
 				zap.String("type", "file"),
 				zap.String("path", providerCfg.Path),
 			)
 		default:
-			return nil, fmt.Errorf(
+			return fmt.Errorf(
 				"unknown identity provider type: %q", providerCfg.Type,
 			)
 		}
 	}
 
 	if len(identityProviders) == 0 {
-		return nil, fmt.Errorf("no identity providers configured")
+		return fmt.Errorf("no identity providers configured")
 	}
 
 	m.identityProvider = identity.NewCompositeIdentityProvider(
 		identityProviders,
-		identity.WithLog(log),
+		identity.WithLog(m.log),
 	)
 
 	// Create FilePermissionStore.
@@ -130,20 +161,23 @@ func NewManager(cfg *Config, options ...ManagerOption) (*Manager, error) {
 		cfg.PermissionsPath,
 	)
 	if err != nil {
-		return nil, fmt.Errorf(
+		return fmt.Errorf(
 			"failed to create permission store: %w", err,
 		)
 	}
-	log.Info("loaded permissions",
+	m.log.Info("loaded permissions",
 		zap.String("path", cfg.PermissionsPath),
 	)
 
 	// Create RBACAuthorizer.
 	m.authorizer = rbac.NewRBACAuthorizer(
-		permissionStore, rbac.WithLog(log),
+		permissionStore, rbac.WithLog(m.log),
 	)
+	return nil
+}
 
-	// Create authenticators from config entries.
+func (m *Manager) configureAuthenticators(cfg *Config) error {
+	log := m.log
 	factories := map[string]AuthenticatorFactory{
 		"basic": basic.NewFromConfig,
 		"sshkey": func(rawCfg *yaml.Node) (core.Authenticator, error) {
@@ -172,12 +206,12 @@ func NewManager(cfg *Config, options ...ManagerOption) (*Manager, error) {
 	for _, entry := range cfg.Authenticators {
 		factory, ok := factories[entry.Type]
 		if !ok {
-			return nil, fmt.Errorf("unknown authenticator type: %q", entry.Type)
+			return fmt.Errorf("unknown authenticator type: %q", entry.Type)
 		}
 
 		auth, err := factory(&entry.Config)
 		if err != nil {
-			return nil, fmt.Errorf("failed to init %q authenticator: %w", entry.Type, err)
+			return fmt.Errorf("failed to init %q authenticator: %w", entry.Type, err)
 		}
 
 		m.authenticators = append(m.authenticators, auth)
@@ -191,13 +225,14 @@ func NewManager(cfg *Config, options ...ManagerOption) (*Manager, error) {
 		m.authenticators, none.NewNoneAuthenticator(),
 	)
 
-	return m, nil
+	return nil
 }
 
 // Authenticate attempts to authenticate the given credential using
 // registered authenticators.
 //
-// Returns the authenticated Principal on success.
+// Verification remains strict in audit mode; only RPC admission may fall back
+// to an anonymous identity after a verification failure.
 func (m *Manager) Authenticate(
 	ctx context.Context,
 	credential core.Credential,
@@ -217,6 +252,9 @@ func (m *Manager) Authenticate(
 		if err != nil {
 			return nil, err
 		}
+		if m.mode == ModeAudit && authInfo.AuthMethod == "none" && credential.Token != "" {
+			return nil, status.Error(codes.Unauthenticated, "unsupported credential")
+		}
 
 		return m.buildPrincipal(ctx, authInfo)
 	}
@@ -232,14 +270,14 @@ func (m *Manager) buildPrincipal(
 	ctx context.Context,
 	authInfo *core.AuthInfo,
 ) (*core.Principal, error) {
-	// Anonymous requests do not have an account identity to resolve.
-	if authInfo.AuthMethod == "none" {
+	// Anonymous callers and audit subjects need no account lookup.
+	if authInfo.AuthMethod == "none" || m.mode == ModeAudit {
 		return &core.Principal{
 			User:        authInfo.Subject.Identifier,
 			Groups:      []string{},
 			AuthMethod:  authInfo.AuthMethod,
 			AuthTime:    time.Now(),
-			IsAnonymous: true,
+			IsAnonymous: authInfo.AuthMethod == "none",
 		}, nil
 	}
 
@@ -270,6 +308,43 @@ func (m *Manager) buildPrincipal(
 		AuthTime:    time.Now(),
 		IsAnonymous: false,
 	}, nil
+}
+
+// AuthenticateRequest applies the admission policy to strict verification.
+//
+// Audit admits failed credentials as anonymous; introspection must use strict
+// verification instead.
+func (m *Manager) AuthenticateRequest(
+	ctx context.Context,
+	credential core.Credential,
+	requestInfo *core.RequestInfo,
+) (*core.Principal, error) {
+	principal, err := m.Authenticate(ctx, credential, requestInfo)
+	if err == nil || m.mode != ModeAudit {
+		return principal, err
+	}
+
+	method := ""
+	if requestInfo != nil {
+		method = requestInfo.FullMethod
+	}
+	m.log.Warn("authentication failed in audit mode",
+		zap.String("method", method),
+		zap.String("reason", "invalid_credentials"),
+	)
+	return &core.Principal{
+		User:        "anonymous",
+		Groups:      []string{},
+		AuthMethod:  "none",
+		AuthTime:    time.Now(),
+		IsAnonymous: true,
+	}, nil
+}
+
+// Mode returns the policy the manager applies, with an omitted mode already
+// resolved from the deprecated input or to disabled.
+func (m *Manager) Mode() Mode {
+	return m.mode
 }
 
 // ClientCAs returns the authorities the x509 authenticator verifies client

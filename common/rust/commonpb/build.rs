@@ -28,19 +28,19 @@ const SERDE_MESSAGES: &[&str] = &[
 ];
 
 fn main() -> Result<(), Box<dyn Error>> {
-    println!("cargo:rerun-if-changed=common/commonpb/v1/target.proto");
-    println!("cargo:rerun-if-changed=common/commonpb/v1/metric.proto");
-    println!("cargo:rerun-if-changed=common/commonpb/v1/macaddr.proto");
-    println!("cargo:rerun-if-changed=common/commonpb/v1/ipaddr.proto");
-    println!("cargo:rerun-if-changed=common/commonpb/v1/ipv4addr.proto");
-    println!("cargo:rerun-if-changed=common/commonpb/v1/ipv6addr.proto");
-    println!("cargo:rerun-if-changed=common/commonpb/v1/iprange.proto");
-    println!("cargo:rerun-if-changed=common/commonpb/v1/ipnetwork.proto");
-    println!("cargo:rerun-if-changed=common/commonpb/v1/ipprefix.proto");
-    println!("cargo:rerun-if-changed=common/commonpb/v1/ipv4prefix.proto");
-    println!("cargo:rerun-if-changed=common/commonpb/v1/ipv4network.proto");
-    println!("cargo:rerun-if-changed=common/commonpb/v1/ipv6network.proto");
-    println!("cargo:rerun-if-changed=common/commonpb/v1/ipv6prefix.proto");
+    println!("cargo:rerun-if-changed=../../../common/commonpb/v1/target.proto");
+    println!("cargo:rerun-if-changed=../../../common/commonpb/v1/metric.proto");
+    println!("cargo:rerun-if-changed=../../../common/commonpb/v1/macaddr.proto");
+    println!("cargo:rerun-if-changed=../../../common/commonpb/v1/ipaddr.proto");
+    println!("cargo:rerun-if-changed=../../../common/commonpb/v1/ipv4addr.proto");
+    println!("cargo:rerun-if-changed=../../../common/commonpb/v1/ipv6addr.proto");
+    println!("cargo:rerun-if-changed=../../../common/commonpb/v1/iprange.proto");
+    println!("cargo:rerun-if-changed=../../../common/commonpb/v1/ipnetwork.proto");
+    println!("cargo:rerun-if-changed=../../../common/commonpb/v1/ipprefix.proto");
+    println!("cargo:rerun-if-changed=../../../common/commonpb/v1/ipv4prefix.proto");
+    println!("cargo:rerun-if-changed=../../../common/commonpb/v1/ipv4network.proto");
+    println!("cargo:rerun-if-changed=../../../common/commonpb/v1/ipv6network.proto");
+    println!("cargo:rerun-if-changed=../../../common/commonpb/v1/ipv6prefix.proto");
 
     let mut config = tonic_prost_build::configure()
         .build_server(false)

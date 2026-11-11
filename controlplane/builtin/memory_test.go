@@ -1,16 +1,25 @@
 package builtin_test
 
 import (
+	"maps"
 	"math"
+	"strconv"
+	"strings"
 	"testing"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
+	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/builtin"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
+// findMetric returns the named series with the exact, unordered label set.
 func findMetric(t *testing.T, metrics []*commonpb.Metric, name string, labels map[string]string) *commonpb.Metric {
 	t.Helper()
 
@@ -19,14 +28,11 @@ func findMetric(t *testing.T, metrics []*commonpb.Metric, name string, labels ma
 			continue
 		}
 
-		match := true
+		actualLabels := map[string]string{}
 		for _, label := range metric.GetLabels() {
-			if want, ok := labels[label.GetName()]; ok && want != label.GetValue() {
-				match = false
-				break
-			}
+			actualLabels[label.GetName()] = label.GetValue()
 		}
-		if match && len(metric.GetLabels()) == len(labels) {
+		if len(metric.GetLabels()) == len(labels) && maps.Equal(actualLabels, labels) {
 			return metric
 		}
 	}
@@ -34,11 +40,82 @@ func findMetric(t *testing.T, metrics []*commonpb.Metric, name string, labels ma
 	return nil
 }
 
+// gaugeValue rejects other metric kinds even when their default value is zero.
 func gaugeValue(t *testing.T, metric *commonpb.Metric) float64 {
 	t.Helper()
 
 	require.NotNil(t, metric)
+	require.IsType(t, &commonpb.Metric_Gauge{}, metric.GetValue())
 	return metric.GetGauge()
+}
+
+// Test_CPAllocatorMetrics_AllocatorCapacity verifies that shared capacity is
+// exported even without agents and zero-valued classes are not omitted.
+func Test_CPAllocatorMetrics_AllocatorCapacity(t *testing.T) {
+	stats := ffi.AllocatorStats{
+		FreeBytes:             48,
+		LargestFreeBlockBytes: 32,
+		Pools: []ffi.AllocatorPoolStats{
+			{BlockSizeBytes: 8, FreeBlocks: 2},
+			{BlockSizeBytes: 16, FreeBlocks: 0},
+			{BlockSizeBytes: 32, FreeBlocks: 1},
+		},
+	}
+	metrics := builtin.CPAllocatorMetrics(stats)
+	require.Len(t, metrics, 2+len(stats.Pools))
+	assertAllocatorMetrics(t, metrics, "cp", "", stats)
+}
+
+// Test_MemoryMetrics_AllocatorUsesLiveGeneration verifies that retired
+// arenas do not produce duplicate series or inflate live free capacity.
+func Test_MemoryMetrics_AllocatorUsesLiveGeneration(t *testing.T) {
+	stats := ffi.AllocatorStats{
+		FreeBytes:             64,
+		LargestFreeBlockBytes: 32,
+		Pools: []ffi.AllocatorPoolStats{
+			{BlockSizeBytes: 16, FreeBlocks: 0},
+			{BlockSizeBytes: 32, FreeBlocks: 2},
+		},
+	}
+	agents := []ffi.AgentInfo{{
+		Name: "route",
+		Instances: []ffi.AgentInstanceInfo{
+			{Allocator: stats},
+			{Allocator: ffi.AllocatorStats{FreeBytes: 1024, LargestFreeBlockBytes: 512}},
+		},
+	}}
+	metrics := builtin.MemoryMetrics(agents)
+	assertAllocatorMetrics(t, metrics, "agent", "route", stats)
+	var allocatorCount int
+	for _, metric := range metrics {
+		if strings.HasPrefix(metric.GetName(), "memory_allocator_") {
+			allocatorCount++
+		}
+	}
+	require.Equal(t, 2+len(stats.Pools), allocatorCount)
+}
+
+// assertAllocatorMetrics checks exact labels and raw size-class counts
+// without introducing PID or generation labels into monitoring.
+func assertAllocatorMetrics(t *testing.T, metrics []*commonpb.Metric, scope string, agent string, stats ffi.AllocatorStats) {
+	t.Helper()
+	labels := map[string]string{"scope": scope, "agent": agent}
+	require.Equal(t, float64(stats.FreeBytes), gaugeValue(t,
+		findMetric(t, metrics, "memory_allocator_free_bytes", labels),
+	))
+	require.Equal(t, float64(stats.LargestFreeBlockBytes), gaugeValue(t,
+		findMetric(t, metrics, "memory_allocator_largest_free_block_bytes", labels),
+	))
+	for _, pool := range stats.Pools {
+		labels := map[string]string{
+			"scope":            scope,
+			"agent":            agent,
+			"block_size_bytes": strconv.FormatUint(pool.BlockSizeBytes, 10),
+		}
+		require.Equal(t, float64(pool.FreeBlocks), gaugeValue(t,
+			findMetric(t, metrics, "memory_allocator_free_blocks", labels),
+		))
+	}
 }
 
 // TestMemoryMetricsContextPathResolution verifies that the root node of
@@ -50,7 +127,7 @@ func TestMemoryMetricsContextPathResolution(t *testing.T) {
 			Name: "acl",
 			Instances: []ffi.AgentInstanceInfo{
 				{
-					MemoryTree: []ffi.AgentMemoryNode{
+					MemoryTree: []ffi.MemoryNode{
 						{Name: "acl", ParentIdx: math.MaxUint32, BAllocSize: 100},
 						{Name: "acl-in", ParentIdx: 0, BAllocSize: 60},
 						{Name: "filter", ParentIdx: 1, BAllocSize: 40},
@@ -81,7 +158,7 @@ func TestMemoryMetricsContextDistinguishesSiblingSubtrees(t *testing.T) {
 			Name: "acl",
 			Instances: []ffi.AgentInstanceInfo{
 				{
-					MemoryTree: []ffi.AgentMemoryNode{
+					MemoryTree: []ffi.MemoryNode{
 						{Name: "acl", ParentIdx: math.MaxUint32},
 						{Name: "acl-in", ParentIdx: 0},
 						{Name: "filter", ParentIdx: 1},
@@ -115,7 +192,7 @@ func TestMemoryMetricsContextClampsUnderflow(t *testing.T) {
 			Name: "acl",
 			Instances: []ffi.AgentInstanceInfo{
 				{
-					MemoryTree: []ffi.AgentMemoryNode{
+					MemoryTree: []ffi.MemoryNode{
 						{Name: "root", ParentIdx: math.MaxUint32, BAllocSize: 10, BFreeSize: 20},
 					},
 				},
@@ -178,7 +255,7 @@ func TestMemoryMetricsNonDecreasingParentResolvesToRoot(t *testing.T) {
 			Name: "acl",
 			Instances: []ffi.AgentInstanceInfo{
 				{
-					MemoryTree: []ffi.AgentMemoryNode{
+					MemoryTree: []ffi.MemoryNode{
 						{Name: "out-of-range", ParentIdx: 99, BAllocSize: 10},
 						{Name: "self-ref", ParentIdx: 1, BAllocSize: 20},
 						{Name: "forward-ref", ParentIdx: 3, BAllocSize: 30},
@@ -221,7 +298,7 @@ func TestMemoryMetricsContextAggregatesDuplicateLabels(t *testing.T) {
 			Name: "acl",
 			Instances: []ffi.AgentInstanceInfo{
 				{
-					MemoryTree: []ffi.AgentMemoryNode{
+					MemoryTree: []ffi.MemoryNode{
 						{Name: "root", ParentIdx: math.MaxUint32, BAllocSize: 100},
 						{Name: "filter", ParentIdx: 0, BAllocSize: 30},
 						{Name: "filter", ParentIdx: 0, BAllocSize: 20},
@@ -255,7 +332,7 @@ func TestMemoryMetricsContextClampsBeforeAggregating(t *testing.T) {
 			Name: "acl",
 			Instances: []ffi.AgentInstanceInfo{
 				{
-					MemoryTree: []ffi.AgentMemoryNode{
+					MemoryTree: []ffi.MemoryNode{
 						{Name: "root", ParentIdx: math.MaxUint32, BAllocSize: 100},
 						{Name: "filter", ParentIdx: 0, BAllocSize: 100, BFreeSize: 0},
 						{Name: "filter", ParentIdx: 0, BAllocSize: 10, BFreeSize: 40},
@@ -283,4 +360,255 @@ func TestMemoryMetricsSkipsAgentWithNoInstances(t *testing.T) {
 		metrics := builtin.MemoryMetrics(agents)
 		require.Empty(t, metrics)
 	})
+}
+
+// TestCPMemoryMetricsZoneTree verifies that the controlplane zone's own
+// snapshot exports the allocator's free byte count and per-path context
+// gauges rooted at the "cp" bootstrap context.
+func TestCPMemoryMetricsZoneTree(t *testing.T) {
+	cp := ffi.CPMemoryInfo{
+		FreeBytes: 4096,
+		MemoryTree: []ffi.MemoryNode{
+			{Name: "cp", ParentIdx: math.MaxUint32, BAllocSize: 100},
+			{Name: "ectx", ParentIdx: 0, BAllocSize: 60, BFreeSize: 10},
+			{Name: "counter_storage", ParentIdx: 0, BAllocSize: 20},
+			{Name: "dataplane", ParentIdx: 0, BAllocSize: 15},
+		},
+	}
+
+	metrics := builtin.CPMemoryMetrics(cp)
+
+	free := findMetric(t, metrics, "memory_cp_free_bytes", map[string]string{})
+	require.Equal(t, float64(4096), gaugeValue(t, free))
+
+	root := findMetric(t, metrics, "memory_cp_context_used_bytes",
+		map[string]string{"path": "/cp"})
+	require.Equal(t, float64(100), gaugeValue(t, root))
+
+	ectx := findMetric(t, metrics, "memory_cp_context_used_bytes",
+		map[string]string{"path": "/cp/ectx"})
+	require.Equal(t, float64(50), gaugeValue(t, ectx))
+
+	counters := findMetric(t, metrics, "memory_cp_context_used_bytes",
+		map[string]string{"path": "/cp/counter_storage"})
+	require.Equal(t, float64(20), gaugeValue(t, counters))
+
+	systemAgent := findMetric(t, metrics, "memory_cp_context_used_bytes",
+		map[string]string{"path": "/cp/dataplane"})
+	require.Equal(t, float64(15), gaugeValue(t, systemAgent))
+}
+
+// Test_Memory_Collect_ExportsCPZone verifies that a live instance's
+// exported gauges carry the controlplane zone: a positive free-byte gauge
+// and context gauges for the zone's fixed ectx and counter-storage
+// contexts.
+func Test_Memory_Collect_ExportsCPZone(t *testing.T) {
+	shm := newMemoryHarness(t).SharedMemory()
+	svc := builtin.NewMemory(0, shm)
+
+	metrics := svc.Collect()
+
+	free := findMetric(t, metrics, "memory_cp_free_bytes", map[string]string{})
+	require.NotNil(t, free)
+	require.Greater(t, gaugeValue(t, free), float64(0))
+
+	for _, path := range []string{"/cp", "/cp/ectx", "/cp/counter_storage"} {
+		context := findMetric(t, metrics, "memory_cp_context_used_bytes",
+			map[string]string{"path": path})
+		require.NotNil(t, context, "path %q must be exported", path)
+	}
+}
+
+// moduleAgentSize is the arena a test module agent is attached with, far
+// below the controlplane pool of newMemoryHarness so it can grow.
+const moduleAgentSize = 4 * datasize.MB
+
+// newMemoryHarness returns a single-instance dataplane harness with a
+// 32 MiB controlplane pool, freed when the test ends.
+func newMemoryHarness(t *testing.T) *dataplaneut.Harness {
+	t.Helper()
+
+	harness, err := dataplaneut.NewHarness(dataplaneut.Config{
+		CPMemory:      uint64(datasize.MB * 32),
+		DPMemory:      uint64(datasize.MB * 4),
+		WorkerCount:   1,
+		Devices:       []string{"d0"},
+		DevicesToLoad: []string{"plain"},
+	})
+	require.NoError(t, err)
+	t.Cleanup(harness.Free)
+
+	return harness
+}
+
+// attachModuleAgent attaches an agent with its own arena of
+// moduleAgentSize under the given name, as a module control plane does.
+func attachModuleAgent(t *testing.T, shm *ffi.SharedMemory, name string) {
+	t.Helper()
+
+	_, err := shm.AgentAttach(name, 0, moduleAgentSize)
+	require.NoError(t, err)
+}
+
+// liveArenaLimit returns the memory limit ListArenas reports for the live
+// generation of the named agent.
+func liveArenaLimit(t *testing.T, svc *builtin.Memory, name string) uint64 {
+	t.Helper()
+
+	response, err := svc.ListArenas(t.Context(), &ynpb.ListArenasRequest{})
+	require.NoError(t, err)
+
+	for _, arena := range response.GetArenas() {
+		if arena.GetAgent() == name && !arena.GetRetired() {
+			return arena.GetMemoryLimit()
+		}
+	}
+
+	require.FailNow(t, "no live arena listed", "agent %q", name)
+	return 0
+}
+
+// Test_Memory_ExtendAgent_GrowsModuleAgent verifies that growing a module
+// agent by an aligned size reports the attached size plus exactly that
+// size.
+func Test_Memory_ExtendAgent_GrowsModuleAgent(t *testing.T) {
+	shm := newMemoryHarness(t).SharedMemory()
+	attachModuleAgent(t, shm, "route")
+	svc := builtin.NewMemory(0, shm)
+
+	response, err := svc.ExtendAgent(t.Context(), &ynpb.ExtendAgentRequest{
+		Agent: "route",
+		Size:  uint64(datasize.MB),
+	})
+	require.NoError(t, err)
+	require.Equal(t, uint64(moduleAgentSize+datasize.MB), response.GetMemoryLimit())
+}
+
+// Test_Memory_ExtendAgent_ListsGrownLimit verifies that the limit a growth
+// reports is the one the arena listing shows for the live generation.
+func Test_Memory_ExtendAgent_ListsGrownLimit(t *testing.T) {
+	shm := newMemoryHarness(t).SharedMemory()
+	attachModuleAgent(t, shm, "route")
+	svc := builtin.NewMemory(0, shm)
+
+	response, err := svc.ExtendAgent(t.Context(), &ynpb.ExtendAgentRequest{
+		Agent: "route",
+		Size:  uint64(datasize.MB),
+	})
+	require.NoError(t, err)
+	require.Equal(t, response.GetMemoryLimit(), liveArenaLimit(t, svc, "route"))
+}
+
+// Test_Memory_ExtendAgent_ExportsGrownLimit verifies that the limit a
+// growth reports is the one the arena limit gauge exports for the agent.
+func Test_Memory_ExtendAgent_ExportsGrownLimit(t *testing.T) {
+	shm := newMemoryHarness(t).SharedMemory()
+	attachModuleAgent(t, shm, "route")
+	svc := builtin.NewMemory(0, shm)
+
+	response, err := svc.ExtendAgent(t.Context(), &ynpb.ExtendAgentRequest{
+		Agent: "route",
+		Size:  uint64(datasize.MB),
+	})
+	require.NoError(t, err)
+
+	limit := findMetric(t, svc.Collect(), "memory_arena_limit_bytes",
+		map[string]string{"agent": "route"})
+	require.Equal(t, float64(response.GetMemoryLimit()), gaugeValue(t, limit))
+}
+
+// Test_Memory_ExtendAgent_RoundsUpUnalignedSize verifies that a size below
+// the allocator granularity still grows the agent, by more than was asked.
+func Test_Memory_ExtendAgent_RoundsUpUnalignedSize(t *testing.T) {
+	shm := newMemoryHarness(t).SharedMemory()
+	attachModuleAgent(t, shm, "route")
+	svc := builtin.NewMemory(0, shm)
+
+	response, err := svc.ExtendAgent(t.Context(), &ynpb.ExtendAgentRequest{
+		Agent: "route",
+		Size:  1,
+	})
+	require.NoError(t, err)
+	require.Greater(t, response.GetMemoryLimit(), uint64(moduleAgentSize)+1)
+}
+
+// Test_Memory_ExtendAgent_Rejects verifies that backend failures report
+// their gRPC status and leave every attached agent at its prior limit.
+func Test_Memory_ExtendAgent_Rejects(t *testing.T) {
+	cases := []struct {
+		name string
+		// instanceID is the dataplane instance the service is bound to.
+		instanceID uint32
+		// agent attaches the agent under test and returns its name.
+		agent func(t *testing.T, shm *ffi.SharedMemory) string
+		size  uint64
+		code  codes.Code
+	}{
+		{
+			name:       "agent nobody attached",
+			instanceID: 0,
+			agent:      func(*testing.T, *ffi.SharedMemory) string { return "missing" },
+			size:       uint64(datasize.MB),
+			code:       codes.NotFound,
+		},
+		{
+			name:       "dataplane instance not initialised",
+			instanceID: 1,
+			agent: func(t *testing.T, shm *ffi.SharedMemory) string {
+				attachModuleAgent(t, shm, "route")
+				return "route"
+			},
+			size: uint64(datasize.MB),
+			code: codes.Unavailable,
+		},
+		{
+			name:       "controlplane pool too small",
+			instanceID: 0,
+			agent: func(t *testing.T, shm *ffi.SharedMemory) string {
+				attachModuleAgent(t, shm, "route")
+				return "route"
+			},
+			size: uint64(datasize.GB),
+			code: codes.ResourceExhausted,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			shm := newMemoryHarness(t).SharedMemory()
+			name := tc.agent(t, shm)
+
+			before := builtin.NewMemory(0, shm).Collect()
+
+			_, err := builtin.NewMemory(tc.instanceID, shm).ExtendAgent(
+				t.Context(),
+				&ynpb.ExtendAgentRequest{Agent: name, Size: tc.size},
+			)
+			require.Equal(t, tc.code, status.Code(err), "error: %v", err)
+
+			require.Equal(t,
+				limitGauges(before),
+				limitGauges(builtin.NewMemory(0, shm).Collect()),
+				"a rejected growth must leave every arena limit as it was",
+			)
+		})
+	}
+}
+
+// limitGauges returns the arena limit gauge of every agent, keyed by the
+// agent name.
+func limitGauges(metrics []*commonpb.Metric) map[string]float64 {
+	limits := map[string]float64{}
+	for _, metric := range metrics {
+		if metric.GetName() != "memory_arena_limit_bytes" {
+			continue
+		}
+		for _, label := range metric.GetLabels() {
+			if label.GetName() == "agent" {
+				limits[label.GetValue()] = metric.GetGauge()
+			}
+		}
+	}
+
+	return limits
 }

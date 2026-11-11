@@ -25,14 +25,31 @@ type NeighbourService struct {
 	operatorpb.UnimplementedNeighbourServiceServer
 
 	neighTable *neigh.NeighTable
+	onSnapshot func()
+}
+
+// NeighbourServiceOption configures complete-observation reporting.
+type NeighbourServiceOption func(*NeighbourService)
+
+// WithNeighbourServiceOnSnapshot reports each accepted complete observation.
+//
+// Identical and empty publications also confirm receiver freshness.
+func WithNeighbourServiceOnSnapshot(onSnapshot func()) NeighbourServiceOption {
+	return func(m *NeighbourService) {
+		m.onSnapshot = onSnapshot
+	}
 }
 
 // NewNeighbourService constructs a NeighbourService bound to the
 // supplied neighbour table.
-func NewNeighbourService(neighTable *neigh.NeighTable) *NeighbourService {
-	return &NeighbourService{
+func NewNeighbourService(neighTable *neigh.NeighTable, options ...NeighbourServiceOption) *NeighbourService {
+	m := &NeighbourService{
 		neighTable: neighTable,
 	}
+	for _, option := range options {
+		option(m)
+	}
+	return m
 }
 
 func (m *NeighbourService) List(
@@ -52,10 +69,8 @@ func (m *NeighbourService) List(
 		view = v
 	}
 
-	entries, size := view.Entries()
-
-	neighbours := make([]*operatorpb.NeighbourEntry, 0, size)
-	for entry := range entries {
+	neighbours := make([]*operatorpb.NeighbourEntry, 0, view.Len())
+	for entry := range view.Entries() {
 		source := entry.Source
 		if source == "" {
 			source = table
@@ -228,11 +243,14 @@ func (m *NeighbourService) SwapNeighbours(
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	if err := ctx.Err(); err != nil {
-		return nil, status.FromContextError(err).Err()
-	}
-	if err := m.neighTable.SwapSource(req.GetTable(), entries); err != nil {
+	if err := m.neighTable.SwapSourceContext(ctx, req.GetTable(), entries); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, status.FromContextError(err).Err()
+		}
 		return nil, status.Errorf(codes.NotFound, "failed to swap neighbours: %v", err)
+	}
+	if m.onSnapshot != nil {
+		m.onSnapshot()
 	}
 	return &operatorpb.SwapNeighboursResponse{}, nil
 }

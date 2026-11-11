@@ -1,28 +1,65 @@
-# Ring buffer unit tests
+# Pdump capture unit tests.
 
-# Sources for the ring test
-ring_test_sources = files(
-  'ring_test.c',
+pdump_test_fixture_sources = files(
+  'fixture.c',
 )
 
-# Include directories
-ring_test_includes = [
-  yanet_rootdir,
-  '..',
-  '../..',
-]
+pdump_capture_test_sources = pdump_test_fixture_sources + files(
+  'capture_test.c',
+)
 
-ring_test_exe = executable(
-  'ring_test',
-  c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
-  sources: ring_test_sources,
-  include_directories: ring_test_includes,
-  dependencies: [lib_logging_dep],
+pdump_capture_test_exe = executable(
+  'pdump_capture_test',
+  pdump_capture_test_sources,
+  c_args: ['-UNDEBUG'],
+  dependencies: [
+    lib_dataplane_ut_dep,
+    lib_logging_dep,
+    lib_errors_dep,
+    lib_ring_objects_dep,
+    lib_pdump_dp_dep,
+    lib_agent_cp_dep,
+    lib_counters_dep,
+    libdpdk_test_dep,
+    libpcap_dep,
+  ],
+  include_directories: yanet_rootdir,
 )
 
 test(
-  'pdump_ring',
-  ring_test_exe,
+  'pdump',
+  pdump_capture_test_exe,
   timeout: 30,
 )
+
+pdump_bench_sources = pdump_test_fixture_sources + files(
+  'pdump_bench.c',
+)
+
+pdump_bench_exe = executable(
+  'pdump_bench',
+  pdump_bench_sources,
+  dependencies: [
+    lib_dataplane_ut_dep,
+    lib_logging_dep,
+    lib_errors_dep,
+    lib_ring_objects_dep,
+    lib_pdump_dp_dep,
+    lib_agent_cp_dep,
+    lib_counters_dep,
+    libdpdk_test_dep,
+    libpcap_dep,
+  ],
+  include_directories: yanet_rootdir,
+)
+
+benchmark('pdump_bench', pdump_bench_exe, timeout: 300)
+
+limit_test_exe = executable(
+  'pdump_limit_test',
+  sources: files('limit_test.c'),
+  c_args: yanet_test_c_args,
+  include_directories: yanet_rootdir,
+)
+
+test('pdump_limit', limit_test_exe, timeout: 30)

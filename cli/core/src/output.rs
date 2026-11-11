@@ -108,6 +108,7 @@ impl Output for HumanOutput {
     }
 
     fn failure(&self, err: &Error) {
+        let Error(err) = err;
         let prefix = if self.is_colored {
             "[✗]".red().to_string()
         } else {
@@ -180,6 +181,7 @@ impl Output for JsonOutput {
     }
 
     fn failure(&self, err: &Error) {
+        let Error(err) = err;
         let fallback_code = match err.kind {
             ErrorKind::ServiceUnregistered => "NotFound",
             ErrorKind::NotFound => "NotFound",
@@ -265,7 +267,11 @@ static OUTPUT: OnceLock<Box<dyn Output>> = OnceLock::new();
 /// the logger fails to install.
 pub fn init<F: Format>(verbosity: u8, format: F) {
     logging::init(verbosity as usize).expect("logger init failed");
-    OUTPUT.set(format.build()).ok().expect("output already initialised");
+    install(format.build());
+}
+
+fn install(backend: Box<dyn Output>) {
+    OUTPUT.set(backend).ok().expect("output already initialised");
     colored::control::set_override(is_colored());
 }
 

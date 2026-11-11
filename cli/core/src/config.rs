@@ -132,6 +132,9 @@ pub struct Settings {
     pub client_cert: Resolved<Option<PathBuf>>,
     pub client_key: Resolved<Option<PathBuf>>,
     pub timeout: Resolved<Option<Duration>>,
+    /// Whether the server certificate is accepted unverified; a flag of
+    /// one invocation only, never read from the file.
+    pub skip_verify: bool,
     /// Every file consulted while resolving, in system-then-user order.
     pub files: Vec<ConsultedFile>,
 }
@@ -157,6 +160,8 @@ impl Settings {
             AuthMethod::None => Ok(auth::ResolvedAuth::None),
             AuthMethod::Sshcert => match self.cert_tag.value.as_deref().map(str::trim) {
                 Some(tag) if !tag.is_empty() => Ok(auth::ResolvedAuth::Sshcert { tag: tag.to_owned() }),
+                // An empty tag matches every identity in the agent through
+                // `contains("")`, so it is treated the same as no tag at all.
                 _ => Err(Error::MissingCertTag),
             },
         }
@@ -367,11 +372,6 @@ struct MergedFile {
 /// Reads one file, returning `None` when it is absent and `required` is
 /// `false`. A missing required file and a present-but-unreadable file are
 /// both [`Error::Read`].
-// `core::io::ErrorKind` is behind the unstable `core_io` feature, so this
-// function keeps `std::io::ErrorKind`. The allow sits here rather than on a
-// `use` because clippy's `useless_attribute` rejects it directly on a `use`
-// item.
-#[allow(clippy::std_instead_of_core)]
 fn read_file(path: &Path, required: bool) -> Result<(Option<RawFile>, ConsultedFile), Error> {
     use std::io::ErrorKind;
 
@@ -681,12 +681,14 @@ pub fn resolve(args: &ConnectionArgs, sources: &Sources) -> Result<Settings, Err
             value: timeout,
             origin: timeout_origin,
         },
+        skip_verify: args.tls.dangerously_skip_verify,
         files: merged.files,
     })
 }
 
 #[cfg(test)]
 mod test {
+    use core::assert_matches;
     use std::fs;
 
     use super::*;
@@ -781,7 +783,7 @@ mod test {
         write(&dir, "system.yaml", "endpoint: grpc://system:1\n");
         let file = resolve(&bare_args(), &sources).unwrap();
         assert_eq!("grpc://system:1", file.endpoint.value);
-        assert!(matches!(file.endpoint.origin, Origin::File(..)));
+        assert_matches!(file.endpoint.origin, Origin::File(..));
 
         write(&dir, "user.yaml", "endpoint: grpc://user:1\n");
         let user_over_system = resolve(&bare_args(), &sources).unwrap();
@@ -882,9 +884,7 @@ mod test {
         args.endpoint = Some("lab".to_owned());
         let err = resolve(&args, &sources).unwrap_err();
 
-        assert!(
-            matches!(err, Error::SectionMissingEndpoint { ref alias, ref path } if alias == "lab" && *path == user_path)
-        );
+        assert_matches!(err, Error::SectionMissingEndpoint { ref alias, ref path } if alias == "lab" && *path == user_path);
     }
 
     #[test]
@@ -901,7 +901,7 @@ mod test {
         args.endpoint = Some("a".to_owned());
         let err = resolve(&args, &sources).unwrap_err();
 
-        assert!(matches!(err, Error::AliasChain { ref alias } if alias == "a"));
+        assert_matches!(err, Error::AliasChain { ref alias } if alias == "a");
     }
 
     #[test]
@@ -975,7 +975,7 @@ mod test {
 
         let err = resolve(&bare_args(), &sources).unwrap_err();
 
-        assert!(matches!(err, Error::Read { .. }));
+        assert_matches!(err, Error::Read { .. });
     }
 
     #[test]
@@ -1004,7 +1004,7 @@ mod test {
         args.auth.auth = Some(AuthMethod::Sshcert);
         let settings = resolve(&args, &sources).unwrap();
 
-        assert!(matches!(settings.resolved_auth(), Err(Error::MissingCertTag)));
+        assert_matches!(settings.resolved_auth(), Err(Error::MissingCertTag));
     }
 
     #[test]
@@ -1043,7 +1043,7 @@ mod test {
         args.auth.cert_tag = Some("   ".to_owned());
         let settings = resolve(&args, &sources).unwrap();
 
-        assert!(matches!(settings.resolved_auth(), Err(Error::MissingCertTag)));
+        assert_matches!(settings.resolved_auth(), Err(Error::MissingCertTag));
     }
 
     #[test]
@@ -1086,7 +1086,7 @@ mod test {
 
         let err = resolve(&bare_args(), &sources).unwrap_err();
 
-        assert!(matches!(err, Error::InvalidTimeout { .. }));
+        assert_matches!(err, Error::InvalidTimeout { .. });
     }
 
     #[test]

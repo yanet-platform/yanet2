@@ -22,13 +22,13 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
+	cplain "github.com/yanet-platform/yanet2/devices/plain/bindings/go/cplain"
 	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	"github.com/yanet-platform/yanet2/modules/l3b/bindings/go/cl3b"
 	controlplane "github.com/yanet-platform/yanet2/modules/l3b/controlplane"
-	cl3bobject "github.com/yanet-platform/yanet2/objects/l3b/bindings/go/cl3bobject"
+	"github.com/yanet-platform/yanet2/objects/l3b/bindings/go/cl3bobject"
 
 	"github.com/yanet-platform/xnetip"
 
@@ -588,11 +588,10 @@ func Test_CompatMetabalancerDecap(t *testing.T) {
 	// the balancer's own addresses — the old dstAddresses list; the old
 	// srcPrefixes half of the early-decap contract is not part of the new
 	// module and is dropped from the port.
-	prefixes := []netip.Prefix{
-		netip.MustParsePrefix("1.210.198.65/32"),
-		netip.MustParsePrefix("2222:898:0:320::b2a/128"),
-	}
-	decapHandle, err := decap.NewBackend(agent).UpdateModule("meta", prefixes)
+	decapHandle, err := decap.NewBackend(agent).Update("meta", decap.PrefixSets{
+		Prefixes4: []netip.Prefix{netip.MustParsePrefix("1.210.198.65/32")},
+		Prefixes6: []netip.Prefix{netip.MustParsePrefix("2222:898:0:320::b2a/128")},
+	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = decapHandle.Free() })
 
@@ -642,7 +641,7 @@ func Test_CompatMetabalancerDecap(t *testing.T) {
 			Dst6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
 		},
 	}
-	sinkHandle, err := forward.NewBackend(agent).UpdateModule("sink", sinkRules)
+	sinkHandle, err := forward.NewBackend(agent).Update("sink", forward.RuleSet{Compiled: sinkRules})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sinkHandle.Free() })
 
@@ -665,7 +664,7 @@ func Test_CompatMetabalancerDecap(t *testing.T) {
 		Functions: []string{"test"},
 	}))
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy"}))
-	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	_, err = cplain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: "test", Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},

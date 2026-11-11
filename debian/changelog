@@ -1,3 +1,33 @@
+yanet2 (0.5.0) unstable; urgency=medium
+
+  * Release 0.5.0.
+
+ -- Viacheslav Saushev <vvsaushev@yandex-team.ru>  Wed, 11 Nov 2026 00:21:49 +0000
+
+yanet2 (0.4.1) unstable; urgency=medium
+
+  * Release 0.4.1.
+
+ -- Evgeny Safronov <division494@gmail.com>  Wed, 04 Nov 2026 13:06:44 +0300
+
+yanet2 (0.4.0) unstable; urgency=medium
+
+  * Release 0.4.0.
+
+ -- Evgeny Safronov <division494@gmail.com>  Tue, 03 Nov 2026 08:08:45 +0300
+
+yanet2 (0.3.0) unstable; urgency=medium
+
+  * Release 0.3.0.
+
+ -- Viacheslav Saushev <vvsaushev@yandex-team.ru>  Mon, 26 Oct 2026 23:45:24 +0000
+
+yanet2 (0.2.0) unstable; urgency=medium
+
+  * Release 0.2.0.
+
+ -- Georgy Kirichenko <kirichenkoga@gmail.com>  Thu, 22 Oct 2026 13:03:46 +0300
+
 yanet2 (0.0.1) UNRELEASED; urgency=medium
 
   * Initial release.

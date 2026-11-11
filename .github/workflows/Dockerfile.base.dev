@@ -7,15 +7,18 @@ LABEL maintainer="YANET Team" \
 ENV DEBIAN_FRONTEND=noninteractive \
     GOCACHE=/tmp/gocache \
     GOMODCACHE=/tmp/gomodcache \
+    CCACHE_DIR=/ccache \
+    CCACHE_MAXSIZE=10G \
     PATH="/usr/local/go/bin:${PATH}"
 
-ARG GO_VERSION=1.24.13
+ARG GO_VERSION=1.27.1
 ARG PROTOC_GEN_GO_VERSION=v1.36.11
 ARG PROTOC_GEN_GO_GRPC_VERSION=v1.6.1
 
 RUN apt-get update -y && apt-get install -y \
     meson \
     cmake \
+    ccache \
     clang \
     clang-format-19 \
     clang-tidy-19 \

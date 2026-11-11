@@ -1,0 +1,159 @@
+name: Rust SDK dataplane tests
+
+# The Go tests of the Rust module SDK fixtures (bindings/rust) over the C dataplane
+# harness, natively. rust-sdk-ut-asan.yml runs them under AddressSanitizer and
+# shares the setup steps below; change both files together.
+#
+# They are separate from build.yml, which excludes bindings/rust and installs no
+# Rust toolchain, while the meson build of these tests runs cargo. A change to
+# what the archive, the plugins and the tests are built from or link re-runs
+# the job. It writes its ccache and cargo caches from main only, since a cache
+# written on a pull-request ref is readable only from that pull request. The
+# Go build cache has profiles of its own, since the cgo package of the
+# fixtures is not in build.yml's.
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "bindings/rust/**"
+      - "api/**.c"
+      - "api/**.h"
+      - "common/**.c"
+      - "common/**.h"
+      - "devices/plain/**.c"
+      - "devices/plain/**.h"
+      - "lib/**.c"
+      - "lib/**.h"
+      - "bindings/go/cerrors/**"
+      - "bindings/go/dataplane_ut/**"
+      - "common/go/dataplane/**"
+      - "controlplane/ffi/**"
+      - "devices/plain/bindings/go/cplain/**"
+      - "**/meson.build"
+      - "meson_options.txt"
+      - "Makefile"
+      - "scripts/go_cdeps.py"
+      - "scripts/go_cgo_flags.py"
+      - ".golangci.yml"
+      - "go.mod"
+      - "go.sum"
+      - "subprojects/dpdk"
+      - ".github/actions/go-buildcache/**"
+      - ".github/actions/go-modcache/**"
+      - ".github/workflows/rust-sdk-ut.yml"
+  pull_request:
+    # A stacked pull request has a non-main base, so a main-only filter would skip it.
+    branches: ["**"]
+    paths:
+      - "bindings/rust/**"
+      - "api/**.c"
+      - "api/**.h"
+      - "common/**.c"
+      - "common/**.h"
+      - "devices/plain/**.c"
+      - "devices/plain/**.h"
+      - "lib/**.c"
+      - "lib/**.h"
+      - "bindings/go/cerrors/**"
+      - "bindings/go/dataplane_ut/**"
+      - "common/go/dataplane/**"
+      - "controlplane/ffi/**"
+      - "devices/plain/bindings/go/cplain/**"
+      - "**/meson.build"
+      - "meson_options.txt"
+      - "Makefile"
+      - "scripts/go_cdeps.py"
+      - "scripts/go_cgo_flags.py"
+      - ".golangci.yml"
+      - "go.mod"
+      - "go.sum"
+      - "subprojects/dpdk"
+      - ".github/actions/go-buildcache/**"
+      - ".github/actions/go-modcache/**"
+      - ".github/workflows/rust-sdk-ut.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  # bindgen needs a clang and a libclang of the same LLVM major, both in the
+  # CI image.
+  CLANG_PATH: /usr/bin/clang-23
+  LIBCLANG_PATH: /usr/lib/llvm-23/lib
+
+defaults:
+  run:
+    # The runner's default shell, which container jobs would replace with sh.
+    shell: bash -e {0}
+
+permissions:
+  contents: read
+
+jobs:
+  fixtures:
+    name: fixture tests (native)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    container: ghcr.io/yanet-platform/yanet2-ci@sha256:3cbb2aae05beb4efc16f160cfa4d5307deba5d3110005d6557fdb49e5e2ee7a1
+    env:
+      # The Makefile runs just these Go packages, and no meson tests.
+      GO_TEST_PACKAGES: ./bindings/rust/yanet-sdk-fixture-api/bindings/go/cfixture
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: true
+
+      - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
+        name: ccache
+        with:
+          key: ${{ runner.os }}-rust-sdk-ut-native-image-cache
+          max-size: 2G
+          verbose: 2
+          save: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Restore Go module cache
+        uses: ./.github/actions/go-modcache
+
+      - name: Restore Go build cache
+        if: ${{ !env.ACT }}
+        id: go-buildcache
+        uses: ./.github/actions/go-buildcache
+        with:
+          profile: rust-sdk-release
+
+      - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
+
+      - name: Configure meson
+        run: meson setup build -Dsdk_rust_fixtures=enabled
+
+      # Meson has cargo build into this target directory.
+      - name: Cache rust
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: bindings/rust -> ../../build/bindings/rust/cargo-target
+          shared-key: rust-sdk-ut-native
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Test
+        run: make test-only
+
+      - name: Configure lint
+        run: echo "CGO_CPPFLAGS=$(cat build/yanet_cgo_cppflags)" >> "$GITHUB_ENV"
+
+      # go-lint.yml cannot type-check this package: its files carry a build tag
+      # and its header exists only after the build above.
+      - name: Lint
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
+        with:
+          version: v2.15.0
+          args: --timeout 5m --build-tags sdk_rust_fixtures ./bindings/rust/...
+
+      - name: Save Go build cache
+        if: success() && github.ref == 'refs/heads/main' && steps.go-buildcache.outputs.cache-hit != 'true' && !env.ACT
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.go-buildcache.outputs.path }}
+          key: ${{ steps.go-buildcache.outputs.key }}

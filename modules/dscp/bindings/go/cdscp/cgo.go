@@ -1,7 +1,6 @@
 package cdscp
 
 //#cgo CFLAGS: -I../../../../../
-//#cgo LDFLAGS: -L../../../../../build/modules/dscp/api -ldscp_cp
 //
 //#include <stdlib.h>
 //#include "lib/dataplane/packet/dscp.h"

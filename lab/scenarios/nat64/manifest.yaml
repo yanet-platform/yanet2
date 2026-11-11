@@ -2,11 +2,12 @@ $schema: ../../yanet2-lab.schema.json
 version: 1
 name: nat64
 description: Configure an unmanaged stateless NAT64 module and verify IPv4-to-IPv6 translation.
+files:
+  - source: nat64_lab.yaml
+    destination: /tmp/yanet/config/nat64_lab.yaml
 steps:
-  - name: add-prefix
-    argv: [/tmp/yanet/cli/yanet-cli-nat64, prefix, add, --name, nat64_lab, --prefix, "2001:db8::/96"]
-  - name: add-mapping
-    argv: [/tmp/yanet/cli/yanet-cli-nat64, mapping, add, --name, nat64_lab, --ipv4, 198.51.100.2, --ipv6, "2001:db8::3", --prefix-index, "0"]
+  - name: configure-nat64
+    argv: [/tmp/yanet/cli/yanet-cli-nat64, update, --name, nat64_lab, /tmp/yanet/config/nat64_lab.yaml]
   - name: attach-nat64
     argv:
       - /tmp/yanet/cli/yanet-cli-function

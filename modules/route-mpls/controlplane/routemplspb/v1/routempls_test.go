@@ -1,10 +1,12 @@
 package routemplspb_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	routemplspb "github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb/v1"
 )
 
@@ -22,10 +24,21 @@ func Test_CreateConfigRequest_Validate(t *testing.T) {
 			message: "name is required",
 		},
 		{
+			name: "missing prefix",
+			request: &routemplspb.CreateConfigRequest{
+				Name: "mpls0",
+				Rules: []*routemplspb.Rule{{
+					Nexthop: &routemplspb.NextHop{},
+				}},
+			},
+			message: "rules[0]: prefix is required",
+		},
+		{
 			name: "label above maximum",
 			request: &routemplspb.CreateConfigRequest{
 				Name: "mpls0",
 				Rules: []*routemplspb.Rule{{
+					Prefix:  &commonpb.IPPrefix{},
 					Nexthop: &routemplspb.NextHop{Label: 1048576},
 				}},
 			},
@@ -36,6 +49,7 @@ func Test_CreateConfigRequest_Validate(t *testing.T) {
 			request: &routemplspb.CreateConfigRequest{
 				Name: "mpls0",
 				Rules: []*routemplspb.Rule{{
+					Prefix:  &commonpb.IPPrefix{},
 					Nexthop: &routemplspb.NextHop{Label: 1048575},
 				}},
 			},
@@ -43,9 +57,23 @@ func Test_CreateConfigRequest_Validate(t *testing.T) {
 		{
 			name: "parser-owned fields omitted",
 			request: &routemplspb.CreateConfigRequest{
-				Name:  "mpls0",
-				Rules: []*routemplspb.Rule{{}},
+				Name: "mpls0",
+				Rules: []*routemplspb.Rule{{
+					Prefix:  &commonpb.IPPrefix{},
+					Nexthop: &routemplspb.NextHop{},
+				}},
 			},
+		},
+		{
+			name: "counter containing NUL",
+			request: &routemplspb.CreateConfigRequest{
+				Name: "mpls0",
+				Rules: []*routemplspb.Rule{{
+					Prefix:  &commonpb.IPPrefix{},
+					Nexthop: &routemplspb.NextHop{Counter: "unsafe\x00suffix"},
+				}},
+			},
+			message: "rules[0]: nexthop: counter must not contain NUL",
 		},
 		{name: "nil request", message: "name is required"},
 	}
@@ -76,12 +104,25 @@ func Test_UpdateConfigRequest_Validate(t *testing.T) {
 			message: "name is required",
 		},
 		{
+			name: "withdraw missing next hop",
+			request: &routemplspb.UpdateConfigRequest{
+				Name: "mpls0",
+				Updates: []*routemplspb.UpdateEvent{{
+					Event: &routemplspb.UpdateEvent_Withdraw{
+						Withdraw: &routemplspb.Rule{Prefix: &commonpb.IPPrefix{}},
+					},
+				}},
+			},
+			message: "updates[0]: withdraw: nexthop is required",
+		},
+		{
 			name: "update label above maximum",
 			request: &routemplspb.UpdateConfigRequest{
 				Name: "mpls0",
 				Updates: []*routemplspb.UpdateEvent{{
 					Event: &routemplspb.UpdateEvent_Update{
 						Update: &routemplspb.Rule{
+							Prefix:  &commonpb.IPPrefix{},
 							Nexthop: &routemplspb.NextHop{Label: 1048576},
 						},
 					},
@@ -96,6 +137,7 @@ func Test_UpdateConfigRequest_Validate(t *testing.T) {
 				Updates: []*routemplspb.UpdateEvent{{
 					Event: &routemplspb.UpdateEvent_Withdraw{
 						Withdraw: &routemplspb.Rule{
+							Prefix:  &commonpb.IPPrefix{},
 							Nexthop: &routemplspb.NextHop{Label: 1048576},
 						},
 					},
@@ -109,10 +151,30 @@ func Test_UpdateConfigRequest_Validate(t *testing.T) {
 				Name: "mpls0",
 				Updates: []*routemplspb.UpdateEvent{{
 					Event: &routemplspb.UpdateEvent_Update{
-						Update: &routemplspb.Rule{},
+						Update: &routemplspb.Rule{
+							Prefix:  &commonpb.IPPrefix{},
+							Nexthop: &routemplspb.NextHop{},
+						},
 					},
 				}},
 			},
+		},
+		{
+			name: "update counter at maximum length",
+			request: &routemplspb.UpdateConfigRequest{
+				Name: "mpls0",
+				Updates: []*routemplspb.UpdateEvent{{
+					Event: &routemplspb.UpdateEvent_Update{
+						Update: &routemplspb.Rule{
+							Prefix: &commonpb.IPPrefix{},
+							Nexthop: &routemplspb.NextHop{
+								Counter: strings.Repeat("x", commonpb.MaxCounterNameLen),
+							},
+						},
+					},
+				}},
+			},
+			message: "updates[0]: update: nexthop: counter must be shorter than 128 bytes",
 		},
 		{
 			name:    "empty update list",
@@ -184,7 +246,7 @@ func Test_DeleteConfigRequest_Validate(t *testing.T) {
 }
 
 // Test_UpdateEvent_Validate verifies that each oneof branch reports invalid
-// labels without rejecting an event whose parser-owned fields are absent.
+// labels without rejecting an event whose parsed contents are absent.
 //
 // An event without a branch is rejected.
 func Test_UpdateEvent_Validate(t *testing.T) {
@@ -196,24 +258,36 @@ func Test_UpdateEvent_Validate(t *testing.T) {
 		{
 			name: "update label above maximum",
 			event: &routemplspb.UpdateEvent{Event: &routemplspb.UpdateEvent_Update{
-				Update: &routemplspb.Rule{Nexthop: &routemplspb.NextHop{Label: 1048576}},
+				Update: &routemplspb.Rule{
+					Prefix:  &commonpb.IPPrefix{},
+					Nexthop: &routemplspb.NextHop{Label: 1048576},
+				},
 			}},
 			message: "update: nexthop: label 1048576 must be in range 0..1048575",
 		},
 		{
 			name: "withdraw label above maximum",
 			event: &routemplspb.UpdateEvent{Event: &routemplspb.UpdateEvent_Withdraw{
-				Withdraw: &routemplspb.Rule{Nexthop: &routemplspb.NextHop{Label: 1048576}},
+				Withdraw: &routemplspb.Rule{
+					Prefix:  &commonpb.IPPrefix{},
+					Nexthop: &routemplspb.NextHop{Label: 1048576},
+				},
 			}},
 			message: "withdraw: nexthop: label 1048576 must be in range 0..1048575",
 		},
 		{
-			name:  "valid update",
-			event: &routemplspb.UpdateEvent{Event: &routemplspb.UpdateEvent_Update{Update: &routemplspb.Rule{}}},
+			name: "valid update",
+			event: &routemplspb.UpdateEvent{Event: &routemplspb.UpdateEvent_Update{Update: &routemplspb.Rule{
+				Prefix:  &commonpb.IPPrefix{},
+				Nexthop: &routemplspb.NextHop{},
+			}}},
 		},
 		{
-			name:  "valid withdraw",
-			event: &routemplspb.UpdateEvent{Event: &routemplspb.UpdateEvent_Withdraw{Withdraw: &routemplspb.Rule{}}},
+			name: "valid withdraw",
+			event: &routemplspb.UpdateEvent{Event: &routemplspb.UpdateEvent_Withdraw{Withdraw: &routemplspb.Rule{
+				Prefix:  &commonpb.IPPrefix{},
+				Nexthop: &routemplspb.NextHop{},
+			}}},
 		},
 		{name: "event without a branch", event: &routemplspb.UpdateEvent{}, message: "event is required"},
 		{name: "nil event", message: "event is required"},
@@ -231,22 +305,32 @@ func Test_UpdateEvent_Validate(t *testing.T) {
 	}
 }
 
-// Test_Rule_Validate verifies that a present next hop validates its label
-// while parser-owned prefix and address fields remain outside validation.
+// Test_Rule_Validate verifies that prefix and next-hop messages are required
+// while parser-owned address fields remain outside validation.
 func Test_Rule_Validate(t *testing.T) {
 	cases := []struct {
 		name    string
 		rule    *routemplspb.Rule
 		message string
 	}{
-		{name: "missing next hop", rule: &routemplspb.Rule{}},
-		{name: "label at maximum", rule: &routemplspb.Rule{Nexthop: &routemplspb.NextHop{Label: 1048575}}},
+		{
+			name:    "missing next hop",
+			rule:    &routemplspb.Rule{Prefix: &commonpb.IPPrefix{}},
+			message: "nexthop is required",
+		},
+		{
+			name: "label at maximum",
+			rule: &routemplspb.Rule{
+				Prefix:  &commonpb.IPPrefix{},
+				Nexthop: &routemplspb.NextHop{Label: 1048575},
+			},
+		},
 		{
 			name:    "label above maximum",
-			rule:    &routemplspb.Rule{Nexthop: &routemplspb.NextHop{Label: 1048576}},
+			rule:    &routemplspb.Rule{Prefix: &commonpb.IPPrefix{}, Nexthop: &routemplspb.NextHop{Label: 1048576}},
 			message: "nexthop: label 1048576 must be in range 0..1048575",
 		},
-		{name: "nil rule"},
+		{name: "nil rule", message: "prefix is required"},
 	}
 
 	for _, tc := range cases {

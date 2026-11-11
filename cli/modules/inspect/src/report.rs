@@ -4,7 +4,7 @@ use bytesize::ByteSize;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 use ync::{display, output};
-use ynpb::pb::{DevicePipelineInfo, InspectResponse, InstanceInfo, MemoryNode};
+use ynpb::pb::{AllocatorInfo, CpMemoryInfo, DevicePipelineInfo, InspectResponse, InstanceInfo, MemoryNode};
 
 use crate::memory::{MemoryTree, node_live};
 
@@ -154,6 +154,19 @@ fn memory_records(info: &InstanceInfo, details: bool, unicode: bool) -> Vec<Reco
     let mut agents: Vec<_> = info.agents.iter().collect();
     agents.sort_by_key(|agent| &agent.name);
     let mut rows = Vec::new();
+    if let Some(allocator) = &info.cp_allocator {
+        rows.push(Record::new(
+            "allocator",
+            "control-plane",
+            vec![
+                Field::new("free", bytes(allocator.free_bytes)),
+                Field::new("largest", bytes(allocator.largest_free_block_bytes)),
+            ],
+        ));
+        if details {
+            rows.extend(pool_records("control-plane", allocator));
+        }
+    }
     for agent in agents {
         if agent.instances.is_empty() {
             let mut fields = if details {
@@ -189,17 +202,74 @@ fn memory_records(info: &InstanceInfo, details: bool, unicode: bool) -> Vec<Reco
                     Field::new("gen", instance.generation.to_string()),
                     Field::new("used", format!("{} / {}", bytes(used), bytes(instance.memory_limit))),
                     Field::new("free", bytes(instance.free_bytes)),
+                    Field::new(
+                        "largest",
+                        instance
+                            .allocator
+                            .as_ref()
+                            .map(|allocator| bytes(allocator.largest_free_block_bytes))
+                            .unwrap_or_else(|| "n/a".into()),
+                    ),
                     usage,
                 ],
             );
             if details {
                 rows.extend(memory_tree_records(row, &agent.name, &instance.memory_tree, unicode));
+                if let Some(allocator) = &instance.allocator {
+                    let owner = format!("{} pid={} gen={}", name(&agent.name), instance.pid, instance.generation);
+                    rows.extend(pool_records(&owner, allocator));
+                }
             } else {
                 rows.push(row);
             }
         }
     }
+    rows.extend(cp_memory_records(&info.cp_memory, details, unicode));
     nonempty(rows, "memory")
+}
+
+/// The controlplane zone backs every context that is not an agent arena;
+/// it has no pid, generation or arena limit of its own, only the zone
+/// allocator's free byte count and the context tree.
+fn cp_memory_records(cp_memory: &Option<CpMemoryInfo>, details: bool, unicode: bool) -> Vec<Record> {
+    let Some(cp_memory) = cp_memory else {
+        return Vec::new();
+    };
+    let row = Record::new(
+        "memory",
+        name("cp"),
+        vec![
+            Field::new("pid", "-"),
+            Field::new("gen", "-"),
+            Field::new("used", "-"),
+            Field::new("free", bytes(cp_memory.free_bytes)),
+            Field::new("", "-"),
+        ],
+    );
+    if details {
+        memory_tree_records(row, "cp", &cp_memory.memory_tree, unicode)
+    } else {
+        vec![row]
+    }
+}
+
+fn pool_records(owner: &str, allocator: &AllocatorInfo) -> Vec<Record> {
+    let mut pools: Vec<_> = allocator.pools.iter().collect();
+    pools.sort_by_key(|pool| pool.block_size_bytes);
+    pools
+        .into_iter()
+        .map(|pool| {
+            Record::new(
+                "pool",
+                owner,
+                vec![
+                    Field::new("size", bytes(pool.block_size_bytes)),
+                    Field::new("blocks", pool.free_blocks.to_string()),
+                    Field::new("free", bytes(pool.block_size_bytes.saturating_mul(pool.free_blocks))),
+                ],
+            )
+        })
+        .collect()
 }
 
 fn bindings(pipelines: &[DevicePipelineInfo]) -> String {
@@ -545,7 +615,8 @@ fn wrap(blocks: &[Vec<Span>], width: usize, indent: usize) -> Vec<Vec<Span>> {
     let mut line = Vec::new();
     let mut column = 0;
     for block in blocks {
-        // Padding between fields does not force a fitting value onto a new line.
+        // Padding between fields does not force a fitting value onto a new
+        // line.
         let mut block_width = 0;
         let mut trim = true;
         for span in block.iter().rev() {
@@ -615,5 +686,27 @@ fn append_lines(out: &mut String, lines: Vec<Vec<Span>>, colored: bool) {
             out.push_str(&span.style.paint(&span.text, colored));
         }
         out.push('\n');
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use ynpb::pb::{AllocatorInfo, AllocatorPoolInfo};
+
+    use super::pool_records;
+
+    #[test]
+    fn test_pool_records_sort_size_classes_and_preserve_empty_pools() {
+        let allocator = AllocatorInfo {
+            pools: vec![
+                AllocatorPoolInfo { block_size_bytes: 32, free_blocks: 1 },
+                AllocatorPoolInfo { block_size_bytes: 8, free_blocks: 0 },
+            ],
+            ..Default::default()
+        };
+        let rows = pool_records("control-plane", &allocator);
+        assert_eq!(2, rows.len());
+        assert_eq!("0", rows[0].fields[1].value);
+        assert_eq!("1", rows[1].fields[1].value);
     }
 }

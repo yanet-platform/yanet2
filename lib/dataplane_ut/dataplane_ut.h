@@ -19,7 +19,7 @@ struct dataplane_ut_worker_spec {
 // Construction parameters for an in-process dataplane harness.
 // worker_count must be >= 1.
 //
-// The three list pairs may be empty.
+// The four list pairs may be empty.
 struct dataplane_ut_config {
 	size_t cp_memory;
 	size_t dp_memory;
@@ -33,15 +33,17 @@ struct dataplane_ut_config {
 	const char *const *modules;
 	size_t module_count;
 
-	// Directory scanned for module .so plugins. NULL or empty loads
-	// only statically-linked built-ins.
+	// Directory scanned for .so plugins providing modules or object
+	// types. NULL or empty loads only statically-linked built-ins.
 	const char *plugin_dir;
 
 	const char *const *devices_to_load;
 	size_t devices_to_load_count;
 
-	// Object type names to load via dp_load_object (resolving
-	// new_object_<name> from the main binary). May be empty.
+	// Object type names to load; a repeated name loads once. May be empty.
+	//
+	// A type's constructor resolves from the main binary or from a plugin
+	// in the plugin directory, so a plugin-provided type needs it set.
 	const char *const *objects_to_load;
 	size_t objects_to_load_count;
 
@@ -133,6 +135,7 @@ void
 dataplane_ut_run(
 	struct dataplane_ut *ut,
 	size_t worker_idx,
+	const uint16_t *device_ids,
 	struct packet_list *input,
 	struct dataplane_ut_round_result *result
 );
@@ -146,6 +149,18 @@ dataplane_ut_run(
 int
 dataplane_ut_build_optimized(void);
 
+// What a benchmark run puts back into every packet before each round.
+//
+// The values combine with a bitwise or. A handler that prepends or strips a
+// header also overwrites bytes of the frame, so its run takes both.
+enum dataplane_ut_reset {
+	// The bytes of the frame, for handlers that rewrite them in place.
+	DATAPLANE_UT_RESET_PAYLOAD = 1 << 0,
+	// The data offset and the lengths of the first segment, for handlers
+	// that prepend or strip headers.
+	DATAPLANE_UT_RESET_GEOMETRY = 1 << 1,
+};
+
 // Run rounds pipeline rounds on worker, recycling the packets in input each
 // time without allocating or printing.
 //
@@ -157,15 +172,18 @@ dataplane_ut_build_optimized(void);
 // holds all packets in a consistent state for freeing. The snapshot array is
 // freed before returning.
 //
-// Mbuf geometry is snapshotted and validated before every round. When
-// reset_payload is nonzero, each packet's payload bytes are also snapshotted
-// and restored, so modules that rewrite headers in place (for example route
-// decrementing TTL) see fresh input each round. Modules that grow, shrink, or
-// re-slice packets stay out of scope and cause the run to fail.
+// Mbuf geometry is snapshotted and, unless reset asks to put it back,
+// validated before every round. The payload reset also snapshots and restores
+// each packet's bytes, so modules that rewrite headers in place (for example
+// route decrementing TTL) see fresh input each round. The geometry reset puts
+// back the data offset and the lengths of the first segment, so modules that
+// prepend or strip headers see it too. A handler that changes the segment
+// chain or another segment stays out of scope and causes the run to fail.
 //
 // Returns 0 on success, -ENOMEM when a snapshot cannot be allocated, and
-// -EINVAL when a handler changes mbuf geometry. Allocation failures leave input
-// intact; every other return leaves it rebuilt from the fixed packet set.
+// -EINVAL when a handler changes mbuf geometry that the run does not put
+// back. Allocation failures leave input intact; every other return leaves it
+// rebuilt from the fixed packet set.
 //
 // Handlers must not free or replicate the fixed packet set. Any newly emitted
 // packet is reclaimed from the discarded per-round result before the next
@@ -174,9 +192,29 @@ int
 dataplane_ut_run_rounds(
 	struct dataplane_ut *ut,
 	size_t worker,
+	const uint16_t *device_ids,
 	struct packet_list *input,
 	uint64_t rounds,
-	int reset_payload
+	int reset
+);
+
+// Bytes of headers a handler can still prepend to the packet.
+uint16_t
+dataplane_ut_headroom(const struct packet *packet);
+
+// Leave the first count packets of the list less room for prepended headers.
+//
+// A packet enters a real pipeline with the default headroom and loses it to
+// every header prepended on the way. Each frame is moved towards the start of
+// its buffer until headroom[i] bytes can still be prepended to the i-th
+// packet, so a test can show what a module does when its header no longer
+// fits.
+//
+// Returns 0 on success and -EINVAL, changing nothing, when the list holds
+// fewer packets than count or a packet has less headroom than asked.
+int
+dataplane_ut_limit_headroom(
+	struct packet_list *list, const uint16_t *headroom, size_t count
 );
 
 // Install one named empty pipeline, forcing a generation switch.

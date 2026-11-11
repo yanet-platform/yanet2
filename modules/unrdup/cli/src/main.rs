@@ -210,7 +210,8 @@ impl TryFrom<Protocol> for TransportProto {
 
 fn client(channel: LayeredChannel) -> UnrdupServiceClient<LayeredChannel> {
     UnrdupServiceClient::new(channel)
-        .send_compressed(CompressionEncoding::Gzip)
+        .send_compressed(CompressionEncoding::Zstd)
+        .accept_compressed(CompressionEncoding::Zstd)
         .accept_compressed(CompressionEncoding::Gzip)
 }
 

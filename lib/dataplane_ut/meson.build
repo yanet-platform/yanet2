@@ -1,4 +1,6 @@
 dependencies = [
+  # The harness loads module plugins.
+  dependency('dl'),
   lib_common_dep,
   lib_logging_dep,
   lib_errors_dep,
@@ -13,7 +15,7 @@ dependencies = [
 
 sources = files(
   'dataplane_ut.c',
-  'pool.c',
+  'stages.c',
   'tx_pipe.c',
   'tx_stage.c',
 )
@@ -21,13 +23,7 @@ sources = files(
 lib_dataplane_ut = static_library(
   'dataplane_ut',
   sources,
-  c_args: yanet_c_args,
-  link_args: yanet_link_args + ['-Wl,-E'],
   dependencies: dependencies,
-  include_directories: [
-    yanet_rootdir,
-    include_directories('.'),
-  ],
   install: false,
 )
 

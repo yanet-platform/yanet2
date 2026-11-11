@@ -522,15 +522,17 @@ async fn rediscover(
             .filter(|service| !supervisors.contains_key(service))
             .collect();
 
-        // The invariant this bookkeeping upholds is that no two live services ever
-        // share an alias — both halves of it, not just the departure half. A departed
-        // service's alias is captured here for the membership event's departed side but
-        // deliberately left in `aliases` until after every newcomer below has been
-        // assigned, so a newcomer can never claim a still-nominally-live departing
-        // service's alias out from under it. `assign_newcomer_aliases` covers the other
-        // half: it inserts each newcomer as it goes, so two newcomers discovered in
-        // this very sweep that derive the same short alias collide against each other
-        // too, not only against services outside the sweep.
+        // The invariant this bookkeeping upholds is that no two live services
+        // ever share an alias — both halves of it, not just the
+        // departure half. A departed service's alias is captured here
+        // for the membership event's departed side but deliberately
+        // left in `aliases` until after every newcomer below has been
+        // assigned, so a newcomer can never claim a still-nominally-live
+        // departing service's alias out from under it.
+        // `assign_newcomer_aliases` covers the other half: it inserts
+        // each newcomer as it goes, so two newcomers discovered in this
+        // very sweep that derive the same short alias collide against each
+        // other too, not only against services outside the sweep.
         let departed: Vec<(String, String)> = departed_services
             .into_iter()
             .map(|service| {

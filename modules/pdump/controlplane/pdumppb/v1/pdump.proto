@@ -40,12 +40,15 @@ message RecordMeta {
   uint32 worker_idx = 4;
   // Index of the pipeline where the pdump module is located.
   uint32 pipeline_idx = 5;
-  // ID of the device from which the packet was received.
-  uint32 rx_device_id = 6;
+  // Legacy receive device of pre-rename captures; new records ship the
+  // slot zeroed, so consumers should not display it.
+  uint32 rx_device_id = 6 [deprecated = true]; // Display device_id only.
   // ID of the device to which the packet may be sent.
-  uint32 tx_device_id = 7;
+  uint32 tx_device_id = 7 [deprecated = true]; // Use device_id instead.
   // Indicates from which packet_list the packet is collected.
   uint32 queue = 8;
+  // ID of the device on whose pipeline the packet was captured.
+  uint32 device_id = 9;
 }
 
 message Record {
@@ -71,8 +74,26 @@ message Config {
   // Snaplen specifies maximum packet length to capture. Must be greater
   // than zero.
   optional uint32 snaplen = 3;
-  // Ring_size specifies per worker ring buffer size.
-  optional uint32 ring_size = 4;
+  // Removed in favor of ring_name, which binds to a pre-existing ring object
+  // instead of sizing a private one.
+  reserved 4;
+  reserved "ring_size";
+  // RingName names a pre-existing ring object, created through RingService,
+  // that this config captures into.
+  //
+  // Required when a config is created. Absent on an update keeps the
+  // currently bound ring; explicitly empty is invalid. Deleting a config
+  // never deletes its ring.
+  optional string ring_name = 5;
+  // Shared best-effort capture rate, 0..1,000,000 pps; zero is unlimited.
+  //
+  // All workers share one continuously replenished budget per config, with
+  // burst max(32, ceil(rate/1000)). Unused credit never exceeds that burst.
+  // Absent on an update preserves the rate; explicit zero disables it.
+  // Every new config, including a filter-only update, starts fresh credit.
+  // Contention may undercapture; worker clock offsets affect the effective
+  // rate, so this is not a strict wall-clock guarantee or a fairness policy.
+  optional uint64 rate_pps = 6;
 }
 
 // ShowConfigResponse contains the configuration details of the pdump module.

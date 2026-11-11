@@ -66,9 +66,7 @@ func generateUserCert(t *testing.T, caSigner ssh.Signer, username string, serial
 		ValidPrincipals: []string{username},
 		ValidAfter:      uint64(time.Now().Add(-1 * time.Hour).Unix()),
 		ValidBefore:     uint64(time.Now().Add(24 * time.Hour).Unix()),
-		Permissions: ssh.Permissions{
-			Extensions: map[string]string{"permit-pty": ""},
-		},
+		Extensions:      map[string]string{"permit-pty": ""},
 	}
 
 	require.NoError(t, cert.SignCert(rand.Reader, caSigner))

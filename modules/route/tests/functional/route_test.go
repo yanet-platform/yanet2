@@ -22,7 +22,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
+	cplain "github.com/yanet-platform/yanet2/devices/plain/bindings/go/cplain"
 	route "github.com/yanet-platform/yanet2/modules/route/controlplane"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1"
 )
@@ -118,7 +118,7 @@ func wirePipeline(
 	tb testing.TB,
 	agent *ffi.Agent,
 	deviceName, configName string,
-) []*plain.DeviceConfig {
+) []*cplain.DeviceConfig {
 	tb.Helper()
 
 	require.NoError(tb, agent.UpdateFunction(ffi.FunctionConfig{
@@ -140,7 +140,7 @@ func wirePipeline(
 	require.NoError(tb, agent.UpdatePipeline(ffi.PipelineConfig{
 		Name: "dummy",
 	}))
-	devices, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	devices, err := cplain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   deviceName,
 		Input:  []ffi.DevicePipelineConfig{{Name: configName, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
@@ -638,7 +638,7 @@ func TestRoute_ECMP_HashSelection(t *testing.T) {
 	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
 		Name: "dummy1",
 	}))
-	_, err = plain.UpdateDevices(agent, []ffi.DeviceConfig{
+	_, err = cplain.UpdateDevices(agent, []ffi.DeviceConfig{
 		{
 			Name:   "port0",
 			Input:  []ffi.DevicePipelineConfig{{Name: "test", Weight: 1}},
@@ -895,7 +895,7 @@ func Test_Route_OutputSelfLoopStopsAtTotalLimit(t *testing.T) {
 		Name:      "feeder",
 		Functions: []string{"loop"},
 	}))
-	_, err := plain.UpdateDevices(agent, []ffi.DeviceConfig{{
+	_, err := cplain.UpdateDevices(agent, []ffi.DeviceConfig{{
 		Name:   "port0",
 		Input:  []ffi.DevicePipelineConfig{{Name: "feeder", Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "loop", Weight: 1}},

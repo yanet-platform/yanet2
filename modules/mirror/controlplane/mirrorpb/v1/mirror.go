@@ -43,6 +43,11 @@ func (m *Rule) Validate() error {
 	if err := m.GetAction().Validate(); err != nil {
 		return fmt.Errorf("action: %w", err)
 	}
+	for idx, device := range m.GetDevices() {
+		if err := device.Validate(); err != nil {
+			return fmt.Errorf("devices[%d]: %w", idx, err)
+		}
+	}
 
 	return nil
 }

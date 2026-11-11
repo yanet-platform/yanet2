@@ -1,16 +1,20 @@
 package operator
 
 import (
+	"net"
 	"time"
 
 	"go.uber.org/zap"
-
-	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"google.golang.org/grpc"
 )
 
 type options struct {
 	Log     *zap.Logger
 	Metrics MetricsFactory
+	// Listener is nil when the operator binds its server endpoint.
+	Listener net.Listener
+	// GatewayDialOptions follow the defaults of every gateway connection.
+	GatewayDialOptions []grpc.DialOption
 }
 
 func newOptions() *options {
@@ -38,6 +42,29 @@ func WithLog(log *zap.Logger) Option {
 func WithMetrics(factory MetricsFactory) Option {
 	return func(o *options) {
 		o.Metrics = factory
+	}
+}
+
+// WithListener hands the operator's gRPC server an already open listener to
+// serve instead of binding the configured server endpoint.
+//
+// The server closes it when it stops.
+func WithListener(listener net.Listener) Option {
+	return func(o *options) {
+		o.Listener = listener
+	}
+}
+
+// WithGatewayDialOptions adds gRPC dial options to every gateway connection,
+// of the actuators and of the registration alike; they cannot replace the
+// transport credentials the gateway config selects.
+//
+// A context dialer among them lets the operator reach its gateways over an
+// in-memory transport; the gateway endpoints then need a scheme that skips
+// name resolution, such as passthrough.
+func WithGatewayDialOptions(dialOptions ...grpc.DialOption) Option {
+	return func(o *options) {
+		o.GatewayDialOptions = append(o.GatewayDialOptions, dialOptions...)
 	}
 }
 
@@ -81,8 +108,8 @@ func WithRouteServiceRIBTTL(ttl time.Duration) RouteServiceOption {
 	}
 }
 
-// WithRouteServiceOnChanged registers a callback fired whenever the
-// RIB state mutates so the reconcile loop can wake up.
+// WithRouteServiceOnChanged registers a callback fired after a flush or the
+// end of a feed session, so the change reaches the gateways at once.
 func WithRouteServiceOnChanged(fn func()) RouteServiceOption {
 	return func(o *routeServiceOptions) {
 		o.OnChanged = fn
@@ -143,36 +170,6 @@ func WithRouteServiceConfiguredModules(names ...string) RouteServiceOption {
 	}
 }
 
-// noopMetricsCollector is the default MetricsCollector wired into
-// metrics-service options when the caller does not pass a real one.
-type noopMetricsCollector struct{}
-
-func (noopMetricsCollector) Collect() []*commonpb.Metric {
-	return nil
-}
-
-type metricsServiceOptions struct {
-	Metrics MetricsCollector
-}
-
-func newMetricsServiceOptions() *metricsServiceOptions {
-	return &metricsServiceOptions{
-		Metrics: noopMetricsCollector{},
-	}
-}
-
-// MetricsServiceOption configures NewMetricsService.
-type MetricsServiceOption func(*metricsServiceOptions)
-
-// WithMetricsServiceCollector attaches the metrics collector that
-// GetMetrics serves from. When unset, GetMetrics returns an empty
-// response.
-func WithMetricsServiceCollector(c MetricsCollector) MetricsServiceOption {
-	return func(o *metricsServiceOptions) {
-		o.Metrics = c
-	}
-}
-
 type operatorServiceOptions struct{}
 
 func newOperatorServiceOptions() *operatorServiceOptions {
@@ -183,10 +180,13 @@ func newOperatorServiceOptions() *operatorServiceOptions {
 type OperatorServiceOption func(*operatorServiceOptions)
 
 type gatewayActuatorOptions struct {
-	Function   FunctionConfig
-	Devices    []string
-	OnFIBBuilt func(module string, stats FIBBuildStats)
-	Log        *zap.Logger
+	Function     FunctionConfig
+	Devices      []string
+	StaticRoutes []StaticRouteConfig
+	ExpectBird   bool
+	OnFIBBuilt   func(module string, stats FIBBuildStats)
+	DialOptions  []grpc.DialOption
+	Log          *zap.Logger
 }
 
 func newGatewayActuatorOptions() *gatewayActuatorOptions {
@@ -206,8 +206,11 @@ func WithGatewayActuatorLog(log *zap.Logger) GatewayActuatorOption {
 	}
 }
 
-// WithGatewayActuatorFunction sets the network function the actuator
-// publishes to its gateway on every Apply pass.
+// WithGatewayActuatorFunction sets the network function maintained after
+// forwarding preflight succeeds.
+//
+// Preflight rejection suppresses forwarding and function publication and drives
+// reconciliation backoff.
 func WithGatewayActuatorFunction(fn FunctionConfig) GatewayActuatorOption {
 	return func(o *gatewayActuatorOptions) {
 		o.Function = fn
@@ -222,6 +225,34 @@ func WithGatewayActuatorFunction(fn FunctionConfig) GatewayActuatorOption {
 func WithGatewayActuatorDevices(devices []string) GatewayActuatorOption {
 	return func(o *gatewayActuatorOptions) {
 		o.Devices = devices
+	}
+}
+
+// WithGatewayActuatorStaticRoutes requires one configured static alternative
+// per exact prefix to resolve locally before an apply can succeed.
+func WithGatewayActuatorStaticRoutes(routes []StaticRouteConfig) GatewayActuatorOption {
+	return func(o *gatewayActuatorOptions) {
+		o.StaticRoutes = routes
+	}
+}
+
+// WithGatewayActuatorExpectBird controls whether publication requires BIRD
+// routes and local BIRD forwarding in every present module.
+//
+// Omission defaults to false for directly constructed actuators. The full
+// operator explicitly passes its configured BIRD expectation.
+func WithGatewayActuatorExpectBird(expect bool) GatewayActuatorOption {
+	return func(o *gatewayActuatorOptions) {
+		o.ExpectBird = expect
+	}
+}
+
+// WithGatewayActuatorDialOptions adds gRPC dial options to the gateway
+// connection; they cannot replace the transport credentials the gateway
+// config selects.
+func WithGatewayActuatorDialOptions(dialOptions ...grpc.DialOption) GatewayActuatorOption {
+	return func(o *gatewayActuatorOptions) {
+		o.DialOptions = append(o.DialOptions, dialOptions...)
 	}
 }
 

@@ -3,6 +3,523 @@
 Manual steps required when upgrading an existing deployment. The packaging
 does not perform these automatically.
 
+## FWState synchronization splits emission from reception
+
+`SyncConfig` replaces its flat source, destination MAC and multicast/unicast
+endpoint fields with two independent lists: a repeated `endpoints` list,
+each entry carrying its own source and destination IPv6 address and a
+destination port, drives emission, and a repeated `listeners` list, each
+entry carrying a destination address and port, is the receive contract. An
+carried update replaces both lists whole, an empty list clearing it, so
+an update that keeps them carries them. Reception no longer derives from emission and
+no longer requires a multicast Ethernet destination: a unicast listener
+names the router's own address and receives point-to-point sync. A config
+without listeners claims nothing. The shared-memory config layout changes,
+so the dataplane and the control plane must be upgraded together.
+
+The `dst_ether` field is gone: emitted sync packets leave their Ethernet
+header zeroed, and the route module downstream of fwstate resolves and stamps
+both MAC addresses. A fwstate config must sit in front of route in the
+pipeline, and a multicast sync group needs a covering route whose next-hop
+MAC is the derived multicast MAC (for example `33:33:00:00:00:01` for
+`ff02::1`). The UDP source port of every emitted packet equals its
+destination port, as before.
+
+The CLI replaces `--src-addr`, `--dst-ether`, `--multicast` and `--unicast`
+with a repeatable `--sync-endpoint SRC@DST:PORT` (for example
+`fd00::1@ff02::1:9999`, the destination also accepts brackets) and a
+repeatable `--listen-endpoint DST:PORT`; every update replaces both lists
+whole, so one that names no endpoint or listener clears them. Where a
+deployment previously relied on the multicast endpoint receiving, it must now
+name the listener explicitly.
+Mixed versions fail silently, not safely: protobuf keeps the unknown list
+fields on each side, so a new client's endpoints and listeners are ignored by
+an old service - a freshly created config then starts with synchronization
+disabled - and an old client's flat slots are skipped by the new service,
+whose empty-list update semantics then clear its lists. Upgrade `yanet2-cli`,
+the control plane and the web UI together, with no mixed-version updates in
+between.
+## NAT64 configs are replaced as a whole
+
+The NAT64 service now answers Unimplemented to `AddPrefix`, `RemovePrefix`,
+`AddMapping`, `RemoveMapping`, `SetMTU` and `SetDropUnknown`; `UpdateConfig`
+replaces the whole config instead. Those calls started from an empty config
+for a name the control plane did not hold, so after a control-plane restart
+the first of them replaced the full config the dataplane still ran with an
+almost empty one. They also followed their own rules: a repeated prefix was
+ignored, a repeated IPv4 address replaced its mapping, and removing a prefix
+shifted the prefix indexes the mappings refer to.
+
+- `yanet-cli-nat64 prefix`, `mapping`, `mtu` and `drop` are replaced by
+  `yanet-cli-nat64 update --name <name> <file>`, whose file is the update
+  request in YAML. A redirected `yanet-cli-nat64 show --name <name>` prints
+  one to start from; keep it, since after a control-plane restart `show`
+  knows nothing of the config the dataplane still runs:
+
+  ```yaml
+  config:
+    prefixes:
+      - 64:ff9b::/96
+    mappings:
+      - ipv4: 192.0.2.1
+        ipv6: 2001:db8::1
+        prefix_index: 0
+    mtu:
+      ipv4_mtu: 1450
+      ipv6_mtu: 1280
+    drop_unknown_prefix: false
+    drop_unknown_mapping: true
+  ```
+
+  The file replaces the whole config: prefixes and mappings it leaves out
+  are removed, an absent `mtu` takes the defaults shown, a value left out
+  of a present `mtu` is 0, which turns that clamp off, and an absent flag
+  is false. A prefix or an IPv4 address listed twice is rejected.
+- Upgrade `yanet2-cli` together with the control plane: the old commands
+  fail against the new control plane, and `update` against an older one.
+- Scripts and clients of the retired calls send the whole config through
+  `UpdateConfig`.
+
+## dscp configs change only through a whole-config update
+
+The dscp control plane now answers `AddPrefixes`, `RemovePrefixes` and
+`SetDscpMarking` with Unimplemented; clients send the whole config with
+`UpdateConfig` instead. Each of those calls started from an empty config
+when the control plane did not hold the name, so after a control-plane
+restart the first one replaced the full config the dataplane still ran.
+
+`yanet-cli-dscp` replaces `prefix-add`, `prefix-remove` and `set-marking`
+with `update`, which takes every prefix and the marking at once:
+
+```bash
+yanet-cli-dscp update --name dscp0 --prefix 10.0.0.0/24 --prefix 2001:db8::/32 --flag always --mark 46
+```
+
+- Upgrade `yanet2-cli` together with the control plane: an older CLI can
+  no longer change a dscp config, and an older control plane does not
+  serve `update`.
+- Scripts that changed part of a config must keep the whole desired
+  config and pass it to `update`: after a control-plane restart `show`
+  knows nothing of the config the dataplane still runs.
+
+
+## MPLS tunnels take the address family of their next hop
+
+bird-adapter now picks the tunnel family and source address by the next
+hop instead of the prefix: an IPv6 route with an IPv4 next hop (6VPE) gets
+an IPv4 tunnel instead of an IPv6 one to the IPv4-mapped address, and an
+IPv4 route with an IPv6 next hop gets the IPv6 source address. route-mpls
+rejects a next hop whose source and destination belong to different
+families.
+
+- Restart the control plane after upgrading `yanet2-bird-adapter`. A
+  running one keeps the tunnels the earlier adapter sent next to the new
+  ones until then.
+- `yanet-cli-route-mpls update` with `--src` and `--dst` of different
+  families now fails.
+
+## route-mpls updates no longer create a config
+
+route-mpls `UpdateConfig` now changes an existing config only and answers
+NotFound for a name the control plane does not hold, instead of starting
+from an empty config. After a control-plane restart that empty start
+replaced the full table the dataplane still ran with the first change.
+
+- Upgrade `yanet2-bird-adapter` before or together with the control plane.
+  The new adapter answers NotFound by sending its whole MPLS table; an
+  older one keeps failing its MPLS updates. The Debian packages enforce the
+  order; container deployments must follow it by hand.
+- Scripts that create a config with `yanet-cli-route-mpls update` must run
+  `yanet-cli-route-mpls create --name <name>` first.
+
+## Web UI compresses ACL saves to gateways on other origins
+
+The web UI now gzips an ACL config save for a gateway on another origin
+too, as it already did for its own origin, and such a gateway must allow
+it: from this version on it lets its trusted origins send
+`Content-Encoding`. Upgrade every gateway that a standalone UI or the UI's
+Gateway drawer reaches before the UI itself, or the browser refuses every
+ACL save to an older gateway at its CORS preflight. The UI then shows a
+network error with no HTTP status.
+
+## Gateway HTTP checks a call before reading its body
+
+The gateway's HTTP surface now authenticates and authorizes a call from its
+`X-Yanet-Authentication` header and its TLS connection before it reads the
+request body, so it reads no body of a call it refuses. A refused call gets
+its status code and a plain-text message, a server-streaming call too,
+where a stream used to answer 200 and then send an `error` event. A
+refusal over HTTP/1 closes its connection, since the gateway does not read
+the rest of a body it refused.
+
+In enabled mode an anonymous caller may send a body of at most 1 MiB and
+gets 413 beyond it. Any other call may send up to 256 MiB of JSON, as many
+bytes as the gRPC servers accept for one protobuf message, which encodes
+the same request in fewer bytes; an upload near that bound may have to go
+over gRPC. A token that is not valid text no longer gets 400 up front: it
+is checked like any other token.
+
+## Gateway backends no longer receive the caller's token
+
+The gateway now drops the `x-yanet-authentication` metadata from every call
+it proxies to a module, device or operator backend; the rest of the
+caller's metadata still reaches the backend. The gateway authenticates a
+call before proxying it, and a process registered under a service's name
+would otherwise collect the token of every caller. A backend of your own
+that reads the token has to stop relying on it; none in this repository
+does.
+
+## Gateway HTTP authenticates calls to every service
+
+With authentication in audit or enabled mode, HTTP calls to module, device
+and operator services now pass the gateway's authentication and
+authorization, as their gRPC calls always did; before, the HTTP server
+called them without either. In enabled mode a caller the permissions do
+not cover is refused with 403, so a web UI or a script that relied on the
+open HTTP surface stops working until its callers are covered.
+
+A browser covers itself with a client certificate over HTTPS, see below. A
+browser on a plaintext HTTP listener carries no certificate and calls as
+the user `anonymous`, which gets only the permissions the permissions file
+grants it; those permissions apply to anonymous gRPC callers as well. The
+gateway warns at startup when a plaintext HTTP listener runs under an
+active policy. A script authenticates with the `X-Yanet-Authentication`
+header, the HTTP counterpart of the gRPC metadata of the same name.
+
+## Gateway HTTPS asks browsers for a client certificate
+
+With an x509 authenticator configured, the gateway's HTTPS listener now
+asks every client for a certificate, as its gRPC TLS listener does, and
+the gateway authenticates a browser call by it. A browser
+holding a certificate from a trusted authority shows its certificate
+picker on the first visit; a client without one is still served as an
+anonymous caller. Without an x509 authenticator the listener asks for no
+certificate, as before. An x509 authenticator may now run with
+`server.http.tls` alone, without a gRPC TLS listener.
+
+Two HTTPS clients that used to be served change with it, as on the gRPC
+TLS listener: a client presenting a certificate from an authority outside
+the pool fails the handshake, and in enabled mode a trusted certificate
+whose name no identity provider knows is refused with 401 instead of being
+served as anonymous. A browser keeps the certificate of its connection
+until it reconnects; expiry and revocation still apply to every call.
+
+The web UI now sends its API calls with the browser's credentials, and a
+gateway on another origin must allow them: from this version on it answers
+its trusted origins with `Access-Control-Allow-Credentials: true`. Upgrade
+every gateway that a standalone UI or the UI's Gateway drawer reaches
+before the UI itself, or the browser rejects the older gateway's
+responses.
+
+## Gateway HTTP rejects cross-origin browser calls from untrusted origins
+
+The gateway's HTTP server no longer sends `Access-Control-Allow-Origin: *`.
+A cross-origin browser POST is now rejected with 403 unless the page's
+origin is listed in `server.http.trusted_origins`, and only a listed origin
+gets CORS headers. Same-origin pages, the web dev proxy and clients that are
+not browsers, such as curl and scripts, are unaffected.
+
+A web UI served from another origin than the gateway, a standalone UI or a
+gateway added to the UI's Gateway drawer, stops working until every such
+gateway lists the UI's origin:
+
+```yaml
+gateway:
+  server:
+    http:
+      endpoint: "[::1]:8081"
+      trusted_origins:
+        - "https://yanet-ui.example.net"
+```
+
+Each entry is a bare `scheme://host[:port]`; anything else fails the config
+load. The deprecated `server.http_endpoint` has no place for origins, so a
+gateway still on it moves to the `server.http` section to trust one.
+
+## TLS key pairs move into `key_pairs` and rotate without a restart
+
+Every certificate and private key is now given as a `key_pairs` list
+instead of `cert_file` and `key_file`: in the gateway's `server.grpc.tls`,
+`server.http.tls` and deprecated `server.tls`, and in every client `tls`
+block (`gateways[].tls` of the operators, `route_operator_tls` of the BIRD
+adapter). Each entry names a loader type and its settings, and `file` is
+the only type. `ca_file` and `server_name` stay as they are. Rewrite
+
+```yaml
+tls:
+  cert_file: /etc/yanet2/tls/server.pem
+  key_file: /etc/yanet2/tls/server.key
+```
+
+into
+
+```yaml
+tls:
+  key_pairs:
+    - type: file
+      config:
+        cert_file: /etc/yanet2/tls/server.pem
+        key_file: /etc/yanet2/tls/server.key
+```
+
+A gateway TLS listener needs at least one entry, so a gateway config left
+with only the old keys fails to load and names the listener. A client may
+give no entry and then presents no certificate, and an operator `tls`
+block left with only `cert_file` and `key_file` dials without one, since
+the old keys are ignored like any unknown key. Keep `cert_file` and
+`key_file` next to `key_pairs` through the package upgrade, as the older
+binaries ignore `key_pairs` and the newer ones the old keys, and drop the
+old keys afterwards. The BIRD adapter rejects unknown keys in both
+versions, so its `route_operator_tls` moves to `key_pairs` together with
+the package. An unknown `type`, or an unknown key under `config`, fails
+the config load. Environment overrides cannot reach the settings under
+`config`, so key pair paths are YAML-only.
+
+The files are reread without a restart. The gateway and every client
+reload an entry on the first handshake an hour after its last try, the
+gateway also on a metrics scrape, and on every handshake while its
+certificate expires within the hour or already has. A loaded pair replaces
+the current one only when it parses, its key matches and it is valid now.
+A pair not yet valid waits and takes over at its start without another
+read; anything else keeps the current pair, with a warning naming the
+source once per content. Replace the files by rename or by swapping a
+symlink: a key and certificate written one after the other may be read
+half written, which keeps the old pair until both files match at a later
+reload. Startup still fails on an unreadable or mismatched pair, and a
+pair outside its validity period still loads, with a warning.
+
+The gateway serves the first entry that is valid and that the client
+supports, else the first entry. A client presents the first entry that is
+valid and that the server's request accepts, else no certificate, so an
+expired client certificate leaves its calls anonymous instead of failing
+the handshake.
+
+A gRPC connection keeps the client certificate of its handshake, while the
+x509 authenticator checks that certificate on every call. Set
+`server.grpc.tls.max_connection_age` to make every client reconnect:
+
+```yaml
+gateway:
+  server:
+    grpc:
+      tls:
+        endpoint: "[::1]:8443"
+        max_connection_age: 1h
+        key_pairs:
+          - type: file
+            config:
+              cert_file: /etc/yanet2/tls/server.pem
+              key_file: /etc/yanet2/tls/server.key
+```
+
+Once a connection reaches that age, varied by up to 10% either way, the
+gateway sends GOAWAY: calls and streams in flight run to completion and the
+client reconnects on its next call. That listener also refuses TLS session
+resumption, which would carry an old client certificate over. The key is
+off by default, and a gateway with an x509 authenticator warns at startup
+while it is unset. Under `server.http.tls`, negative, or positive but under
+a second, it fails startup.
+
+Deploy a renewed client pair more than the reload interval plus 1.1 times
+the connection age before the old one expires, 1h + 1.1 × 1h = 2h06m with
+the example above: the first handshake an hour after the last reload picks
+the pair up, and within 1.1 times the age every older connection has had
+its GOAWAY, so new calls go out presenting the new pair. A stream already
+running at the GOAWAY keeps its connection until it ends, since its
+identity was checked when it started. Renewing a day ahead satisfies this
+with room to spare. A server pair only needs the hour, since clients check
+the server certificate at the handshake alone.
+
+To move client certificates onto a new CA:
+
+1. Add the new CA to the x509 authenticator's `ca_sources` on every
+   gateway; the gateway reloads them by itself.
+2. Replace the pair files of every client with a certificate from the new
+   CA, as for a renewal, without a restart. A second `key_pairs` entry, a
+   config change and so a restart, is needed only while a client talks to
+   gateways that do not all trust the new CA yet. A client then presents
+   the first entry whose issuer the gateway's request names, so the two
+   CAs need distinct subject names.
+3. Drop the old CA from `ca_sources` last.
+
+To move the gateway's server certificate onto a new CA, add the new CA to
+the `ca_file` of every client first, which a client reads only when it
+starts, then replace the gateway's pair files.
+
+Two gauges follow a rollout, see [gateway TLS metrics](metrics.md#gateway-tls-metrics):
+`gateway_tls_certificate_not_after_seconds` for the certificates the
+gateway serves and `auth_x509_client_certificate_not_after_seconds` for
+those its clients present.
+
+## Gateway listeners move into `grpc` and `http` sections
+
+The gateway's `server` block now configures each protocol in a section of
+its own, `grpc` and `http`. A section takes an optional plaintext `endpoint`
+and an optional `tls` listener with its own `endpoint` and `key_pairs`, so
+plaintext and TLS can run side by side while clients move to TLS one at a
+time.
+
+The old `endpoint`, `http_endpoint` and `tls` keys keep working as
+deprecated aliases until #2983 removes them, and the director logs a
+warning naming every one it finds. `endpoint` maps to `grpc.endpoint` and
+`http_endpoint` to `http.endpoint`; with `tls` set, both turn into the TLS
+listener of their section instead, as before. `[::1]:8080` stays the gRPC
+default only while neither `endpoint` nor `grpc` is given. A section
+replaces the old keys of its protocol, so old keys left beside it are
+ignored and named in the warning.
+
+The packaged `default.yaml` keeps the old keys until #2983, so it logs the
+warning, and the new sections appear in it as a commented example. A site
+config kept by dpkg keeps its old keys and keeps working; to move it,
+rewrite for example
+
+```yaml
+gateway:
+  server:
+    endpoint: "[::1]:8080"
+    http_endpoint: "[::1]:8081"
+    tls:
+      key_pairs:
+        - type: file
+          config:
+            cert_file: /etc/yanet2/tls/server.pem
+            key_file: /etc/yanet2/tls/server.key
+```
+
+into the same listeners:
+
+```yaml
+gateway:
+  server:
+    grpc:
+      tls:
+        endpoint: "[::1]:8080"
+        key_pairs:
+          - type: file
+            config:
+              cert_file: /etc/yanet2/tls/server.pem
+              key_file: /etc/yanet2/tls/server.key
+    http:
+      tls:
+        endpoint: "[::1]:8081"
+        key_pairs:
+          - type: file
+            config:
+              cert_file: /etc/yanet2/tls/server.pem
+              key_file: /etc/yanet2/tls/server.key
+```
+
+Adding `grpc.endpoint` on another address then serves plaintext gRPC beside
+TLS for the clients that have not moved yet. An x509 authenticator needs
+a TLS listener to ask for client certificates, and plaintext callers stay
+anonymous.
+
+Environment overrides follow the keys: `YANET_GATEWAY_SERVER_GRPC_ENDPOINT`,
+`YANET_GATEWAY_SERVER_GRPC_TLS_ENDPOINT`,
+`YANET_GATEWAY_SERVER_GRPC_TLS_MAX_CONNECTION_AGE` and so on for the
+sections, while key pair paths are YAML-only. Once a config uses a section,
+overrides of that protocol's old keys are ignored like the keys themselves.
+Until #2983, `YANET_GATEWAY_SERVER_HTTP_ENDPOINT` names both
+`http_endpoint` and `http.endpoint`, and setting it fails startup.
+
+## Route operator separates device exclusions from unresolved nexthops
+
+`route_operator_fib_unresolved_nexthops` now counts route records whose
+nexthops are absent from the full neighbour snapshot. Healthy routes on
+foreign devices no longer inflate this metric. The new
+`route_operator_fib_device_excluded_routes` gauge counts resolved route
+records excluded by the gateway's device restriction, with `gateway` and
+`module` labels.
+
+Both metrics are latest-build gauges: subsequent builds replace their
+values, including resetting them to zero. They are not counters or
+confirmations of successful gateway programming. Missing neighbours have
+unknown device ownership, so do not sum per-gateway unresolved series as
+unique global losses. No configuration migration is needed.
+
+## Pdump adds an optional capture rate limit
+
+Pdump now supports an optional `rate_pps` setting with one best-effort
+rate/burst budget per config shared across all workers. The accepted range
+is 0..1,000,000 pps, inclusive. New configs default to zero (unlimited),
+so existing configurations do not need a rate setting. Omitting the rate
+on an update preserves its current value. Burst is automatic and global,
+not per worker. See
+[shared capture limit](ring.md#shared-capture-limit) for replacement,
+recommit and `pdump_rate_skipped` counter semantics.
+
+The private shared-memory pdump config layout changed. Rebuild the
+dataplane, pdump plugin and CGO control-plane binaries from the same
+revision, then stop the old dataplane and all processes attached to its
+shared memory in a coordinated maintenance window. Remove stale
+`/dev/hugepages/yanet*` mappings only after those processes have stopped,
+then restart the rebuilt components and reapply configuration. Do not mix
+old/new binaries or reuse pre-upgrade shared memory. For source builds,
+run `meson compile -C build` to rebuild C archives and CGO dependency
+fingerprints, then rebuild standalone CGO executables. The plugin interface
+ABI does not version this private layout; there is no mixed-version
+negotiation or rolling compatibility here.
+
+## Pdump capture moved onto named ring objects
+
+Pdump no longer sizes a private per-worker ring. A config captures into a
+pre-existing ring object instead, created once and named.
+
+The record layout and the shared-memory config it lives in changed
+together, so upgrade the dataplane and the control plane in the same
+maintenance window — a dataplane still running the old private-ring code
+cannot read a config the new control plane writes, and vice versa. Clear
+any stale `/dev/hugepages/yanet*` files from before the upgrade.
+
+1. Create the ring before creating or updating any pdump config that
+   captures into it:
+
+   ```bash
+   yanet-cli-ring create --name captures --capacity 1MiB
+   ```
+
+   The pdump web page can create a ring from its own UI as well. Pdump
+   binds only to a ring of at least 128 KiB per worker, so every record
+   fits whatever the snaplen; a smaller ring is refused
+   (`InvalidArgument`).
+
+2. Pass the ring's name instead of a size. `ring_size` and `--ring-size`
+   are gone, along with the web ring-size input; `ring_name` /
+   `--ring-name` (the web config dialog's ring field) replaces them. It
+   is required when a config is created. An update that omits it keeps
+   the config's currently bound ring; passing it explicitly empty is
+   rejected.
+
+   Rings allocate in the pdump module's own agent arena, not a separate
+   reserve. A deployment that overrides pdump's `memory_requirements`
+   (16 MiB by default before this change) must raise it to cover its
+   rings; the packaged default is now 128 MiB.
+
+Old automation that still passes `--ring-size`, or that creates a config
+without naming a ring, now fails: an absent or empty ring name is
+rejected (`InvalidArgument`), and a name that does not match a published
+ring is rejected (`NotFound`). Nothing is created on either failure.
+
+A ring linked by a published pdump config cannot be deleted — delete the
+config first. As before, deleting a config ends its capture streams; open
+readers do not keep the ring from being deleted. Deleting a config never
+deletes the ring it captured into.
+
+A capture stream no longer replays the records a ring already held
+before the stream started — including a stream reopened after rebinding
+a config to another ring. It starts at the ring's current position. A
+same-object config update (filter, snaplen or mode, ring kept) still
+carries its stream and cursor forward without a reset.
+
+PCAP and PCAPNG files pdump's CLI writes always carry a 65535 header
+snaplen now, independent of the configured capture snaplen.
+
+Field 4 is removed and reserved, not renumbered: a new control plane
+simply ignores an old CLI's `ring_size` as an unknown field, and since an
+old CLI cannot send `ring_name`, its create fails with
+`InvalidArgument`; an old CLI's `show` just lacks the ring. Upgrade
+`yanet2-cli` together with the control plane.
+
 ## Balancer2 scaffold and CLI removed
 
 The unused `modules/balancer2` scaffold, the
@@ -80,8 +597,9 @@ Instances are grouped under `yanet2-controlplane.target`, which the operators
 order against, so `systemctl restart yanet2-controlplane.target` reaches every
 running instance.
 
-Running more than one instance needs per-instance `endpoint`, `http_endpoint`
-and `memory_path` values in each config, and the operators point at
+Running more than one instance needs per-instance listener endpoints
+(`grpc` and `http`, or the deprecated `endpoint` and `http_endpoint`) and
+`memory_path` values in each config, and the operators point at
 `[::1]:8080` in their own configs.
 
 ## `instance_id` is now mandatory on the gateway and on every module and device

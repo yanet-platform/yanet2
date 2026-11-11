@@ -7,22 +7,20 @@ use core::ops::BitOrAssign;
 
 use clap::Args;
 
-#[allow(non_upper_case_globals)]
-#[allow(non_camel_case_types)]
-#[allow(non_snake_case)]
+/// The dataplane's capture queue bits, read from its header at build time.
+///
+/// They are carried unchanged in the config mode and in every record's
+/// queue.
 mod mode {
-    // Auto-generated bindings from C header file
     include!(concat!(env!("OUT_DIR"), "/pdump_mode.rs"));
 }
 
-pub use mode::pdump_mode;
-
 /// Capture input packets mode flag
-pub const INPUT: pdump_mode = mode::pdump_mode_PDUMP_INPUT;
+pub const INPUT: u32 = mode::PDUMP_INPUT;
 /// Capture dropped packets mode flag
-pub const DROPS: pdump_mode = mode::pdump_mode_PDUMP_DROPS;
+pub const DROPS: u32 = mode::PDUMP_DROPS;
 /// Capture all packets (input, drops) mode flag
-pub const ALL: pdump_mode = mode::pdump_mode_PDUMP_ALL;
+pub const ALL: u32 = mode::PDUMP_ALL;
 
 #[derive(Args, Debug, Clone, Copy)]
 #[group(required = false, multiple = true)]
@@ -40,7 +38,7 @@ pub struct Mode {
     pub all: bool,
 }
 
-pub fn to_str(mode: pdump_mode) -> &'static str {
+pub fn to_str(mode: u32) -> &'static str {
     let input = mode & INPUT != 0;
     let drops = mode & DROPS != 0;
 
@@ -53,7 +51,7 @@ pub fn to_str(mode: pdump_mode) -> &'static str {
     }
 }
 
-pub fn to_char(mode: pdump_mode) -> char {
+pub fn to_char(mode: u32) -> char {
     let input = mode & INPUT != 0;
     let drops = mode & DROPS != 0;
     match (input, drops) {

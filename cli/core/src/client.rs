@@ -17,40 +17,49 @@
 //!
 //! let channel = connect(&cmd.globals.connection).await?;
 //! let client = MyServiceClient::new(channel)
-//!     .send_compressed(CompressionEncoding::Gzip)
+//!     .send_compressed(CompressionEncoding::Zstd)
+//!     .accept_compressed(CompressionEncoding::Zstd)
 //!     .accept_compressed(CompressionEncoding::Gzip);
 //! ```
 
-use core::{fmt::Debug, time::Duration};
+use core::{fmt::Debug, pin::Pin, time::Duration};
 use std::{
     fs,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use http::{Uri, uri::PathAndQuery};
 use prost::Message;
+use rustls::{
+    DigitallySignedStruct, SignatureScheme,
+    client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
+    crypto::{self, CryptoProvider, WebPkiSupportedAlgorithms},
+    pki_types::{CertificateDer, ServerName, UnixTime},
+};
 use tonic::{
     Request, Response, Status,
+    body::Body,
     client::Grpc,
     codec::CompressionEncoding,
     transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity},
 };
 use tonic_prost::ProstCodec;
-use tower::Layer;
+use tower::{Layer, ServiceExt, util::BoxCloneSyncService};
+/// Channel type with all interceptors applied.
+///
+/// Generated clients take it, e.g. `MyServiceClient<LayeredChannel>`. The
+/// interceptors and the transport sit behind one boxed service built in this
+/// crate, so a CLI binary does not compile its own copy of them.
+pub use ync_rpc::Channel as LayeredChannel;
 
 use crate::{
-    auth::{self, AuthArgs, interceptor::AuthService},
+    auth::{self, AuthArgs},
     config::{self, Settings},
     errors::{Error, map_not_found, root_cause},
     progress::ProgressService,
-    timeout::{TimeoutLayer, TimeoutService},
+    timeout::TimeoutLayer,
 };
-
-/// Channel type with all interceptors applied.
-///
-/// Use this as the type parameter for tonic-generated clients, e.g.
-/// `MyServiceClient<LayeredChannel>`.
-pub type LayeredChannel = ProgressService<TimeoutService<AuthService<Channel>>>;
 
 /// TLS material supplied explicitly by the user.
 #[derive(Debug, Clone, Default, clap::Args)]
@@ -68,11 +77,21 @@ pub struct TlsArgs {
     /// PEM client private key for mutual TLS.
     #[arg(long, global = true, env = "YANET_CLIENT_KEY", value_name = "PATH")]
     pub client_key: Option<PathBuf>,
+    /// Accept any server certificate without checking its chain, name or
+    /// validity period.
+    ///
+    /// The connection stays encrypted but is open to an active
+    /// man-in-the-middle; the CA bundle and native roots are not consulted.
+    #[arg(long, global = true)]
+    pub dangerously_skip_verify: bool,
 }
 
 impl Settings {
     fn tls_configured(&self) -> bool {
-        self.ca.value.is_some() || self.client_cert.value.is_some() || self.client_key.value.is_some()
+        self.ca.value.is_some()
+            || self.client_cert.value.is_some()
+            || self.client_key.value.is_some()
+            || self.skip_verify
     }
 }
 
@@ -88,7 +107,7 @@ pub struct ConnectionArgs {
     /// Falls back to the `endpoint` key of the configuration file,
     /// /etc/yanet2/cli.yaml merged with $XDG_CONFIG_HOME/yanet2/cli.yaml
     /// (~/.config by default) or the single file named by YANET_CONFIG,
-    /// then to grpc://[::1]:8080. A value without :// is an alias from
+    /// then to `grpc://[::1]:8080`. A value without :// is an alias from
     /// the file's `endpoints:` map.
     #[arg(long, global = true, env = "YANET_ENDPOINT")]
     pub endpoint: Option<String>,
@@ -164,6 +183,14 @@ fn build_endpoint(settings: &Settings) -> Result<Endpoint, ConnectionError> {
             let channel = Channel::from_shared(format!("https://{address}"))?;
             let tls = build_tls_config(settings)?;
 
+            if settings.skip_verify {
+                log::warn!("server certificate verification is disabled");
+
+                return channel
+                    .tls_config_with_verifier(tls, Arc::new(SkipServerVerification::new()))
+                    .map_err(ConnectionError::TlsConfig);
+            }
+
             channel.tls_config(tls).map_err(ConnectionError::TlsConfig)
         }
         Some(("grpc" | "unix", ..)) if settings.tls_configured() => Err(ConnectionError::TlsOptionsWithoutTls),
@@ -174,7 +201,8 @@ fn build_endpoint(settings: &Settings) -> Result<Endpoint, ConnectionError> {
     }
 }
 
-/// Uses native roots unless an explicit CA bundle replaces them.
+/// Uses native roots unless an explicit CA bundle replaces them, and no
+/// roots at all when the server certificate is not verified.
 fn build_tls_config(settings: &Settings) -> Result<ClientTlsConfig, ConnectionError> {
     let identity = match (&settings.client_cert.value, &settings.client_key.value) {
         (Some(cert), Some(key)) => Some(Identity::from_pem(
@@ -185,7 +213,9 @@ fn build_tls_config(settings: &Settings) -> Result<ClientTlsConfig, ConnectionEr
         (..) => return Err(ConnectionError::IncompleteClientIdentity),
     };
 
+    // tonic refuses a custom verifier combined with any root.
     let mut tls = match &settings.ca.value {
+        _ if settings.skip_verify => ClientTlsConfig::new(),
         Some(path) => {
             ClientTlsConfig::new().ca_certificate(Certificate::from_pem(read_tls_file(path, "CA certificate bundle")?))
         }
@@ -203,6 +233,61 @@ fn build_tls_config(settings: &Settings) -> Result<ClientTlsConfig, ConnectionEr
     Ok(tls)
 }
 
+/// Accepts any server certificate while still checking that the server
+/// holds the key of the certificate it presented.
+#[derive(Debug)]
+struct SkipServerVerification {
+    algorithms: WebPkiSupportedAlgorithms,
+}
+
+impl SkipServerVerification {
+    /// Takes the signature algorithms of the provider tonic builds the
+    /// connection with: the process default, else aws-lc-rs.
+    fn new() -> Self {
+        let algorithms = match CryptoProvider::get_default() {
+            Some(provider) => provider.signature_verification_algorithms,
+            None => crypto::aws_lc_rs::default_provider().signature_verification_algorithms,
+        };
+
+        Self { algorithms }
+    }
+}
+
+impl ServerCertVerifier for SkipServerVerification {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        crypto::verify_tls12_signature(message, cert, dss, &self.algorithms)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        crypto::verify_tls13_signature(message, cert, dss, &self.algorithms)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        self.algorithms.supported_schemes()
+    }
+}
+
 /// Returns the bare address of an IPv6-literal endpoint for certificate
 /// verification, or nothing for a name or an IPv4 literal.
 ///
@@ -212,7 +297,7 @@ fn ipv6_server_name(endpoint: &str) -> Option<String> {
     let uri: Uri = endpoint.parse().ok()?;
     let host = uri.host()?;
 
-    host.strip_prefix('[')?.strip_suffix(']').map(str::to_owned)
+    host.strip_circumfix('[', ']').map(str::to_owned)
 }
 
 /// Reads one PEM input while preserving its role and path in the error.
@@ -228,30 +313,37 @@ fn read_tls_file(path: &Path, kind: &'static str) -> Result<Vec<u8>, ConnectionE
 /// returned channel. Resolution stays the caller's job so that a transport
 /// failure can still be blamed on the alias and URI that were actually
 /// resolved, rather than losing that context to a fresh, potentially
-/// different resolution.
-async fn establish(settings: &Settings) -> Result<LayeredChannel, ConnectionError> {
-    // Checked before any I/O, like the TLS/identity checks in
-    // `build_endpoint`: a missing cert tag must not cost a round trip or
-    // get masked by an unrelated transport failure.
-    let resolved_auth = settings.resolved_auth()?;
+/// different resolution. The future is boxed so the transport it drives is
+/// compiled once in this crate rather than in every CLI binary.
+fn establish(
+    settings: &Settings,
+) -> Pin<Box<dyn Future<Output = Result<LayeredChannel, ConnectionError>> + Send + '_>> {
+    Box::pin(async move {
+        // Checked before any I/O, like the TLS/identity checks in
+        // `build_endpoint`: a missing cert tag must not cost a round trip or
+        // get masked by an unrelated transport failure.
+        let resolved_auth = settings.resolved_auth()?;
 
-    let attempt = async {
-        let channel = build_endpoint(settings)?.connect().await?;
-        let auth = auth::create_layer(resolved_auth).await?;
+        let attempt = async {
+            let channel = build_endpoint(settings)?.connect().await?;
+            let auth = auth::create_layer(resolved_auth).await?;
 
-        Ok::<_, ConnectionError>(auth.layer(channel))
-    };
+            Ok::<_, ConnectionError>(auth.layer(channel))
+        };
 
-    let auth_service = match settings.timeout.value {
-        Some(budget) => tokio::time::timeout(budget, attempt)
-            .await
-            .map_err(|_| ConnectionError::Timeout(budget))??,
-        None => attempt.await?,
-    };
+        let auth_service = match settings.timeout.value {
+            Some(budget) => tokio::time::timeout(budget, attempt)
+                .await
+                .map_err(|_| ConnectionError::Timeout(budget))??,
+            None => attempt.await?,
+        };
 
-    Ok(ProgressService::new(
-        TimeoutLayer::new(settings.timeout.value).layer(auth_service),
-    ))
+        let layered = ProgressService::new(TimeoutLayer::new(settings.timeout.value).layer(auth_service));
+
+        Ok(LayeredChannel::new(BoxCloneSyncService::new(
+            layered.map_response(|response| response.map(Body::new)),
+        )))
+    })
 }
 
 /// Resolves the label for an error raised before any RPC is attempted.
@@ -261,9 +353,6 @@ async fn establish(settings: &Settings) -> Result<LayeredChannel, ConnectionErro
 /// would from [`Connection::connect_for`], so a configuration mistake exits
 /// the same way regardless of where the command first needs an endpoint to
 /// reject something.
-// The siblings returning the same `Error` are all `async fn`, whose
-// desugared `Future` output hides the `Result` from this lint.
-#[allow(clippy::result_large_err)]
 pub fn resolve_label(args: &ConnectionArgs, action: &str) -> Result<String, Error> {
     config::resolve(args, &config::Sources::from_process_env())
         .map(|settings| settings.label())
@@ -272,10 +361,17 @@ pub fn resolve_label(args: &ConnectionArgs, action: &str) -> Result<String, Erro
 
 /// Resolves the configuration, then connects with all interceptors
 /// pre-applied.
-pub async fn connect(args: &ConnectionArgs) -> Result<LayeredChannel, ConnectionError> {
-    let settings = config::resolve(args, &config::Sources::from_process_env())?;
+///
+/// The future is boxed so its body is compiled once in this crate rather than
+/// in every CLI binary.
+pub fn connect(
+    args: &ConnectionArgs,
+) -> Pin<Box<dyn Future<Output = Result<LayeredChannel, ConnectionError>> + Send + '_>> {
+    Box::pin(async move {
+        let settings = config::resolve(args, &config::Sources::from_process_env())?;
 
-    establish(&settings).await
+        establish(&settings).await
+    })
 }
 
 /// An established, authenticated channel to one endpoint.
@@ -290,23 +386,27 @@ pub struct Connection {
 
 impl Connection {
     /// Resolve the target and establish an authenticated channel to it.
-    pub async fn connect(args: &ConnectionArgs) -> Result<Self, Error> {
-        Self::connect_for(args, "connect").await
+    pub fn connect(args: &ConnectionArgs) -> Pin<Box<dyn Future<Output = Result<Self, Error>> + Send + '_>> {
+        Self::connect_for(args, "connect")
     }
 
     /// Establish the channel, blaming a failure on `action` rather than the
     /// connect step.
     ///
-    /// The dynamic-dispatch helpers report the verb the user asked for (e.g.
-    /// `ready`) all the way through, so they name their own action here. So
-    /// does a CLI that connects once and then dispatches several RPCs over
-    /// that one connection: a connect failure must read the same as an RPC
-    /// failure of the same command.
-    pub async fn connect_for(args: &ConnectionArgs, action: &str) -> Result<Self, Error> {
-        let settings = config::resolve(args, &config::Sources::from_process_env())
-            .map_err(|err| Error::from_config(err, action, args.endpoint.clone()))?;
+    /// A CLI that connects once and then dispatches several RPCs over that
+    /// one connection names the verb the user asked for (e.g. `ready`) here:
+    /// a connect failure must read the same as an RPC failure of the same
+    /// command.
+    pub fn connect_for<'a>(
+        args: &'a ConnectionArgs,
+        action: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Self, Error>> + Send + 'a>> {
+        Box::pin(async move {
+            let settings = config::resolve(args, &config::Sources::from_process_env())
+                .map_err(|err| Error::from_config(err, action, args.endpoint.clone()))?;
 
-        Self::connect_settings(&settings, action).await
+            Self::connect_settings(&settings, action).await
+        })
     }
 
     /// Establish the channel from an already-resolved [`Settings`], blaming
@@ -315,13 +415,18 @@ impl Connection {
     /// For a caller that has its own reason to resolve first (to reuse the
     /// resolved label, say) rather than resolving twice via
     /// [`Connection::connect_for`].
-    pub async fn connect_settings(settings: &Settings, action: &str) -> Result<Self, Error> {
-        let endpoint = settings.label();
+    pub fn connect_settings<'a>(
+        settings: &'a Settings,
+        action: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Self, Error>> + Send + 'a>> {
+        Box::pin(async move {
+            let endpoint = settings.label();
 
-        establish(settings)
-            .await
-            .map(|channel| Self { channel, endpoint: endpoint.clone() })
-            .map_err(|err| Error::from_connection(err, action, endpoint))
+            establish(settings)
+                .await
+                .map(|channel| Self { channel, endpoint: endpoint.clone() })
+                .map_err(|err| Error::from_connection(err, action, endpoint))
+        })
     }
 
     /// The resolved endpoint this connection reached: `<alias> (<uri>)`
@@ -330,11 +435,15 @@ impl Connection {
         &self.endpoint
     }
 
-    /// Invoke a unary RPC on an arbitrary gRPC service over this connection.
+    /// Invoke a unary RPC on an arbitrary gRPC service over this connection,
+    /// without a generated client.
     ///
-    /// The dispatch is the free [`invoke_unary`]'s, minus the connect: a CLI
-    /// probing several services builds one [`Connection`] and calls this per
-    /// service, so they all share a single channel.
+    /// The service goes by its fully-qualified name and the method by its
+    /// wire name (e.g. `"Ready"`); a failure is reported under the
+    /// user-facing verb (e.g. `"ready"`). The request and response are any
+    /// `prost` messages — the shared codec is built from them. A CLI probing
+    /// several services calls this per service, so they all share a single
+    /// channel.
     pub async fn invoke_unary<Req, Resp>(
         &self,
         action: &str,
@@ -347,7 +456,8 @@ impl Connection {
         Resp: Message + Default + 'static,
     {
         let mut grpc = Grpc::new(self.channel.clone())
-            .send_compressed(CompressionEncoding::Gzip)
+            .send_compressed(CompressionEncoding::Zstd)
+            .accept_compressed(CompressionEncoding::Zstd)
             .accept_compressed(CompressionEncoding::Gzip);
 
         let path = PathAndQuery::try_from(format!("/{service}/{method}")).map_err(|err| {
@@ -372,13 +482,14 @@ impl Connection {
     }
 
     /// Invoke a server-streaming RPC on an arbitrary gRPC service over this
-    /// connection.
+    /// connection, without a generated client.
     ///
-    /// The dispatch is the free [`invoke_server_stream`]'s, minus the
-    /// connect: a CLI watching several services builds one [`Connection`]
-    /// and calls this per service, so they all share a single channel.
-    /// `tonic::Streaming` never leaks to the caller — all stream state is
-    /// contained here.
+    /// The service, the method (e.g. `"Watch"`) and the verb a failure is
+    /// reported under are given as for a unary call. Each received message
+    /// goes to the callback, and the call succeeds once the server closes the
+    /// stream cleanly. A CLI watching several services calls this per
+    /// service, so they all share a single channel. `tonic::Streaming` never
+    /// leaks to the caller — all stream state is contained here.
     pub async fn invoke_server_stream<Req, Resp, F>(
         &self,
         action: &str,
@@ -393,7 +504,8 @@ impl Connection {
         F: FnMut(Resp),
     {
         let mut grpc = Grpc::new(self.channel.clone())
-            .send_compressed(CompressionEncoding::Gzip)
+            .send_compressed(CompressionEncoding::Zstd)
+            .accept_compressed(CompressionEncoding::Zstd)
             .accept_compressed(CompressionEncoding::Gzip);
 
         let path = PathAndQuery::try_from(format!("/{service}/{method}")).map_err(|err| {
@@ -431,7 +543,7 @@ impl Connection {
 
 /// A connected gRPC client bundled with its endpoint and service name.
 ///
-/// Wraps a tonic-generated client together with the endpoint it reached and
+/// Wraps a generated client together with the endpoint it reached and
 /// its fully-qualified service name. This lets a CLI stop threading
 /// `endpoint` through its own service struct and stop re-declaring the
 /// per-command error-mapping helpers: [`status`](Service::status) and
@@ -462,7 +574,7 @@ impl<C> Service<C> {
     /// Wrap a `name` service client over an existing [`Connection`].
     ///
     /// `build` receives a clone of the connection's channel and returns the
-    /// tonic-generated client (compression and message sizes are configured
+    /// generated client (compression and message sizes are configured
     /// there — they are inherent client methods and cannot be defaulted here).
     /// A CLI driving several services connects once and calls this per client.
     pub fn new<F>(connection: &Connection, name: &'static str, build: F) -> Self
@@ -577,9 +689,9 @@ impl<C> Service<C> {
         Map: FnOnce(Status) -> Error,
         Call: AsyncFnOnce(&mut C, Req) -> Result<Response<Resp>, Status>,
     {
-        log::trace!("{action} request: {request:?}");
+        trace(action, "request", &request);
         let response = call(&mut self.client, request).await.map_err(map)?.into_inner();
-        log::trace!("{action} response: {response:?}");
+        trace(action, "response", &response);
 
         Ok(response)
     }
@@ -595,61 +707,15 @@ impl<C> Service<C> {
     }
 }
 
-/// Invoke a unary RPC on an arbitrary gRPC service by its fully-qualified
-/// name, without a generated client.
-///
-/// `action` is the user-facing verb used in error messages (e.g. `"ready"`),
-/// `service` is the service FQN, `method` is the wire method name (e.g.
-/// `"Ready"`). The request and response are any `prost` messages — the
-/// shared codec is built from them.
-pub async fn invoke_unary<Req, Resp>(
-    connection: &ConnectionArgs,
-    action: &str,
-    service: &str,
-    method: &str,
-    request: Req,
-) -> Result<Resp, Error>
-where
-    Req: Message + 'static,
-    Resp: Message + Default + 'static,
-{
-    Connection::connect_for(connection, action)
-        .await?
-        .invoke_unary(action, service, method, request)
-        .await
-}
-
-/// Invoke a server-streaming RPC on an arbitrary gRPC service by its
-/// fully-qualified name, without a generated client.
-///
-/// `action` is the user-facing verb used in error messages (e.g. `"ready"`),
-/// `service` is the service FQN, `method` is the wire method name (e.g.
-/// `"Watch"`). Each received message is delivered to `on_message`; the
-/// function returns `Ok(())` when the server closes the stream cleanly.
-/// `tonic::Streaming` never leaks to the caller — all stream state is
-/// contained here.
-pub async fn invoke_server_stream<Req, Resp, F>(
-    connection: &ConnectionArgs,
-    action: &str,
-    service: &str,
-    method: &str,
-    request: Req,
-    on_message: F,
-) -> Result<(), Error>
-where
-    Req: Message + Send + Sync + 'static,
-    Resp: Message + Default + Send + Sync + 'static,
-    F: FnMut(Resp),
-{
-    Connection::connect_for(connection, action)
-        .await?
-        .invoke_server_stream(action, service, method, request, on_message)
-        .await
+/// Logs one side of an RPC at trace level, compiled once here rather than in
+/// every binary.
+fn trace(action: &str, side: &str, message: &dyn Debug) {
+    log::trace!("{action} {side}: {message:?}");
 }
 
 #[cfg(test)]
 mod test {
-    use core::{net::SocketAddr, time::Duration};
+    use core::{assert_matches, net::SocketAddr, time::Duration};
     use std::{
         net::{TcpListener, TcpStream},
         path::PathBuf,
@@ -812,7 +878,7 @@ mod test {
 
         assert_eq!(ErrorKind::Connection, err.kind());
         assert_eq!(4, err.exit_code());
-        assert_eq!("show", err.action);
+        assert_eq!("show", err.0.action);
         assert_eq!("connect timed out after 0.2s", err.message());
     }
 
@@ -833,7 +899,7 @@ mod test {
 
         let err = connect(&args).await.err().unwrap();
 
-        assert!(matches!(err, ConnectionError::InvalidEndpointScheme(scheme) if scheme == "https"));
+        assert_matches!(err, ConnectionError::InvalidEndpointScheme(scheme) if scheme == "https");
     }
 
     #[tokio::test]
@@ -853,7 +919,7 @@ mod test {
 
         let err = connect(&args).await.err().unwrap();
 
-        assert!(matches!(err, ConnectionError::TlsOptionsWithoutTls));
+        assert_matches!(err, ConnectionError::TlsOptionsWithoutTls);
     }
 
     #[tokio::test]
@@ -873,7 +939,7 @@ mod test {
 
         let err = connect(&args).await.err().unwrap();
 
-        assert!(matches!(err, ConnectionError::IncompleteClientIdentity));
+        assert_matches!(err, ConnectionError::IncompleteClientIdentity);
     }
 
     #[tokio::test]
@@ -900,7 +966,7 @@ mod test {
 
         let err = establish(&settings).await.err().unwrap();
 
-        assert!(matches!(err, ConnectionError::Config(config::Error::MissingCertTag)));
+        assert_matches!(err, ConnectionError::Config(config::Error::MissingCertTag));
     }
 
     #[tokio::test]
@@ -912,6 +978,7 @@ mod test {
                 ca: Some(tls_fixture("ca.pem")),
                 client_cert: Some(tls_fixture("client-cert.pem")),
                 client_key: Some(tls_fixture("client-key.pem")),
+                ..TlsArgs::default()
             },
         );
 
@@ -928,12 +995,26 @@ mod test {
         assert!(err.message().to_lowercase().contains("certificate"), "{err:?}");
     }
 
+    #[tokio::test]
+    async fn test_connect_skip_verify_accepts_untrusted_certificate() {
+        let server = start_tls_server(false).await;
+        let args = tls_connection_args(
+            server.endpoint.clone(),
+            TlsArgs {
+                dangerously_skip_verify: true,
+                ..TlsArgs::default()
+            },
+        );
+
+        check_tls_health(&args).await.unwrap();
+    }
+
     #[test]
     fn status_maps_grpc_code() {
         let service = Service::from_parts((), "grpc://[::1]:8080", "test.Service");
         let err = (service.status("list"))(Status::not_found("missing"));
 
-        assert_eq!(ErrorKind::NotFound, err.kind);
+        assert_eq!(ErrorKind::NotFound, err.0.kind);
     }
 
     #[test]
@@ -941,8 +1022,8 @@ mod test {
         let service = Service::from_parts((), "grpc://[::1]:8080", "test.Service");
         let err = service.invalid("update", "bad input");
 
-        assert_eq!(ErrorKind::InvalidArgument, err.kind);
-        assert_eq!("bad input", err.message);
+        assert_eq!(ErrorKind::InvalidArgument, err.0.kind);
+        assert_eq!("bad input", err.0.message);
     }
 
     #[test]
@@ -976,7 +1057,7 @@ mod test {
             .unwrap_err();
 
         assert_eq!(ErrorKind::Unavailable, err.kind());
-        assert_eq!("show", err.action);
+        assert_eq!("show", err.0.action);
     }
 
     #[tokio::test]

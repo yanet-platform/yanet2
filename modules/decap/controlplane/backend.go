@@ -2,8 +2,9 @@ package decap
 
 import (
 	"fmt"
-	"net/netip"
+	"slices"
 
+	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/decap/bindings/go/cdecap"
 )
@@ -23,33 +24,27 @@ func NewBackend(agent *ffi.Agent) Backend {
 	}
 }
 
-func (m *backend) UpdateModule(name string, prefixes []netip.Prefix) (ModuleHandle, error) {
-	mod, err := cdecap.NewModuleConfig(m.agent, name)
+func (m *backend) Update(name string, payload PrefixSets) (crud.Handle, error) {
+	module, err := cdecap.NewModuleConfig(m.agent, name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create module config: %w", err)
 	}
 
-	for _, prefix := range prefixes {
-		if err := mod.PrefixAdd(prefix); err != nil {
-			if err := mod.Free(); err != nil {
-				return nil, fmt.Errorf("failed to free abandoned config: %w", err)
+	build := func(module *cdecap.ModuleConfig) error {
+		for _, prefix := range slices.Concat(payload.Prefixes4, payload.Prefixes6) {
+			if err := module.PrefixAdd(prefix); err != nil {
+				return fmt.Errorf("failed to add prefix %v: %w", prefix, err)
 			}
-			return nil, fmt.Errorf("failed to add prefix %v: %w", prefix, err)
 		}
+		return nil
+	}
+	if err := crud.PublishModule(m.agent, module, build); err != nil {
+		return nil, err
 	}
 
-	if err := m.agent.UpdateModules(
-		[]ffi.ModuleConfig{mod.AsFFIModule()},
-	); err != nil {
-		if err := mod.Free(); err != nil {
-			return nil, fmt.Errorf("failed to free abandoned config: %w", err)
-		}
-		return nil, fmt.Errorf("failed to update module %q: %w", name, err)
-	}
-
-	return mod, nil
+	return module, nil
 }
 
-func (m *backend) DeleteModule(name string) error {
+func (m *backend) Delete(name string) error {
 	return m.agent.DeleteModuleConfig(moduleType, name)
 }

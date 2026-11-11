@@ -3,29 +3,50 @@ package vlan
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
-	"github.com/yanet-platform/yanet2/controlplane/configstore"
+	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/devices/vlan/controlplane/vlanpb/v1"
 )
+
+// DevicePipelines is the published payload: the input and output
+// pipeline bindings of the device together with its vlan id.
+type DevicePipelines struct {
+	Input  []commonpb.Pipeline
+	Output []commonpb.Pipeline
+	VlanID uint16
+}
+
+// Backend abstracts shared memory operations.
+type Backend interface {
+	// Update publishes a device config with the given pipelines and
+	// vlan id to the dataplane.
+	Update(name string, payload DevicePipelines) (crud.Handle, error)
+	// Delete removes the named device from the dataplane registry.
+	Delete(name string) error
+	// Device returns the live registry entry of the named device.
+	Device(name string) (ffi.DeviceInfo, bool)
+	// LookupVlan returns the vlan id of the live vlan device with the
+	// given name.
+	LookupVlan(name string) (uint16, error)
+}
 
 // DeviceVlanService implements the DeviceVlan gRPC service.
 type DeviceVlanService struct {
 	vlanpb.UnimplementedDeviceVlanServiceServer
 
-	agent   *ffi.Agent
-	configs *configstore.Store[*DeviceConfig]
+	backend Backend
+	core    *crud.Core[DevicePipelines]
 }
 
-func NewDeviceVlanService(agent *ffi.Agent) *DeviceVlanService {
+func NewDeviceVlanService(backend Backend) *DeviceVlanService {
 	return &DeviceVlanService{
-		agent:   agent,
-		configs: configstore.NewStore[*DeviceConfig](),
+		backend: backend,
+		core:    crud.NewCore(backend),
 	}
 }
 
@@ -34,33 +55,26 @@ func (m *DeviceVlanService) UpdateDevice(
 	request *vlanpb.UpdateDeviceVlanRequest,
 ) (*vlanpb.UpdateDeviceVlanResponse, error) {
 	name := request.GetName()
-	vlan := request.GetVlan()
-	err := m.configs.Update(name, func(*DeviceConfig, bool) (*DeviceConfig, error) {
-		deviceConfig, err := NewDeviceConfig(m.agent, name, request.GetDevice(), uint16(vlan))
-		if err != nil {
-			return nil, fmt.Errorf("failed to create device config: %w", err)
-		}
+	pipelines := DevicePipelines{
+		Input:  commonpb.PipelinesFromProto(request.GetDevice().GetInput()),
+		Output: commonpb.PipelinesFromProto(request.GetDevice().GetOutput()),
+		VlanID: uint16(request.GetVlan()),
+	}
 
-		if err := m.agent.UpdateDevices([]ffi.ShmDeviceConfig{deviceConfig.AsFFIDevice()}); err != nil {
-			if freeErr := deviceConfig.Free(); freeErr != nil {
-				return nil, fmt.Errorf("failed to update device and free the unpublished replacement: %w (update error: %v)", freeErr, err)
-			}
-			code := codes.Internal
-			if errors.Is(err, ffi.ErrFailedPrecondition) {
-				// The device names an entity of the graph it runs that the
-				// configuration cannot resolve.
-				code = codes.FailedPrecondition
-			}
-			return nil, status.Errorf(code, "failed to update device: %v", err)
-		}
-
-		return deviceConfig, nil
-	})
-	if err != nil {
-		return nil, err
+	if err := m.core.Replace(name, pipelines); err != nil {
+		return nil, crud.PublishError(name, err)
 	}
 
 	return &vlanpb.UpdateDeviceVlanResponse{}, nil
+}
+
+// DeleteDevice unpublishes the named device, removing it from the
+// dataplane registry, and releases the handle kept for it.
+//
+// The registry delete runs before the entry is withdrawn, so a delete the
+// dataplane refuses leaves the published device and its handle in place.
+func (m *DeviceVlanService) DeleteDevice(name string) error {
+	return m.core.Delete(name)
 }
 
 // ShowDevice returns the pipeline bindings and vlan id of the vlan device
@@ -71,7 +85,7 @@ func (m *DeviceVlanService) ShowDevice(
 	request *vlanpb.ShowDeviceVlanRequest,
 ) (*vlanpb.ShowDeviceVlanResponse, error) {
 	name := request.GetName()
-	vlan, err := LookupVlan(m.agent, name)
+	vlan, err := m.backend.LookupVlan(name)
 	if err != nil {
 		if errors.Is(err, ffi.ErrNotFound) {
 			return nil, status.Error(codes.NotFound, err.Error())
@@ -82,24 +96,10 @@ func (m *DeviceVlanService) ShowDevice(
 	// The bindings come from a second registry read, so a device deleted
 	// in between reports not found and one replaced in between pairs the
 	// id above with the replacement's bindings.
-	info, ok := m.agent.DPConfig().Device("vlan", name)
+	info, ok := m.backend.Device(name)
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "vlan device '%s' not found", name)
 	}
 
-	return &vlanpb.ShowDeviceVlanResponse{Device: deviceProto(info), Vlan: uint32(vlan)}, nil
-}
-
-func deviceProto(info ffi.DeviceInfo) *commonpb.Device {
-	device := &commonpb.Device{
-		Input:  make([]*commonpb.DevicePipeline, len(info.InputPipelines)),
-		Output: make([]*commonpb.DevicePipeline, len(info.OutputPipelines)),
-	}
-	for idx, pipeline := range info.InputPipelines {
-		device.Input[idx] = &commonpb.DevicePipeline{Name: pipeline.Name, Weight: pipeline.Weight}
-	}
-	for idx, pipeline := range info.OutputPipelines {
-		device.Output[idx] = &commonpb.DevicePipeline{Name: pipeline.Name, Weight: pipeline.Weight}
-	}
-	return device
+	return &vlanpb.ShowDeviceVlanResponse{Device: crud.DeviceProto(info), Vlan: uint32(vlan)}, nil
 }

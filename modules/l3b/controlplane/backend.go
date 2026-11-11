@@ -7,6 +7,8 @@ import (
 	"sort"
 	"sync"
 
+	"google.golang.org/protobuf/proto"
+
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -15,7 +17,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/l3b/bindings/go/cl3b"
 	l3bpb "github.com/yanet-platform/yanet2/modules/l3b/controlplane/l3bpb/v1"
-	cl3bobject "github.com/yanet-platform/yanet2/objects/l3b/bindings/go/cl3bobject"
+	"github.com/yanet-platform/yanet2/objects/l3b/bindings/go/cl3bobject"
 )
 
 // Backend abstracts the shared-memory operations behind the l3b service.
@@ -47,8 +49,10 @@ type Backend interface {
 		cursor uint64,
 		limit uint32,
 	) ([]cl3bobject.Session, uint64, uint64, error)
-	// GetService inspects a named virtual service: scheduler masks and
-	// the live real servers with addresses, weights and states.
+	// GetService returns an owned snapshot of accepted configuration and state.
+	//
+	// Runtime state and weights become visible after the shared-memory call
+	// returns, including applied changes when a ring rebuild fails.
 	GetService(service string) (*l3bpb.GetServiceResponse, error)
 }
 
@@ -58,62 +62,186 @@ type freeable interface {
 	Free() error
 }
 
-type managedService struct {
+// SessionTableHandle is a session table owned by the backend.
+type SessionTableHandle interface {
+	Free() error
+}
+
+// VirtualServiceHandle is a service object owned by the backend.
+type VirtualServiceHandle interface {
+	Free() error
+	Publish() error
+	UpdateRing([]uint32) error
+	SetRealServerState(uint32, bool) error
+	ReadSessions(uint64, uint32) ([]cl3bobject.Session, uint64, uint64, error)
+}
+
+// ModuleHandle is a module configuration owned by the backend.
+type ModuleHandle interface {
+	Free() error
+	Update([]cl3b.DestinationFilterRule) error
+	AsFFIModule() ffi.ModuleConfig
+}
+
+// SharedMemoryOps separates allocation and publication from backend bookkeeping.
+type SharedMemoryOps interface {
+	WorkerCount() uint32
+	CreateSessionTable(string, uint16, uint32) (SessionTableHandle, error)
+	CreateVirtualService(string, cl3bobject.VirtualServiceConfig, SessionTableHandle) (VirtualServiceHandle, error)
+	DeleteVirtualService(string) error
+	NewModuleConfig(string) (ModuleHandle, error)
+	UpdateModules([]ffi.ModuleConfig) error
+}
+
+type agentOps struct{ agent *ffi.Agent }
+
+func (m agentOps) WorkerCount() uint32 { return m.agent.DPConfig().WorkerCount() }
+
+func (m agentOps) CreateSessionTable(name string, workers uint16, size uint32) (SessionTableHandle, error) {
+	return cl3bobject.CreateSessionTable(m.agent, name, workers, size)
+}
+
+func (m agentOps) CreateVirtualService(name string, config cl3bobject.VirtualServiceConfig, table SessionTableHandle) (VirtualServiceHandle, error) {
+	sharedTable, ok := table.(*cl3bobject.SessionTableObject)
+	if !ok {
+		return nil, fmt.Errorf("invalid session table handle for virtual service %q: %T", name, table)
+	}
+	object, err := cl3bobject.CreateVirtualService(m.agent, name, config, sharedTable)
+	if err != nil {
+		return nil, err
+	}
+	return agentService{object: object, agent: m.agent}, nil
+}
+
+func (m agentOps) DeleteVirtualService(name string) error {
+	return cl3bobject.DeleteVirtualService(m.agent, name)
+}
+
+func (m agentOps) NewModuleConfig(name string) (ModuleHandle, error) {
+	return cl3b.NewModuleConfig(m.agent, name)
+}
+
+func (m agentOps) UpdateModules(modules []ffi.ModuleConfig) error {
+	return m.agent.UpdateModules(modules)
+}
+
+type agentService struct {
 	object *cl3bobject.VirtualServiceObject
-	// The table outlives every generation published under this name and
-	// is destroyed only when the named service is deleted.
-	sessionTable *cl3bobject.SessionTableObject
-	// weights[i] is the configured weight of real server i.
+	agent  *ffi.Agent
+}
+
+func (m agentService) Free() error                       { return m.object.Free() }
+func (m agentService) Publish() error                    { return m.object.Publish(m.agent) }
+func (m agentService) UpdateRing(indexes []uint32) error { return m.object.UpdateRing(indexes) }
+func (m agentService) SetRealServerState(index uint32, enabled bool) error {
+	return m.object.SetRealServerState(index, enabled)
+}
+func (m agentService) ReadSessions(cursor uint64, limit uint32) ([]cl3bobject.Session, uint64, uint64, error) {
+	return m.object.ReadSessions(m.agent, cursor, limit)
+}
+
+type retainedHandle struct {
+	handle  freeable
+	readers int
+}
+
+// Free leaves still-referenced allocations available for a later retry.
+func (m *retainedHandle) Free() error { return m.handle.Free() }
+
+// HasReaders gates destruction while a reader can still reach the allocation.
+func (m *retainedHandle) HasReaders() bool { return m.readers != 0 }
+
+// Admit keeps the allocation alive for a reader admitted under the view lock.
+func (m *retainedHandle) Admit() { m.readers++ }
+
+// Release ends a reader's lease under the view lock without freeing memory.
+func (m *retainedHandle) Release() {
+	m.readers--
+}
+
+// VirtualService requires a handle wrapping a service allocation.
+func (m *retainedHandle) VirtualService() VirtualServiceHandle {
+	return m.handle.(VirtualServiceHandle)
+}
+
+// SessionTable requires a handle wrapping a session-table allocation.
+func (m *retainedHandle) SessionTable() SessionTableHandle {
+	return m.handle.(SessionTableHandle)
+}
+
+type managedService struct {
+	object *retainedHandle
+	// Deletion retires the shared table; destruction waits for admitted readers
+	// and every referencing configuration generation to drain.
+	sessionTable *retainedHandle
+	config       cl3bobject.VirtualServiceConfig
+	// Configured weights survive disabling and re-enabling real servers.
 	weights []uint32
-	// enabled[i] is whether real server i takes traffic; disabled servers
-	// leave the scheduler ring so their share shifts to the enabled ones.
+	// Traffic state changes precede ring rebuilding; disabled servers leave the
+	// ring only after a successful rebuild.
 	enabled []bool
 }
 
-// Replace swaps in the object, weights and states of an updated service.
+// Replace commits a published generation and returns the superseded allocation.
 func (m *managedService) Replace(
-	object *cl3bobject.VirtualServiceObject,
+	object *retainedHandle,
+	config cl3bobject.VirtualServiceConfig,
 	weights []uint32,
-) {
+	enabled []bool,
+) *retainedHandle {
+	previous := m.object
 	m.object = object
+	m.config = config
 	m.weights = weights
-	m.enabled = make([]bool, len(weights))
-	for idx := range m.enabled {
-		m.enabled[idx] = true
+	m.enabled = enabled
+	return previous
+}
+
+// ReplacementState carries overrides only from the current accepted membership.
+func (m *managedService) ReplacementState(config cl3bobject.VirtualServiceConfig) ([]uint32, []bool) {
+	previous := map[netip.Addr]int{}
+	for idx, real := range m.config.RealServers {
+		previous[real.DestinationAddress] = idx
 	}
-}
-
-// PublishTarget returns the service object currently serving traffic.
-func (m *managedService) PublishTarget() *cl3bobject.VirtualServiceObject {
-	return m.object
-}
-
-// Weight returns the configured scheduler weight of the real server at the
-// index, zero when the index is out of range.
-func (m *managedService) Weight(realServerIndex int) uint32 {
-	if realServerIndex < 0 || realServerIndex >= len(m.weights) {
-		return 0
+	weights := defaultWeights(len(config.RealServers))
+	enabled := make([]bool, len(weights))
+	for idx, real := range config.RealServers {
+		if oldIndex, ok := previous[real.DestinationAddress]; ok {
+			weights[idx] = m.weights[oldIndex]
+			enabled[idx] = m.enabled[oldIndex]
+		}
 	}
-	return m.weights[realServerIndex]
+	return weights, enabled
 }
 
-// Retire returns the currently published service for deferred destruction;
-// the session table it borrows stays alive.
-func (m *managedService) Retire() freeable {
-	return m.object
+// PublishTarget selects the generation affected by serialized runtime updates.
+func (m *managedService) PublishTarget() VirtualServiceHandle {
+	return m.object.VirtualService()
 }
 
 // SessionTable returns the table every service published under this name pins
 // flows into.
-func (m *managedService) SessionTable() *cl3bobject.SessionTableObject {
-	return m.sessionTable
+func (m *managedService) SessionTable() SessionTableHandle {
+	return m.sessionTable.SessionTable()
+}
+
+// AdmitSessionRead leases both objects reached by a session read.
+func (m *managedService) AdmitSessionRead() (*retainedHandle, *retainedHandle) {
+	m.object.Admit()
+	m.sessionTable.Admit()
+	return m.object, m.sessionTable
+}
+
+// Handles returns both objects owned by a deleted service.
+func (m *managedService) Handles() (*retainedHandle, *retainedHandle) {
+	return m.object, m.sessionTable
 }
 
 var errRealServerIndexOutOfRange = errors.New("real server index out of range")
 
-// SetRealServerState enables or disables a single real server, mirrors the
-// state into the service object and rebuilds the ring over the enabled
-// servers only.
+// SetRealServerState applies a traffic state change before rebuilding the ring.
+//
+// A failed ring rebuild keeps the applied state visible.
 func (m *managedService) SetRealServerState(
 	realServerIndex uint32,
 	enabled bool,
@@ -122,7 +250,7 @@ func (m *managedService) SetRealServerState(
 		return fmt.Errorf("%w: %d", errRealServerIndexOutOfRange, realServerIndex)
 	}
 
-	if err := m.object.SetRealServerState(realServerIndex, enabled); err != nil {
+	if err := m.PublishTarget().SetRealServerState(realServerIndex, enabled); err != nil {
 		return err
 	}
 
@@ -130,8 +258,9 @@ func (m *managedService) SetRealServerState(
 	return m.rebuildRing()
 }
 
-// SetRealServerWeight clamps the weight into range, applies it and rebuilds
-// the scheduler ring of the published object.
+// SetRealServerWeight stores a bounded weight before rebuilding the ring.
+//
+// A failed ring rebuild keeps the configured weight visible.
 func (m *managedService) SetRealServerWeight(
 	realServerIndex uint32,
 	weight uint32,
@@ -140,16 +269,18 @@ func (m *managedService) SetRealServerWeight(
 		return fmt.Errorf("%w: %d", errRealServerIndexOutOfRange, realServerIndex)
 	}
 
-	if weight > maxRealServerWeight {
-		weight = maxRealServerWeight
+	if weight > l3bpb.MaxRealServerWeight {
+		weight = l3bpb.MaxRealServerWeight
 	}
 
 	m.weights[realServerIndex] = weight
 	return m.rebuildRing()
 }
 
-// rebuildRing installs a ring over the enabled servers only, each with its
-// configured weight; an empty ring drops new flows until a server is enabled.
+// rebuildRing attempts to install weighted scheduling over enabled servers.
+//
+// An empty ring drops new flows. Recovery requires a successful rebuild with
+// at least one enabled server whose configured weight is positive.
 func (m *managedService) rebuildRing() error {
 	effective := make([]uint32, len(m.weights))
 	for idx, weight := range m.weights {
@@ -157,11 +288,31 @@ func (m *managedService) rebuildRing() error {
 			effective[idx] = weight
 		}
 	}
-	return m.object.UpdateRing(RingFromWeights(effective))
+	return m.PublishTarget().UpdateRing(RingFromWeights(effective))
+}
+
+// Snapshot builds an owned response from accepted config and applied state.
+//
+// Stored weights remain visible even when a ring rebuild fails.
+func (m *managedService) Snapshot() *l3bpb.GetServiceResponse {
+	realServers := make([]*l3bpb.RealServerState, 0, len(m.config.RealServers))
+	for idx, real := range m.config.RealServers {
+		realServers = append(realServers, &l3bpb.RealServerState{
+			DestinationAddress: real.DestinationAddress.AsSlice(),
+			SourceNetwork:      commonpb.NewIPNetworkFrom(real.SourceNet),
+			Weight:             m.weights[idx],
+			Enabled:            m.enabled[idx],
+		})
+	}
+	return &l3bpb.GetServiceResponse{
+		HashMask:    m.config.HashMask,
+		IndexMask:   m.config.IndexMask,
+		RealServers: realServers,
+	}
 }
 
 type managedConfig struct {
-	module *cl3b.ModuleConfig
+	module ModuleHandle
 }
 
 // FFIModule returns the shared-memory handle of the module configuration.
@@ -174,64 +325,111 @@ func (m *managedConfig) Retire() freeable {
 	return m.module
 }
 
-// backend is the real Backend backed by shared memory.
+// backend keeps readers independent of serialized shared-memory mutations.
 type backend struct {
-	agent *ffi.Agent
+	operations SharedMemoryOps
 
-	mu       sync.Mutex
-	services map[string]*managedService
-	configs  map[string]*managedConfig
+	writerMu  sync.Mutex
+	mu        sync.RWMutex
+	services  map[string]*managedService
+	snapshots map[string]*l3bpb.GetServiceResponse
+	configs   map[string]*managedConfig
 
-	// deferred holds superseded objects and module configs whose free was
-	// refused because a live configuration generation still referenced
-	// them. This backend is their owner: it retries them on its next
-	// mutating call.
-	deferred []freeable
+	// Retired handles wait for both Go readers and C generations to drain.
+	//
+	// Later mutations retry reclamation; reader completion never frees memory.
+	deferred []*retainedHandle
 }
 
-// NewBackend creates a Backend that operates on real shared memory.
+// NewBackend operates on real shared memory through the supplied agent.
 func NewBackend(agent *ffi.Agent) Backend {
+	return NewBackendWithSharedMemory(NewSharedMemoryOps(agent))
+}
+
+// NewSharedMemoryOps preserves C ownership and publication through the agent.
+func NewSharedMemoryOps(agent *ffi.Agent) agentOps {
+	return agentOps{agent: agent}
+}
+
+// NewBackendWithSharedMemory serializes writes independently of reads.
+func NewBackendWithSharedMemory(operations SharedMemoryOps) *backend {
 	return &backend{
-		agent:    agent,
-		services: map[string]*managedService{},
-		configs:  map[string]*managedConfig{},
+		operations: operations,
+		services:   map[string]*managedService{},
+		snapshots:  map[string]*l3bpb.GetServiceResponse{},
+		configs:    map[string]*managedConfig{},
 	}
 }
 
-// reclaimDeferred retries every deferred handle, dropping the ones whose
-// generations have drained and keeping the rest deferred. The caller must hold
-// the backend mutex.
+// reclaimDeferred retries retired handles once their Go readers have drained.
+//
+// The caller holds the writer lock, and no reader lock spans a free.
 func (m *backend) reclaimDeferred() {
+	m.mu.Lock()
+	ready := make([]*retainedHandle, 0, len(m.deferred))
 	kept := m.deferred[:0]
 	for _, handle := range m.deferred {
-		if err := handle.Free(); isStillReferenced(err) {
+		if !handle.HasReaders() {
+			ready = append(ready, handle)
+		} else {
 			kept = append(kept, handle)
 		}
 	}
 	clear(m.deferred[len(kept):])
 	m.deferred = kept
+	m.mu.Unlock()
+
+	for _, handle := range ready {
+		if isStillReferenced(handle.Free()) {
+			m.mu.Lock()
+			m.deferred = append(m.deferred, handle)
+			m.mu.Unlock()
+		}
+	}
 }
 
 func isStillReferenced(err error) bool {
 	return errors.Is(err, ffi.ErrStillReferenced)
 }
 
-// deferOrFree retires a superseded handle immediately when its generations
-// have drained, and otherwise parks it for a later retry. The caller must hold
-// the backend mutex.
+// deferOrFree retires a handle and attempts serialized reclamation.
+//
+// The caller holds the writer lock.
 func (m *backend) deferOrFree(handle freeable) {
-	if isStillReferenced(handle.Free()) {
-		m.deferred = append(m.deferred, handle)
-	}
+	m.retire(&retainedHandle{handle: handle})
+	m.reclaimDeferred()
+}
+
+func (m *backend) retire(handle *retainedHandle) {
+	m.mu.Lock()
+	m.deferred = append(m.deferred, handle)
+	m.mu.Unlock()
+}
+
+func (m *backend) releaseSessionRead(service, table *retainedHandle) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	service.Release()
+	table.Release()
+}
+
+func (m *backend) service(name string) (*managedService, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	service, ok := m.services[name]
+	return service, ok
 }
 
 func (m *backend) CreateService(service *l3bpb.VirtualService) error {
+	if service.GetSessionIndexSize() > l3bpb.MaxSessionIndexSize {
+		return status.Errorf(codes.InvalidArgument, "session_index_size must be at most %d", l3bpb.MaxSessionIndexSize)
+	}
 	name := service.GetName()
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.writerMu.Lock()
+	defer m.writerMu.Unlock()
 
-	if _, ok := m.services[name]; ok {
+	if _, ok := m.service(name); ok {
 		return status.Errorf(codes.AlreadyExists, "virtual service %q already exists", name)
 	}
 
@@ -244,35 +442,39 @@ func (m *backend) CreateService(service *l3bpb.VirtualService) error {
 		return err
 	}
 
-	workerCount := m.agent.DPConfig().WorkerCount()
-	table, err := cl3bobject.CreateSessionTable(
-		m.agent, name, uint16(workerCount), service.GetSessionIndexSize(),
+	workerCount := m.operations.WorkerCount()
+	table, err := m.operations.CreateSessionTable(
+		name, uint16(workerCount), service.GetSessionIndexSize(),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create session table %q: %w", name, err)
 	}
 
-	object, weights, err := m.publishService(config, name, table)
+	weights := defaultWeights(len(config.RealServers))
+	enabled := make([]bool, len(weights))
+	object, err := m.publishService(config, name, table, weights, enabled)
 	if err != nil {
-		// A table that never reached a configuration generation is
-		// dangling, so its destruction cannot be refused.
-		_ = table.Free()
+		// A failed candidate leaves its table outside the published view.
+		m.deferOrFree(table)
 		return err
 	}
 
-	managed := &managedService{sessionTable: table}
-	managed.Replace(object, weights)
+	managed := &managedService{sessionTable: &retainedHandle{handle: table}}
+	managed.Replace(&retainedHandle{handle: object}, config, weights, enabled)
+	m.mu.Lock()
 	m.services[name] = managed
+	m.snapshots[name] = managed.Snapshot()
+	m.mu.Unlock()
 	return nil
 }
 
 func (m *backend) UpdateService(service *l3bpb.VirtualService) error {
 	name := service.GetName()
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.writerMu.Lock()
+	defer m.writerMu.Unlock()
 
-	existing, ok := m.services[name]
+	existing, ok := m.service(name)
 	if !ok {
 		return status.Errorf(codes.NotFound, "virtual service %q not found", name)
 	}
@@ -284,78 +486,98 @@ func (m *backend) UpdateService(service *l3bpb.VirtualService) error {
 		return err
 	}
 
-	// The replacement borrows the live session table, so pinned flows keep
-	// their real servers across the update.
-	object, weights, err := m.publishService(config, name, existing.SessionTable())
+	// State and weight follow surviving destination addresses across replacement.
+	//
+	// shortcut: address-keyed session pins can revive on explicit re-enable;
+	// incarnation isolation requires incarnation-aware resolution.
+	weights, enabled := existing.ReplacementState(config)
+	object, err := m.publishService(config, name, existing.SessionTable(), weights, enabled)
 	if err != nil {
 		return err
 	}
 
-	// The upsert swapped the registry slot atomically; the superseded
-	// service object stays alive until its generations drain.
-	m.deferOrFree(existing.Retire())
-
-	existing.Replace(object, weights)
+	// The upsert swapped the registry slot atomically; the superseded service
+	// stays alive until admitted readers and referencing generations drain.
+	m.mu.Lock()
+	oldObject := existing.Replace(&retainedHandle{handle: object}, config, weights, enabled)
+	m.snapshots[name] = existing.Snapshot()
+	m.mu.Unlock()
+	m.retire(oldObject)
+	m.reclaimDeferred()
 	return nil
 }
 
 // publishService builds a fresh virtual service object under the given name,
-// installs its default scheduler ring and upserts it into the dataplane.
+// installs its administrative state and scheduler ring before publication.
 //
-// The service only borrows the session table, so a candidate discarded here
-// leaves it untouched for whoever is serving traffic. The caller must hold
-// the backend mutex.
+// The service borrows the session table, and the caller holds the writer lock.
 func (m *backend) publishService(
 	config cl3bobject.VirtualServiceConfig,
 	name string,
-	table *cl3bobject.SessionTableObject,
-) (*cl3bobject.VirtualServiceObject, []uint32, error) {
-	object, err := cl3bobject.CreateVirtualService(m.agent, name, config, table)
+	table SessionTableHandle,
+	weights []uint32,
+	enabled []bool,
+) (VirtualServiceHandle, error) {
+	object, err := m.operations.CreateVirtualService(name, config, table)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create virtual service %q: %w", name, err)
+		return nil, fmt.Errorf("failed to create virtual service %q: %w", name, err)
 	}
 
-	weights := defaultWeights(len(config.RealServers))
-	if err := object.UpdateRing(RingFromWeights(weights)); err != nil {
-		_ = object.Free()
-		return nil, nil, fmt.Errorf("failed to populate real server ring: %w", err)
+	effective := make([]uint32, len(weights))
+	for idx, active := range enabled {
+		if !active {
+			continue
+		}
+		if err := object.SetRealServerState(uint32(idx), true); err != nil {
+			m.deferOrFree(object)
+			return nil, fmt.Errorf("failed to initialize real server state: %w", err)
+		}
+		effective[idx] = weights[idx]
+	}
+	if err := object.UpdateRing(RingFromWeights(effective)); err != nil {
+		m.deferOrFree(object)
+		return nil, fmt.Errorf("failed to populate real server ring: %w", err)
 	}
 
-	if err := object.Publish(m.agent); err != nil {
-		_ = object.Free()
-		return nil, nil, fmt.Errorf("failed to publish virtual service %q: %w", name, err)
+	if err := object.Publish(); err != nil {
+		m.deferOrFree(object)
+		return nil, fmt.Errorf("failed to publish virtual service %q: %w", name, err)
 	}
 
-	return object, weights, nil
+	return object, nil
 }
 
 func (m *backend) DeleteService(name string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.writerMu.Lock()
+	defer m.writerMu.Unlock()
 
-	existing, ok := m.services[name]
+	existing, ok := m.service(name)
 	if !ok {
 		return status.Errorf(codes.NotFound, "virtual service %q not found", name)
 	}
 
-	if err := cl3bobject.DeleteVirtualService(m.agent, name); err != nil {
+	if err := m.operations.DeleteVirtualService(name); err != nil {
+		if errors.Is(err, ffi.ErrBusy) {
+			return status.Errorf(codes.FailedPrecondition, "failed to delete virtual service %q: %v", name, err)
+		}
 		return fmt.Errorf("failed to delete virtual service %q: %w", name, err)
 	}
 
-	// The delete retired the generation holding the published object;
-	// retry the deferred ones, then release this service and the table no
-	// service reaches any more.
-	m.reclaimDeferred()
-	m.deferOrFree(existing.Retire())
-	m.deferOrFree(existing.SessionTable())
-
+	// The service and table remain owned until readers and generations drain.
+	m.mu.Lock()
 	delete(m.services, name)
+	delete(m.snapshots, name)
+	m.mu.Unlock()
+	object, table := existing.Handles()
+	m.retire(object)
+	m.retire(table)
+	m.reclaimDeferred()
 	return nil
 }
 
 func (m *backend) ListServices() []string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
 	names := make([]string, 0, len(m.services))
 	for name := range m.services {
@@ -368,15 +590,15 @@ func (m *backend) ListServices() []string {
 func (m *backend) UpdateModuleConfig(config *l3bpb.ModuleConfig) error {
 	name := config.GetName()
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.writerMu.Lock()
+	defer m.writerMu.Unlock()
 
 	// Resolve the service each rule names before building anything; the
 	// rules themselves carry the names into the module configuration.
 	rules := make([]cl3b.DestinationFilterRule, 0, len(config.GetDestinationFilterRules()))
 	for _, rule := range config.GetDestinationFilterRules() {
 		serviceName := rule.GetService()
-		if _, ok := m.services[serviceName]; !ok {
+		if _, ok := m.service(serviceName); !ok {
 			return status.Errorf(codes.NotFound, "unknown virtual service %q", serviceName)
 		}
 
@@ -405,34 +627,33 @@ func (m *backend) UpdateModuleConfig(config *l3bpb.ModuleConfig) error {
 
 	// A module configuration is immutable once published: build a fresh one
 	// per update and retire the module it replaces.
-	module, err := cl3b.NewModuleConfig(m.agent, name)
+	module, err := m.operations.NewModuleConfig(name)
 	if err != nil {
 		return fmt.Errorf("failed to create module config %q: %w", name, err)
 	}
 	if err := module.Update(rules); err != nil {
-		_ = module.Free()
+		m.deferOrFree(module)
 		return fmt.Errorf("failed to update module config %q: %w", name, err)
 	}
 
 	managed := &managedConfig{module: module}
 	previous, ok := m.configs[name]
-	m.configs[name] = managed
 
-	modules := make([]ffi.ModuleConfig, 0, len(m.configs))
-	for _, cfg := range m.configs {
-		modules = append(modules, cfg.FFIModule())
-	}
-	if err := m.agent.UpdateModules(modules); err != nil {
-		// Roll back to the previous module so the map keeps the live one.
-		if ok {
-			m.configs[name] = previous
-		} else {
-			delete(m.configs, name)
+	modules := make([]ffi.ModuleConfig, 0, len(m.configs)+1)
+	for configName, current := range m.configs {
+		if configName != name {
+			modules = append(modules, current.FFIModule())
 		}
-		_ = module.Free()
+	}
+	modules = append(modules, managed.FFIModule())
+	if err := m.operations.UpdateModules(modules); err != nil {
+		m.deferOrFree(module)
 		return fmt.Errorf("failed to update module config %q: %w", name, err)
 	}
 
+	m.mu.Lock()
+	m.configs[name] = managed
+	m.mu.Unlock()
 	if ok {
 		m.deferOrFree(previous.Retire())
 	}
@@ -440,8 +661,8 @@ func (m *backend) UpdateModuleConfig(config *l3bpb.ModuleConfig) error {
 }
 
 func (m *backend) ListModuleConfigs() []string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
 	names := make([]string, 0, len(m.configs))
 	for name := range m.configs {
@@ -456,17 +677,21 @@ func (m *backend) UpdateRealServerState(
 	realServerIndex uint32,
 	enabled bool,
 ) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.writerMu.Lock()
+	defer m.writerMu.Unlock()
 
-	existing, ok := m.services[service]
+	existing, ok := m.service(service)
 	if !ok {
 		return status.Errorf(codes.NotFound, "virtual service %q not found", service)
 	}
 
 	m.reclaimDeferred()
 
-	if err := existing.SetRealServerState(realServerIndex, enabled); err != nil {
+	err := existing.SetRealServerState(realServerIndex, enabled)
+	m.mu.Lock()
+	m.snapshots[service] = existing.Snapshot()
+	m.mu.Unlock()
+	if err != nil {
 		code := codes.Internal
 		if errors.Is(err, errRealServerIndexOutOfRange) {
 			code = codes.InvalidArgument
@@ -484,17 +709,21 @@ func (m *backend) UpdateRealServerWeight(
 	realServerIndex uint32,
 	weight uint32,
 ) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.writerMu.Lock()
+	defer m.writerMu.Unlock()
 
-	existing, ok := m.services[service]
+	existing, ok := m.service(service)
 	if !ok {
 		return status.Errorf(codes.NotFound, "virtual service %q not found", service)
 	}
 
 	m.reclaimDeferred()
 
-	if err := existing.SetRealServerWeight(realServerIndex, weight); err != nil {
+	err := existing.SetRealServerWeight(realServerIndex, weight)
+	m.mu.Lock()
+	m.snapshots[service] = existing.Snapshot()
+	m.mu.Unlock()
+	if err != nil {
 		code := codes.Internal
 		if errors.Is(err, errRealServerIndexOutOfRange) {
 			code = codes.InvalidArgument
@@ -521,12 +750,15 @@ func (m *backend) ListSessions(
 	limit uint32,
 ) ([]cl3bobject.Session, uint64, uint64, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	existing, ok := m.services[service]
 	if !ok {
+		m.mu.Unlock()
 		return nil, 0, 0, status.Errorf(codes.NotFound, "virtual service %q not found", service)
 	}
+	object, table := existing.AdmitSessionRead()
+	m.mu.Unlock()
+	defer m.releaseSessionRead(object, table)
 
 	if limit == 0 {
 		limit = defaultSessionPageLimit
@@ -534,49 +766,17 @@ func (m *backend) ListSessions(
 	if limit > maxSessionPageLimit {
 		limit = maxSessionPageLimit
 	}
-	return existing.PublishTarget().ReadSessions(m.agent, cursor, limit)
+	return object.VirtualService().ReadSessions(cursor, limit)
 }
 
 func (m *backend) GetService(service string) (*l3bpb.GetServiceResponse, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	existing, ok := m.services[service]
+	m.mu.RLock()
+	snapshot, ok := m.snapshots[service]
+	m.mu.RUnlock()
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "virtual service %q not found", service)
 	}
-
-	info, err := existing.PublishTarget().Inspect()
-	if err != nil {
-		return nil, fmt.Errorf("failed to inspect virtual service %q: %w", service, err)
-	}
-
-	realServers := make([]*l3bpb.RealServerState, 0, len(info.RealServers))
-	for idx, real := range info.RealServers {
-		var destinationBytes []byte
-		if real.DestinationAddress.Is4() {
-			octets := real.DestinationAddress.As4()
-			destinationBytes = octets[:]
-		} else {
-			octets := real.DestinationAddress.As16()
-			destinationBytes = octets[:]
-		}
-
-		weight := existing.Weight(idx)
-
-		realServers = append(realServers, &l3bpb.RealServerState{
-			DestinationAddress: destinationBytes,
-			SourceNetwork:      commonpb.NewIPNetworkFrom(real.SourceNet),
-			Weight:             weight,
-			Enabled:            real.Enabled,
-		})
-	}
-
-	return &l3bpb.GetServiceResponse{
-		HashMask:    info.HashMask,
-		IndexMask:   info.IndexMask,
-		RealServers: realServers,
-	}, nil
+	return proto.Clone(snapshot).(*l3bpb.GetServiceResponse), nil
 }
 
 const (
@@ -587,10 +787,6 @@ const (
 	// translate into a huge allocation.
 	maxSessionPageLimit = 100000
 )
-
-// maxRealServerWeight is the upper bound on a real server weight; the per-ring
-// capacity is sized so every server could max out at once.
-const maxRealServerWeight uint32 = 1000
 
 // defaultWeights returns one weight per real server, defaulting to 1.
 func defaultWeights(realServerCount int) []uint32 {
@@ -647,11 +843,16 @@ func buildVirtualServiceConfig(
 	policy := service.GetSessionTimeouts()
 
 	realServers := make([]cl3bobject.RealServer, 0, len(service.GetRealServers()))
+	seen := map[netip.Addr]struct{}{}
 	for _, server := range service.GetRealServers() {
 		destinationAddress, ok := netip.AddrFromSlice(server.GetDestinationAddress())
 		if !ok {
 			return cl3bobject.VirtualServiceConfig{}, invalid("real server destination address is not a valid 4- or 16-byte IP address")
 		}
+		if _, ok := seen[destinationAddress]; ok {
+			return cl3bobject.VirtualServiceConfig{}, invalid("duplicate real server destination address")
+		}
+		seen[destinationAddress] = struct{}{}
 
 		sourceNet, err := server.GetSourceNetwork().ToNetwork()
 		if err != nil {
@@ -708,7 +909,7 @@ func buildVirtualServiceConfig(
 		RealServers:       realServers,
 		HashMask:          service.GetHashMask(),
 		IndexMask:         service.GetIndexMask(),
-		RingCapacity:      uint32(len(realServers)) * maxRealServerWeight,
+		RingCapacity:      uint32(len(realServers)) * l3bpb.MaxRealServerWeight,
 		SchedulerFlags:    service.GetSchedulerFlags(),
 		Flags:             service.GetFlags(),
 		DSCPFlags:         service.GetDscpFlags(),

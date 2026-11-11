@@ -10,7 +10,6 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 
 	fwstate "github.com/yanet-platform/yanet2/modules/fwstate/controlplane"
 	fwstatepb "github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
@@ -93,8 +92,17 @@ func concurrencyUpdateRequest(
 	port uint32,
 ) *fwstatepb.UpdateConfigRequest {
 	request := validDeleteTestUpdateRequest(name, maps.v4Name(), maps.v6Name())
-	request.SyncConfig.PortMulticast = proto.Uint32(port)
+	request.SyncConfig.Endpoints[0].Port = new(port)
 	return request
+}
+
+// firstEndpointPort reads the port of a snapshot's single sync endpoint.
+func firstEndpointPort(syncConfig *fwstatepb.SyncConfig) uint32 {
+	endpoints := syncConfig.GetEndpoints()
+	if len(endpoints) == 0 {
+		return 0
+	}
+	return endpoints[0].GetPort()
 }
 
 func publishConfig(
@@ -127,7 +135,7 @@ func requirePublishedConfig(
 	show, err := service.ShowConfig(t.Context(), &fwstatepb.ShowConfigRequest{Name: want.name})
 	require.NoError(t, err)
 	require.Equal(t, want.mapNameV4, show.GetMapNameV4())
-	require.Equal(t, want.port, show.GetSyncConfig().GetPortMulticast())
+	require.Equal(t, want.port, firstEndpointPort(show.GetSyncConfig()))
 }
 
 func TestFWStateReadsDoNotWaitForUpdate(t *testing.T) {
@@ -154,7 +162,7 @@ func TestFWStateReadsDoNotWaitForUpdate(t *testing.T) {
 	readsDone := runAsync(tasks, func() error {
 		show, err := service.ShowConfig(t.Context(), &fwstatepb.ShowConfigRequest{Name: name})
 		if err != nil || show.GetMapNameV4() != mapsA.v4Name() ||
-			show.GetSyncConfig().GetPortMulticast() != 9999 {
+			firstEndpointPort(show.GetSyncConfig()) != 9999 {
 			return fmt.Errorf("ShowConfig did not return the old state: %v", err)
 		}
 		if _, err = service.ListConfigs(t.Context(), &fwstatepb.ListConfigsRequest{}); err != nil {
@@ -181,7 +189,7 @@ func TestFWStateUpdateRollbackKeepsPublishedConfig(t *testing.T) {
 	// at the generation install with FailedPrecondition naming the map,
 	// leaving the previous config in place.
 	failing := concurrencyUpdateRequest(name, mapsB, 10000)
-	failing.MapNameV4 = proto.String("no-such-map")
+	failing.MapNameV4 = new("no-such-map")
 	_, err := service.UpdateConfig(t.Context(), failing)
 	require.Equal(t, codes.FailedPrecondition, status.Code(err))
 	require.Contains(t, err.Error(), "no-such-map")
@@ -256,7 +264,7 @@ func TestFWStateConcurrentReadersUpdateAndDelete(t *testing.T) {
 				if err == nil {
 					snapshot := fwstateStateSnapshot{
 						mapNameV4: show.GetMapNameV4(),
-						port:      show.GetSyncConfig().GetPortMulticast(),
+						port:      firstEndpointPort(show.GetSyncConfig()),
 					}
 					if _, ok := allowedSnapshots[snapshot]; !ok {
 						return fmt.Errorf("ShowConfig returned invalid snapshot %v", snapshot)
