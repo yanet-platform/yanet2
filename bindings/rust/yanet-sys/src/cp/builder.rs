@@ -20,6 +20,7 @@ use core::{
     fmt,
     marker::PhantomData,
     mem::{ManuallyDrop, align_of, forget, size_of},
+    net::{Ipv4Addr, Ipv6Addr},
     sync::atomic::{AtomicI8, AtomicI16, AtomicI32, AtomicI64, AtomicU8, AtomicU16, AtomicU32, AtomicU64},
 };
 
@@ -249,6 +250,7 @@ plain_build! {
     u8, u16, u32, u64, i8, i16, i32, i64,
     AtomicU8, AtomicU16, AtomicU32, AtomicU64,
     AtomicI8, AtomicI16, AtomicI32, AtomicI64,
+    Ipv4Addr, Ipv6Addr,
     (),
 }
 
