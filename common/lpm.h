@@ -19,6 +19,7 @@
 #include "key.h"
 #include "memory.h"
 #include "memory_address.h"
+#include "numutils.h"
 #include "value.h"
 
 #define LPM_VALUE_INVALID 0xffffffff
@@ -54,52 +55,75 @@ lpm_page(const struct lpm *lpm, uint32_t page_idx) {
 	return chunk + page_idx % LPM_CHUNK_SIZE;
 }
 
+/*
+ * The number of entries the chunk directory holds for a chunk count.
+ *
+ * The directory grows to the next power of two, so a tree build copies
+ * amortised O(1) offsets per chunk. The capacity is derived from the page
+ * count alone, so the growth and the free agree on the size without a
+ * stored field.
+ */
+static inline size_t
+lpm_chunk_capacity(size_t chunk_count) {
+	return chunk_count ? next_power_of_two(chunk_count) : 0;
+}
+
 static inline int
 lpm_new_page(struct lpm *lpm, union lpm_value *value) {
 	if (!(lpm->page_count % LPM_CHUNK_SIZE)) {
-		uint32_t old_chunk_count = lpm->page_count / LPM_CHUNK_SIZE;
-		uint32_t new_chunk_count = old_chunk_count + 1;
+		size_t old_chunk_count = lpm->page_count / LPM_CHUNK_SIZE;
+		size_t old_capacity = lpm_chunk_capacity(old_chunk_count);
+		bool grow = old_chunk_count == old_capacity;
+		size_t new_capacity = lpm_chunk_capacity(old_chunk_count + 1);
 
 		struct memory_context *memory_context = &lpm->memory_context;
 
-		struct lpm_page **pages = (struct lpm_page **)memory_balloc(
-			memory_context,
-			sizeof(struct lpm_page *) * new_chunk_count
-		);
-		if (pages == NULL) {
-			errno = ENOMEM;
-			return -1;
+		struct lpm_page **old_pages = ADDR_OF(&lpm->pages);
+		struct lpm_page **pages = old_pages;
+		if (grow) {
+			pages = (struct lpm_page **)memory_balloc(
+				memory_context,
+				sizeof(struct lpm_page *) * new_capacity
+			);
+			if (pages == NULL) {
+				errno = ENOMEM;
+				return -1;
+			}
 		}
 
 		struct lpm_page *page = (struct lpm_page *)memory_balloc(
 			memory_context, sizeof(struct lpm_page) * LPM_CHUNK_SIZE
 		);
 		if (page == NULL) {
-			memory_bfree(
-				memory_context,
-				pages,
-				sizeof(struct lpm_page *) * new_chunk_count
-			);
+			if (grow) {
+				memory_bfree(
+					memory_context,
+					pages,
+					sizeof(struct lpm_page *) * new_capacity
+				);
+			}
 
 			errno = ENOMEM;
 			return -1;
 		}
 
-		// Set correct relative addresses
-		struct lpm_page **old_pages = ADDR_OF(&lpm->pages);
-		for (uint64_t chunk_idx = 0; chunk_idx < old_chunk_count;
-		     ++chunk_idx) {
-			EQUATE_OFFSET(&pages[chunk_idx], &old_pages[chunk_idx]);
-		}
-
 		SET_OFFSET_OF(&pages[old_chunk_count], page);
-		SET_OFFSET_OF(&lpm->pages, pages);
 
-		memory_bfree(
-			memory_context,
-			old_pages,
-			old_chunk_count * sizeof(struct lpm_page *)
-		);
+		if (grow) {
+			// Set correct relative addresses
+			for (size_t chunk_idx = 0; chunk_idx < old_chunk_count;
+			     ++chunk_idx) {
+				EQUATE_OFFSET(
+					&pages[chunk_idx], &old_pages[chunk_idx]
+				);
+			}
+			SET_OFFSET_OF(&lpm->pages, pages);
+			memory_bfree(
+				memory_context,
+				old_pages,
+				sizeof(struct lpm_page *) * old_capacity
+			);
+		}
 	}
 	struct lpm_page *np = lpm_page(lpm, lpm->page_count);
 	lpm->page_count += 1;
@@ -136,7 +160,7 @@ lpm_free(struct lpm *lpm) {
 	struct lpm_page **pages = ADDR_OF(&lpm->pages);
 
 	if (pages != NULL) {
-		uint32_t chunk_count =
+		size_t chunk_count =
 			(lpm->page_count + LPM_CHUNK_SIZE - 1) / LPM_CHUNK_SIZE;
 
 		for (size_t chunk_idx = 0; chunk_idx < chunk_count;
@@ -151,7 +175,8 @@ lpm_free(struct lpm *lpm) {
 		memory_bfree(
 			memory_context,
 			pages,
-			sizeof(struct lpm_page *) * chunk_count
+			sizeof(struct lpm_page *) *
+				lpm_chunk_capacity(chunk_count)
 		);
 	}
 
