@@ -28,17 +28,30 @@ import (
 // as each round restores the metadata parsed from the packets given, the
 // address hash among it. Each round is a call into C timed together with the
 // callback, a cost equal for every pipeline, which an empty one cancels.
+//
+// The options mean what they mean to Bench. A reset undoes what the module
+// did to the packets after each round, so the callback gets the frames as
+// it left them, and with WithPayloadReset and WithGeometryReset together
+// that holds for a module that moves headers.
 func (m *Harness) BenchRewriting(
 	b *testing.B,
 	packets []gopacket.Packet,
 	rewrite func(round int, frames [][]byte),
+	options ...BenchOption,
 ) {
 	b.Helper()
+
+	opts := newBenchOptions()
+	for _, o := range options {
+		o(opts)
+	}
 
 	warnUnoptimized(b)
 
 	pinner := runtime.Pinner{}
 	defer pinner.Unpin()
+
+	devices := m.benchDevices(b, opts, len(packets))
 
 	payloads := xpacket.PacketsGoPayload(packets...)
 	data := make([]dataplane.PacketData, 0, len(payloads))
@@ -60,8 +73,6 @@ func (m *Harness) BenchRewriting(
 		totalBytes += int64(len(frame))
 	}
 
-	// Every packet runs on device 0, as in Bench without device ids.
-	devices := make([]uint16, len(frames))
 	var devicesPtr *C.uint16_t
 	if len(devices) > 0 {
 		pinner.Pin(&devices[0])
@@ -78,7 +89,7 @@ func (m *Harness) BenchRewriting(
 			devicesPtr,
 			list,
 			C.uint64_t(1),
-			C.int(0),
+			opts.reset(),
 		)
 		if rc != 0 {
 			b.Fatalf("failed to run round %d: rc=%d", round, rc)

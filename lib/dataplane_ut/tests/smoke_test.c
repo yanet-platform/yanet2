@@ -219,7 +219,14 @@ run_round_restore_test(void) {
 	packet->recirc_remaining = 0;
 	packet->recirc_initialized = 0;
 	TEST_ASSERT_SUCCESS(
-		dataplane_ut_run_rounds(ut, 0, input_devices, &input, 3, 1),
+		dataplane_ut_run_rounds(
+			ut,
+			0,
+			input_devices,
+			&input,
+			3,
+			DATAPLANE_UT_RESET_PAYLOAD
+		),
 		"run_rounds failed"
 	);
 	TEST_ASSERT_EQUAL(
@@ -419,7 +426,9 @@ run_rounds_geometry_mismatch_test(void) {
 	packet_list_add(&input, packet);
 
 	uint16_t empty_devices[1] = {0};
-	int rc = dataplane_ut_run_rounds(ut, 0, empty_devices, &input, 3, 1);
+	int rc = dataplane_ut_run_rounds(
+		ut, 0, empty_devices, &input, 3, DATAPLANE_UT_RESET_PAYLOAD
+	);
 	TEST_ASSERT_EQUAL(
 		(long)rc,
 		(long)-EINVAL,
