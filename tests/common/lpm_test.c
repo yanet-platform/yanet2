@@ -126,7 +126,7 @@ random_ranges(uint64_t *state, uint8_t key_size, size_t count, uint8_t *out) {
  * verifies that the insert builds the tree the reference walk builds and
  * fails where the reference fails when the arena runs out.
  *
- * Seeded random ranges cover keys of 1, 2, 4, 8, 12 and 16 bytes. Over one
+ * Seeded random ranges cover keys of every size from 1 to 16 bytes. Over one
  * run of 16-byte ranges the budget grows from 16 KiB to 2 MiB in 16 KiB
  * steps, half a chunk of pages, so the first, the second and each later
  * chunk allocation fails in turn. A fixed run pins that a range whose start
@@ -134,12 +134,11 @@ random_ranges(uint64_t *state, uint8_t key_size, size_t count, uint8_t *out) {
  */
 static int
 run_insert_matches_reference_test(void) {
-	static const uint8_t key_sizes[] = {1, 2, 4, 8, 12, 16};
 	uint8_t ranges[32 * (2 * LPM_KEY_SIZE_MAX + 2)];
 	uint64_t state = 0x9e3779b97f4a7c15;
 	size_t failed_pages;
 	for (uint32_t run = 0; run < 2000; ++run) {
-		uint8_t key_size = key_sizes[run % sizeof(key_sizes)];
+		uint8_t key_size = (uint8_t)(1 + run % LPM_KEY_SIZE_MAX);
 		size_t count = 1 + next_random(&state) % 24;
 		random_ranges(&state, key_size, count, ranges);
 		if (reference_compare(
