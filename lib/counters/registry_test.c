@@ -73,6 +73,38 @@ generation_name(char *buffer, uint64_t idx) {
 	snprintf(buffer, COUNTER_NAME_LEN, "c%" PRIu64, idx);
 }
 
+// Links a registered registry to the current one, spawns its storage from
+// the current storage and makes it current, as a module replacement does.
+static int
+generation_install(
+	struct registry_fixture *fixture,
+	struct counter_registry *registry,
+	struct generation *current
+) {
+	yanet_error *err = NULL;
+	TEST_ASSERT_SUCCESS(
+		counter_registry_link(registry, current->registry, &err),
+		"failed to link registry"
+	);
+
+	struct counter_storage *storage = counter_storage_spawn(
+		&fixture->storage_context, current->storage, registry
+	);
+	TEST_ASSERT_NOT_NULL(storage, "failed to spawn counter storage");
+
+	// The replaced storage reads its registry on release, so it goes
+	// first.
+	counter_storage_free(current->storage);
+	if (current->registry != NULL) {
+		counter_registry_fini(current->registry);
+		free(current->registry);
+	}
+
+	current->registry = registry;
+	current->storage = storage;
+	return TEST_SUCCESS;
+}
+
 // Replaces the current generation with one that registers `fixed`
 // permanent counters and a window of `window` counters starting at
 // `first`, linking to the current registry and spawning from the current
@@ -111,27 +143,7 @@ generation_replace(
 		);
 	}
 
-	TEST_ASSERT_SUCCESS(
-		counter_registry_link(registry, current->registry, &err),
-		"failed to link registry"
-	);
-
-	struct counter_storage *storage = counter_storage_spawn(
-		&fixture->storage_context, current->storage, registry
-	);
-	TEST_ASSERT_NOT_NULL(storage, "failed to spawn counter storage");
-
-	// The replaced storage reads its registry on release, so it goes
-	// first.
-	counter_storage_free(current->storage);
-	if (current->registry != NULL) {
-		counter_registry_fini(current->registry);
-		free(current->registry);
-	}
-
-	current->registry = registry;
-	current->storage = storage;
-	return TEST_SUCCESS;
+	return generation_install(fixture, registry, current);
 }
 
 static void
@@ -397,12 +409,86 @@ run_released_slot_reused_from_zero_test(void) {
 	return TEST_SUCCESS;
 }
 
+// verifies that a replacement registering the kept names in reverse order
+// keeps every counter's values and carries no name over
+static int
+run_reordered_counters_keep_values_test(void) {
+	struct registry_fixture fixture;
+	TEST_ASSERT_SUCCESS(
+		registry_fixture_init(&fixture), "fixture init failed"
+	);
+
+	const uint64_t count = 8;
+	struct generation current = {0};
+	TEST_ASSERT_SUCCESS(
+		generation_replace(&fixture, 0, 0, count, &current),
+		"first replacement failed"
+	);
+
+	char name[COUNTER_NAME_LEN];
+	for (uint64_t idx = 0; idx < count; ++idx) {
+		generation_name(name, idx);
+		TEST_ASSERT_SUCCESS(
+			counter_value_add(&current, name, 100 + idx),
+			"failed to count into '%s'",
+			name
+		);
+	}
+
+	struct counter_registry *registry = calloc(1, sizeof(*registry));
+	TEST_ASSERT_NOT_NULL(registry, "failed to allocate registry");
+	TEST_ASSERT_SUCCESS(
+		counter_registry_init(registry, &fixture.registry_context),
+		"failed to init registry"
+	);
+	yanet_error *err = NULL;
+	for (uint64_t idx = count; idx-- > 0;) {
+		generation_name(name, idx);
+		TEST_ASSERT(
+			counter_registry_register(registry, name, 2, &err) !=
+				COUNTER_INVALID,
+			"failed to register '%s'",
+			name
+		);
+	}
+	TEST_ASSERT_SUCCESS(
+		generation_install(&fixture, registry, &current),
+		"reordered replacement failed"
+	);
+
+	TEST_ASSERT_EQUAL(
+		current.registry->count,
+		count,
+		"reordered replacement carried a name it registers"
+	);
+	for (uint64_t idx = 0; idx < count; ++idx) {
+		uint64_t value = 0;
+		generation_name(name, idx);
+		TEST_ASSERT_SUCCESS(
+			counter_value(&current, name, &value),
+			"failed to read '%s'",
+			name
+		);
+		TEST_ASSERT_EQUAL(
+			value,
+			100 + idx,
+			"counter '%s' lost its value across the reordering",
+			name
+		);
+	}
+
+	generation_retire(&current);
+	registry_fixture_fini(&fixture);
+	return TEST_SUCCESS;
+}
+
 int
 main(void) {
 	int results[] = {
 		run_renamed_counters_released_test(),
 		run_many_distinct_names_accepted_test(),
 		run_released_slot_reused_from_zero_test(),
+		run_reordered_counters_keep_values_test(),
 	};
 	for (size_t idx = 0; idx < sizeof(results) / sizeof(results[0]);
 	     ++idx) {

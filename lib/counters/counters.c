@@ -341,17 +341,33 @@ counter_registry_link(
 			}
 		}
 
+		// Each name is first compared with the one after the previous
+		// match, as a replacement mostly keeps the replaced order.
+		//
+		// Names are unique, so a match there is the one the index
+		// lookup would find; a mismatch falls back to the index.
+		uint64_t expected_idx = 0;
 		for (uint64_t src_idx = 0; src_idx < src->count; ++src_idx) {
 			struct counter *src_name =
 				ADDR_OF(&src->names) + src_idx;
 
-			uint32_t hash = str_index_hash(
-				src_name->name, COUNTER_NAME_LEN
-			);
-			uint64_t dst_idx = counter_registry_lookup_hashed(
-				dst, src_name->name, hash
-			);
+			// Hashed for the index lookup only; a name matched in
+			// order is never inserted.
+			uint32_t hash = 0;
+			uint64_t dst_idx = expected_idx;
+			if (dst_idx >= dst->count ||
+			    strncmp((ADDR_OF(&dst->names) + dst_idx)->name,
+				    src_name->name,
+				    COUNTER_NAME_LEN)) {
+				hash = str_index_hash(
+					src_name->name, COUNTER_NAME_LEN
+				);
+				dst_idx = counter_registry_lookup_hashed(
+					dst, src_name->name, hash
+				);
+			}
 			if (dst_idx != (uint64_t)-1) {
+				expected_idx = dst_idx + 1;
 				struct counter *dst_name =
 					ADDR_OF(&dst->names) + dst_idx;
 				if (dst_name->size != src_name->size) {
