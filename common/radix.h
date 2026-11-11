@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -9,6 +10,7 @@
 
 #include "memory.h"
 #include "memory_address.h"
+#include "numutils.h"
 
 #define RADIX_VALUE_INVALID 0xffffffff
 #define RADIX_CHUNK_SIZE 16
@@ -37,6 +39,18 @@ radix_page(const struct radix *radix, uint32_t page_idx) {
 	return chunk + page_idx % RADIX_CHUNK_SIZE;
 }
 
+/*
+ * The number of entries the chunk directory holds for a chunk count.
+ *
+ * The capacity is the next power of two, so a tree build copies amortised
+ * O(1) offsets per chunk. No chunks need no directory. The growth and the
+ * free both size the directory through this one function.
+ */
+static inline uint64_t
+radix_chunk_capacity(uint64_t chunk_count) {
+	return chunk_count ? next_power_of_two(chunk_count) : 0;
+}
+
 static inline int
 radix_new_page(struct radix *radix, uint32_t *page_idx) {
 	if (!(radix->page_count % RADIX_CHUNK_SIZE)) {
@@ -53,32 +67,40 @@ radix_new_page(struct radix *radix, uint32_t *page_idx) {
 
 		radix_page_t **old_pages = ADDR_OF(&radix->pages);
 		uint64_t old_chunk_count = radix->page_count / RADIX_CHUNK_SIZE;
-		uint64_t new_chunk_count = old_chunk_count + 1;
-		radix_page_t **new_pages = (radix_page_t **)memory_balloc(
-			memory_context, new_chunk_count * sizeof(*new_pages)
-		);
-		if (new_pages == NULL) {
+		uint64_t old_capacity = radix_chunk_capacity(old_chunk_count);
+		bool grow = old_chunk_count == old_capacity;
+		radix_page_t **pages = old_pages;
+		if (grow) {
+			uint64_t new_capacity =
+				radix_chunk_capacity(old_chunk_count + 1);
+			pages = (radix_page_t **)memory_balloc(
+				memory_context, new_capacity * sizeof(*pages)
+			);
+			if (pages == NULL) {
+				memory_bfree(
+					memory_context,
+					new_chunk,
+					sizeof(radix_page_t) * RADIX_CHUNK_SIZE
+				);
+				return -1;
+			}
+
+			// Set correct relative addresses
+			for (size_t i = 0; i < old_chunk_count; ++i) {
+				EQUATE_OFFSET(&pages[i], &old_pages[i]);
+			}
+		}
+
+		SET_OFFSET_OF(&pages[old_chunk_count], new_chunk);
+
+		if (grow) {
+			SET_OFFSET_OF(&radix->pages, pages);
 			memory_bfree(
 				memory_context,
-				new_chunk,
-				sizeof(radix_page_t) * RADIX_CHUNK_SIZE
+				old_pages,
+				old_capacity * sizeof(*old_pages)
 			);
-			return -1;
 		}
-
-		// Set correct relative addresses
-		for (size_t i = 0; i < old_chunk_count; ++i) {
-			EQUATE_OFFSET(&new_pages[i], &old_pages[i]);
-		}
-
-		SET_OFFSET_OF(&new_pages[new_chunk_count - 1], new_chunk);
-		SET_OFFSET_OF(&radix->pages, new_pages);
-
-		memory_bfree(
-			memory_context,
-			old_pages,
-			old_chunk_count * sizeof(radix_page_t *)
-		);
 	}
 	if (page_idx != NULL) {
 		*page_idx = radix->page_count;
@@ -101,9 +123,9 @@ static inline void
 radix_free(struct radix *radix) {
 	struct memory_context *memory_context = ADDR_OF(&radix->memory_context);
 	radix_page_t **pages = ADDR_OF(&radix->pages);
-	uint32_t chunk_count =
+	uint64_t chunk_count =
 		(radix->page_count + RADIX_CHUNK_SIZE - 1) / RADIX_CHUNK_SIZE;
-	for (uint32_t chunk_idx = 0; chunk_idx < chunk_count; ++chunk_idx) {
+	for (uint64_t chunk_idx = 0; chunk_idx < chunk_count; ++chunk_idx) {
 		radix_page_t *chunk = ADDR_OF(&pages[chunk_idx]);
 		if (chunk == NULL) {
 			continue;
@@ -117,7 +139,9 @@ radix_free(struct radix *radix) {
 		SET_OFFSET_OF(pages + chunk_idx, NULL);
 	}
 	memory_bfree(
-		memory_context, pages, sizeof(radix_page_t *) * chunk_count
+		memory_context,
+		pages,
+		sizeof(radix_page_t *) * radix_chunk_capacity(chunk_count)
 	);
 	SET_OFFSET_OF(&radix->pages, NULL);
 }
