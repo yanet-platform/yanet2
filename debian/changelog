@@ -1,3 +1,9 @@
+yanet2 (0.5.0) unstable; urgency=medium
+
+  * Release 0.5.0.
+
+ -- Viacheslav Saushev <vvsaushev@yandex-team.ru>  Wed, 11 Nov 2026 00:21:49 +0000
+
 yanet2 (0.4.1) unstable; urgency=medium
 
   * Release 0.4.1.

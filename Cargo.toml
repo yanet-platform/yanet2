@@ -60,7 +60,7 @@ members = [
 
 # Every member takes these, so a release or toolchain bump edits one line.
 [workspace.package]
-version = "0.4.1"
+version = "0.5.0"
 edition = "2024"
 rust-version = "1.99"
 publish = false
