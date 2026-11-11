@@ -16,9 +16,9 @@ use core::{
 
 use yanet_packet as _;
 use yanet_sdk::{
-    Batch, Build, BuiltObject, CommitCx, Counter, Cx, Device, Kind, Lpm4, Lpm6, Module, Object, ObjectBuilder,
-    ObjectCommitCx, ObjectCounter, ObjectLink, OwnedSlice, PerWorker, PerWorkerSlice, Refusal, Registered, ShmBox,
-    ShmLayout, ShmSlice, TaggedCounter, TaggedCounters, Traffic, Verdict,
+    Batch, Build, BuiltObject, CommitCx, Counter, Cx, Device, HashIndex, Kind, Lpm4, Lpm6, Module, Object,
+    ObjectBuilder, ObjectCommitCx, ObjectCounter, ObjectLink, OwnedSlice, PerWorker, PerWorkerSlice, Refusal,
+    Registered, ShmBox, ShmLayout, ShmSlice, TaggedCounter, TaggedCounters, Traffic, Verdict,
 };
 use yanet_sdk_derive as _;
 use yanet_sdk_testing::{
@@ -220,6 +220,14 @@ struct Tables {
     v6: Lpm6,
 }
 
+/// An exact-match index of each address family.
+#[derive(ShmLayout)]
+#[repr(C)]
+struct Indexes {
+    v4: HashIndex<Ipv4Addr>,
+    v6: HashIndex<Ipv6Addr>,
+}
+
 /// A module with a given configuration type: the builder reads only its name
 /// and that type.
 struct Fixture<C>(PhantomData<fn() -> C>);
@@ -270,11 +278,13 @@ struct ByRule {
 
 type ByRuleModule = Fixture<ByRule>;
 type TablesModule = Fixture<Tables>;
+type IndexesModule = Fixture<Indexes>;
 
 /// An owner of an empty arena.
 fn owner() -> TestOwner {
     // SAFETY: no build of this file opens a C object: its only tables are
-    // built from no ranges, which leaves them empty.
+    // built from no ranges and its only indexes from no records, which leaves
+    // them empty.
     unsafe { TestOwner::new() }
 }
 
@@ -400,6 +410,28 @@ fn test_build_leaves_tables_of_no_ranges_empty_and_unallocated() {
     // Only the root block.
     assert_eq!(1, owner.live_blocks());
     release::<TablesModule>(&owner, built);
+    owner.assert_released();
+}
+
+/// verifies that indexes built from no records allocate nothing and find
+/// nothing.
+#[test]
+fn test_build_leaves_indexes_of_no_records_empty_and_unallocated() {
+    let owner = owner();
+
+    let built = build::<IndexesModule>(&owner, |_| Ok(IndexesParts { v4: &[], v6: &[] })).expect("built");
+
+    let (config, view) = body::<IndexesModule>(&owner, &built);
+    assert_eq!(
+        (None, None),
+        (
+            config.v4.resolve(&view).get(Ipv4Addr::UNSPECIFIED),
+            config.v6.resolve(&view).get(Ipv6Addr::UNSPECIFIED)
+        )
+    );
+    // Only the root block.
+    assert_eq!(1, owner.live_blocks());
+    release::<IndexesModule>(&owner, built);
     owner.assert_released();
 }
 

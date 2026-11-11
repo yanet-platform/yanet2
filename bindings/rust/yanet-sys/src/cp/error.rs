@@ -38,11 +38,27 @@ pub enum Refusal {
     /// counters other than through it, of a size the registrar does not
     /// vouch for; `YANET_ERROR_INVALID_ARGUMENT`.
     ForeignCounter,
+    /// A key that two records of a hash index give.
+    ///
+    /// Reported as `YANET_ERROR_INVALID_ARGUMENT`.
+    DuplicateKey {
+        /// The position of the record that holds the key.
+        first: u32,
+        /// The position of the record refused.
+        second: u32,
+    },
+    /// A record of a hash index at the position that marks a free slot,
+    /// `u32::MAX`.
+    ///
+    /// Reported as `YANET_ERROR_INVALID_ARGUMENT`.
+    InvalidPosition,
 }
 
 impl Refusal {
     /// The refusal's message, which `Display` writes and a C error frame
     /// carries.
+    ///
+    /// For a key given twice `Display` adds the positions of both records.
     pub fn message(self) -> &'static str {
         match self {
             Self::OutOfMemory => "the shared memory is exhausted",
@@ -53,6 +69,8 @@ impl Refusal {
             Self::RuleSetMismatch => "a join or a decode over rulesets of different sizes",
             Self::InvalidName => "a name is empty, holds a NUL or does not fit its C field",
             Self::ForeignCounter => "a counter registered amid a registrar's counters other than through it",
+            Self::DuplicateKey { .. } => "a key of a hash index is given twice",
+            Self::InvalidPosition => "a record of a hash index names the position of a free slot",
         }
     }
 
@@ -66,14 +84,21 @@ impl Refusal {
             | Self::TooManyItems
             | Self::RuleSetMismatch
             | Self::InvalidName
-            | Self::ForeignCounter => bindings::yanet_error_kind_YANET_ERROR_INVALID_ARGUMENT,
+            | Self::ForeignCounter
+            | Self::DuplicateKey { .. }
+            | Self::InvalidPosition => bindings::yanet_error_kind_YANET_ERROR_INVALID_ARGUMENT,
         }
     }
 }
 
 impl fmt::Display for Refusal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        f.write_str(self.message())
+        match *self {
+            Self::DuplicateKey { first, second } => {
+                write!(f, "{}, at positions {first} and {second}", self.message())
+            }
+            _ => f.write_str(self.message()),
+        }
     }
 }
 
@@ -112,5 +137,22 @@ impl<E: Error> Error for BuildError<E> {
             Self::Refused(refusal) => refusal.source(),
             Self::Owner(err) => err.source(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate alloc;
+
+    use alloc::string::ToString;
+
+    use super::Refusal;
+
+    #[test]
+    fn test_display_of_a_key_given_twice_names_both_positions() {
+        assert_eq!(
+            "a key of a hash index is given twice, at positions 3 and 7",
+            Refusal::DuplicateKey { first: 3, second: 7 }.to_string()
+        );
     }
 }

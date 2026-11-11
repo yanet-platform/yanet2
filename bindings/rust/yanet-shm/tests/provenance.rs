@@ -4,6 +4,7 @@
 
 use core::mem::{offset_of, size_of};
 
+use criterion as _;
 use yanet_sdk_testing::{BlockArena, View};
 use yanet_shm::{
     opaque::Opaque,

@@ -41,6 +41,40 @@
 //! }
 //! ```
 //!
+//! An exact-match table is a [`HashIndex`] field: its parts are records of a
+//! key and the position it names in an array of the author's, borrowed for the
+//! build, and the build refuses a key given twice. The handler looks keys up
+//! through the [`HashIndexRef`] it resolves for its batch:
+//!
+//! ```
+//! use core::net::Ipv4Addr;
+//!
+//! use yanet_sdk::{Cx, HashIndex, Module, ShmLayout, ShmSlice};
+//!
+//! #[derive(ShmLayout)]
+//! #[repr(C)]
+//! struct Config {
+//!     hosts: HashIndex<Ipv4Addr>,
+//!     weights: ShmSlice<u64>,
+//! }
+//!
+//! fn config<'b, W: yanet_sdk::Owner, E: From<yanet_sdk::BuildError<W::Error>>>(
+//!     scope: yanet_sdk::Scope<'b, '_, W, E>,
+//!     hosts: &'b [(Ipv4Addr, u32)],
+//! ) -> Result<ConfigParts<'b, W>, E> {
+//!     Ok(ConfigParts {
+//!         hosts,
+//!         weights: scope.slice(hosts.len(), |i| Ok(10 * i as u64))?,
+//!     })
+//! }
+//!
+//! fn weight<'id, M: Module<Config = Config>>(cx: &Cx<'id, M>, host: Ipv4Addr) -> Option<u64> {
+//!     let config = cx.config();
+//!     let position = config.hosts.resolve(cx).get(host)?;
+//!     config.weights.as_slice(cx).get(position as usize).copied()
+//! }
+//! ```
+//!
 //! State a worker keeps for itself across batches is a [`PerWorker`] field: a
 //! slot per worker, built from one value, which
 //! the handler reads and writes for its own worker only, through the
@@ -116,6 +150,7 @@
 pub use yanet_packet as packet;
 pub use yanet_sdk_derive::{FfiRecord, ShmLayout, api};
 pub use yanet_shm::{
+    hash_index::{HashIndexKey, HashIndexRef},
     mutex::{Mutex, MutexGuard},
     rel::{ShmBox, ShmSlice},
     resolve::Resolve,
@@ -126,7 +161,10 @@ pub use yanet_sys::{
         Addr4, Attribute, BURST, Decode, Join, LineAttr, LineRange, Lines, Net4, Net4Attr, Net6, Net6Attr, Nets4,
         Nets6, Node, PortAttr, PortRange, Ports, Rule, Rules, results_min,
     },
-    common::lpm::{Lpm4, Lpm6, LpmRange},
+    common::{
+        index::HashIndex,
+        lpm::{Lpm4, Lpm6, LpmRange},
+    },
     cp::{
         BlockAddr, Branch, Build, BuildError, Builder, Built, BuiltObject, Context, CounterRegistrar, FfiRecord,
         Header, Kind, ModuleKind, ObjectBuilder, ObjectKind, Owned, OwnedRegions, OwnedSlice, OwnedSlots, Owner,

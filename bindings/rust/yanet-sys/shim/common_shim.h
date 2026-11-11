@@ -59,3 +59,23 @@ YANET_SYS_HIDDEN void
 yanet_sys_common_memory_bfree(
 	struct memory_context *context, void *block, size_t size
 );
+
+// memory_context_init_from (common/memory.h): opens a memory context at the
+// given address as a child of a live one, under a name, allocating from the
+// parent's block allocator.
+//
+// Cannot fail. The context must be passed to
+// yanet_sys_common_memory_context_fini, which unlinks it from the parent.
+YANET_SYS_HIDDEN int
+yanet_sys_common_memory_context_init_from(
+	struct memory_context *context,
+	struct memory_context *parent,
+	const char *name
+);
+
+// memory_context_fini (common/memory.h): unlinks a memory context from its
+// parent and zeroes it.
+//
+// Cannot fail. Idempotent: a zeroed context is left as it is.
+YANET_SYS_HIDDEN void
+yanet_sys_common_memory_context_fini(struct memory_context *context);

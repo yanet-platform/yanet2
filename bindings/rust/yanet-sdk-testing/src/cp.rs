@@ -106,9 +106,10 @@ impl TestOwner {
     /// # Safety
     ///
     /// No configuration that opens a C object, such as an LPM built from
-    /// ranges, is built over the owner: it leaves no live C memory context in
-    /// a header, which such an object opens its own context under. An LPM
-    /// built from no ranges opens nothing.
+    /// ranges or a hash index built from records, is built over the owner: it
+    /// leaves no live C memory context in a header, which such an object opens
+    /// its own context under. An LPM built from no ranges and a hash index
+    /// built from no records open nothing.
     pub unsafe fn new() -> Self {
         Self {
             arena: BlockArena::new(),
