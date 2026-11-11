@@ -70,14 +70,15 @@ counter_registry_read_index(uint32_t index, const void *data) {
 	return names[index].name;
 }
 
-uint64_t
-counter_registry_lookup_index(
-	struct counter_registry *registry, const char *name
+static uint64_t
+counter_registry_lookup_hashed(
+	struct counter_registry *registry, const char *name, uint32_t hash
 ) {
-	uint32_t index = str_index_lookup(
+	uint32_t index = str_index_lookup_hashed(
 		&registry->str_index,
 		name,
 		COUNTER_NAME_LEN,
+		hash,
 		counter_registry_read_index,
 		registry
 	);
@@ -87,6 +88,15 @@ counter_registry_lookup_index(
 	}
 
 	return (uint64_t)-1;
+}
+
+uint64_t
+counter_registry_lookup_index(
+	struct counter_registry *registry, const char *name
+) {
+	return counter_registry_lookup_hashed(
+		registry, name, str_index_hash(name, COUNTER_NAME_LEN)
+	);
 }
 
 static int
@@ -145,6 +155,7 @@ static uint64_t
 counter_registry_insert(
 	struct counter_registry *registry,
 	const char *name,
+	uint32_t hash,
 	uint64_t size,
 	uint32_t age,
 	yanet_error **err
@@ -166,10 +177,10 @@ counter_registry_insert(
 		}
 	}
 
-	if (str_index_insert(
+	if (str_index_insert_hashed(
 		    &registry->str_index,
-		    name,
 		    COUNTER_NAME_LEN,
+		    hash,
 		    registry->count,
 		    counter_registry_read_index,
 		    registry
@@ -218,7 +229,8 @@ counter_registry_register(
 		return -1;
 	}
 
-	uint64_t idx = counter_registry_lookup_index(registry, name);
+	uint32_t hash = str_index_hash(name, COUNTER_NAME_LEN);
+	uint64_t idx = counter_registry_lookup_hashed(registry, name, hash);
 
 	if (idx != (uint64_t)-1) {
 		struct counter *name = ADDR_OF(&registry->names) + idx;
@@ -235,7 +247,7 @@ counter_registry_register(
 		return idx;
 	}
 
-	return counter_registry_insert(registry, name, size, 0, err);
+	return counter_registry_insert(registry, name, hash, size, 0, err);
 }
 
 // Remember a released value slot for a later name of the same pool.
@@ -333,8 +345,11 @@ counter_registry_link(
 			struct counter *src_name =
 				ADDR_OF(&src->names) + src_idx;
 
-			uint64_t dst_idx = counter_registry_lookup_index(
-				dst, src_name->name
+			uint32_t hash = str_index_hash(
+				src_name->name, COUNTER_NAME_LEN
+			);
+			uint64_t dst_idx = counter_registry_lookup_hashed(
+				dst, src_name->name, hash
 			);
 			if (dst_idx != (uint64_t)-1) {
 				struct counter *dst_name =
@@ -370,6 +385,7 @@ counter_registry_link(
 			dst_idx = counter_registry_insert(
 				dst,
 				src_name->name,
+				hash,
 				src_name->size,
 				src_name->age + 1,
 				err

@@ -50,6 +50,15 @@ str_index_fnv1a(const void *key, size_t key_size, uint32_t seed) {
 	return hash;
 }
 
+// The hash a key is placed and looked up by.
+//
+// A caller that both looks a key up and inserts it computes the hash once
+// and passes it to the hashed variants.
+static inline uint32_t
+str_index_hash(const char *key, uint32_t key_size) {
+	return str_index_fnv1a(key, strnlen(key, key_size), 0);
+}
+
 typedef const char *(*str_index_read_func)(uint32_t index, const void *data);
 
 struct str_index {
@@ -88,10 +97,11 @@ str_index_fini(struct str_index *str_index) {
 }
 
 static inline uint32_t
-str_index_lookup(
+str_index_lookup_hashed(
 	const struct str_index *str_index,
 	const char *key,
 	uint32_t key_size,
+	uint32_t hash,
 	str_index_read_func read_func,
 	const void *read_func_data
 ) {
@@ -99,39 +109,50 @@ str_index_lookup(
 		return STR_INDEX_INVALID;
 	}
 
-	uint32_t length = strnlen(key, key_size);
-	uint32_t hash = str_index_fnv1a(key, length, 0);
-	hash = hash % str_index->capacity;
+	uint32_t pos = hash % str_index->capacity;
 
 	uint32_t *values = ADDR_OF(&str_index->values);
 
-	while (values[hash] != STR_INDEX_INVALID) {
-		const char *known = read_func(values[hash], read_func_data);
+	while (values[pos] != STR_INDEX_INVALID) {
+		const char *known = read_func(values[pos], read_func_data);
 		if (!strncmp(key, known, key_size)) {
 			break;
 		}
-		hash = (hash + 1) % str_index->capacity;
+		pos = (pos + 1) % str_index->capacity;
 	}
-	return values[hash];
+	return values[pos];
+}
+
+static inline uint32_t
+str_index_lookup(
+	const struct str_index *str_index,
+	const char *key,
+	uint32_t key_size,
+	str_index_read_func read_func,
+	const void *read_func_data
+) {
+	return str_index_lookup_hashed(
+		str_index,
+		key,
+		key_size,
+		str_index_hash(key, key_size),
+		read_func,
+		read_func_data
+	);
 }
 
 static inline void
 str_index_insert_force(
-	struct str_index *str_index,
-	const char *key,
-	uint32_t key_size,
-	uint32_t value
+	struct str_index *str_index, uint32_t hash, uint32_t value
 ) {
-	uint32_t length = strnlen(key, key_size);
-	uint32_t hash = str_index_fnv1a(key, length, 0);
-	hash = hash % str_index->capacity;
+	uint32_t pos = hash % str_index->capacity;
 
 	uint32_t *values = ADDR_OF(&str_index->values);
 
-	while (values[hash] != STR_INDEX_INVALID) {
-		hash = (hash + 1) % str_index->capacity;
+	while (values[pos] != STR_INDEX_INVALID) {
+		pos = (pos + 1) % str_index->capacity;
 	}
-	values[hash] = value;
+	values[pos] = value;
 	str_index->size += 1;
 }
 
@@ -169,7 +190,9 @@ str_index_expand(
 		}
 		const char *key = read_func(old_values[pos], read_func_data);
 		str_index_insert_force(
-			str_index, key, key_size, old_values[pos]
+			str_index,
+			str_index_hash(key, key_size),
+			old_values[pos]
 		);
 	}
 
@@ -181,11 +204,12 @@ str_index_expand(
 	return 0;
 }
 
+// Insert a key not yet in the index under the hash it was looked up by.
 static inline int
-str_index_insert(
+str_index_insert_hashed(
 	struct str_index *str_index,
-	const char *key,
 	uint32_t key_size,
+	uint32_t hash,
 	uint32_t value,
 	str_index_read_func read_func,
 	const void *read_func_data
@@ -203,7 +227,26 @@ str_index_insert(
 		}
 	}
 
-	str_index_insert_force(str_index, key, key_size, value);
+	str_index_insert_force(str_index, hash, value);
 
 	return 0;
+}
+
+static inline int
+str_index_insert(
+	struct str_index *str_index,
+	const char *key,
+	uint32_t key_size,
+	uint32_t value,
+	str_index_read_func read_func,
+	const void *read_func_data
+) {
+	return str_index_insert_hashed(
+		str_index,
+		key_size,
+		str_index_hash(key, key_size),
+		value,
+		read_func,
+		read_func_data
+	);
 }
