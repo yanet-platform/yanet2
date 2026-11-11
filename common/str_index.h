@@ -159,6 +159,10 @@ str_index_expand(
 	SET_OFFSET_OF(&str_index->values, new_values);
 	str_index->capacity = new_capacity;
 
+	// The re-insertion counts every surviving entry again; the count
+	// restarts so it keeps holding the number of entries.
+	str_index->size = 0;
+
 	for (uint32_t pos = 0; pos < old_capacity; ++pos) {
 		if (old_values[pos] == STR_INDEX_INVALID) {
 			continue;

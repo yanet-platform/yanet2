@@ -89,6 +89,15 @@ big_array_test = executable(
 )
 test('big_array', big_array_test, suite: ['common'])
 
+str_index_test = executable(
+  'str_index_test',
+  ['str_index_test.c'],
+  c_args: yanet_test_c_args,
+  dependencies: dependencies,
+  include_directories: yanet_rootdir,
+)
+test('str_index', str_index_test, suite: ['common'])
+
 hash_index_test = executable(
   'hash_index_test',
   ['hash_index_test.c',],
