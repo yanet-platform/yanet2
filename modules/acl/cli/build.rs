@@ -6,7 +6,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             builder
                 .message_attribute(
                     ".modules.acl.controlplane.aclpb.v1.Rule",
-                    "#[derive(serde::Serialize, serde::Deserialize)] #[serde(default, deny_unknown_fields)]",
+                    "#[derive(serde::Serialize, serde::Deserialize)] #[serde(default)]",
                 )
                 .message_attribute(
                     ".modules.acl.controlplane.aclpb.v1.Action",

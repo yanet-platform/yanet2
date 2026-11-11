@@ -196,7 +196,6 @@ fn print_rule_counter_groups(rows: &[RuleCounterRow]) {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct ACLConfig {
     #[serde(default)]
     name: String,
@@ -705,10 +704,10 @@ mod test {
     }
 
     #[test]
-    fn test_acl_config_rejects_legacy_sync_config() {
-        let err = serde_yaml::from_str::<ACLConfig>("rules: []\nsync_config: {}\n").unwrap_err();
+    fn test_acl_config_ignores_legacy_sync_config() {
+        let config = serde_yaml::from_str::<ACLConfig>("rules: []\nsync_config: {}\n").unwrap();
 
-        assert!(err.to_string().contains("unknown field `sync_config`"));
+        assert!(config.rules.is_empty());
     }
 
     #[test]

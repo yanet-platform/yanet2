@@ -248,19 +248,13 @@ mod test {
         assert_eq!(shown.config, parsed.config);
     }
 
-    /// Verifies that a misspelled key is refused rather than read as an
-    /// absent field, which the whole-config update would publish as empty.
     #[test]
-    fn test_file_rejects_an_unknown_config_key() {
-        let yaml = "config:\n  prefix:\n    - 64:ff9b::/96\n";
+    fn test_file_ignores_an_unknown_config_key() {
+        let yaml = "name: nat64\nconfig:\n  future:\n    - 64:ff9b::/96\n";
 
-        let parsed: Result<UpdateConfigRequest, _> = serde_yaml::from_str(yaml);
+        let parsed: UpdateConfigRequest = serde_yaml::from_str(yaml).unwrap();
 
-        assert!(
-            parsed
-                .expect_err("a misspelled key must be refused")
-                .to_string()
-                .contains("unknown field `prefix`")
-        );
+        assert_eq!("nat64", parsed.name);
+        assert_eq!(Some(Default::default()), parsed.config);
     }
 }

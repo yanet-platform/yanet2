@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 
 	"github.com/yanet-platform/yanet2/common/go/testutils/tlscert"
 	"github.com/yanet-platform/yanet2/common/go/xgrpc"
@@ -17,6 +18,25 @@ import (
 type pemPair struct {
 	cert []byte
 	key  []byte
+}
+
+// Test_NewKeyPairLoader_IgnoresUnknownKeys verifies that extra settings
+// leave the certificate and key selected by the known fields intact.
+func Test_NewKeyPairLoader_IgnoresUnknownKeys(t *testing.T) {
+	ca := tlscert.NewCA(t)
+	pair := ca.IssueClient(t, "operator")
+	var config xgrpc.KeyPairConfig
+	require.NoError(t, yaml.Unmarshal([]byte("type: file\nconfig:\n"+
+		"  cert_file: "+pair.CertFile+"\n"+
+		"  key_file: "+pair.KeyFile+"\n"+
+		"  future: {enabled: true}\n"), &config))
+	loader, err := xgrpc.NewKeyPairLoader(config)
+	require.NoError(t, err)
+	certificate, key, err := loader.Load()
+	require.NoError(t, err)
+	want := readPEMPair(t, pair)
+	require.Equal(t, want.cert, certificate)
+	require.Equal(t, want.key, key)
 }
 
 // readPEMPair returns the PEM files of an issued pair.

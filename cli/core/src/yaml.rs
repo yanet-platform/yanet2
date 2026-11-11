@@ -91,14 +91,14 @@ mod test {
     }
 
     #[derive(Debug, Default, PartialEq, Deserialize)]
-    #[serde(default, deny_unknown_fields)]
+    #[serde(default)]
     struct Config {
         name: String,
         rules: Vec<Rule>,
     }
 
     #[derive(Debug, Default, PartialEq, Deserialize)]
-    #[serde(default, deny_unknown_fields)]
+    #[serde(default)]
     struct Rule {
         target: String,
         weight: u32,
@@ -149,10 +149,20 @@ mod test {
     }
 
     #[test]
-    fn test_load_document_refuses_an_unknown_null_valued_key() {
-        let err = load_config("nullkey", "rulez: null\n").expect_err("a misspelled null-valued key must be refused");
+    fn test_load_document_ignores_unknown_keys_at_each_depth() {
+        let config = load_config(
+            "future-keys",
+            "name: c0\nfuture: null\nrules:\n  - target: out\n    future: {nested: [1, 2]}\n",
+        )
+        .unwrap();
 
-        assert!(err.to_string().contains("rulez"), "{err}");
+        assert_eq!(
+            Config {
+                name: "c0".into(),
+                rules: vec![Rule { target: "out".into(), weight: 0 }],
+            },
+            config
+        );
     }
 
     #[test]

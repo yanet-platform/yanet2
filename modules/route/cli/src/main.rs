@@ -29,22 +29,11 @@ pub mod routepb {
     tonic::include_proto!("modules.route.controlplane.routepb.v1");
 }
 
-/// The FIB rules file, deserialized straight into the wire's
-/// [`routepb::FibEntry`] -- `range` is range-native, matching the wire, so
-/// there is no CIDR-to-range conversion here either.
+/// The FIB rules file; the command line supplies the module name.
 ///
-/// A minimal wrapper around `entries` rather than [`routepb::UpdateFibRequest`]
-/// itself: `module_name` comes from `--name`, not the file. Deserializing
-/// straight into `UpdateFibRequest` would leave a `module_name` key written
-/// into the file either silently discarded (if overwritten after loading)
-/// or silently conflicting with `--name` (if kept) -- neither reports
-/// anything to the caller. `#[serde(deny_unknown_fields)]` instead turns
-/// that key, or any other stray one at this level, into a load error.
-/// `FIBEntry`/`FIBNexthop` carry the same attribute (see `build.rs`), so a
-/// stray or retired key inside an entry fails to load the same way. A
-/// required key missing from the file is left to the server.
+/// Entries use the wire's range representation. Unknown mapping keys are
+/// ignored, and the server validates the resulting entries.
 #[derive(Debug, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
 struct FibConfig {
     #[serde(default)]
     entries: Vec<routepb::FibEntry>,
@@ -421,31 +410,25 @@ entries:
         assert!(serde_yaml::from_str::<FibConfig>(yaml).is_err());
     }
 
-    /// `module_name` belongs to `--name`, not the file: writing it into the
-    /// file is a load error, not a silently ignored or silently
-    /// overridden key -- see [`FibConfig`]'s doc.
     #[test]
-    fn fib_config_yaml_rejects_module_name_field() {
+    fn test_fib_config_yaml_ignores_module_name_field() {
         let yaml = "
 module_name: foo
 entries: []
 ";
-        assert!(serde_yaml::from_str::<FibConfig>(yaml).is_err());
+        assert!(serde_yaml::from_str::<FibConfig>(yaml).unwrap().entries.is_empty());
     }
 
-    /// The old CIDR-keyed rules format's `prefix` key is retired, not
-    /// renamed: `FIBEntry` has no such field, so loading a file still
-    /// written in that shape fails to load here rather than silently
-    /// deserializing with `range: None` -- see `build.rs`'s
-    /// `deny_unknown_fields` on `FIBEntry`.
     #[test]
-    fn fib_config_yaml_rejects_retired_prefix_field() {
+    fn test_fib_config_yaml_ignores_unknown_entry_fields() {
         let yaml = r#"
 entries:
   - prefix: "10.0.0.0/24"
     nexthops: []
 "#;
-        let err = serde_yaml::from_str::<FibConfig>(yaml).unwrap_err();
-        assert!(err.to_string().contains("prefix"), "unexpected error: {err}");
+        let config = serde_yaml::from_str::<FibConfig>(yaml).unwrap();
+        assert_eq!(1, config.entries.len());
+        assert!(config.entries[0].range.is_none());
+        assert!(config.entries[0].nexthops.is_empty());
     }
 }

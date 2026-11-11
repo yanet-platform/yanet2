@@ -2,8 +2,8 @@ use core::error::Error;
 
 fn main() -> Result<(), Box<dyn Error>> {
     // Decoding mirrors the Go xproto contract: an omitted or null field
-    // takes its zero value and an unknown key is refused.
-    let serialize_deserialize = "#[derive(serde::Serialize, serde::Deserialize)]#[serde(default, deny_unknown_fields)]";
+    // takes its zero value and unknown keys are ignored.
+    let serialize_deserialize = "#[derive(serde::Serialize, serde::Deserialize)]#[serde(default)]";
     let null_as_default = "#[serde(deserialize_with = \"crate::null_as_default\")]";
 
     tonic_prost_build::configure()

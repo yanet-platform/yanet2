@@ -137,7 +137,7 @@ func newGRPCServer() *grpc.Server {
 }
 
 func runServer() error {
-	cfg, err := xcfg.LoadConfig[ServerConfig](serverCmdArgs.ConfigPath, xcfg.WithKnownFields(), xcfg.WithEnv())
+	cfg, err := xcfg.LoadConfig[ServerConfig](serverCmdArgs.ConfigPath, xcfg.WithEnv())
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}

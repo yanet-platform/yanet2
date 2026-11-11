@@ -216,10 +216,8 @@ fn alias_hint(known: &[String]) -> String {
     }
 }
 
-/// One file's raw contents, exactly as written. Unknown keys are rejected
-/// here rather than silently ignored.
+/// One file's known connection settings; additional keys are ignored.
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct RawFile {
     endpoint: Option<String>,
     auth: Option<AuthMethod>,
@@ -235,7 +233,6 @@ struct RawFile {
 /// itself is used, checked in [`resolve`] rather than here so a section
 /// present only to be merged into by the other file need not carry it.
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct RawSection {
     endpoint: Option<String>,
     auth: Option<AuthMethod>,
@@ -772,6 +769,21 @@ mod test {
     }
 
     #[test]
+    fn test_resolve_ignores_unknown_keys_in_file_and_endpoint() {
+        let dir = scratch_dir("unknown-keys");
+        write(
+            &dir,
+            "system.yaml",
+            "endpoint: lab\nfuture: {nested: [1, 2]}\nendpoints:\n  lab:\n    endpoint: grpc://router:8080\n    future: null\n",
+        );
+
+        let settings = resolve(&bare_args(), &sources(&dir)).unwrap();
+
+        assert_eq!("grpc://router:8080", settings.endpoint.value);
+        assert_eq!("lab", settings.alias.unwrap().value);
+    }
+
+    #[test]
     fn test_resolve_endpoint_falls_back_through_all_five_levels() {
         let dir = scratch_dir("precedence");
         let sources = sources(&dir);
@@ -931,13 +943,13 @@ mod test {
     fn test_resolve_malformed_file_names_path_and_offending_key() {
         let dir = scratch_dir("malformed");
         let sources = sources(&dir);
-        let path = write(&dir, "user.yaml", "bogus_key: 1\n");
+        let path = write(&dir, "user.yaml", "timeout: invalid\n");
 
         let err = resolve(&bare_args(), &sources).unwrap_err();
         let message = err.to_string();
 
         assert!(message.contains(&path.display().to_string()), "{message}");
-        assert!(message.contains("bogus_key"), "{message}");
+        assert!(message.contains("timeout"), "{message}");
     }
 
     #[test]

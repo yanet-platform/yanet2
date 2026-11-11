@@ -334,17 +334,13 @@ rules:
     }
 
     #[test]
-    fn test_file_rejects_an_unknown_key() {
+    fn test_file_ignores_an_unknown_key() {
         let yaml = "rules:\n  - action:\n      target: t\n    srcs: []\n";
 
-        let parsed: Result<UpdateConfigRequest, _> = serde_yaml::from_str(yaml);
+        let parsed: UpdateConfigRequest = serde_yaml::from_str(yaml).unwrap();
 
-        assert!(
-            parsed
-                .expect_err("the legacy srcs key must be refused")
-                .to_string()
-                .contains("srcs")
-        );
+        assert_eq!("t", parsed.rules[0].action.as_ref().unwrap().target);
+        assert!(parsed.rules[0].sources4.is_empty());
     }
 
     #[test]
@@ -392,26 +388,20 @@ rules:
     }
 
     #[test]
-    fn test_extern_messages_default_and_refuse_unknown_keys() {
+    fn test_extern_messages_default_and_ignore_unknown_keys() {
         let sparse: forwardpb::Rule =
             serde_yaml::from_str("vlan_ranges:\n  - {}\n").expect("an empty vlan range must default");
-        let unknown: Result<forwardpb::Rule, _> = serde_yaml::from_str("devices:\n  - name: eth0\n    mtu: 9000\n");
+        let unknown: forwardpb::Rule = serde_yaml::from_str("devices:\n  - name: eth0\n    mtu: 9000\n").unwrap();
 
         assert_eq!(vec![filterpb::pb::VlanRange { from: 0, to: 0 }], sparse.vlan_ranges);
-        assert!(
-            unknown
-                .expect_err("an unknown device key must be refused")
-                .to_string()
-                .contains("mtu")
-        );
+        assert_eq!(vec![filterpb::pb::Device { name: "eth0".into() }], unknown.devices);
     }
 
     #[test]
-    fn test_unknown_null_valued_keys_are_still_refused() {
-        let refused = serde_yaml::from_str::<UpdateConfigRequest>("rulez: null\n")
-            .expect_err("a misspelled null-valued key must be refused");
+    fn test_unknown_null_valued_keys_are_ignored() {
+        let parsed = serde_yaml::from_str::<UpdateConfigRequest>("future: null\n").unwrap();
 
-        assert!(refused.to_string().contains("rulez"));
+        assert_eq!(UpdateConfigRequest::default(), parsed);
     }
 
     #[test]

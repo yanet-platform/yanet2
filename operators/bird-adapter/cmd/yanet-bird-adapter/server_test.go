@@ -25,11 +25,8 @@ import (
 // Test_ShippedDefaultConfig_MatchesServerConfig guards against drift between
 // the shipped default config file and the ServerConfig struct.
 //
-// With strict parsing enabled a stale or renamed key in the shipped YAML
-// would break every fresh install, so this test loads the conffile through
-// xcfg.WithKnownFields() and requires it to decode to the server defaults plus
-// its explicitly present BIRD block. That also catches the Go defaults
-// silently drifting away from the shipped conffile.
+// The shipped example is checked strictly so renamed keys cannot silently
+// stop configuring their fields. Runtime loading tolerates additional keys.
 func Test_ShippedDefaultConfig_MatchesServerConfig(t *testing.T) {
 	cfg, err := xcfg.LoadConfig[ServerConfig]("../../etc/yanet/bird-adapter-default.yaml", xcfg.WithKnownFields())
 	require.NoError(t, err)

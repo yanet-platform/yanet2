@@ -43,6 +43,7 @@ func Test_NewFromConfig_WiresSources(t *testing.T) {
 	rawConfig := decodeConfigNode(t, "config:\n"+
 		"  ca_sources:\n    - "+ca.BundleFile()+"\n"+
 		"  crl_sources:\n    - "+crlFile+"\n"+
+		"  future: {enabled: true}\n"+
 		"  refresh_interval: 1m\n")
 	authenticator, err := x509auth.NewFromConfig(rawConfig)
 	require.NoError(t, err)
@@ -58,14 +59,15 @@ func Test_NewFromConfig_WiresSources(t *testing.T) {
 	require.Equal(t, "pipeline-operator", info.Subject.Login)
 }
 
-// Test_NewFromConfig_RejectsUnknownKey verifies that a key the config does
-// not declare is an error, so a misspelled revocation list key cannot
-// silently leave revocation off.
-func Test_NewFromConfig_RejectsUnknownKey(t *testing.T) {
+// Test_NewFromConfig_IgnoresUnknownKey verifies that an additional key
+// leaves the configured trust authorities intact.
+func Test_NewFromConfig_IgnoresUnknownKey(t *testing.T) {
 	ca := tlscert.NewCA(t)
 
-	_, err := x509auth.NewFromConfig(decodeConfigNode(t, "config:\n"+
+	authenticator, err := x509auth.NewFromConfig(decodeConfigNode(t, "config:\n"+
 		"  ca_sources:\n    - "+ca.BundleFile()+"\n"+
-		"  crl_source: /etc/yanet2/auth/clients.crl\n"))
-	require.ErrorContains(t, err, "crl_source")
+		"  future: {enabled: true}\n"))
+	require.NoError(t, err)
+	t.Cleanup(authenticator.Close)
+	require.True(t, ca.Pool().Equal(authenticator.ClientCAs()))
 }

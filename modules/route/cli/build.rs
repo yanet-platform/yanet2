@@ -1,16 +1,6 @@
 use core::error::Error;
 
-/// Messages that gain the ordinary `Serialize`/`Deserialize` derive, plus
-/// `#[serde(deny_unknown_fields)]`.
-///
-/// `FibShow`'s `--format json` and `fib update`'s YAML loader both go
-/// straight through `FIBEntry`/`FIBNexthop` -- see `src/main.rs` -- so
-/// those are the only local messages that need it. The `IPRange` and
-/// `MACAddress` fields they carry are `extern_path`'d to `commonpb::pb`
-/// below and already have their own hand-written serde impls there.
-/// `deny_unknown_fields` only shapes `Deserialize`, turning a stray or
-/// retired key inside a YAML entry into a load error instead of silently
-/// discarding it -- see `FibConfig`'s doc in `src/main.rs`.
+/// Wire messages read from FIB documents and rendered in command output.
 const SERDE_MESSAGES: &[&str] = &[
     ".modules.route.controlplane.routepb.v1.FIBEntry",
     ".modules.route.controlplane.routepb.v1.FIBNexthop",
@@ -40,11 +30,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                 )
         });
     for message in SERDE_MESSAGES {
-        build = build.with(|builder| {
-            builder
-                .message_attribute(message, "#[derive(serde::Serialize, serde::Deserialize)]")
-                .message_attribute(message, "#[serde(deny_unknown_fields)]")
-        });
+        build =
+            build.with(|builder| builder.message_attribute(message, "#[derive(serde::Serialize, serde::Deserialize)]"));
     }
 
     build.compile()

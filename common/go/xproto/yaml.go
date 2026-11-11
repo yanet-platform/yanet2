@@ -15,9 +15,8 @@ import (
 // Unmarshal decodes a single YAML document, spelled as the message's JSON
 // form, into the message.
 //
-// A key must spell a field name exactly, letter case included, and an error
-// found while decoding into the message names the offending value by its
-// JSON pointer.
+// Known keys use the exact field name, including letter case. Unknown keys
+// are ignored, and invalid known values report their JSON pointer.
 func Unmarshal(data []byte, msg proto.Message) error {
 	if msg == nil || !msg.ProtoReflect().IsValid() {
 		return errors.New("the target message is nil")
@@ -60,7 +59,6 @@ func Unmarshal(data []byte, msg proto.Message) error {
 	proto.Reset(msg)
 	return json.Unmarshal(
 		encoded, msg,
-		json.RejectUnknownMembers(true),
 		json.WithUnmarshalers(json.UnmarshalFromFunc(unmarshalFieldless)),
 	)
 }
@@ -68,23 +66,13 @@ func Unmarshal(data []byte, msg proto.Message) error {
 // unmarshalFieldless decodes a message without fields, whose Go struct
 // encoding/json/v2 refuses for having no exported fields.
 //
-// An empty object fills it and a member is unknown. Any other message, or
-// a value other than an object, goes to the default decoding.
+// Object members are ignored. Other messages and non-object values use the
+// default decoding.
 func unmarshalFieldless(decoder *jsontext.Decoder, message proto.Message) error {
 	if message.ProtoReflect().Descriptor().Fields().Len() != 0 || decoder.PeekKind() != '{' {
 		return errors.ErrUnsupported
 	}
-	if _, err := decoder.ReadToken(); err != nil {
-		return err
-	}
-	if decoder.PeekKind() != '}' {
-		name, err := decoder.ReadToken()
-		if err != nil {
-			return err
-		}
-		return fmt.Errorf("unknown object member name %q", name.String())
-	}
-	_, err := decoder.ReadToken()
+	_, err := decoder.ReadValue()
 	return err
 }
 
