@@ -1,8 +1,7 @@
 #pragma once
 
 /*
- * The LPM range insert checked against the walk it replaced, shared by the
- * LPM test and its fuzz target.
+ * The LPM range insert checked by the LPM test against the walk it replaced.
  *
  * Two trees take the same ranges, one by the insert and one by the
  * reference walk, each in an arena of the same budget; they must return the
