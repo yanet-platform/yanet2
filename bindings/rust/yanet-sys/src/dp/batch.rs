@@ -8,7 +8,14 @@
 
 use core::{marker::PhantomData, mem::size_of, ops::Deref, ptr::NonNull};
 
+use yanet_packet::resize::{Insertion, Layout, Parsed};
+
 use crate::bindings;
+
+/// Length of the Ethernet header, before which no parsed network header
+/// starts: the tunnel operations write its ether type in the two bytes
+/// before it.
+const ETHERNET_HEADER_LEN: usize = 14;
 
 /// Packets of one handler call.
 ///
@@ -642,6 +649,27 @@ fn parsed(type_: u16, offset: u16) -> bool {
     type_ != 0 || offset != 0
 }
 
+/// Moves the offset of each parsed header starting at or after a frame
+/// offset; unparsed headers stay unparsed.
+///
+/// # Safety
+///
+/// The packet must be valid and exclusively owned.
+#[inline(always)]
+unsafe fn move_parsed(packet: *mut bindings::packet, from: usize, shift: impl Fn(u16) -> u16) {
+    // SAFETY: guaranteed by the caller.
+    unsafe {
+        let network = &raw mut (*packet).network_header;
+        if parsed((*network).type_, (*network).offset) && usize::from((*network).offset) >= from {
+            (*network).offset = shift((*network).offset);
+        }
+        let transport = &raw mut (*packet).transport_header;
+        if parsed((*transport).type_, (*transport).offset) && usize::from((*transport).offset) >= from {
+            (*transport).offset = shift((*transport).offset);
+        }
+    }
+}
+
 /// Clears what the parser writes of a packet, as an allocated packet has
 /// it: the headers unparsed, no VLAN id, hash or flags.
 ///
@@ -681,7 +709,7 @@ impl Deref for Packet<'_> {
     }
 }
 
-impl Packet<'_> {
+impl<'id> Packet<'id> {
     /// Mutable bytes of the first segment of the frame.
     #[inline(always)]
     pub fn data_mut(&mut self) -> &mut [u8] {
@@ -717,14 +745,7 @@ impl Packet<'_> {
             }
             // `packet_refresh_data_len`: the packet is on no counted list.
             (*raw).data_len = (*(*raw).mbuf).data_len;
-            let network = &raw mut (*raw).network_header;
-            if parsed((*network).type_, (*network).offset) {
-                (*network).offset += len16;
-            }
-            let transport = &raw mut (*raw).transport_header;
-            if parsed((*transport).type_, (*transport).offset) {
-                (*transport).offset += len16;
-            }
+            move_parsed(raw, 0, |offset| offset + len16);
             let (start, _) = segment((*raw).mbuf);
             Ok(core::slice::from_raw_parts_mut(start, len))
         }
@@ -781,6 +802,191 @@ impl Packet<'_> {
             (*mbuf).pkt_len -= len as u32;
             (*raw).data_len = (*mbuf).data_len;
         }
+        Ok(())
+    }
+
+    /// Inserts `len` payload bytes at frame offset `at` of a single-segment
+    /// packet, has `fill` write them, and keeps the headers consistent.
+    ///
+    /// The bytes before `at` keep their offsets: the shorter side moves, into
+    /// the headroom beyond the descriptor or into the tailroom, the other side
+    /// when that room is short. Parsed headers at or after `at` move with
+    /// their bytes; unparsed headers stay unparsed. The bytes `fill` gets
+    /// hold whatever the buffer held there, and what it returns is returned.
+    ///
+    /// The IPv4 total length, with the header checksum, the IPv6 payload
+    /// length and the UDP length grow by the bytes inserted in what each
+    /// covers. Once `fill` returns, the TCP or UDP checksum is updated over
+    /// the new bytes from the old checksum, so a segment that arrived damaged
+    /// stays damaged; a UDP checksum covers the bytes up to the UDP length
+    /// only. A fragment, a UDP datagram without a checksum or with a length
+    /// past its datagram, and a segment the frame does not hold whole keep
+    /// their transport checksum. Linking an inserted header into a chain,
+    /// such as an IPv6 extension header, is the caller's.
+    ///
+    /// Refused, leaving the packet unchanged:
+    /// - for memory safety: a chained packet, an offset past the frame, and a
+    ///   length neither room takes;
+    /// - for header consistency, as the lengths and checksums could not
+    ///   describe the result: an offset inside a fixed IPv4, IPv6, TCP or UDP
+    ///   header or inside the IPv4 or TCP options, and a length a length field
+    ///   cannot hold.
+    ///
+    /// [`Packet::prepend`] and [`Packet::append`] edit the frame raw, as DPDK
+    /// does, refusing only what memory safety needs.
+    #[inline]
+    pub fn insert<R>(&mut self, at: usize, len: usize, fill: impl FnOnce(&mut [u8]) -> R) -> Result<R, ResizeError> {
+        self.insert_as(at, len, Insertion::Payload, fill)
+    }
+
+    /// Inserts `len` bytes of TCP options at frame offset `at`, between the
+    /// end of the fixed TCP header and the end of its options, as
+    /// [`Packet::insert`] inserts payload; `fill` writes them.
+    ///
+    /// The data offset grows with the lengths, and the TCP checksum covers
+    /// both. The offset is the caller's to put between options: one inside an
+    /// option splits it.
+    ///
+    /// Refused, besides what an insert refuses for memory safety, for header
+    /// consistency: an offset outside the options, a length not of whole
+    /// 32-bit words or one making the header longer than 60 bytes, a header
+    /// that runs past its datagram or whose data offset is below five words,
+    /// and a packet without an available TCP header.
+    #[inline]
+    pub fn insert_tcp_options<R>(
+        &mut self,
+        at: usize,
+        len: usize,
+        fill: impl FnOnce(&mut [u8]) -> R,
+    ) -> Result<R, ResizeError> {
+        self.insert_as(at, len, Insertion::TcpOptions, fill)
+    }
+
+    /// Inserts bytes as the insertion names them; see [`Packet::insert`].
+    #[inline(always)]
+    fn insert_as<R>(
+        &mut self,
+        at: usize,
+        len: usize,
+        insertion: Insertion,
+        fill: impl FnOnce(&mut [u8]) -> R,
+    ) -> Result<R, ResizeError> {
+        let len16 = u16::try_from(len).map_err(|_| ResizeError)?;
+        let data_len = self.data().len();
+        if self.chained() || at > data_len {
+            return Err(ResizeError);
+        }
+        // The plan refuses an offset inside a header the parser vouches for.
+        let mut edit = Layout::read(self.data(), self.parsed())
+            .plan_insert(self.data(), at, len, insertion)
+            .map_err(|_| ResizeError)?;
+        let raw = self.raw.as_ptr();
+        // SAFETY: the packet, its mbuf and buffer are exclusively ours for
+        // the call (attach: packet). The moved bytes and the new ones lie in
+        // the only segment and the room checked for them: the headroom
+        // beyond the descriptor or the tailroom. A parsed offset at or after
+        // the insert is no later than the end of the frame, so the shifted
+        // one is no later than the end of the grown frame, inside the buffer.
+        unsafe {
+            let mbuf = (*raw).mbuf;
+            let data_off = usize::from((*mbuf).data_off);
+            let front_room = data_off >= size_of::<bindings::packet>() + len;
+            let tail_room = usize::from((*mbuf).buf_len) - data_off - data_len >= len;
+            let front = match (at <= data_len - at, front_room, tail_room) {
+                (_, false, false) => return Err(ResizeError),
+                (true, true, _) | (false, true, false) => true,
+                _ => false,
+            };
+            let (start, _) = segment(mbuf);
+            if front {
+                core::ptr::copy(start, start.sub(len), at);
+                (*mbuf).data_off -= len16;
+            } else {
+                core::ptr::copy(start.add(at), start.add(at + len), data_len - at);
+            }
+            (*mbuf).data_len += len16;
+            (*mbuf).pkt_len += u32::from(len16);
+            // `packet_refresh_data_len`: the packet is on no counted list.
+            (*raw).data_len = (*mbuf).data_len;
+            move_parsed(raw, at, |offset| offset + len16);
+        }
+        let frame = self.data_mut();
+        edit.write_headers(frame);
+        let filled = fill(&mut frame[at..at + len]);
+        edit.write_transport_checksum(frame);
+        Ok(filled)
+    }
+
+    /// Removes `len` bytes at frame offset `at` of a single-segment packet
+    /// and keeps the headers consistent.
+    ///
+    /// The bytes before `at` keep their offsets: the shorter side moves.
+    /// Parsed headers after the range move with their bytes; unparsed
+    /// headers stay unparsed.
+    ///
+    /// At once, the lengths of the parsed headers shrink by the removed bytes
+    /// in what each covers, removed option bytes shrink the IPv4 header length
+    /// or the TCP data offset, and the IPv4 header checksum and the TCP or
+    /// UDP checksum are updated over all of it. The transport checksum is
+    /// left unchanged in the same cases as for [`Packet::insert`].
+    ///
+    /// Refused, leaving the packet unchanged:
+    /// - for memory safety: a chained packet, a range past the frame, one
+    ///   holding a parsed header's start or a byte the parser vouches for, and
+    ///   one that would leave a parsed network header starting inside the
+    ///   14-byte Ethernet header, whose ether type the tunnel operations write
+    ///   in the two bytes before it;
+    /// - for header consistency: a range holding both option bytes and bytes
+    ///   after the options, option bytes not of whole 32-bit words, and a
+    ///   length a length field holds less of than the range removes.
+    #[inline]
+    pub fn remove(&mut self, at: usize, len: usize) -> Result<(), ResizeError> {
+        let len16 = u16::try_from(len).map_err(|_| ResizeError)?;
+        let data_len = self.data().len();
+        let end = at.checked_add(len).ok_or(ResizeError)?;
+        // A header vouching for no bytes still has its start, which the
+        // removed range must not hold either.
+        let overlaps = |&(start, span): &(usize, usize)| at < start + span.max(1) && start < end;
+        // The network header must not move into the Ethernet header. A
+        // parsed one may be of ether type zero, so its offset counts too.
+        let PacketMeta(packet) = &**self;
+        let network = packet.network_header;
+        let offset = usize::from(network.offset);
+        let into_ethernet =
+            parsed(network.type_, network.offset) && offset >= end && offset - len < ETHERNET_HEADER_LEN;
+        if self.chained()
+            || end > data_len
+            || into_ethernet
+            || len > 0 && self.parsed_spans().iter().flatten().any(overlaps)
+        {
+            return Err(ResizeError);
+        }
+        let mut edit = Layout::read(self.data(), self.parsed())
+            .plan_remove(self.data(), at, len)
+            .map_err(|_| ResizeError)?;
+        let raw = self.raw.as_ptr();
+        // SAFETY: the packet, its mbuf and buffer are exclusively ours for
+        // the call (attach: packet), and the moved bytes lie in its only
+        // segment. A parsed offset after the removed range moves down by
+        // its length and its vouched bytes stay whole, as none of them was
+        // removed; one before it keeps its place, inside the shrunk frame.
+        unsafe {
+            let mbuf = (*raw).mbuf;
+            let (start, _) = segment(mbuf);
+            if at <= data_len - end {
+                core::ptr::copy(start, start.add(len), at);
+                (*mbuf).data_off += len16;
+            } else {
+                core::ptr::copy(start.add(end), start.add(at), data_len - end);
+            }
+            (*mbuf).data_len -= len16;
+            (*mbuf).pkt_len -= u32::from(len16);
+            (*raw).data_len = (*mbuf).data_len;
+            move_parsed(raw, end, |offset| offset - len16);
+        }
+        let frame = self.data_mut();
+        edit.write_headers(frame);
+        edit.write_transport_checksum(frame);
         Ok(())
     }
 
@@ -1097,6 +1303,37 @@ impl PacketMeta {
     /// header.
     #[inline(always)]
     fn parsed_end(&self) -> usize {
+        self.parsed_spans()
+            .iter()
+            .flatten()
+            .map(|&(start, span)| start + span)
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// What the parser found, as the resize bookkeeping reads it: the
+    /// network header's type and offset, the protocol and offset of an
+    /// available transport header, and whether the packet is a fragment.
+    #[inline(always)]
+    fn parsed(&self) -> Parsed {
+        let Self(packet) = self;
+        let transport = packet.transport_header;
+        let available = parsed(transport.type_, transport.offset) && self.transport_header_available();
+        Parsed {
+            network_type: self.network_type(),
+            network_offset: self.network_offset(),
+            transport: available.then_some((self.transport_protocol(), transport.offset)),
+            fragment: self.is_fragment(),
+        }
+    }
+
+    /// Start and vouched length of the parsed network and transport
+    /// headers, from the start of the frame; `None` for an unparsed one.
+    ///
+    /// The parser vouches (attach: packet) for the fixed IPv4 or IPv6 header
+    /// and an available TCP or UDP header, and for no bytes of other headers.
+    #[inline(always)]
+    fn parsed_spans(&self) -> [Option<(usize, usize)>; 2] {
         let Self(packet) = self;
         let (network, transport) = (packet.network_header, packet.transport_header);
         let network_len = match u16::from_be(network.type_) {
@@ -1110,7 +1347,10 @@ impl PacketMeta {
             (true, 17) => 8,
             _ => 0,
         };
-        (usize::from(network.offset) + network_len).max(usize::from(transport.offset) + transport_len)
+        [
+            parsed(network.type_, network.offset).then_some((usize::from(network.offset), network_len)),
+            parsed(transport.type_, transport.offset).then_some((usize::from(transport.offset), transport_len)),
+        ]
     }
 }
 

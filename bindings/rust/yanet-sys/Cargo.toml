@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 netip = "0.5.0"
+yanet-packet = { path = "../yanet-packet" }
 yanet-shm = { path = "../yanet-shm" }
 
 [build-dependencies]

@@ -8,6 +8,8 @@ use zerocopy::byteorder::network_endian::{U16, U32};
 
 use crate::{fold, no_zero};
 
+pub mod resize;
+
 /// The mode of a header mutation: whether its changes adjust the checksum.
 ///
 /// Sealed: [`Adjusted`] and [`Unadjusted`] are the only modes.
