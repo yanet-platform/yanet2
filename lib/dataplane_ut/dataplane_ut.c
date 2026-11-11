@@ -728,11 +728,27 @@ saved_packet_list_free_extra(
 }
 
 static int
-saved_packet_restore(struct saved_packet *saved) {
+saved_packet_restore(struct saved_packet *saved, int reset) {
 	*saved->pkt = saved->state;
 	saved->pkt->next = NULL;
 
 	struct rte_mbuf *mbuf = packet_to_mbuf(saved->pkt);
+	if (reset & DATAPLANE_UT_RESET_GEOMETRY) {
+		mbuf->data_off = saved->first_data_off;
+		mbuf->data_len = saved->first_data_len;
+		mbuf->pkt_len = saved->data_len;
+
+		// Only the first segment is put back, so the chain must still
+		// add up to the captured length.
+		uint32_t chain_len = 0;
+		for (const struct rte_mbuf *segment = mbuf; segment != NULL;
+		     segment = segment->next) {
+			chain_len += segment->data_len;
+		}
+		if (chain_len != saved->data_len) {
+			return -EINVAL;
+		}
+	}
 	if (rte_pktmbuf_pkt_len(mbuf) != saved->data_len ||
 	    mbuf->nb_segs != saved->segment_count ||
 	    mbuf->data_off != saved->first_data_off ||
@@ -759,12 +775,15 @@ saved_packet_restore(struct saved_packet *saved) {
 
 static int
 saved_packets_rebuild(
-	struct saved_packet *saved, size_t count, struct packet_list *input
+	struct saved_packet *saved,
+	size_t count,
+	struct packet_list *input,
+	int reset
 ) {
 	packet_list_init(input);
 	int result = 0;
 	for (size_t idx = 0; idx < count; ++idx) {
-		int rc = saved_packet_restore(&saved[idx]);
+		int rc = saved_packet_restore(&saved[idx], reset);
 		if (result == 0 && rc != 0) {
 			result = rc;
 		}
@@ -780,7 +799,7 @@ dataplane_ut_run_rounds(
 	const uint16_t *device_ids,
 	struct packet_list *input,
 	uint64_t rounds,
-	int reset_payload
+	int reset
 ) {
 	size_t count = (size_t)packet_list_count(input);
 	if (rounds == 0 || count == 0) {
@@ -807,7 +826,7 @@ dataplane_ut_run_rounds(
 		saved[idx].segment_count = mbuf->nb_segs;
 		saved[idx].first_data_off = mbuf->data_off;
 		saved[idx].first_data_len = mbuf->data_len;
-		if (reset_payload) {
+		if (reset & DATAPLANE_UT_RESET_PAYLOAD) {
 			saved[idx].data = malloc(saved[idx].data_len);
 			if (saved[idx].data == NULL) {
 				result = -ENOMEM;
@@ -840,7 +859,7 @@ dataplane_ut_run_rounds(
 	// every saved packet through output or drop. Newly emitted packets are
 	// reclaimed below.
 	for (uint64_t round = 0; round < rounds; ++round) {
-		result = saved_packets_rebuild(saved, count, input);
+		result = saved_packets_rebuild(saved, count, input, reset);
 		if (result != 0) {
 			break;
 		}
@@ -856,7 +875,8 @@ dataplane_ut_run_rounds(
 	// Leave input holding all packets so the caller can free them.
 cleanup:
 	if (captured) {
-		int restore_result = saved_packets_rebuild(saved, count, input);
+		int restore_result =
+			saved_packets_rebuild(saved, count, input, reset);
 		if (result == 0) {
 			result = restore_result;
 		}
@@ -867,6 +887,42 @@ cleanup:
 
 	free(saved);
 	return result;
+}
+
+uint16_t
+dataplane_ut_headroom(const struct packet *packet) {
+	uint16_t headroom = rte_pktmbuf_headroom(packet_to_mbuf(packet));
+	// The packet descriptor's share of the headroom is never a header's.
+	if (headroom < sizeof(struct packet)) {
+		return 0;
+	}
+	return headroom - sizeof(struct packet);
+}
+
+int
+dataplane_ut_limit_headroom(
+	struct packet_list *list, const uint16_t *headroom, size_t count
+) {
+	struct packet *packet = packet_list_first(list);
+	for (size_t idx = 0; idx < count; ++idx) {
+		if (packet == NULL ||
+		    dataplane_ut_headroom(packet) < headroom[idx]) {
+			return -EINVAL;
+		}
+		packet = packet->next;
+	}
+
+	packet = packet_list_first(list);
+	for (size_t idx = 0; idx < count; ++idx) {
+		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+		uint16_t data_off = sizeof(struct packet) + headroom[idx];
+		memmove((char *)mbuf->buf_addr + data_off,
+			rte_pktmbuf_mtod(mbuf, char *),
+			mbuf->data_len);
+		mbuf->data_off = data_off;
+		packet = packet->next;
+	}
+	return 0;
 }
 
 void

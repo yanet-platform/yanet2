@@ -218,6 +218,8 @@ type PacketDescriptor struct {
 	TransportOffset uint16
 	// RecircRemaining is what is left of the packet's recirculation budget.
 	RecircRemaining uint16
+	// Headroom is the bytes of headers a module can still prepend.
+	Headroom uint16
 }
 
 // Harness is a handle to an in-process dataplane harness.
@@ -542,7 +544,31 @@ func (m *Harness) HandlePacketsWithHashes(
 // multi-segment mbuf. The result is returned unparsed so callers can inspect
 // packets that gopacket cannot decode.
 func (m *Harness) HandleSegmentedPackets(packets ...[][]byte) (*RawResult, error) {
-	return m.handleSegmentedPackets(0, 0, packets...)
+	return m.handleSegmentedPackets(0, 0, nil, packets...)
+}
+
+// HandleSegmentedPacketsWithHeadroom runs one pipeline round on worker 0, as
+// HandleSegmentedPackets does, over packets left with less room for
+// prepended headers.
+//
+// headroom[i] is the bytes a module can still prepend to packets[i]. A packet
+// enters a real pipeline with the default headroom and loses it to every
+// header prepended on the way, so here a test shows what a module does when
+// its header no longer fits. headroom may be shorter than packets — entries
+// past len(headroom) keep the default. Returns an error if len(headroom) >
+// len(packets) or an entry exceeds the default.
+func (m *Harness) HandleSegmentedPacketsWithHeadroom(
+	headroom []uint16,
+	packets ...[][]byte,
+) (*RawResult, error) {
+	if len(headroom) > len(packets) {
+		return nil, fmt.Errorf(
+			"headroom length %d exceeds packets length %d",
+			len(headroom),
+			len(packets),
+		)
+	}
+	return m.handleSegmentedPackets(0, 0, headroom, packets...)
 }
 
 // HandleSegmentedPacketsOnDevice runs one pipeline round on the given worker
@@ -570,7 +596,7 @@ func (m *Harness) HandleSegmentedPacketsOnDevice(
 			m.deviceCount,
 		)
 	}
-	return m.handleSegmentedPackets(worker, deviceID, packets...)
+	return m.handleSegmentedPackets(worker, deviceID, nil, packets...)
 }
 
 // freeLostPackets frees the packets that are on neither list.
@@ -590,9 +616,13 @@ func freeLostPackets(packets []*dataplane.Packet, lists ...*dataplane.PacketList
 
 // handleSegmentedPackets is the shared implementation for the
 // HandleSegmentedPackets* variants.
+//
+// It builds the packets, optionally limits their headroom, then runs one
+// pipeline round on the given worker index.
 func (m *Harness) handleSegmentedPackets(
 	worker int,
 	deviceID uint16,
+	headroom []uint16,
 	packets ...[][]byte,
 ) (*RawResult, error) {
 	// The dataplane_ut_run call indexes ut->dp_config->workers[worker] directly.
@@ -619,6 +649,19 @@ func (m *Harness) handleSegmentedPackets(
 	}
 
 	packetList := dataplane.NewPacketList(&pinner, builtPackets)
+
+	if len(headroom) > 0 {
+		pinner.Pin(&headroom[0])
+		rc := C.dataplane_ut_limit_headroom(
+			(*C.struct_packet_list)(unsafe.Pointer(packetList)),
+			(*C.uint16_t)(unsafe.Pointer(&headroom[0])),
+			C.size_t(len(headroom)),
+		)
+		if rc != 0 {
+			packetList.Free()
+			return nil, fmt.Errorf("failed to limit packet headroom: rc=%d", rc)
+		}
+	}
 
 	pinner.Pin(m)
 
@@ -670,6 +713,7 @@ func (m *Harness) handleSegmentedPackets(
 				NetworkOffset:   uint16(cPacket.network_header.offset),
 				TransportOffset: uint16(cPacket.transport_header.offset),
 				RecircRemaining: uint16(cPacket.recirc_remaining),
+				Headroom:        uint16(C.dataplane_ut_headroom(cPacket)),
 			})
 		}
 		return out
@@ -811,12 +855,25 @@ func reportThroughput(b *testing.B, totalBytes int64, packets int) {
 
 // benchOptions configures a Bench run.
 type benchOptions struct {
-	ResetPayload bool
-	DeviceIDs    []uint16
+	ResetPayload  bool
+	ResetGeometry bool
+	DeviceIDs     []uint16
 }
 
 func newBenchOptions() *benchOptions {
 	return &benchOptions{}
+}
+
+// reset returns what the rounds of the run put back into every packet.
+func (m *benchOptions) reset() C.int {
+	reset := C.int(0)
+	if m.ResetPayload {
+		reset |= C.DATAPLANE_UT_RESET_PAYLOAD
+	}
+	if m.ResetGeometry {
+		reset |= C.DATAPLANE_UT_RESET_GEOMETRY
+	}
+	return reset
 }
 
 // BenchOption customizes a Bench run.
@@ -827,11 +884,24 @@ type BenchOption func(*benchOptions)
 //
 // Required for modules that rewrite packet contents in place, such as
 // route decrementing TTL — costs one payload copy per packet per round.
-// Only the bytes are restored, so geometry-changing modules stay out of
-// scope.
+// Only the bytes are restored: a module that moves headers needs
+// WithGeometryReset as well.
 func WithPayloadReset() BenchOption {
 	return func(opts *benchOptions) {
 		opts.ResetPayload = true
+	}
+}
+
+// WithGeometryReset restores the data offset and the lengths of every
+// packet's first segment to their captured state between rounds.
+//
+// Required for modules that prepend or strip headers, such as an
+// encapsulation. They overwrite bytes of the frame as well, so the run
+// takes WithPayloadReset beside it. A module that changes the segment
+// chain stays out of scope.
+func WithGeometryReset() BenchOption {
+	return func(opts *benchOptions) {
+		opts.ResetGeometry = true
 	}
 }
 
@@ -846,6 +916,33 @@ func WithDeviceIDs(ids []uint16) BenchOption {
 	return func(opts *benchOptions) {
 		opts.DeviceIDs = ids
 	}
+}
+
+// benchDevices returns the executing device id of each of count packets:
+// the ids the options give, then device 0.
+//
+// The round dispatch indexes per-device scheduling arrays by the packet
+// device id, so an id outside the registered topology would corrupt memory
+// on the C side and fails the benchmark here.
+func (m *Harness) benchDevices(
+	b *testing.B, opts *benchOptions, count int,
+) []uint16 {
+	b.Helper()
+
+	for idx, deviceID := range opts.DeviceIDs {
+		if int(deviceID) >= m.deviceCount {
+			b.Fatalf(
+				"device id %d at packet %d exceeds topology device count %d",
+				deviceID,
+				idx,
+				m.deviceCount,
+			)
+		}
+	}
+
+	devices := make([]uint16, count)
+	copy(devices, opts.DeviceIDs)
+	return devices
 }
 
 // Bench runs b.N pipeline rounds over the given packets on worker 0,
@@ -869,19 +966,7 @@ func (m *Harness) Bench(
 	pinner := runtime.Pinner{}
 	defer pinner.Unpin()
 
-	// The round dispatch indexes per-device scheduling arrays by the
-	// packet device id, so an id outside the registered topology would
-	// corrupt memory on the C side.
-	for idx, deviceID := range opts.DeviceIDs {
-		if int(deviceID) >= m.deviceCount {
-			b.Fatalf(
-				"device id %d at packet %d exceeds topology device count %d",
-				deviceID,
-				idx,
-				m.deviceCount,
-			)
-		}
-	}
+	devices := m.benchDevices(b, opts, len(packets))
 
 	payloads := xpacket.PacketsGoPayload(packets...)
 	data := make([]dataplane.PacketData, 0, len(payloads))
@@ -903,14 +988,6 @@ func (m *Harness) Bench(
 	}
 	numPkts := len(payloads)
 
-	reset := C.int(0)
-	if opts.ResetPayload {
-		reset = C.int(1)
-	}
-
-	devices := make([]uint16, len(packets))
-	copy(devices, opts.DeviceIDs)
-
 	var devicesPtr *C.uint16_t
 	if len(devices) > 0 {
 		devicesPtr = (*C.uint16_t)(&devices[0])
@@ -923,7 +1000,7 @@ func (m *Harness) Bench(
 		devicesPtr,
 		(*C.struct_packet_list)(unsafe.Pointer(packetList)),
 		C.uint64_t(b.N),
-		reset,
+		opts.reset(),
 	)
 	b.StopTimer()
 	if rc != 0 {
