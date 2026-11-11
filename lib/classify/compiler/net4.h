@@ -1,17 +1,14 @@
 #pragma once
 
-#include "common/key.h"
 #include "common/lpm.h"
 #include "common/memory.h"
-#include "common/radix.h"
-#include "common/range_collector.h"
-#include "common/range_index.h"
 #include "common/registry.h"
 #include "common/value.h"
 
 #include "declare.h"
 #include "lib/classify/classifiers/net4.h"
 #include "lib/classify/rule.h"
+#include "partition.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -37,9 +34,21 @@ struct classify_compile_net4 {
 	classify_net4_get_net4s_func get_net4s;
 	const char *name;
 
-	struct range_index range_index;
+	struct classify_partition partition;
 	struct value_table value_table;
 };
+
+// The address of an IPv4 network masked to its prefix, as a key.
+static inline uint64_t
+classify_net4_from(const struct net4 *net4) {
+	return classify_key_load(net4->addr, 4) &
+	       classify_key_load(net4->mask, 4);
+}
+
+static inline uint64_t
+classify_net4_len(const struct net4 *net4) {
+	return __builtin_popcountll(*(net4_word *)net4->mask);
+}
 
 static inline struct classify_compile_net4 *
 classify_compile_net4_create(
@@ -60,10 +69,7 @@ classify_compile_net4_create(
 	compile->get_net4s = get_net4s;
 	compile->name = name;
 
-	struct range_collector collector;
-	if (range_collector_init(&collector, memory_context)) {
-		goto error_free;
-	}
+	struct classify_prefixes prefixes = {NULL, 0};
 
 	for (uint32_t rule_idx = 0; rule_idx < rule_count; ++rule_idx) {
 		const struct classifier_rule *rule = rules[rule_idx];
@@ -78,28 +84,21 @@ classify_compile_net4_create(
 		for (struct net4 *net4 = net->items;
 		     net4 < net->items + net->count;
 		     ++net4) {
-			uint8_t from[4];
-			for (uint32_t idx = 0; idx < 4; ++idx) {
-				from[idx] = net4->addr[idx] & net4->mask[idx];
-			}
-
-			if (range4_collector_add(
-				    &collector,
-				    from,
-				    __builtin_popcountll(*(net4_word *)
-								  net4->mask)
+			if (classify_prefixes_add(
+				    memory_context,
+				    &prefixes,
+				    classify_net4_from(net4),
+				    classify_net4_len(net4)
 			    )) {
-				goto error_collector;
+				goto error_prefixes;
 			}
 		}
 	}
 
-	if (range_index_init(&compile->range_index, memory_context)) {
-		goto error_collector;
-	}
-
-	if (range_collector_collect(&collector, 4, &compile->range_index)) {
-		goto error_range_index;
+	if (classify_partition_build(
+		    memory_context, 32, &prefixes, &compile->partition
+	    )) {
+		goto error_prefixes;
 	}
 
 	char table_name[MEMORY_CONTEXT_NAME_SIZE];
@@ -109,22 +108,21 @@ classify_compile_net4_create(
 		    memory_context,
 		    table_name,
 		    1,
-		    collector.count
+		    compile->partition.region_count
 	    )) {
-		goto error_range_index;
+		goto error_partition;
 	}
 
-	range_collector_free(&collector, 4);
+	classify_prefixes_free(memory_context, &prefixes);
 
 	return compile;
 
-error_range_index:
-	range_index_free(&compile->range_index);
+error_partition:
+	classify_partition_free(memory_context, &compile->partition);
 
-error_collector:
-	range_collector_free(&collector, 4);
+error_prefixes:
+	classify_prefixes_free(memory_context, &prefixes);
 
-error_free:
 	memory_bfree(
 		memory_context, compile, sizeof(struct classify_compile_net4)
 	);
@@ -167,38 +165,28 @@ classify_compile_net4_rule_iter(
 	net4_compile->get_net4s(rule, &nets);
 	const struct filter_net4s *net = &nets;
 
-	uint32_t *range_index_values =
-		ADDR_OF(&net4_compile->range_index.values);
+	const struct classify_partition *partition = &net4_compile->partition;
 
 	for (uint32_t net_idx = 0; net_idx < net->count; ++net_idx) {
 		const struct net4 *net4 = net->items + net_idx;
 
-		uint8_t from[4];
-		uint8_t to[4];
-		for (uint32_t idx = 0; idx < 4; ++idx) {
-			from[idx] = net4->addr[idx] & net4->mask[idx];
-			to[idx] = net4->addr[idx] | ~net4->mask[idx];
-		}
-		filter_key_inc(4, to);
-
-		uint32_t start =
-			radix_lookup(&net4_compile->range_index.radix, 4, from);
-		uint32_t stop =
-			radix_lookup(&net4_compile->range_index.radix, 4, to);
-		if (stop == 0) {
-			/*
-			 * The only chance get zero here is for the last one
-			 * item.
-			 */
-			stop = net4_compile->range_index.count;
-		}
+		uint64_t from = classify_net4_from(net4);
+		uint32_t start;
+		uint32_t stop;
+		classify_partition_bounds(
+			partition,
+			from,
+			classify_prefix_to(32, from, classify_net4_len(net4)),
+			&start,
+			&stop
+		);
 
 		for (uint32_t idx = start; idx < stop; ++idx) {
 			if (iter_cb_func(
 				    value_table_get_ptr(
 					    &net4_compile->value_table,
 					    0,
-					    range_index_values[idx]
+					    partition->values[idx]
 				    ),
 				    cb_func_data
 			    ) < 0) {
@@ -238,7 +226,7 @@ classify_compile_net4_free(
 ) {
 	struct classify_compile_net4 *net4_compile = compile;
 
-	range_index_free(&net4_compile->range_index);
+	classify_partition_free(memory_context, &net4_compile->partition);
 	value_table_free(&net4_compile->value_table);
 
 	memory_bfree(
@@ -274,8 +262,10 @@ classify_compile_net4_commit(
 		return -1;
 	}
 
-	if (range_index_build_lpm(
-		    &net4_compile->range_index, 4, &net4_attr->lpm
+	if (classify_partition_build_lpm(
+		    &net4_compile->partition,
+		    net4_compile->partition.values,
+		    &net4_attr->lpm
 	    )) {
 		goto error;
 	}

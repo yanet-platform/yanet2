@@ -6,11 +6,12 @@
  * the port and protocol range attributes.
  *
  * The ruleset intervals partition the domain into regions with every
- * point of a region covered by the same set of rules. The range
- * collector computes the partition, the build touches and collects
- * whole regions instead of every covered value, and the classes are
- * committed into a flat attribute line indexed by the raw value, so
- * the query side reads them with one flat load.
+ * point of a region covered by the same set of rules. The boundary
+ * partition below splits the domain into pieces at the range ends, the
+ * build touches and collects whole pieces instead of every covered
+ * value, and the classes are committed into a flat attribute line
+ * indexed by the raw value, so the query side reads them with one flat
+ * load.
  *
  * One expansion of the declaration below yields the full compile
  * machinery of one attribute side: the compile scratch with its ops
@@ -20,11 +21,7 @@
  * generated callbacks carry no rule knowledge beyond it.
  */
 
-#include "common/key.h"
 #include "common/memory.h"
-#include "common/radix.h"
-#include "common/range_collector.h"
-#include "common/range_index.h"
 #include "common/registry.h"
 #include "common/value.h"
 
@@ -52,68 +49,99 @@ typedef void (*classify_u16_get_ranges_func)(
 	const struct classifier_rule *rule, struct filter_u16_ranges *ranges
 );
 
+#define FILTER_U16_WORDS (65536 / 64)
+
 /*
- * Adds the interval [from, to] to the collector as the minimal set of
- * aligned prefix blocks covering it. The collector takes masks, so a
- * block of 2^width values is a mask of 16 - width bits.
+ * Partition of the 16 bit domain by the range ends.
+ *
+ * A piece starts at zero, at the start of every range and past the end
+ * of every range; the bitmap marks the piece starts. The rank of a word
+ * counts the starts in the words before it, so a value resolves into
+ * its piece with one popcount.
  */
-static inline int
-filter_u16_add_range(
-	struct range_collector *collector, uint32_t from, uint32_t to
+struct filter_u16_partition {
+	uint64_t starts[FILTER_U16_WORDS];
+	uint16_t rank[FILTER_U16_WORDS];
+	uint32_t count;
+};
+
+static inline void
+filter_u16_partition_init(struct filter_u16_partition *partition) {
+	memset(partition, 0, sizeof(*partition));
+	partition->starts[0] = 1;
+}
+
+// Splits the domain at both ends of the range; a reversed range covers
+// no values and splits nothing.
+static inline void
+filter_u16_partition_add(
+	struct filter_u16_partition *partition, uint32_t from, uint32_t to
 ) {
-	while (from <= to) {
-		uint32_t aligned = (from == 0) ? 1u << 16 : from & -from;
-		uint32_t width = 31 - __builtin_clz(aligned);
-		uint32_t room = to - from + 1;
-		while ((1u << width) > room) {
-			--width;
-		}
-		uint8_t key[2];
-		key[0] = from >> 8;
-		key[1] = from;
-		if (range2_collector_add(collector, key, 16 - width)) {
-			return -1;
-		}
-		from += 1u << width;
+	if (from > to) {
+		return;
 	}
-	return 0;
+	partition->starts[from / 64] |= (uint64_t)1 << (from % 64);
+	if (to < 65535) {
+		++to;
+		partition->starts[to / 64] |= (uint64_t)1 << (to % 64);
+	}
+}
+
+// Counts the pieces once every range is added.
+static inline void
+filter_u16_partition_rank(struct filter_u16_partition *partition) {
+	uint32_t count = 0;
+	for (uint32_t word = 0; word < FILTER_U16_WORDS; ++word) {
+		partition->rank[word] = count;
+		count += __builtin_popcountll(partition->starts[word]);
+	}
+	partition->count = count;
+}
+
+static inline int
+filter_u16_partition_is_start(
+	const struct filter_u16_partition *partition, uint32_t value
+) {
+	return (partition->starts[value / 64] >> (value % 64)) & 1;
+}
+
+// The index of the piece holding the value: the number of piece starts
+// up to the value, the value included, less one.
+static inline uint32_t
+filter_u16_partition_piece(
+	const struct filter_u16_partition *partition, uint32_t value
+) {
+	uint64_t upto = partition->starts[value / 64] &
+			(((uint64_t)2 << (value % 64)) - 1);
+	return partition->rank[value / 64] + __builtin_popcountll(upto) - 1;
 }
 
 /*
- * Fills the committed line region by region: the walk delivers the
- * region start keys in ascending order along with the region indexes,
- * every raw value of a region gains the region class.
+ * Fills the committed line piece by piece: every raw value of a piece
+ * gains the class of the piece.
  */
-struct filter_u16_commit_ctx {
-	struct vline *line;
-	struct value_table *value_table;
-
-	uint32_t value;
-	uint32_t pos;
-};
-
-static inline int
-filter_u16_commit_iterate(
-	uint8_t key_size, const uint8_t *key, uint32_t index, void *data
+static inline void
+filter_u16_fill_line(
+	const struct filter_u16_partition *partition,
+	const struct value_table *value_table,
+	struct vline *line
 ) {
-	(void)key_size;
-	struct filter_u16_commit_ctx *ctx =
-		(struct filter_u16_commit_ctx *)data;
-
-	uint32_t to = ((uint32_t)key[0] << 8) | key[1];
-	while (ctx->pos < to) {
-		*vline_get_ptr(ctx->line, ctx->pos++) = ctx->value;
+	// Zero starts the first piece.
+	uint32_t piece = UINT32_MAX;
+	uint32_t value = 0;
+	for (uint32_t pos = 0; pos < 65536; ++pos) {
+		if (filter_u16_partition_is_start(partition, pos)) {
+			value = value_table_get(value_table, 0, ++piece);
+		}
+		*vline_get_ptr(line, pos) = value;
 	}
-	ctx->value = value_table_get(ctx->value_table, 0, index);
-
-	return 0;
 }
 
 #define CLASSIFY_U16_RANGES_COMPILE(tag, attr_type, get_ranges)                \
 	struct classify_compile_##tag {                                        \
 		classify_u16_get_ranges_func get_ranges;                       \
 		const char *name;                                              \
-		struct range_index range_index;                                \
+		struct filter_u16_partition partition;                         \
 		struct value_table value_table;                                \
 	};                                                                     \
                                                                                \
@@ -137,10 +165,7 @@ filter_u16_commit_iterate(
 		compile->get_ranges = adapted_get_ranges;                      \
 		compile->name = name;                                          \
                                                                                \
-		struct range_collector collector;                              \
-		if (range_collector_init(&collector, memory_context)) {        \
-			goto error_free;                                       \
-		}                                                              \
+		filter_u16_partition_init(&compile->partition);                \
                                                                                \
 		for (uint32_t rule_idx = 0; rule_idx < rule_count;             \
 		     ++rule_idx) {                                             \
@@ -152,25 +177,14 @@ filter_u16_commit_iterate(
 			struct filter_u16_ranges ranges;                       \
 			compile->get_ranges(rule, &ranges);                    \
 			for (uint32_t idx = 0; idx < ranges.count; ++idx) {    \
-				if (filter_u16_add_range(                      \
-					    &collector,                        \
-					    ranges.items[idx].from,            \
-					    ranges.items[idx].to               \
-				    )) {                                       \
-					goto error_collector;                  \
-				}                                              \
+				filter_u16_partition_add(                      \
+					&compile->partition,                   \
+					ranges.items[idx].from,                \
+					ranges.items[idx].to                   \
+				);                                             \
 			}                                                      \
 		}                                                              \
-                                                                               \
-		if (range_index_init(&compile->range_index, memory_context)) { \
-			goto error_collector;                                  \
-		}                                                              \
-                                                                               \
-		if (range_collector_collect(                                   \
-			    &collector, 2, &compile->range_index               \
-		    )) {                                                       \
-			goto error_range_index;                                \
-		}                                                              \
+		filter_u16_partition_rank(&compile->partition);                \
                                                                                \
 		char table_name[MEMORY_CONTEXT_NAME_SIZE];                     \
 		classify_leaf_name(                                            \
@@ -181,29 +195,17 @@ filter_u16_commit_iterate(
 			    memory_context,                                    \
 			    table_name,                                        \
 			    1,                                                 \
-			    compile->range_index.count                         \
+			    compile->partition.count                           \
 		    )) {                                                       \
-			goto error_range_index;                                \
+			memory_bfree(                                          \
+				memory_context,                                \
+				compile,                                       \
+				sizeof(struct classify_compile_##tag)          \
+			);                                                     \
+			return NULL;                                           \
 		}                                                              \
                                                                                \
-		range_collector_free(&collector, 2);                           \
-                                                                               \
 		return compile;                                                \
-                                                                               \
-	error_range_index:                                                     \
-		range_index_free(&compile->range_index);                       \
-                                                                               \
-	error_collector:                                                       \
-		range_collector_free(&collector, 2);                           \
-                                                                               \
-	error_free:                                                            \
-		memory_bfree(                                                  \
-			memory_context,                                        \
-			compile,                                               \
-			sizeof(struct classify_compile_##tag)                  \
-		);                                                             \
-                                                                               \
-		return NULL;                                                   \
 	}                                                                      \
                                                                                \
 	static inline uint32_t classify_compile_##tag##_size(                  \
@@ -287,42 +289,37 @@ filter_u16_commit_iterate(
 			/*                                                     \
 			 * Reversed endpoint pairs cover no values.            \
 			 *                                                     \
-			 * They add no collector blocks, so their boundaries   \
-			 * need not exist in the region index.                 \
+			 * They split nothing, so their boundaries need not    \
+			 * exist among the piece starts.                       \
 			 */                                                    \
 			if (span->from > span->to) {                           \
 				continue;                                      \
 			}                                                      \
                                                                                \
-			uint8_t from_key[2];                                   \
-			uint8_t to_key[2];                                     \
-			from_key[0] = span->from >> 8;                         \
-			from_key[1] = span->from;                              \
-			to_key[0] = span->to >> 8;                             \
-			to_key[1] = span->to;                                  \
-			filter_key_inc(2, to_key);                             \
-                                                                               \
 			/*                                                     \
-			 * Valid boundaries must resolve to region starts.     \
+			 * Valid boundaries must resolve to piece starts.      \
 			 * A missing boundary fails compilation safely.        \
 			 */                                                    \
-			uint32_t start = radix_lookup(                         \
-				&tag_compile->range_index.radix, 2, from_key   \
-			);                                                     \
-			uint32_t stop = radix_lookup(                          \
-				&tag_compile->range_index.radix, 2, to_key     \
-			);                                                     \
-			if (start == RADIX_VALUE_INVALID ||                    \
-			    stop == RADIX_VALUE_INVALID) {                     \
+			const struct filter_u16_partition *partition =         \
+				&tag_compile->partition;                       \
+			if (!filter_u16_partition_is_start(                    \
+				    partition, span->from                      \
+			    ) ||                                               \
+			    (span->to != 65535 &&                              \
+			     !filter_u16_partition_is_start(                   \
+				     partition, span->to + 1u                  \
+			     ))) {                                             \
 				return -1;                                     \
 			}                                                      \
-			if (stop == 0) {                                       \
-				/*                                             \
-				 * The only chance get zero here is for        \
-				 * the last one item.                          \
-				 */                                            \
-				stop = tag_compile->range_index.count;         \
-			}                                                      \
+			uint32_t start = filter_u16_partition_piece(           \
+				partition, span->from                          \
+			);                                                     \
+			uint32_t stop =                                        \
+				span->to == 65535                              \
+					? partition->count                     \
+					: filter_u16_partition_piece(          \
+						  partition, span->to + 1u     \
+					  );                                   \
                                                                                \
 			for (uint32_t idx = start; idx < stop; ++idx) {        \
 				if (iter_cb_func(                              \
@@ -368,7 +365,6 @@ filter_u16_commit_iterate(
 	) {                                                                    \
 		struct classify_compile_##tag *tag_compile = compile;          \
                                                                                \
-		range_index_free(&tag_compile->range_index);                   \
 		value_table_free(&tag_compile->value_table);                   \
                                                                                \
 		memory_bfree(                                                  \
@@ -399,27 +395,11 @@ filter_u16_commit_iterate(
 			return -1;                                             \
 		}                                                              \
                                                                                \
-		struct filter_u16_commit_ctx commit_ctx;                       \
-		commit_ctx.line = &staging;                                    \
-		commit_ctx.value_table = &tag_compile->value_table;            \
-		commit_ctx.value = 0;                                          \
-		commit_ctx.pos = 0;                                            \
-                                                                               \
-		if (radix_walk(                                                \
-			    &tag_compile->range_index.radix,                   \
-			    2,                                                 \
-			    filter_u16_commit_iterate,                         \
-			    &commit_ctx                                        \
-		    )) {                                                       \
-			vline_free(&staging);                                  \
-			memset(tag_attr, 0, sizeof(*tag_attr));                \
-			return -1;                                             \
-		}                                                              \
-                                                                               \
-		while (commit_ctx.pos < 65536) {                               \
-			*vline_get_ptr(&staging, commit_ctx.pos++) =           \
-				commit_ctx.value;                              \
-		}                                                              \
+		filter_u16_fill_line(                                          \
+			&tag_compile->partition,                               \
+			&tag_compile->value_table,                             \
+			&staging                                               \
+		);                                                             \
                                                                                \
 		/*                                                             \
 		 * The staging line moves into the embedded attribute field    \

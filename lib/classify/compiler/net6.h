@@ -2,13 +2,9 @@
 
 #include "common/exp_array.h"
 #include "common/hash_index.h"
-#include "common/key.h"
 #include "common/lpm.h"
 #include "common/memory.h"
 #include "common/network.h"
-#include "common/radix.h"
-#include "common/range_collector.h"
-#include "common/range_index.h"
 #include "common/registry.h"
 #include "common/remap.h"
 #include "common/value.h"
@@ -16,6 +12,7 @@
 #include "declare.h"
 #include "lib/classify/classifiers/net6.h"
 #include "lib/classify/rule.h"
+#include "partition.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -74,8 +71,8 @@ struct classify_compile_net6 {
 	classify_net6_get_net6s_func get_net6s;
 	const char *name;
 
-	struct range_index ri_hi;
-	struct range_index ri_lo;
+	struct classify_partition part_hi;
+	struct classify_partition part_lo;
 
 	// Rows of the join table with a low half distinction; the compile
 	// time map drives the region enumeration and the commit packing.
@@ -196,52 +193,43 @@ filter_net6_nets_append(
 	return 0;
 }
 
+static inline uint64_t
+filter_net6_part_len(const uint8_t *part_mask) {
+	return __builtin_popcountll(*(net6_half *)part_mask);
+}
+
 static inline int
 filter_net6_build_part(
 	struct memory_context *memory_context,
 	struct net6 *nets,
 	uint32_t net_count,
 	net6_get_part_func get_part,
-	struct range_index *ri
+	struct classify_partition *partition
 ) {
-	struct range_collector collector;
-	if (range_collector_init(&collector, memory_context)) {
-		return -1;
-	}
+	struct classify_prefixes prefixes = {NULL, 0};
 
 	for (uint32_t net_idx = 0; net_idx < net_count; ++net_idx) {
 		uint8_t *addr;
 		uint8_t *mask;
 		get_part(nets + net_idx, &addr, &mask);
 
-		if (range8_collector_add(
-			    &collector,
-			    addr,
-			    __builtin_popcountll(*(net6_half *)mask)
+		if (classify_prefixes_add(
+			    memory_context,
+			    &prefixes,
+			    classify_key_load(addr, 8),
+			    filter_net6_part_len(mask)
 		    )) {
-			goto error;
+			classify_prefixes_free(memory_context, &prefixes);
+			return -1;
 		}
 	}
 
-	if (range_index_init(ri, memory_context)) {
-		goto error;
-	}
+	int rc = classify_partition_build(
+		memory_context, 64, &prefixes, partition
+	);
+	classify_prefixes_free(memory_context, &prefixes);
 
-	if (range_collector_collect(&collector, 8, ri)) {
-		goto error_range_index;
-	}
-
-	range_collector_free(&collector, 8);
-
-	return 0;
-
-error_range_index:
-	range_index_free(ri);
-
-error:
-	range_collector_free(&collector, 8);
-
-	return -1;
+	return rc;
 }
 
 /*
@@ -250,29 +238,20 @@ error:
  */
 static inline void
 filter_net6_part_bounds(
-	const struct range_index *ri,
+	const struct classify_partition *partition,
 	const uint8_t *part_addr,
 	const uint8_t *part_mask,
 	uint32_t *start,
 	uint32_t *stop
 ) {
-	uint8_t from[8];
-	uint8_t to[8];
-	for (uint32_t idx = 0; idx < 8; ++idx) {
-		from[idx] = part_addr[idx];
-		to[idx] = part_addr[idx] | ~part_mask[idx];
-	}
-	filter_key_inc(8, to);
-
-	*start = radix_lookup(&ri->radix, 8, from);
-	*stop = radix_lookup(&ri->radix, 8, to);
-	if (*stop == 0) {
-		/*
-		 * The only chance get zero here is for the last one
-		 * item.
-		 */
-		*stop = ri->count;
-	}
+	uint64_t from = classify_key_load(part_addr, 8);
+	classify_partition_bounds(
+		partition,
+		from,
+		classify_prefix_to(64, from, filter_net6_part_len(part_mask)),
+		start,
+		stop
+	);
 }
 
 // Resolves both half region index ranges of a normalized network at
@@ -284,14 +263,14 @@ filter_net6_net_bounds(
 	uint32_t bounds[4]
 ) {
 	filter_net6_part_bounds(
-		&net6_compile->ri_hi,
+		&net6_compile->part_hi,
 		net->addr,
 		net->mask,
 		&bounds[0],
 		&bounds[1]
 	);
 	filter_net6_part_bounds(
-		&net6_compile->ri_lo,
+		&net6_compile->part_lo,
 		net->addr + 8,
 		net->mask + 8,
 		&bounds[2],
@@ -318,14 +297,14 @@ filter_net6_net_regions_iter(
 	uint32_t bounds[4];
 	filter_net6_net_bounds(net6_compile, net, bounds);
 
-	const uint32_t *values_hi = ADDR_OF(&net6_compile->ri_hi.values);
-	const uint32_t *values_lo = ADDR_OF(&net6_compile->ri_lo.values);
+	const uint32_t *values_hi = net6_compile->part_hi.values;
+	const uint32_t *values_lo = net6_compile->part_lo.values;
 	struct value_table *comb = &net6_compile->comb;
 	const uint8_t *row_split = net6_compile->row_split;
 	struct vline *uniform = &net6_compile->uniform;
 
 	const int full_lo =
-		bounds[2] == 0 && bounds[3] == net6_compile->ri_lo.count;
+		bounds[2] == 0 && bounds[3] == net6_compile->part_lo.count;
 
 	for (uint32_t idx_hi = bounds[0]; idx_hi < bounds[1]; ++idx_hi) {
 		const uint32_t row = values_hi[idx_hi];
@@ -494,7 +473,7 @@ classify_compile_net6_create(
 		    compile->nets,
 		    compile->net_count,
 		    net6_get_hi_part,
-		    &compile->ri_hi
+		    &compile->part_hi
 	    )) {
 		goto error_free_nets;
 	}
@@ -504,7 +483,7 @@ classify_compile_net6_create(
 		    compile->nets,
 		    compile->net_count,
 		    net6_get_lo_part,
-		    &compile->ri_lo
+		    &compile->part_lo
 	    )) {
 		goto error_free_part_hi;
 	}
@@ -522,8 +501,8 @@ classify_compile_net6_create(
 		    &compile->comb,
 		    memory_context,
 		    comb_name,
-		    compile->ri_hi.max_value + 1,
-		    compile->ri_lo.max_value + 1
+		    compile->part_hi.region_count,
+		    compile->part_lo.region_count
 	    )) {
 		goto error_free_parts;
 	}
@@ -553,7 +532,7 @@ classify_compile_net6_create(
 	 * before any region enumeration.
 	 */
 	{
-		const uint32_t *values_hi = ADDR_OF(&compile->ri_hi.values);
+		const uint32_t *values_hi = compile->part_hi.values;
 
 		for (uint32_t net_idx = 0; net_idx < compile->net_count;
 		     ++net_idx) {
@@ -565,7 +544,7 @@ classify_compile_net6_create(
 			uint32_t bounds[4];
 			filter_net6_net_bounds(compile, net, bounds);
 			if (bounds[2] == 0 &&
-			    bounds[3] == compile->ri_lo.count) {
+			    bounds[3] == compile->part_lo.count) {
 				continue;
 			}
 
@@ -733,10 +712,10 @@ error_free_comb:
 	value_table_free(&compile->comb);
 
 error_free_parts:
-	range_index_free(&compile->ri_lo);
+	classify_partition_free(memory_context, &compile->part_lo);
 
 error_free_part_hi:
-	range_index_free(&compile->ri_hi);
+	classify_partition_free(memory_context, &compile->part_hi);
 
 error_free_nets:
 	mem_array_free_exp(
@@ -854,8 +833,8 @@ classify_compile_net6_free(
 ) {
 	struct classify_compile_net6 *net6_compile = compile;
 
-	range_index_free(&net6_compile->ri_hi);
-	range_index_free(&net6_compile->ri_lo);
+	classify_partition_free(memory_context, &net6_compile->part_hi);
+	classify_partition_free(memory_context, &net6_compile->part_lo);
 
 	if (net6_compile->region_values != NULL) {
 		memory_bfree(
@@ -927,7 +906,11 @@ classify_compile_net6_commit(
 	if (lpm_init(&net6_attr->lo, memory_context, lo_name)) {
 		goto error;
 	}
-	if (range_index_build_lpm(&net6_compile->ri_lo, 8, &net6_attr->lo)) {
+	if (classify_partition_build_lpm(
+		    &net6_compile->part_lo,
+		    net6_compile->part_lo.values,
+		    &net6_attr->lo
+	    )) {
 		goto error;
 	}
 
@@ -946,8 +929,8 @@ classify_compile_net6_commit(
 	// The high half trie build walks the partition by region ordinal,
 	// so the resolved values are indexed by ordinal and reach the row
 	// of every ordinal through the region values of the partition.
-	const uint32_t *hi_values = ADDR_OF(&net6_compile->ri_hi.values);
-	uint32_t hi_count = net6_compile->ri_hi.count;
+	const uint32_t *hi_values = net6_compile->part_hi.values;
+	uint32_t hi_count = net6_compile->part_hi.count;
 
 	uint32_t *dense_of_row = (uint32_t *)memory_balloc(
 		memory_context, sizeof(uint32_t) * net6_compile->row_count
@@ -1053,8 +1036,8 @@ classify_compile_net6_commit(
 		value_table_free(comb);
 	}
 
-	int hi_rc = range_index_build_lpm_values(
-		&net6_compile->ri_hi, 8, lpm_values, &net6_attr->hi
+	int hi_rc = classify_partition_build_lpm(
+		&net6_compile->part_hi, lpm_values, &net6_attr->hi
 	);
 
 	memory_bfree(

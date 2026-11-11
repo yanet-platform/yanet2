@@ -652,22 +652,6 @@ struct test_hi_reference {
 // The commit wrapper below has no data argument of its own.
 static struct test_hi_reference test_hi_ref;
 
-// Appends one partition range start to the reference.
-static int
-test_hi_reference_collect(
-	uint8_t key_size, const uint8_t *key, uint32_t value, void *data
-) {
-	(void)value;
-	assert(key_size == 8);
-
-	struct test_hi_reference *ref = data;
-	ref->starts = realloc(ref->starts, (ref->count + 1) * 8);
-	assert(ref->starts != NULL);
-	memcpy(ref->starts[ref->count], key, 8);
-	++ref->count;
-	return 0;
-}
-
 // Builds the ordinal pass of the reference out of the partition and
 // commits the attribute.
 static int
@@ -677,14 +661,19 @@ test_commit_with_hi_reference(
 	struct classify_compile_net6 *net6_compile = compile;
 	struct test_hi_reference *ref = &test_hi_ref;
 
+	const struct classify_partition *part_hi = &net6_compile->part_hi;
+
 	assert(lpm_init(&ref->lpm, mctx, "hi_ref") == 0);
-	assert(range_index_build_lpm(&net6_compile->ri_hi, 8, &ref->lpm) == 0);
-	assert(radix_walk(
-		       &net6_compile->ri_hi.radix,
-		       8,
-		       test_hi_reference_collect,
-		       ref
+	assert(classify_partition_build_lpm(
+		       part_hi, part_hi->values, &ref->lpm
 	       ) == 0);
+
+	ref->starts = realloc(ref->starts, (size_t)part_hi->count * 8);
+	assert(ref->starts != NULL);
+	for (uint32_t idx = 0; idx < part_hi->count; ++idx) {
+		classify_key_store(part_hi->starts[idx], 64, ref->starts[idx]);
+	}
+	ref->count = part_hi->count;
 
 	return classify_compile_net6_commit(mctx, compile, attr);
 }

@@ -64,3 +64,21 @@ classify_net_hash = executable(
   include_directories: yanet_rootdir,
 )
 test('classify_net_hash', classify_net_hash, suite: ['filter'])
+
+classify_partition = executable(
+  'classify_partition',
+  ['partition.c'],
+  c_args: yanet_test_c_args,
+  dependencies: [lib_common_dep, libdpdk_inc_dep],
+  include_directories: yanet_rootdir,
+)
+test('classify_partition', classify_partition, suite: ['filter'])
+
+classify_u16_ranges = executable(
+  'classify_u16_ranges',
+  ['u16_ranges.c'],
+  c_args: yanet_test_c_args,
+  dependencies: [lib_common_dep, libdpdk_inc_dep],
+  include_directories: yanet_rootdir,
+)
+test('classify_u16_ranges', classify_u16_ranges, suite: ['filter'])
