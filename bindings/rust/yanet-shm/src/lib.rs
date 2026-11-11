@@ -9,7 +9,7 @@
 
 #![no_std]
 
-pub mod hash_index;
+pub mod index;
 pub mod mutex;
 pub mod opaque;
 pub mod rel;

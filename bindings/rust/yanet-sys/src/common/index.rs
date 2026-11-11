@@ -14,7 +14,7 @@ use core::{
 };
 
 use yanet_shm::{
-    hash_index::{HashIndexKey, HashIndexRef, Slot},
+    index::{HashIndexKey, HashIndexRef, Slot},
     opaque::Opaque,
     rel::ShmSlice,
     resolve::Resolve,

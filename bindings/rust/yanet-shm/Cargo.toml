@@ -14,5 +14,5 @@ criterion = { version = "0.8.2", default-features = false, features = ["cargo_be
 yanet-sdk-testing = { path = "../yanet-sdk-testing" }
 
 [[bench]]
-name = "hash_index"
+name = "index"
 harness = false

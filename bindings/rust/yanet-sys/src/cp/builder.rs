@@ -27,7 +27,7 @@ use core::{
 };
 
 use yanet_shm::{
-    hash_index::{HashIndexKey, Slot, Unplaced, place, slots_for},
+    index::{HashIndexKey, Slot, Unplaced, place, slots_for},
     mutex::Mutex,
     rel::{ShmBox, ShmSlice},
     root::ShmRoot,
@@ -134,15 +134,14 @@ mod kind {
 /// build's header, as an embedded C object does when it opens its context. It
 /// panics only in code of the author's that it calls, such as the hash of a
 /// key, and then leaves what a failed write leaves. Freeing returns exactly the
-/// blocks the write handed to the
-/// value, each once, and reads only inside the value, those blocks and the
-/// links of that tree, and writes those links as an embedded C object does
-/// when it closes its context, which may reach a sibling's context in another
-/// value. The SDK and its derive implement the trait, so that a value of every
-/// type is written and released by code that knows its layout. Implementing it
-/// is gated by `unsafe trait`, which module crates cannot write directly under
-/// `#![forbid(unsafe_code)]`; writing and freeing are unsafe functions, so
-/// calling them is gated too.
+/// blocks the write handed to the value, each once, and reads only inside the
+/// value, those blocks and the links of that tree, and writes those links as an
+/// embedded C object does when it closes its context, which may reach a
+/// sibling's context in another value. The SDK and its derive implement the
+/// trait, so that a value of every type is written and released by code that
+/// knows its layout. Implementing it is gated by `unsafe trait`, which module
+/// crates cannot write directly under `#![forbid(unsafe_code)]`; writing and
+/// freeing are unsafe functions, so calling them is gated too.
 ///
 /// A whole value has all its fields initialized; padding may remain
 /// uninitialized and must never be read as data.

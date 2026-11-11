@@ -22,7 +22,7 @@ use arena::ArenaOwner;
 use netip as _;
 use yanet_packet as _;
 use yanet_sdk_testing as _;
-use yanet_shm::{hash_index::HashIndexKey, shm::ShmLayout};
+use yanet_shm::{index::HashIndexKey, shm::ShmLayout};
 use yanet_sys::{
     bindings,
     common::index::HashIndex,
