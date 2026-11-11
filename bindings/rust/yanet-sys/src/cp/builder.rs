@@ -17,14 +17,17 @@
 //! releases what it took.
 
 use core::{
+    ffi::c_void,
     fmt,
     marker::PhantomData,
     mem::{ManuallyDrop, align_of, forget, size_of},
     net::{Ipv4Addr, Ipv6Addr},
+    ptr,
     sync::atomic::{AtomicI8, AtomicI16, AtomicI32, AtomicI64, AtomicU8, AtomicU16, AtomicU32, AtomicU64},
 };
 
 use yanet_shm::{
+    index::{HashIndexKey, Slot, Unplaced, place, slots_for},
     mutex::Mutex,
     rel::{ShmBox, ShmSlice},
     root::ShmRoot,
@@ -38,7 +41,10 @@ use super::{
 };
 use crate::{
     bindings,
-    common::lpm::{Lpm, LpmRange},
+    common::{
+        index::HashIndex,
+        lpm::{Lpm, LpmRange},
+    },
     dp::{
         Counter, CounterLayout, Device, Module, ModuleConfig, Object, ObjectConfig, ObjectCounter, ObjectLink,
         PerWorker, PerWorkerSlice, TaggedCounter, TaggedCounters,
@@ -125,16 +131,17 @@ mod kind {
 /// fails with nothing at the address owning anything: it has returned what it
 /// allocated for the value and released its parts and the blocks in them. It
 /// writes nothing else but the links of the C memory context tree under the
-/// build's header, as an embedded C object does when it opens its context, and
-/// does not panic. Freeing returns exactly the blocks the write handed to the
-/// value, each once, and reads only inside the value, those blocks and the
-/// links of that tree, and writes those links as an embedded C object does
-/// when it closes its context, which may reach a sibling's context in another
-/// value. The SDK and its derive implement the trait, so that a value of every
-/// type is written and released by code that knows its layout. Implementing it
-/// is gated by `unsafe trait`, which module crates cannot write directly under
-/// `#![forbid(unsafe_code)]`; writing and freeing are unsafe functions, so
-/// calling them is gated too.
+/// build's header, as an embedded C object does when it opens its context. It
+/// panics only in code of the author's that it calls, such as the hash of a
+/// key, and then leaves what a failed write leaves. Freeing returns exactly the
+/// blocks the write handed to the value, each once, and reads only inside the
+/// value, those blocks and the links of that tree, and writes those links as an
+/// embedded C object does when it closes its context, which may reach a
+/// sibling's context in another value. The SDK and its derive implement the
+/// trait, so that a value of every type is written and released by code that
+/// knows its layout. Implementing it is gated by `unsafe trait`, which module
+/// crates cannot write directly under `#![forbid(unsafe_code)]`; writing and
+/// freeing are unsafe functions, so calling them is gated too.
 ///
 /// A whole value has all its fields initialized; padding may remain
 /// uninitialized and must never be read as data.
@@ -630,6 +637,128 @@ unsafe impl<const K: usize> Build for Lpm<K> {
         // SAFETY: a table that is not empty was initialised, so its pages and
         // context are live.
         unsafe { bindings::yanet_sys_common_lpm_free(memory.root().ptr(addr)) };
+    }
+}
+
+// SAFETY: the index is its memory context and the offset and count words of
+// its slice of slots, and an index of no records is all zeroes: no context
+// opened and a NULL slice, as an empty LPM. The write opens the context under
+// the header's, takes the block of the slots from it and links the block into
+// the slice last. Until then a guard returns the block and closes the context
+// on a refusal and on a panic of a key's code alike, and the records own
+// nothing, so either leaves nothing owned and nothing linked under the header.
+unsafe impl<K: HashIndexKey> Build for HashIndex<K> {
+    /// The records, each a key and the position it names, every key at most
+    /// once. No records leave the index empty, allocating nothing.
+    type Parts<'b, W: Owner> = &'b [(K, u32)];
+
+    unsafe fn write<W: Owner>(
+        parts: Self::Parts<'_, W>,
+        memory: &MemoryContext<'_, W>,
+        addr: usize,
+    ) -> Result<(), Refusal> {
+        let root = memory.root();
+        if parts.is_empty() {
+            // SAFETY: the index's bytes lie in a block of the build,
+            // exclusive (caller contract), and a zeroed index is the empty
+            // one: no context to close and a NULL slice.
+            unsafe { root.ptr::<u8>(addr).write_bytes(0, size_of::<Self>()) };
+            return Ok(());
+        }
+        let len = slots_for(parts.len()).ok_or(Refusal::BlockTooLarge)?;
+        let size = len
+            .checked_mul(size_of::<Slot<K>>())
+            .filter(|&size| size <= bindings::MEMORY_BLOCK_ALLOCATOR_MAX_SIZE as usize)
+            .ok_or(Refusal::BlockTooLarge)?;
+        let context = root.ptr::<bindings::memory_context>(addr);
+        // SAFETY: the context lies at the start of the index, in a block of
+        // the build (caller contract), and the parent is the header's, which
+        // the owner set up for C.
+        unsafe {
+            let parent = root.ptr::<bindings::memory_context>(memory.context.get());
+            bindings::yanet_sys_common_memory_context_init_from(context, parent, c"hash_index".as_ptr());
+        }
+        let mut unlinked = Unlinked {
+            context,
+            block: ptr::null_mut(),
+            size,
+        };
+        // SAFETY: the context is open.
+        unlinked.block = unsafe { bindings::yanet_sys_common_memory_balloc(context, size) };
+        if unlinked.block.is_null() {
+            return Err(Refusal::OutOfMemory);
+        }
+        // SAFETY: the fresh block holds the slots, aligned by the C allocator
+        // as its size is a multiple of a slot's, and nothing else accesses
+        // it. Every slot is written before the slice is made.
+        let slots = unsafe {
+            let first = root.ptr::<Slot<K>>(unlinked.block.addr());
+            for idx in 0..len {
+                first.add(idx).write(Slot::FREE);
+            }
+            core::slice::from_raw_parts_mut(first, len)
+        };
+        place(slots, parts).map_err(|unplaced| match unplaced {
+            Unplaced::DuplicateKey { first, second } => Refusal::DuplicateKey { first, second },
+            Unplaced::InvalidPosition => Refusal::InvalidPosition,
+        })?;
+        let slice = addr + HashIndex::<K>::SLOTS_OFFSET;
+        // SAFETY: the offset and count words are aligned and exclusive
+        // (caller contract).
+        unsafe {
+            root.ptr::<isize>(slice).write(offset_to(unlinked.block.addr(), slice));
+            root.ptr::<u64>(slice + ShmSlice::<Slot<K>>::LEN_OFFSET)
+                .write(len as u64);
+        }
+        forget(unlinked);
+        Ok(())
+    }
+
+    unsafe fn free<W: Owner>(addr: usize, memory: &MemoryContext<'_, W>) {
+        let root = memory.root();
+        let slice = addr + HashIndex::<K>::SLOTS_OFFSET;
+        // SAFETY: the words were written whole (caller contract).
+        let (offset, len) = unsafe {
+            (
+                root.ptr::<isize>(slice).read(),
+                root.ptr::<u64>(slice + ShmSlice::<Slot<K>>::LEN_OFFSET).read(),
+            )
+        };
+        if offset == 0 {
+            // An empty index opened nothing.
+            return;
+        }
+        let unlinked = Unlinked {
+            context: root.ptr(addr),
+            block: root.ptr(target_of(offset, slice)),
+            size: len as usize * size_of::<Slot<K>>(),
+        };
+        // Dropping returns the block of the slots and closes their context.
+        drop(unlinked);
+    }
+}
+
+/// The memory context an index opened and the block of its slots, until the
+/// index links them: the block is returned and the context closed when
+/// dropped, also while unwinding.
+///
+/// Forget it once the index owns them.
+struct Unlinked {
+    context: *mut bindings::memory_context,
+    /// The block of the slots, NULL before it is allocated.
+    block: *mut c_void,
+    size: usize,
+}
+
+impl Drop for Unlinked {
+    fn drop(&mut self) {
+        // SAFETY: the context is open under a header and only the index uses
+        // it, and the block, unless NULL, which C skips, came from it with
+        // this size and nothing references it.
+        unsafe {
+            bindings::yanet_sys_common_memory_bfree(self.context, self.block, self.size);
+            bindings::yanet_sys_common_memory_context_fini(self.context);
+        }
     }
 }
 

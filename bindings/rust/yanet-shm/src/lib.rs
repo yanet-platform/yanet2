@@ -2,12 +2,14 @@
 //! plane.
 //!
 //! Holds the provenance root of the shared-memory mapping, the
-//! relative-pointer field types, `Opaque`, the mutex and the `ShmLayout`
-//! trait with its leaf implementations. Pure Rust and `no_std` without `alloc`:
-//! it binds no C header, so the crates that do build on it.
+//! relative-pointer field types, `Opaque`, the mutex, the exact-match index
+//! and the `ShmLayout` trait with its leaf implementations. Pure Rust and
+//! `no_std` without `alloc`: it binds no C header, so the crates that do build
+//! on it.
 
 #![no_std]
 
+pub mod index;
 pub mod mutex;
 pub mod opaque;
 pub mod rel;
@@ -17,5 +19,7 @@ pub mod shm;
 mod spinlock;
 
 // Test-only dependencies are visible to the library's own test target.
+#[cfg(test)]
+use criterion as _;
 #[cfg(test)]
 use yanet_sdk_testing as _;

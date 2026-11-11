@@ -11,6 +11,7 @@ use core::{
 };
 use std::{panic, thread};
 
+use criterion as _;
 use yanet_sdk_testing as _;
 use yanet_shm::mutex::Mutex;
 

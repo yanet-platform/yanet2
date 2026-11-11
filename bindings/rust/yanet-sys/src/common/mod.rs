@@ -1,11 +1,13 @@
 //! Bindings of `common/`: the LPM type with its lookup and the range it is
-//! built from.
+//! built from, and the exact-match index, whose slots a memory context of
+//! `common/memory.h` holds.
 //!
 //! The table is built by the C routines of `common/`, and the shared-memory
 //! alignment bound is checked against the C block allocator's.
 
 use yanet_shm::shm::MAX_ALIGN;
 
+pub mod index;
 pub mod lpm;
 
 const _: () = assert!(MAX_ALIGN == crate::bindings::MEMORY_BLOCK_MAX_ALIGN as usize);

@@ -38,3 +38,17 @@ yanet_sys_common_memory_bfree(
 ) {
 	memory_bfree(context, block, size);
 }
+
+int
+yanet_sys_common_memory_context_init_from(
+	struct memory_context *context,
+	struct memory_context *parent,
+	const char *name
+) {
+	return memory_context_init_from(context, parent, name);
+}
+
+void
+yanet_sys_common_memory_context_fini(struct memory_context *context) {
+	memory_context_fini(context);
+}
