@@ -45,6 +45,7 @@ dscp_mark_v6(struct rte_ipv6_hdr *ip6_hdr, struct dscp_config config) {
 		return -1;
 	}
 	uint8_t new_mark = config.mark << DSCP_MARK_SHIFT;
-	ip6_hdr->vtc_flow = set_ipv6_tc(ip6_hdr->vtc_flow, new_mark);
+	uint8_t ecn = tc & DSCP_ECN_MASK;
+	ip6_hdr->vtc_flow = set_ipv6_tc(ip6_hdr->vtc_flow, new_mark | ecn);
 	return 0;
 }

@@ -28,6 +28,15 @@ const (
 	dscpMarkAlways  uint8 = 2
 )
 
+// ECN codepoints of RFC 3168 section 5, held in the two low bits of the IPv4
+// TOS octet and of the IPv6 traffic class.
+const (
+	ecnNotECT uint8 = 0b00
+	ecnECT1   uint8 = 0b01
+	ecnECT0   uint8 = 0b10
+	ecnCE     uint8 = 0b11
+)
+
 // setupDSCPHarness publishes marking and unchanged egress for both IP families.
 func setupDSCPHarness(t *testing.T, flag, mark uint8) *dataplaneut.Harness {
 	t.Helper()
@@ -100,14 +109,16 @@ func setupDSCPHarness(t *testing.T, flag, mark uint8) *dataplaneut.Harness {
 	return harness
 }
 
-// markPacket returns a marked copy with recalculated lengths and checksums.
-func markPacket(t *testing.T, packet gopacket.Packet, dscp uint8) gopacket.Packet {
+// markPacket returns a copy carrying the given DSCP and ECN codepoint, with
+// recalculated lengths and checksums.
+func markPacket(t *testing.T, packet gopacket.Packet, dscp, ecn uint8) gopacket.Packet {
 	t.Helper()
 
 	packet = gopacket.NewPacket(packet.Data(), layers.LayerTypeEthernet, gopacket.Default)
 	network := packet.NetworkLayer()
-	// DSCP is six bits; larger values wrap and ECN stays clear.
-	trafficClass := dscp << 2
+	// A DSCP above six bits wraps, and the ECN codepoint takes the two bits
+	// below it.
+	trafficClass := dscp<<2 | ecn
 	switch network.LayerType() {
 	case layers.LayerTypeIPv4:
 		network.(*layers.IPv4).TOS = trafficClass
@@ -236,11 +247,64 @@ func Test_DSCP_MarkingPolicies(t *testing.T) {
 			harness := setupDSCPHarness(t, tc.flag, tc.mark)
 			for _, frame := range frames {
 				t.Run(frame.name, func(t *testing.T) {
-					packet := markPacket(t, frame.packet, tc.from)
+					packet := markPacket(t, frame.packet, tc.from, ecnNotECT)
 					result, err := harness.HandlePackets(packet)
 					require.NoError(t, err)
-					expected := markPacket(t, frame.packet, tc.expected)
+					expected := markPacket(t, frame.packet, tc.expected, ecnNotECT)
 					requireDSCPOutput(t, harness, result, expected)
+				})
+			}
+		})
+	}
+}
+
+// Test_DSCP_MarkingKeepsECN verifies that marking rewrites only the DSCP and
+// keeps the ECN codepoint of either family as it arrived.
+//
+// RFC 3260 section 4 gives Diffserv the six most significant bits of the IPv4
+// TOS octet and of the IPv6 traffic class, and RFC 3168 section 5 defines the
+// two least significant ones as the ECN field, the same in both families.
+// Clearing an ECN-capable codepoint disables ECN for the packet (RFC 3168
+// section 18.1.3), and clearing congestion experienced also erases the signal
+// of a congested router upstream (RFC 3168 section 18.1.1).
+func Test_DSCP_MarkingKeepsECN(t *testing.T) {
+	frames := dscpFrames(t, "1.1.0.0", "1:2:3:4::abcd")
+	codepoints := []struct {
+		name string
+		ecn  uint8
+	}{
+		{"ECT(1)", ecnECT1},
+		{"ECT(0)", ecnECT0},
+		{"CE", ecnCE},
+	}
+	cases := []struct {
+		name     string
+		flag     uint8
+		mark     uint8
+		from     uint8
+		expected uint8
+	}{
+		{"Always mark 40-> 0=40", dscpMarkAlways, 40, 0, 40},
+		{"Always mark 40->26=40", dscpMarkAlways, 40, 26, 40},
+		{"Default mark 40-> 0=40", dscpMarkDefault, 40, 0, 40},
+		{"Default mark 40->26=26", dscpMarkDefault, 40, 26, 26},
+		{"Never remark 40->26=26", dscpMarkNever, 40, 26, 26},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			harness := setupDSCPHarness(t, tc.flag, tc.mark)
+			for _, codepoint := range codepoints {
+				t.Run(codepoint.name, func(t *testing.T) {
+					for _, frame := range frames {
+						t.Run(frame.name, func(t *testing.T) {
+							packet := markPacket(t, frame.packet, tc.from, codepoint.ecn)
+							result, err := harness.HandlePackets(packet)
+							require.NoError(t, err)
+							expected := markPacket(t, frame.packet, tc.expected, codepoint.ecn)
+							requireDSCPOutput(t, harness, result, expected)
+						})
+					}
 				})
 			}
 		})
@@ -253,7 +317,7 @@ func Test_DSCP_PrefixMissPreservesBytes(t *testing.T) {
 	harness := setupDSCPHarness(t, dscpMarkAlways, 40)
 	for _, tc := range dscpFrames(t, "1.1.0.1", "1:2:3:5::abcd") {
 		t.Run(tc.name, func(t *testing.T) {
-			packet := markPacket(t, tc.packet, 7)
+			packet := markPacket(t, tc.packet, 7, ecnNotECT)
 			result, err := harness.HandlePackets(packet)
 			require.NoError(t, err)
 			requireDSCPOutput(t, harness, result, packet)
@@ -268,12 +332,12 @@ func Test_DSCP_ResultsSurviveNextRound(t *testing.T) {
 	harness := setupDSCPHarness(t, dscpMarkNever, 0)
 	for _, tc := range dscpFrames(t, "1.1.0.0", "1:2:3:4::abcd") {
 		t.Run(tc.name, func(t *testing.T) {
-			first := markPacket(t, tc.packet, 10)
+			first := markPacket(t, tc.packet, 10, ecnNotECT)
 			firstResult, err := harness.HandlePackets(first)
 			require.NoError(t, err)
 			require.Zero(t, harness.OutstandingMbufs())
 
-			second := markPacket(t, tc.packet, 20)
+			second := markPacket(t, tc.packet, 20, ecnNotECT)
 			secondResult, err := harness.HandlePackets(second)
 			require.NoError(t, err)
 			requireDSCPOutput(t, harness, secondResult, second)
