@@ -379,3 +379,21 @@ test(
   suite: ['lib'],
   timeout: 90,
 )
+
+nat64state_map_object_test = executable(
+  'nat64state_map_object_test',
+  ['nat64state_map_object_test.c'],
+  dependencies: [
+    lib_dataplane_ut_dep,
+    lib_logging_dep,
+    lib_errors_dep,
+    lib_fwstate_objects_dep,
+    lib_agent_cp_dep,
+    lib_config_cp_dep,
+    lib_dev_plain_dp_dep,
+    libdpdk_test_dep,
+  ],
+  include_directories: yanet_rootdir,
+)
+
+test('nat64state_map_object', nat64state_map_object_test, suite: ['lib'])
