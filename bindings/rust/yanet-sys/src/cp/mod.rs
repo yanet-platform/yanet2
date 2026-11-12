@@ -39,6 +39,7 @@
 mod addr;
 mod builder;
 mod error;
+pub mod names;
 mod owner;
 mod record;
 

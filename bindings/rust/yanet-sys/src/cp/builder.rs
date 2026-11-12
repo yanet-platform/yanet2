@@ -37,6 +37,7 @@ use yanet_shm::{
 use super::{
     addr::{BlockAddr, Context, Header},
     error::{BuildError, Refusal},
+    names,
     owner::Owner,
 };
 use crate::{
@@ -1351,7 +1352,7 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E, ModuleKind
     where
         T: CounterLayout,
     {
-        if !fits_c_field(tag, bindings::COUNTER_TAG_VALUE_LEN) {
+        if names::validate_name(tag, bindings::COUNTER_TAG_VALUE_LEN as usize).is_err() {
             return Err(refused::<W, E>(Refusal::InvalidName));
         }
         let size = T::VALUES as u64;
@@ -1378,7 +1379,7 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E, ModuleKind
     where
         T: CounterLayout,
     {
-        if !fits_c_field(tag, bindings::COUNTER_TAG_VALUE_LEN) {
+        if names::validate_name(tag, bindings::COUNTER_TAG_VALUE_LEN as usize).is_err() {
             return Err(refused::<W, E>(Refusal::InvalidName));
         }
         Ok(CounterRegistrar {
@@ -1416,7 +1417,9 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E, ModuleKind
     /// with the terminator, or the owner refuses the link.
     #[doc(alias = "cp_module_link_object")]
     pub fn object<O: Object>(self, name: &str) -> Result<Registered<'b, ObjectLink<O>>, E> {
-        if !fits_c_field(O::TYPE, bindings::CP_OBJECT_TYPE_LEN) || !fits_c_field(name, bindings::CP_OBJECT_NAME_LEN) {
+        if names::validate_name(O::TYPE, bindings::CP_OBJECT_TYPE_LEN as usize).is_err()
+            || names::validate_name(name, bindings::CP_OBJECT_NAME_LEN as usize).is_err()
+        {
             return Err(refused::<W, E>(Refusal::InvalidName));
         }
         // SAFETY: the header is initialised and not yet published.
@@ -1459,12 +1462,6 @@ where
 // A tag fits its registry's C field when it fits a counter tag value, the
 // field readers find the registry by.
 const _: () = assert!(bindings::COUNTER_TAG_VALUE_LEN <= bindings::COUNTER_NAME_LEN);
-
-/// Whether a name fits a C field of `len` bytes whole: not empty, no NUL, and
-/// room for the terminator.
-fn fits_c_field(name: &str, len: u32) -> bool {
-    !name.is_empty() && name.len() < len as usize && !name.bytes().any(|byte| byte == 0)
-}
 
 impl<T: Build, W: Owner> Owned<'_, T, W> {
     /// Hands the block over to the field it is written into: its address,
@@ -1608,9 +1605,9 @@ impl<M: Module> Builder<M> {
     ///
     /// # Errors
     ///
-    /// The owner's memory is exhausted, its header routine refuses the module
-    /// type or the name, the closure fails, or the write of the body is
-    /// refused.
+    /// An invalid type or name is refused before allocating the root block.
+    /// Otherwise, the owner's memory is exhausted, its header routine refuses
+    /// the request, the closure fails, or the write of the body is refused.
     pub fn build<'env, E, W>(
         owner: &W,
         name: &str,
@@ -1626,6 +1623,11 @@ impl<M: Module> Builder<M> {
                 "a configuration larger than the largest block of the allocator"
             )
         };
+        if names::validate_name(M::NAME, bindings::CP_MODULE_TYPE_LEN as usize).is_err()
+            || names::validate_name(name, bindings::CP_MODULE_NAME_LEN as usize).is_err()
+        {
+            return Err(refused::<W, E>(Refusal::InvalidName));
+        }
         let header = build_root::<ModuleKind, M::Config, W, E>(
             owner,
             M::NAME,
@@ -1651,9 +1653,9 @@ impl<O: Object> ObjectBuilder<O> {
     ///
     /// # Errors
     ///
-    /// The owner's memory is exhausted, its header routine refuses the object
-    /// type or the name, the closure fails, or the write of the body is
-    /// refused.
+    /// An invalid type or name is refused before allocating the root block.
+    /// Otherwise, the owner's memory is exhausted, its header routine refuses
+    /// the request, the closure fails, or the write of the body is refused.
     pub fn build<'env, E, W>(
         owner: &W,
         name: &str,
@@ -1669,6 +1671,11 @@ impl<O: Object> ObjectBuilder<O> {
                 "an object larger than the largest block of the allocator"
             )
         };
+        if names::validate_name(O::TYPE, bindings::CP_OBJECT_TYPE_LEN as usize).is_err()
+            || names::validate_name(name, bindings::CP_OBJECT_NAME_LEN as usize).is_err()
+        {
+            return Err(refused::<W, E>(Refusal::InvalidName));
+        }
         let header = build_root::<ObjectKind, O::Config, W, E>(
             owner,
             O::TYPE,

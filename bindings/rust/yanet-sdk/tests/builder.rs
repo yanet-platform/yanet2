@@ -27,7 +27,7 @@ use yanet_sdk_testing::{
 };
 use yanet_shm as _;
 use yanet_sys::{
-    bindings::{COUNTER_TAG_VALUE_LEN, CP_OBJECT_NAME_LEN},
+    bindings::{COUNTER_TAG_VALUE_LEN, CP_MODULE_NAME_LEN, CP_OBJECT_NAME_LEN},
     common::LINE_BLOCK_ALIGN,
     cp::{BuildError, Builder, Built, Header, MemoryContext, Owner, Scope},
     dp::ModuleConfig,
@@ -712,6 +712,29 @@ fn test_build_frees_the_root_block_of_a_refused_header() {
 }
 
 #[test]
+fn test_build_refuses_invalid_names_before_allocating() {
+    let overlong = "x".repeat(CP_MODULE_NAME_LEN as usize);
+    for name in ["", "a\0b", overlong.as_str()] {
+        let owner = owner_failing_alloc_after(0);
+        let err = Builder::<PolicyModule>::build::<Failure, _>(&owner, name, |_| panic!("invalid name"))
+            .expect_err("refused name");
+
+        assert_eq!(BuildError::Refused(Refusal::InvalidName), err, "{name:?}");
+        owner.assert_released();
+    }
+}
+
+#[test]
+fn test_build_accepts_a_name_that_fills_its_c_field() {
+    let owner = owner();
+    let name = "x".repeat(CP_MODULE_NAME_LEN as usize - 1);
+    let built = Builder::<PolicyModule>::build::<Failure, _>(&owner, &name, |b| policy(b, &[])).expect("built");
+
+    release(&owner, built);
+    owner.assert_released();
+}
+
+#[test]
 fn test_build_reports_exhausted_memory_for_the_root_block() {
     let owner = owner();
     owner.fail_after(Call::Alloc, 0);
@@ -1351,6 +1374,29 @@ fn build_policy_object(
 fn release_object<O: Object>(owner: &TestOwner, built: BuiltObject<O, TestOwner>) {
     // SAFETY: handed over by the builder, unreferenced, released once.
     unsafe { built.destroy(owner) };
+}
+
+#[test]
+fn test_object_build_refuses_invalid_names_before_allocating() {
+    let overlong = "x".repeat(CP_OBJECT_NAME_LEN as usize);
+    for name in ["", "a\0b", overlong.as_str()] {
+        let owner = owner_failing_alloc_after(0);
+        let err = ObjectBuilder::<PolicyState>::build::<Failure, _>(&owner, name, |_| panic!("invalid name"))
+            .expect_err("refused name");
+
+        assert_eq!(BuildError::Refused(Refusal::InvalidName), err, "{name:?}");
+        owner.assert_released();
+    }
+}
+
+#[test]
+fn test_object_build_accepts_a_name_that_fills_its_c_field() {
+    let owner = owner();
+    let name = "x".repeat(CP_OBJECT_NAME_LEN as usize - 1);
+    let built = ObjectBuilder::<PolicyState>::build::<Failure, _>(&owner, &name, |b| policy(b, &[])).expect("built");
+
+    release_object(&owner, built);
+    owner.assert_released();
 }
 
 #[test]
