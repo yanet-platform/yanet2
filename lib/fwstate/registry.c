@@ -37,6 +37,20 @@ fwstate_fwmap_registry_ensure(void) {
 		FWMAP_PROMOTE_VALUE_NAT64STATE,
 		(void *)fwmap_promote_value_nat64state
 	);
+	fwmap_func_registry_set(
+		FWMAP_HASH_NAT64STATE_LAN, (void *)fwmap_hash_nat64state_lan
+	);
+	fwmap_func_registry_set(
+		FWMAP_HASH_NAT64STATE_WAN, (void *)fwmap_hash_nat64state_wan
+	);
+	fwmap_func_registry_set(
+		FWMAP_KEY_EQUAL_NAT64STATE_LAN,
+		(void *)fwmap_key_equal_nat64state_lan
+	);
+	fwmap_func_registry_set(
+		FWMAP_KEY_EQUAL_NAT64STATE_WAN,
+		(void *)fwmap_key_equal_nat64state_wan
+	);
 }
 
 // Binaries linked through meson register at startup; processes that reach

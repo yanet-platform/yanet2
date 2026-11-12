@@ -142,6 +142,87 @@ fwmap_fw6_key_equal(const void *a, const void *b, size_t size) {
 	       memcmp(k1->dst_addr, k2->dst_addr, sizeof(k1->dst_addr)) == 0;
 }
 
+// == Semantic hash and equality for the nat64state keys.
+//
+// The key structs carry padding (the header's alignment word and the wan
+// key's inner gap) that bytewise hashing and equality would fold into
+// the key's identity: a caller that assigns every documented field of a
+// non-zero-initialized key would miss a session inserted from an
+// equal-valued key with different padding bytes. These callbacks read
+// only the documented fields.
+
+static inline uint64_t
+fwmap_hash_nat64state_lan(const void *key, size_t key_size, uint32_t seed) {
+	(void)key_size;
+	const struct nat64state_lan_key *k = key;
+	uint64_t hash = 14695981039346656037ULL ^ (uint64_t)seed;
+	const uint64_t fnv_prime = 1099511628211ULL;
+	const uint16_t fields[3] = {
+		k->hdr.proto, k->hdr.src_port, k->hdr.dst_port
+	};
+	for (size_t i = 0; i < 3; ++i) {
+		for (size_t b = 0; b < sizeof(uint16_t); ++b) {
+			hash ^= ((const uint8_t *)&fields[i])[b];
+			hash *= fnv_prime;
+		}
+	}
+	for (size_t i = 0; i < 16; ++i) {
+		hash ^= k->src_addr[i];
+		hash *= fnv_prime;
+		hash ^= k->dst_addr[i];
+		hash *= fnv_prime;
+	}
+	return hash;
+}
+
+static inline uint64_t
+fwmap_hash_nat64state_wan(const void *key, size_t key_size, uint32_t seed) {
+	(void)key_size;
+	const struct nat64state_wan_key *k = key;
+	uint64_t hash = 14695981039346656037ULL ^ (uint64_t)seed;
+	const uint64_t fnv_prime = 1099511628211ULL;
+	const uint16_t fields[3] = {
+		k->hdr.proto, k->hdr.src_port, k->hdr.dst_port
+	};
+	for (size_t i = 0; i < 3; ++i) {
+		for (size_t b = 0; b < sizeof(uint16_t); ++b) {
+			hash ^= ((const uint8_t *)&fields[i])[b];
+			hash *= fnv_prime;
+		}
+	}
+	for (size_t i = 0; i < 4; ++i) {
+		hash ^= ((const uint8_t *)&k->local_addr)[i];
+		hash *= fnv_prime;
+		hash ^= ((const uint8_t *)&k->remote_addr)[i];
+		hash *= fnv_prime;
+	}
+	return hash;
+}
+
+static inline bool
+fwmap_key_equal_nat64state_lan(const void *a, const void *b, size_t size) {
+	(void)size;
+	const struct nat64state_lan_key *x = a;
+	const struct nat64state_lan_key *y = b;
+	return x->hdr.proto == y->hdr.proto &&
+	       x->hdr.src_port == y->hdr.src_port &&
+	       x->hdr.dst_port == y->hdr.dst_port &&
+	       memcmp(x->src_addr, y->src_addr, 16) == 0 &&
+	       memcmp(x->dst_addr, y->dst_addr, 16) == 0;
+}
+
+static inline bool
+fwmap_key_equal_nat64state_wan(const void *a, const void *b, size_t size) {
+	(void)size;
+	const struct nat64state_wan_key *x = a;
+	const struct nat64state_wan_key *y = b;
+	return x->hdr.proto == y->hdr.proto &&
+	       x->hdr.src_port == y->hdr.src_port &&
+	       x->hdr.dst_port == y->hdr.dst_port &&
+	       x->local_addr == y->local_addr &&
+	       x->remote_addr == y->remote_addr;
+}
+
 // == Value merge for the stateful NAT64 session tables.
 //
 // A session's identity (the pool allocation on the lan side, the original
