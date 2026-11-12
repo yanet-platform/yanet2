@@ -29,6 +29,22 @@ func octetRanges(count int) []cfixture.Range4 {
 	return ranges
 }
 
+// spreadRanges returns three disjoint /16 ranges under each of count first
+// octets, so the table needs a full node of 1 KiB per first octet.
+func spreadRanges(count int) []cfixture.Range4 {
+	ranges := make([]cfixture.Range4, 0, 3*count)
+	for octet := range count {
+		for _, second := range []byte{1, 3, 5} {
+			ranges = append(ranges, cfixture.NewRange4(
+				[4]byte{byte(octet), second, 0, 0},
+				[4]byte{byte(octet), second, 255, 255},
+				1,
+			))
+		}
+	}
+	return ranges
+}
+
 // failedFixtureBuilds are the builds of a fixture configuration that fail after
 // the build has allocated a block, that the api refuses before it builds
 // anything, or that C refuses.
@@ -232,7 +248,7 @@ func exhaustedBuild(t *testing.T) error {
 	small := attach(t, bed.harness, "small", 64*datasize.KB)
 	spec := cfixture.NewFixtureSpec(cfixture.ModePass, 0, cfixture.FaultNone)
 
-	_, err := cfixture.NewFixtureConfig(small, "config", "hits", "port0", &spec, octetRanges(256))
+	_, err := cfixture.NewFixtureConfig(small, "config", "hits", "port0", &spec, spreadRanges(256))
 	return err
 }
 
