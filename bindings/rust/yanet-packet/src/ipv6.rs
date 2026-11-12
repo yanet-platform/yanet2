@@ -516,6 +516,7 @@ mod tests {
                 assert!(length > available);
             }
             ParseError::HeaderLen { .. } | ParseError::LengthBelowHeader { .. } => panic!("unexpected {error:?}"),
+            ParseError::OptionLength { .. } => panic!("unexpected {error:?}"),
         }
     }
 

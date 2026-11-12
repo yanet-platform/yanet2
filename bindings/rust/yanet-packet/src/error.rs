@@ -43,6 +43,14 @@ pub enum ParseError {
         /// Bytes of the input.
         available: usize,
     },
+    /// A TCP option's length cannot be trusted.
+    ///
+    /// It is below its two header bytes, past the options area, other than
+    /// its kind's, or holds more SACK blocks than are kept.
+    OptionLength {
+        /// Offset of the option in the options area.
+        offset: usize,
+    },
 }
 
 impl Display for ParseError {
@@ -59,6 +67,7 @@ impl Display for ParseError {
             Self::LengthBeyondInput { length, available } => {
                 write!(f, "length {length} is beyond the {available} bytes available")
             }
+            Self::OptionLength { offset } => write!(f, "TCP option at offset {offset} has an unusable length"),
         }
     }
 }

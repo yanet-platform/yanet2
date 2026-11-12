@@ -1,16 +1,15 @@
-//! Header bookkeeping of an insert into or a remove from a frame: the
-//! lengths, header lengths and checksums the parsed headers carry over the
-//! bytes that move.
+//! Header bookkeeping of a resized frame: the lengths, header lengths and
+//! checksums the parsed headers carry over the bytes that move.
 //!
 //! A [`Layout`] read from the frame and what the packet parser found plans
-//! an [`Edit`]; whoever moves the bytes writes the edit into the frame after
-//! the move. Every field an edit changes lies in a header that starts before
-//! the edit, which keeps its offset whichever side of the frame moves, so a
-//! plan read before the move is written after it. The checksum changes
-//! accumulate as a mutation's do and are folded in once (RFC 1624).
-//!
-//! The SDK's packet insert and remove use it after checking the edit against
-//! the packet; it is not meant to be called on its own.
+//! an [`Edit`] for an insert, a remove or a TCP options rewrite; whoever
+//! moves the bytes writes the edit into the frame after the move. Every
+//! field an edit changes lies in a header that starts before the edit, so a
+//! plan read before the move holds after it, and the checksum changes are
+//! folded in once (RFC 1624). The SDK's packet operations use it after
+//! checking the edit against the packet; it is not called on its own.
+
+use core::ops::Range;
 
 use zerocopy::byteorder::network_endian::U16;
 
@@ -205,7 +204,9 @@ impl Layout {
     /// The parser vouches that the fixed IPv4, IPv6, TCP or UDP header it
     /// found lies whole in the frame; a length field the frame does not
     /// hold leaves its header out, as do a non-IP network header and an
-    /// unavailable or other transport header.
+    /// unavailable or other transport header. The header types, offsets and
+    /// fragment mark are the parser's: a frame whose headers changed them
+    /// since is parsed again first, or its edits keep inconsistent headers.
     #[inline]
     pub fn read(frame: &[u8], parsed: Parsed) -> Self {
         let network_start = usize::from(parsed.network_offset);
@@ -457,6 +458,74 @@ impl Layout {
             }
         }
         Ok(edit)
+    }
+
+    /// Plans replacing the options of the parsed TCP header by `len` bytes,
+    /// returning the edit and the frame range the old options take.
+    ///
+    /// The data offset counts the new options and the IP length follows the
+    /// difference. The TCP checksum loses the old options and takes the new
+    /// ones once they are written, from the old checksum, as an insert does;
+    /// the difference is whole words, so no byte after it changes its
+    /// pairing. The caller checks the frame is the one the layout was read
+    /// from and moves the bytes as the range tells.
+    ///
+    /// # Errors
+    ///
+    /// Refused are a packet without an available TCP header behind a parsed
+    /// IP header, one whose TCP checksum the layout cannot keep (a fragment,
+    /// an IP header reaching into the TCP header, or a datagram that runs
+    /// past the frame), a header whose data offset is below five words or
+    /// that runs past its datagram, a length not of whole 32-bit words or
+    /// beyond the 40 bytes a header holds, and a length an IP length field
+    /// cannot hold.
+    #[inline]
+    pub fn plan_tcp_options(&self, frame: &[u8], len: usize) -> Result<(Edit, Range<usize>), Refused> {
+        let (Some(network), Some(Transport::Tcp { start, header, word6 })) = (self.network, self.transport) else {
+            return Err(Refused);
+        };
+        // The new options change what the checksum covers, so one that
+        // cannot be kept, a fragment's among them, refuses the rewrite.
+        if !self.checksummed
+            || word6 >> 12 < 5
+            || !len.is_multiple_of(4)
+            || len > TCP_HEADER_MAX - 20
+            || start + header > network.end()
+            || network.end() > frame.len()
+        {
+            return Err(Refused);
+        }
+        let options = start + 20..start + header;
+        let resized = |value: u16| {
+            (usize::from(value) + len)
+                .checked_sub(options.len())
+                .and_then(|value| u16::try_from(value).ok())
+                .ok_or(Refused)
+        };
+        let mut edit = Edit::new();
+        match network {
+            Network::V4 { start, total, .. } => {
+                let new = resized(total)?;
+                edit.change(start + 2, total, new);
+                edit.ipv4_replace(start, total, new);
+            }
+            Network::V6 { start, payload } => edit.change(start + 4, payload, resized(payload)?),
+        }
+        let word6_new = (word6 & 0x0fff) | (((20 + len) as u16 / 4) << 12);
+        edit.change(start + 12, word6, word6_new);
+        let covered = network.end();
+        let segment = (covered - start) as u16;
+        let mut delta = edit.covered_changes(start, covered);
+        replace(&mut delta, segment, resized(segment)?);
+        sub_run(&mut delta, &frame[options.clone()], options.start - start);
+        edit.l4 = Some(L4 {
+            start: start as u16,
+            checksum: (start + 16) as u16,
+            delta,
+            gap_at: options.start as u16,
+            gap_len: len as u16,
+        });
+        Ok((edit, options))
     }
 }
 

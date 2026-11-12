@@ -811,8 +811,11 @@ impl<'id> Packet<'id> {
     /// The bytes before `at` keep their offsets: the shorter side moves, into
     /// the headroom beyond the descriptor or into the tailroom, the other side
     /// when that room is short. Parsed headers at or after `at` move with
-    /// their bytes; unparsed headers stay unparsed. The bytes `fill` gets
-    /// hold whatever the buffer held there, and what it returns is returned.
+    /// their bytes; unparsed headers stay unparsed. The packet is resized
+    /// before `fill` runs, so the bytes it gets, and leaves unwritten, hold
+    /// whatever the buffer held there; what it returns is returned. The header
+    /// types, offsets and fragment fields are the parse's: a frame whose
+    /// headers changed them is parsed again first, [`Packet::parse`].
     ///
     /// The IPv4 total length, with the header checksum, the IPv6 payload
     /// length and the UDP length grow by the bytes inserted in what each
@@ -880,13 +883,33 @@ impl<'id> Packet<'id> {
         let mut edit = Layout::read(self.data(), self.parsed())
             .plan_insert(self.data(), at, len, insertion)
             .map_err(|_| ResizeError)?;
+        self.move_for_insert(at, len16)?;
+        let frame = self.data_mut();
+        edit.write_headers(frame);
+        let filled = fill(&mut frame[at..at + len]);
+        edit.write_transport_checksum(frame);
+        Ok(filled)
+    }
+
+    /// Opens room for `len` bytes at frame offset `at`, moving the shorter
+    /// side.
+    ///
+    /// The bytes before `at` keep their offsets and parsed headers at or after
+    /// it move with their bytes. The caller has checked the packet is
+    /// single-segment and `at` lies in the frame; the headers' contents are
+    /// its to keep. A length neither room takes leaves the packet unchanged.
+    #[inline(always)]
+    fn move_for_insert(&mut self, at: usize, len16: u16) -> Result<(), ResizeError> {
+        let (len, data_len) = (usize::from(len16), self.data().len());
         let raw = self.raw.as_ptr();
         // SAFETY: the packet, its mbuf and buffer are exclusively ours for
-        // the call (attach: packet). The moved bytes and the new ones lie in
-        // the only segment and the room checked for them: the headroom
-        // beyond the descriptor or the tailroom. A parsed offset at or after
-        // the insert is no later than the end of the frame, so the shifted
-        // one is no later than the end of the grown frame, inside the buffer.
+        // the call (attach: packet); callers keep `at` in its one segment.
+        //
+        // The moved bytes and the new ones lie in that segment and the room
+        // checked for them: the headroom beyond the descriptor or the
+        // tailroom. A parsed offset at or after the insert is no later than
+        // the end of the frame, so the shifted one is no later than the end of
+        // the grown frame, inside the buffer.
         unsafe {
             let mbuf = (*raw).mbuf;
             let data_off = usize::from((*mbuf).data_off);
@@ -910,11 +933,7 @@ impl<'id> Packet<'id> {
             (*raw).data_len = (*mbuf).data_len;
             move_parsed(raw, at, |offset| offset + len16);
         }
-        let frame = self.data_mut();
-        edit.write_headers(frame);
-        let filled = fill(&mut frame[at..at + len]);
-        edit.write_transport_checksum(frame);
-        Ok(filled)
+        Ok(())
     }
 
     /// Removes `len` bytes at frame offset `at` of a single-segment packet
@@ -928,7 +947,8 @@ impl<'id> Packet<'id> {
     /// in what each covers, removed option bytes shrink the IPv4 header length
     /// or the TCP data offset, and the IPv4 header checksum and the TCP or
     /// UDP checksum are updated over all of it. The transport checksum is
-    /// left unchanged in the same cases as for [`Packet::insert`].
+    /// left unchanged in the same cases as for [`Packet::insert`], and the
+    /// parse is trusted as there.
     ///
     /// Refused, leaving the packet unchanged:
     /// - for memory safety: a chained packet, a range past the frame, one
@@ -964,12 +984,32 @@ impl<'id> Packet<'id> {
         let mut edit = Layout::read(self.data(), self.parsed())
             .plan_remove(self.data(), at, len)
             .map_err(|_| ResizeError)?;
+        self.move_for_remove(at, len16);
+        let frame = self.data_mut();
+        edit.write_headers(frame);
+        edit.write_transport_checksum(frame);
+        Ok(())
+    }
+
+    /// Closes `len` bytes at frame offset `at`, moving the shorter side.
+    ///
+    /// The bytes before `at` keep their offsets and parsed headers after the
+    /// range move with their bytes. The caller has checked the packet is
+    /// single-segment, the range lies in the frame and holds no parsed
+    /// header's start nor a byte the parser vouches for, and the network
+    /// header stays behind the Ethernet header; the headers' contents are its
+    /// to keep.
+    #[inline(always)]
+    fn move_for_remove(&mut self, at: usize, len16: u16) {
+        let (len, data_len) = (usize::from(len16), self.data().len());
+        let end = at + len;
         let raw = self.raw.as_ptr();
         // SAFETY: the packet, its mbuf and buffer are exclusively ours for
-        // the call (attach: packet), and the moved bytes lie in its only
-        // segment. A parsed offset after the removed range moves down by
-        // its length and its vouched bytes stay whole, as none of them was
-        // removed; one before it keeps its place, inside the shrunk frame.
+        // the call (attach: packet); callers keep the range in its one segment.
+        //
+        // A parsed offset after the removed range moves down by its length
+        // and its vouched bytes stay whole, as none of them was removed; one
+        // before it keeps its place, inside the shrunk frame.
         unsafe {
             let mbuf = (*raw).mbuf;
             let (start, _) = segment(mbuf);
@@ -984,10 +1024,74 @@ impl<'id> Packet<'id> {
             (*raw).data_len = (*mbuf).data_len;
             move_parsed(raw, end, |offset| offset - len16);
         }
+    }
+
+    /// Replaces the options area of the parsed TCP header by `len` bytes,
+    /// has `fill` write them, and keeps the headers consistent.
+    ///
+    /// The difference in size opens or closes at the start of the options as
+    /// an insert or a remove there does, the packet resized before `fill`
+    /// runs on bytes that hold whatever the buffer held; [`TcpOptions::write`]
+    /// fills an area of [`TcpOptions::len`] bytes. The data offset and the IP
+    /// length follow, and once `fill` returns the TCP checksum is updated over
+    /// the old and the new options from the old checksum, so a damaged segment
+    /// stays damaged. The parse is trusted as for [`Packet::insert`]; options
+    /// read by [`TcpOptions::parse`] lose those of kinds it does not know.
+    ///
+    /// # Errors
+    ///
+    /// Refused, leaving the packet unchanged, are for memory safety a chained
+    /// packet, a datagram that runs past the frame and a length neither room
+    /// takes, and for header consistency a packet without an available TCP
+    /// header behind a parsed IP header, a fragment, whose checksum covers
+    /// bytes it does not hold and whose followers would keep their offsets, an
+    /// IP header reaching into the TCP header, a header whose data offset is
+    /// below five words or that runs past its datagram, and a length not of
+    /// whole 32-bit words, beyond the 40 bytes a header holds, or one an IP
+    /// length field cannot hold.
+    ///
+    /// [`TcpOptions::write`]: yanet_packet::tcp_options::TcpOptions::write
+    /// [`TcpOptions::len`]: yanet_packet::tcp_options::TcpOptions::len
+    /// [`TcpOptions::parse`]: yanet_packet::tcp_options::TcpOptions::parse
+    #[inline]
+    pub fn rewrite_tcp_options<R>(&mut self, len: usize, fill: impl FnOnce(&mut [u8]) -> R) -> Result<R, ResizeError> {
+        if self.chained() {
+            return Err(ResizeError);
+        }
+        let (mut edit, options) = Layout::read(self.data(), self.parsed())
+            .plan_tcp_options(self.data(), len)
+            .map_err(|_| ResizeError)?;
+        // The plan bounds both lengths by the 40 bytes a header holds, and
+        // the options lie behind the fixed TCP header, inside the frame.
+        let old = options.len();
+        if len > old {
+            self.move_for_insert(options.start, (len - old) as u16)?;
+        } else if old > len {
+            self.move_for_remove(options.start, (old - len) as u16);
+        }
         let frame = self.data_mut();
         edit.write_headers(frame);
+        let filled = fill(&mut frame[options.start..options.start + len]);
         edit.write_transport_checksum(frame);
-        Ok(())
+        Ok(filled)
+    }
+
+    /// Replaces the options area of the parsed TCP header by the options, as
+    /// [`Packet::rewrite_tcp_options`] does with bytes a closure writes.
+    ///
+    /// # Errors
+    ///
+    /// The refusals of [`Packet::rewrite_tcp_options`]; options beyond the 40
+    /// bytes a header holds are one of them, unless trimmed by
+    /// [`TcpOptions::fit_to_header`] first.
+    ///
+    /// [`TcpOptions::fit_to_header`]: yanet_packet::tcp_options::TcpOptions::fit_to_header
+    #[inline]
+    pub fn write_tcp_options(&mut self, options: &yanet_packet::tcp_options::TcpOptions) -> Result<(), ResizeError> {
+        self.rewrite_tcp_options(options.len(), |area| {
+            let written = options.write(area);
+            debug_assert!(written.is_ok());
+        })
     }
 
     /// Prepends an outer IPv4 header to an IPv4 or IPv6 packet, as the C
