@@ -173,8 +173,8 @@ test_stress_seed12_regression(void *memory, size_t memory_size) {
 	LOG(INFO, "Regression test passed!");
 }
 
-// A network of no mask bits matches every address, also one below the
-// address bits it carries.
+// Verifies that a network of no mask bits matches every address, also one
+// below the address bits it carries.
 static void
 test_any_network_with_address_bits(struct memory_context *memory_context) {
 	struct filter_rule_builder narrow;
