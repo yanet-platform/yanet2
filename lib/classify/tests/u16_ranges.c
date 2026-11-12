@@ -34,6 +34,7 @@ struct test_rule {
 	uint32_t count;
 };
 
+// The ranges of a test rule, as the attribute getter.
 static void
 test_rule_get_ranges(
 	const struct classifier_rule *rule, struct filter_u16_ranges *ranges
@@ -81,6 +82,7 @@ test_random_span(uint64_t *state) {
 	return (struct filter_u16_span){from, to};
 }
 
+// Whether a range of the rule covers the value.
 static int
 test_rule_covers(const struct test_rule *rule, uint32_t value) {
 	for (uint32_t idx = 0; idx < rule->count; ++idx) {

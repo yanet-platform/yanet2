@@ -36,6 +36,8 @@ struct test_reference {
 	uint8_t key_size;
 };
 
+// Builds the oracle partition of the prefixes: the radix collector
+// collected into a range index.
 static void
 test_reference_build(
 	struct memory_context *mctx,
@@ -62,6 +64,7 @@ test_reference_build(
 	       ) == 0);
 }
 
+// Releases the oracle partition.
 static void
 test_reference_free(struct test_reference *ref) {
 	range_index_free(&ref->index);
@@ -75,6 +78,7 @@ struct test_walk_ctx {
 	uint32_t next;
 };
 
+// Checks one oracle range start against the next piece of the partition.
 static int
 test_walk_piece(
 	uint8_t key_size, const uint8_t *key, uint32_t index, void *data
@@ -149,6 +153,9 @@ test_assert_find(
 	       radix_lookup(&ref->index.radix, ref->key_size, bytes));
 }
 
+// Asserts that the oracle and the partition build the same LPM with the
+// values: the same page shape and the same lookups at every piece start
+// and the key before it.
 static void
 test_assert_lpm(
 	const struct test_reference *ref,
@@ -191,6 +198,7 @@ test_assert_lpm(
 	lpm_free(&expected);
 }
 
+// Orders prefixes by start, then by length, for qsort.
 static int
 test_prefix_cmp(const void *first, const void *second) {
 	const struct classify_prefix *a = first;
@@ -372,6 +380,7 @@ test_rand(uint64_t *state) {
 	return value;
 }
 
+// The 64 bit mask of the given number of leading bits.
 static uint64_t
 test_mask64(uint64_t len) {
 	return len == 0 ? 0 : ~(uint64_t)0 << (64 - len);
