@@ -992,6 +992,7 @@ mod tests {
                 assert_eq!(buf.len(), available);
                 assert!(length > available);
             }
+            ParseError::OptionLength { .. } => panic!("unexpected {error:?}"),
         }
     }
 

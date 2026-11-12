@@ -1633,3 +1633,101 @@ fn test_encap_mpls_masks_traffic_class_and_keeps_transport_unparsed() {
     assert_eq!(1 << 12 | 7 << 9 | 1 << 8 | 9, entry);
     assert_eq!((14, 0), frame.offsets());
 }
+
+/// Writes the options over those of a described copy of the frame, returning
+/// the frame and its parsed network and transport offsets.
+///
+/// The copy has 16 bytes of headroom and of tailroom.
+fn rewritten(bytes: &[u8], options: yanet_packet::tcp_options::TcpOptions) -> (Vec<u8>, (u16, u16)) {
+    let mut frame = Frame::new(described(bytes), 16, bytes, 16);
+    assert_eq!(Ok(()), frame.packet().write_tcp_options(&options));
+    (frame.frame().to_vec(), frame.offsets())
+}
+
+/// verifies that rewriting the TCP options to any length keeps every length,
+/// checksum and the data offset agreeing with the bytes written.
+#[test]
+fn test_rewrite_tcp_options_keeps_lengths_and_checksums_consistent() {
+    use yanet_packet::tcp_options::{Sack, SackBlock, TcpOptions, Timestamps};
+
+    let payload: Vec<u8> = (0..24).map(|idx| (idx * 5) as u8).collect();
+    let tcp4 = sealed_ipv4(&[], 6, 0, &tcp_with(&[2, 4, 0x05, 0xb4, 1, 1, 4, 2], &payload), 0);
+    let tcp6 = sealed_ipv6(6, &tcp_with(&[2, 4, 0x05, 0xb4], &payload));
+    let hop_by_hop = [6, 0, 1, 4, 0, 0, 0, 0];
+    let extended6 = sealed_ipv6(0, &[&hop_by_hop[..], &tcp_with(&[2, 4, 0x05, 0xb4], &payload)].concat());
+    let mut blocks = Sack::default();
+    blocks.push(SackBlock { start: 100, end: 200 });
+    let sack = TcpOptions::default()
+        .with_timestamps(Some(Timestamps { value: 7, echo: 9 }))
+        .with_sack(blocks);
+    let same = TcpOptions::default().with_mss(Some(1400)).with_sack_permitted(true);
+    let shorter = TcpOptions::default().with_mss(Some(1200));
+    // Each case: the frame, the options, and the data offset expected after.
+    for (case, bytes, options, words) in [
+        ("ipv4, more options", &tcp4, sack, 5 + 5),
+        ("ipv4, as many options", &tcp4, same, 5 + 2),
+        ("ipv4, fewer options", &tcp4, shorter, 5 + 1),
+        ("ipv4, no options", &tcp4, TcpOptions::default(), 5),
+        ("ipv6, more options", &tcp6, sack, 5 + 5),
+        ("ipv6 behind a hop-by-hop header", &extended6, sack, 5 + 5),
+    ] {
+        let (frame, offsets) = rewritten(bytes, options);
+
+        let transport = usize::from(offsets.1);
+        let header = usize::from(frame[transport + 12] >> 4) * 4;
+        assert_eq!(None, inconsistency(&frame, offsets, 0, 0, true), "{case}");
+        assert_eq!(words, frame[transport + 12] >> 4, "{case}");
+        assert_eq!(
+            Ok(options),
+            TcpOptions::parse(&frame[transport + 20..transport + header]),
+            "{case}"
+        );
+    }
+}
+
+/// verifies that rewriting the options of a segment whose TCP checksum
+/// arrived damaged keeps it damaged.
+#[test]
+fn test_rewrite_tcp_options_keeps_a_damaged_checksum_damaged() {
+    let payload = [0x31; 16];
+    let mut damaged = sealed_ipv4(&[], 6, 0, &tcp_with(&[1, 1, 1, 1], &payload), 0);
+    damaged[60] ^= 0x10;
+    let options = yanet_packet::tcp_options::TcpOptions::default()
+        .with_mss(Some(1460))
+        .with_window_scale(Some(7));
+
+    let (frame, offsets) = rewritten(&damaged, options);
+
+    assert_eq!(Some("transport checksum"), inconsistency(&frame, offsets, 0, 0, true));
+}
+
+/// verifies that a rewrite the TCP header cannot take is refused and leaves
+/// the packet as it was.
+#[test]
+fn test_rewrite_tcp_options_refusal_leaves_the_packet_unchanged() {
+    let payload = [0x22; 16];
+    let tcp4 = sealed_ipv4(&[], 6, 0, &tcp_with(&[1, 1, 1, 1], &payload), 0);
+    let udp4 = sealed_ipv4(&[], 17, 0, &udp_with(&payload), 0);
+    let mut underlong = tcp4.clone();
+    underlong[46] = 0x00;
+    let fragment = sealed_ipv4(&[], 6, 0x2000, &tcp_with(&[1, 1, 1, 1], &payload), 0);
+    // The IP header grown after the parse to reach into the TCP header.
+    let mut overlapping = tcp4.clone();
+    overlapping[14] = 0x46;
+    for (case, parsed, bytes, len) in [
+        ("options not of whole words", &tcp4, &tcp4, 6),
+        ("options beyond 40 bytes", &tcp4, &tcp4, 44),
+        ("a udp datagram", &udp4, &udp4, 4),
+        ("a data offset below five words", &underlong, &underlong, 4),
+        ("a first fragment", &fragment, &fragment, 4),
+        ("an ip header reaching into tcp", &tcp4, &overlapping, 4),
+    ] {
+        let mut frame = Frame::new(described(parsed), 16, bytes, 16);
+        let offsets = frame.offsets();
+
+        let refused = frame.packet().rewrite_tcp_options(len, |area| area.fill(1));
+
+        assert_eq!(Err(ResizeError), refused, "{case}");
+        assert_eq!((bytes.as_slice(), offsets), (frame.frame(), frame.offsets()), "{case}");
+    }
+}

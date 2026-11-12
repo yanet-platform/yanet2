@@ -11,6 +11,8 @@ use crate::{
     split_header, split_header_mut,
 };
 
+pub mod options;
+
 /// The bits of the data offset and flags word that hold the nine flags.
 const FLAG_BITS: u16 = 0x01ff;
 
@@ -156,6 +158,7 @@ impl TcpHeader {
     pub fn mutate(&mut self) -> TcpMutation<'_> {
         TcpMutation {
             header: self,
+            options: &mut [],
             mode: mutation::adjusted(),
         }
     }
@@ -164,7 +167,11 @@ impl TcpHeader {
     /// anew after it.
     #[inline]
     pub fn mutate_unadjusted(&mut self) -> TcpMutation<'_, Unadjusted> {
-        TcpMutation { header: self, mode: Unadjusted }
+        TcpMutation {
+            header: self,
+            options: &mut [],
+            mode: Unadjusted,
+        }
     }
 
     /// Fills the checksum of the segment the bytes hold, its header, options
@@ -199,18 +206,19 @@ impl TcpHeader {
 
 /// A change of TCP header fields, in the mode chosen when it starts.
 ///
-/// An adjusting mutation keeps the checksum valid and ends with
-/// [`TcpMutation::finish`], which adjusts the checksum once for every change;
-/// an unadjusted one stores the fields alone and ends with
-/// [`TcpMutation::finish_unadjusted`], its checksum then filled over the
-/// pseudo header and the segment. Each setter takes the mutation and returns
-/// it, so the changes chain; a chain left without its finish is an unused
-/// value the compiler warns about, though an early return between the start
-/// and the finish goes unseen.
+/// An adjusting mutation ends with [`TcpMutation::finish`], adjusting the
+/// checksum once for every change; an unadjusted one stores the fields alone
+/// and ends with [`TcpMutation::finish_unadjusted`], the checksum filled
+/// anew after it. One started from a [`TcpPacketMut`] also edits options in
+/// place under the same adjustment. Setters chain, and a chain left without
+/// its finish is an unused value the compiler warns about, though an early
+/// return between the start and the finish goes unseen.
 #[must_use = "a mutation ends with finish or finish_unadjusted"]
 #[derive(Debug)]
 pub struct TcpMutation<'a, M = Adjusted> {
     header: &'a mut TcpHeader,
+    /// The options area, empty for a mutation of the fixed header alone.
+    options: &'a mut [u8],
     mode: M,
 }
 
@@ -306,7 +314,7 @@ impl<'a> TcpMutation<'a> {
     /// storing it as zero.
     #[inline]
     pub fn finish(self) -> &'a mut TcpHeader {
-        let Self { header, mode } = self;
+        let Self { header, mode, .. } = self;
         header.checksum = mutation::adjust_no_zero(header.checksum, mode);
         header
     }
@@ -387,6 +395,39 @@ impl<'a> TcpPacketMut<'a> {
         // The options end within the input, so the split cannot panic.
         let (options, payload) = rest.split_at_mut(options_len);
         Ok(Self { header, options, payload })
+    }
+
+    /// Starts a mutation of the header and its options that keeps the
+    /// checksum valid.
+    ///
+    /// # Errors
+    ///
+    /// [`ParseError::OptionLength`] for an option whose length cannot be
+    /// trusted, before anything changes.
+    #[inline]
+    pub fn mutate(&mut self) -> Result<TcpMutation<'_>, ParseError> {
+        self.mutation(mutation::adjusted())
+    }
+
+    /// Starts a mutation of the header and its options that stores the
+    /// changes alone, for a checksum filled anew after it.
+    ///
+    /// # Errors
+    ///
+    /// The same as [`TcpPacketMut::mutate`].
+    #[inline]
+    pub fn mutate_unadjusted(&mut self) -> Result<TcpMutation<'_, Unadjusted>, ParseError> {
+        self.mutation(Unadjusted)
+    }
+
+    #[inline]
+    fn mutation<M>(&mut self, mode: M) -> Result<TcpMutation<'_, M>, ParseError> {
+        options::options(self.options).try_for_each(|option| option.map(drop))?;
+        Ok(TcpMutation {
+            header: self.header,
+            options: self.options,
+            mode,
+        })
     }
 }
 
@@ -732,6 +773,7 @@ mod tests {
             | ParseError::LengthBeyondInput { .. } => {
                 panic!("unexpected {error:?}")
             }
+            ParseError::OptionLength { .. } => panic!("unexpected {error:?}"),
         }
     }
 
