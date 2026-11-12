@@ -76,7 +76,7 @@ pub const FIXTURE_MODE_FREE: u64 = 12;
 /// a build registers or allocates.
 #[derive(ShmLayout)]
 #[repr(C)]
-pub struct Config {
+pub struct Fixture {
     pub mode: u64,
     pub arg: u64,
     pub counter: Counter,
@@ -85,17 +85,14 @@ pub struct Config {
     pub weights: ShmSlice<u64>,
 }
 
-pub struct Fixture;
-
 impl Module for Fixture {
     const NAME: &'static str = "fixture";
-    type Config = Config;
     type Prepared<'p> = ();
 
     // Forgetting is the point: it is safe and touches no list.
     #[allow(clippy::forget_non_drop)]
-    fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
-        match cx.config().mode {
+    fn handle<'id>(&'id self, cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+        match self.mode {
             FIXTURE_MODE_FORGET => {
                 if let Some(packet) = batch.next() {
                     core::mem::forget(packet);
@@ -130,11 +127,11 @@ impl Module for Fixture {
                 batch.dispatch(|_| if drop_all { Verdict::Drop } else { Verdict::Pass });
             }
             FIXTURE_MODE_FORWARD => {
-                let device = &cx.config().device;
+                let device = &self.device;
                 batch.dispatch(|_| device.resolve(cx).map_or(Verdict::Drop, Verdict::Redirect));
             }
             FIXTURE_MODE_RESOLVE => {
-                let device = &cx.config().device;
+                let device = &self.device;
                 batch.dispatch(|_| {
                     if device.resolve(cx).is_some() {
                         Verdict::Pass
@@ -144,7 +141,7 @@ impl Module for Fixture {
                 });
             }
             FIXTURE_MODE_RESOLVE_INPUT => {
-                let device = &cx.config().device;
+                let device = &self.device;
                 batch.dispatch(|_| {
                     if device.resolve_input(cx).is_some() {
                         Verdict::Pass
@@ -154,7 +151,7 @@ impl Module for Fixture {
                 });
             }
             FIXTURE_MODE_REENTER => {
-                let device = &cx.config().device;
+                let device = &self.device;
                 batch.dispatch(|packet| match packet.data_mut().first_mut() {
                     Some(byte) if *byte & 0x80 != 0 => Verdict::Pass,
                     Some(byte) => {
@@ -191,7 +188,7 @@ impl Module for Fixture {
             FIXTURE_MODE_ALLOC_PREPEND => {
                 batch.pass_all();
                 if let Some(mut packet) = batch.alloc() {
-                    match usize::try_from(cx.config().arg).map(|len| packet.prepend(len)) {
+                    match usize::try_from(self.arg).map(|len| packet.prepend(len)) {
                         Ok(Ok(room)) => {
                             room.fill(0xbb);
                             batch.pass(packet);
@@ -215,7 +212,7 @@ impl Module for Fixture {
         }
     }
 
-    fn prepare(_: &CommitCx<'_, Self>) {}
+    fn prepare<'p>(&'p self, _: &CommitCx<'p, Self>) {}
 }
 
 /// The configuration of [`Tally`]: a word the commit derives from, three
@@ -228,7 +225,7 @@ impl Module for Fixture {
 /// of another registry, picked by id.
 #[derive(ShmLayout)]
 #[repr(C)]
-pub struct TallyConfig {
+pub struct Tally {
     pub word: u64,
     pub by_value: [Counter; 3],
     pub held: Counter,
@@ -272,15 +269,11 @@ pub struct Stamp<'p> {
 /// byte modulo 4, through the handle made at commit, unless it is empty; an id
 /// past the counters registered counts nowhere.
 /// Passes the packets when the stamp is 14 and drops them otherwise.
-pub struct Tally;
-
 impl Module for Tally {
     const NAME: &'static str = "tally";
-    type Config = TallyConfig;
     type Prepared<'p> = Stamp<'p>;
 
-    fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
-        let config = cx.config();
+    fn handle<'id>(&'id self, cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
         let prepared = cx.prepared();
         let held = prepared.held.bind(cx);
         let parity = prepared.parity.bind(cx);
@@ -289,38 +282,37 @@ impl Module for Tally {
         let pass = prepared.stamp == 14;
         batch.dispatch(|packet| {
             if let Some(byte) = packet.data().first() {
-                config.by_value[usize::from(byte % 3)].add(cx, 1);
+                self.by_value[usize::from(byte % 3)].add(cx, 1);
                 let side = if byte % 2 == 0 {
                     parity.at::<EVEN>()
                 } else {
                     parity.at::<ODD>()
                 };
                 side.add(Traffic::packet(packet.data().len() as u64));
-                config.by_parity[usize::from(byte % 2)].add(cx, Traffic::packet(packet.data().len() as u64));
+                self.by_parity[usize::from(byte % 2)].add(cx, Traffic::packet(packet.data().len() as u64));
                 by_id.add(u64::from(byte % 4), Traffic::packet(packet.data().len() as u64));
             }
             held.add(2);
             tagged_held.add(3);
-            config.traffic.add(cx, Traffic::packet(packet.data().len() as u64));
+            self.traffic.add(cx, Traffic::packet(packet.data().len() as u64));
             if let Some(seen) = &prepared.seen {
                 let count = seen.get_mut(cx);
                 *count += 1;
                 let count = *count;
-                config.running.add(cx, count);
+                self.running.add(cx, count);
             }
             if pass { Verdict::Pass } else { Verdict::Drop }
         });
     }
 
-    fn prepare<'p>(cx: &CommitCx<'p, Self>) -> Stamp<'p> {
-        let config = cx.config();
+    fn prepare<'p>(&'p self, cx: &CommitCx<'p, Self>) -> Stamp<'p> {
         Stamp {
-            held: config.held.resolve(cx),
-            parity: config.parity.resolve(cx),
-            stamp: config.word * 2,
-            seen: config.seen.handle(cx),
-            tagged_held: config.tagged_held.resolve(cx),
-            by_id: config.by_id.resolve(cx),
+            held: self.held.resolve(cx),
+            parity: self.parity.resolve(cx),
+            stamp: self.word * 2,
+            seen: self.seen.handle(cx),
+            tagged_held: self.tagged_held.resolve(cx),
+            by_id: self.by_id.resolve(cx),
         }
     }
 }
@@ -353,7 +345,7 @@ pub struct RouteList {
 #[doc(alias = "route_fib")]
 #[derive(ShmLayout)]
 #[repr(C)]
-pub struct RouteFib {
+pub struct Fib {
     pub lpm_v6: Lpm6,
     pub lpm_v4: Lpm4,
     pub routes: ShmSlice<Route>,
@@ -365,20 +357,16 @@ pub struct RouteFib {
 /// on every route of the selected list, addresses it from the first route and
 /// redirects it to that route's device. Drops what has no route, another
 /// ethertype and a device that does not resolve.
-pub struct Fib;
-
 impl Module for Fib {
     const NAME: &'static str = "fib";
-    type Config = RouteFib;
     type Prepared<'p> = ();
 
-    fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
-        let fib = cx.config();
+    fn handle<'id>(&'id self, cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
         batch.dispatch(|packet| {
-            let Some(indexes) = route_indexes(cx, fib, packet.data()) else {
+            let Some(indexes) = route_indexes(cx, self, packet.data()) else {
                 return Verdict::Drop;
             };
-            let table = fib.routes.as_slice(cx);
+            let table = self.routes.as_slice(cx);
             let routes = indexes
                 .iter()
                 .filter_map(|&index| table.get(usize::try_from(index).ok()?));
@@ -395,12 +383,12 @@ impl Module for Fib {
         });
     }
 
-    fn prepare(_: &CommitCx<'_, Self>) {}
+    fn prepare<'p>(&'p self, _: &CommitCx<'p, Self>) {}
 }
 
 /// The entries of the route index that the destination of an IPv4 or IPv6
 /// frame selects.
-fn route_indexes<'id>(cx: &Cx<'id, Fib>, fib: &'id RouteFib, frame: &[u8]) -> Option<&'id [u64]> {
+fn route_indexes<'id>(cx: &Cx<'id, Fib>, fib: &'id Fib, frame: &[u8]) -> Option<&'id [u64]> {
     let list = match frame.get(12..14)? {
         [0x08, 0x00] => fib.lpm_v4.lookup(cx, frame.get(30..34)?.try_into().ok()?)?,
         [0x86, 0xdd] => fib.lpm_v6.lookup(cx, frame.get(38..54)?.try_into().ok()?)?,
@@ -419,7 +407,7 @@ fn route_indexes<'id>(cx: &Cx<'id, Fib>, fib: &'id RouteFib, frame: &[u8]) -> Op
 /// [`Stash`] keeps.
 #[derive(ShmLayout)]
 #[repr(C)]
-pub struct StateConfig {
+pub struct State {
     pub seed: u64,
     pub slots: ShmSlice<AtomicU64>,
     pub workers: PerWorker<u64>,
@@ -429,20 +417,16 @@ pub struct StateConfig {
 
 /// An object of atomic slots, the shape of state kept across configuration
 /// updates; prepares its seed, which a module linking it reads per packet.
-pub struct State;
-
 impl Object for State {
     const TYPE: &'static str = "fixture_state";
-    type Config = StateConfig;
     type Prepared<'p> = StatePrepared<'p>;
 
-    fn prepare<'p>(cx: &ObjectCommitCx<'p, Self>) -> StatePrepared<'p> {
-        let config = cx.config();
+    fn prepare<'p>(&'p self, cx: &ObjectCommitCx<'p, Self>) -> StatePrepared<'p> {
         StatePrepared {
-            seed: config.seed,
-            worker: config.workers.handle(cx),
-            region: config.regions.handle(cx),
-            held: config.held.resolve(cx),
+            seed: self.seed,
+            worker: self.workers.handle(cx),
+            region: self.regions.handle(cx),
+            held: self.held.resolve(cx),
         }
     }
 }
@@ -460,7 +444,7 @@ pub struct StatePrepared<'p> {
 /// name.
 #[derive(ShmLayout)]
 #[repr(C)]
-pub struct StashConfig {
+pub struct Stash {
     pub state: ObjectLink<State>,
     pub seen: Counter,
     pub filled: Counter,
@@ -475,20 +459,17 @@ pub struct StashConfig {
 /// made no handle. Holds a packet of an even first byte in the object's
 /// counter of the worker, kept as a gauge, and lets one go for a packet of an
 /// odd first byte while the worker holds any.
-pub struct Stash;
-
 impl Module for Stash {
     const NAME: &'static str = "stash";
-    type Config = StashConfig;
     type Prepared<'p> = ();
 
-    fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
-        let state = &cx.config().state;
+    fn handle<'id>(&'id self, cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+        let state = &self.state;
         let slots = state.get(cx).slots.as_slice(cx);
         let prepared = state.prepared(cx);
         let seed = prepared.seed;
-        let seen = &cx.config().seen;
-        let filled = &cx.config().filled;
+        let seen = &self.seen;
+        let filled = &self.filled;
         let held = prepared.held.bind(cx);
         batch.dispatch(|packet| {
             let slot = packet
@@ -521,5 +502,5 @@ impl Module for Stash {
         });
     }
 
-    fn prepare(_: &CommitCx<'_, Self>) {}
+    fn prepare<'p>(&'p self, _: &CommitCx<'p, Self>) {}
 }

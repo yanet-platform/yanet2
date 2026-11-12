@@ -42,19 +42,18 @@ type Tree6 = Rules<Join<Net6Attr, Net6Attr>, Join<LineAttr, PortAttr>>;
 /// and decoded.
 type TreeAny = Decode<Join<LineAttr, PortAttr>>;
 
-/// A module whose configuration is one tree; never run.
-struct Tree<T>(T);
+// A module whose configuration is one tree; never run.
+yanet_sdk_testing::test_body!(Tree<T> = ShmBox<T>);
 
 macro_rules! tree_module {
     ($($tree:ty: $name:literal;)*) => {$(
         impl Module for Tree<$tree> {
             const NAME: &'static str = $name;
-            type Config = ShmBox<$tree>;
             type Prepared<'p> = ();
 
-            fn handle<'id>(_: &mut Cx<'id, Self>, _: &mut Batch<'id>) {}
+            fn handle<'id>(&'id self, _: &mut Cx<'id, Self>, _: &mut Batch<'id>) {}
 
-            fn prepare<'p>(_: &CommitCx<'p, Self>) {}
+            fn prepare<'p>(&'p self, _: &CommitCx<'p, Self>) {}
         }
     )*};
 }
@@ -678,3 +677,6 @@ fn test_rules_tree6_lookup_burst_is_the_lookup_of_each_key() {
     tree.lookup_burst(&owner, &keys, |&key| key, &mut burst);
     assert_eq!(expected, burst);
 }
+
+// The public facade supplies the layout derive used in documentation tests.
+use yanet_sdk as _;

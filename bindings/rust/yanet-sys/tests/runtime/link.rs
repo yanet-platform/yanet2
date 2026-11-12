@@ -22,74 +22,70 @@ use yanet_sys::{
 
 use crate::common::{Ectx, commit_object, numbered, write};
 
-/// An object of atomic slots, which prepares their number.
-struct Slots;
+// An object of atomic slots, which prepares their number.
+yanet_sdk_testing::test_body!(Slots = ShmSlice<AtomicU64>);
 
 impl Object for Slots {
     const TYPE: &'static str = "slots";
-    type Config = ShmSlice<AtomicU64>;
     type Prepared<'p> = u64;
 
-    fn prepare(cx: &ObjectCommitCx<'_, Self>) -> u64 {
-        cx.config().as_slice(cx).len() as u64
+    fn prepare<'p>(&'p self, cx: &ObjectCommitCx<'p, Self>) -> u64 {
+        self.as_slice(cx).len() as u64
     }
 }
 
-/// An object of atomic slots without a prepared value.
-struct Plain;
+// An object of atomic slots without a prepared value.
+yanet_sdk_testing::test_body!(Plain = ShmSlice<AtomicU64>);
 
 impl Object for Plain {
     const TYPE: &'static str = "plain";
-    type Config = ShmSlice<AtomicU64>;
     type Prepared<'p> = ();
 
-    fn prepare(_: &ObjectCommitCx<'_, Self>) {}
+    fn prepare<'p>(&'p self, _: &ObjectCommitCx<'p, Self>) {}
 }
 
-/// Adds the object's prepared value to its first slot per packet, and
-/// prepares the number of slots plus the object's prepared value.
-struct Linker;
+// Adds the object's prepared value to its first slot per packet, and
+// prepares the number of slots plus the object's prepared value.
+yanet_sdk_testing::test_body!(Linker = ObjectLink<Slots>);
 
 impl Module for Linker {
     const NAME: &'static str = "linker";
-    type Config = ObjectLink<Slots>;
     type Prepared<'p> = u64;
 
-    fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
-        let slots = cx.config().get(cx).as_slice(cx);
-        let step = *cx.config().prepared(cx);
+    fn handle<'id>(&'id self, cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+        let slots = self.get(cx).as_slice(cx);
+        let step = *self.prepared(cx);
         batch.dispatch(|_| {
             slots[0].fetch_add(step, Ordering::Relaxed);
             Verdict::Pass
         });
     }
 
-    fn prepare<'p>(cx: &CommitCx<'p, Self>) -> u64 {
-        cx.config().get(cx).as_slice(cx).len() as u64 + *cx.config().prepared(cx)
+    fn prepare<'p>(&'p self, cx: &CommitCx<'p, Self>) -> u64 {
+        self.get(cx).as_slice(cx).len() as u64 + *self.prepared(cx)
     }
 }
 
-/// Adds one to the first slot of an object without a prepared value per
-/// packet, reading its unit prepared value, and prepares the number of slots.
-struct PlainLinker;
+// Adds one to the first slot of an object without a prepared value per
+// packet, reading its unit prepared value, and prepares the number of slots.
+yanet_sdk_testing::test_body!(PlainLinker = ObjectLink<Plain>);
 
 impl Module for PlainLinker {
     const NAME: &'static str = "plain_linker";
-    type Config = ObjectLink<Plain>;
     type Prepared<'p> = u64;
 
-    fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
-        let slots = cx.config().get(cx).as_slice(cx);
-        let () = *cx.config().prepared(cx);
+    fn handle<'id>(&'id self, cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+        let slots = self.get(cx).as_slice(cx);
+        let () = *self.prepared(cx);
         batch.dispatch(|_| {
             slots[0].fetch_add(1, Ordering::Relaxed);
             Verdict::Pass
         });
     }
 
-    fn prepare<'p>(cx: &CommitCx<'p, Self>) -> u64 {
-        let () = *cx.config().prepared(cx);
-        cx.config().get(cx).as_slice(cx).len() as u64
+    fn prepare<'p>(&'p self, cx: &CommitCx<'p, Self>) -> u64 {
+        let () = *self.prepared(cx);
+        self.get(cx).as_slice(cx).len() as u64
     }
 }
 
@@ -104,7 +100,7 @@ impl Module for PlainLinker {
 ///
 /// The context is the one of a module whose configuration names link 0 of
 /// type `O`.
-unsafe fn link<O: Object<Config = ShmSlice<AtomicU64>>>(
+unsafe fn link<O: Object + core::ops::Deref<Target = ShmSlice<AtomicU64>>>(
     arena: &'static BlockArena,
     context: &mut bindings::module_ectx,
 ) -> usize {
@@ -183,31 +179,29 @@ fn test_miri_reach_of_an_object_link_without_a_prepared_value() {
     assert_eq!((8, 2), (first, *ectx.prepared()));
 }
 
-/// An object of one gauge of its own, which prepares the worker's handle on
-/// it.
-struct Held;
+// An object of one gauge of its own, which prepares the worker's handle on
+// it.
+yanet_sdk_testing::test_body!(Held = ObjectCounter<Gauge>);
 
 impl Object for Held {
     const TYPE: &'static str = "held";
-    type Config = ObjectCounter<Gauge>;
     type Prepared<'p> = CounterRef<'p, Gauge>;
 
-    fn prepare<'p>(cx: &ObjectCommitCx<'p, Self>) -> CounterRef<'p, Gauge> {
-        cx.config().resolve(cx)
+    fn prepare<'p>(&'p self, cx: &ObjectCommitCx<'p, Self>) -> CounterRef<'p, Gauge> {
+        self.resolve(cx)
     }
 }
 
-/// Keeps the linked object's gauge: holds a packet of an even first byte and
-/// lets one go for a packet of an odd first byte while the worker holds any.
-struct Holder;
+// Keeps the linked object's gauge: holds a packet of an even first byte and
+// lets one go for a packet of an odd first byte while the worker holds any.
+yanet_sdk_testing::test_body!(Holder = ObjectLink<Held>);
 
 impl Module for Holder {
     const NAME: &'static str = "holder";
-    type Config = ObjectLink<Held>;
     type Prepared<'p> = ();
 
-    fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
-        let held = cx.config().prepared(cx).bind(cx);
+    fn handle<'id>(&'id self, cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+        let held = self.prepared(cx).bind(cx);
         batch.dispatch(|packet| {
             match packet.data().first() {
                 Some(byte) if byte % 2 == 0 => held.add(1),
@@ -218,7 +212,7 @@ impl Module for Holder {
         });
     }
 
-    fn prepare(_: &CommitCx<'_, Self>) {}
+    fn prepare<'p>(&'p self, _: &CommitCx<'p, Self>) {}
 }
 
 /// Lays out an object of [`Held`], its counter of id 0, as the one link of the
@@ -288,4 +282,49 @@ fn test_miri_reach_of_an_objects_counter_as_a_gauge() {
     // SAFETY: the value lies in the arena, written by the handler only.
     let held = unsafe { ectx.arena.root().ptr::<u64>(value.get()).read() };
     assert_eq!(2, held);
+}
+
+// A linked object's prepared value can borrow its own body.
+yanet_sdk_testing::test_body!(BorrowedSlots = ShmSlice<AtomicU64>);
+
+impl Object for BorrowedSlots {
+    const TYPE: &'static str = "borrowed_slots";
+    type Prepared<'p> = &'p ShmSlice<AtomicU64>;
+
+    fn prepare<'p>(&'p self, _: &ObjectCommitCx<'p, Self>) -> Self::Prepared<'p> {
+        &self.body
+    }
+}
+
+// The module carries that borrow into its own prepared buffer.
+yanet_sdk_testing::test_body!(Borrower = ObjectLink<BorrowedSlots>);
+
+impl Module for Borrower {
+    const NAME: &'static str = "borrower";
+    type Prepared<'p> = &'p ShmSlice<AtomicU64>;
+
+    fn prepare<'p>(&'p self, cx: &CommitCx<'p, Self>) -> Self::Prepared<'p> {
+        *self.prepared(cx)
+    }
+
+    fn handle<'id>(&'id self, cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+        let prepared = cx.prepared().as_slice(cx);
+        let direct = self.get(cx).as_slice(cx);
+        assert!(core::ptr::eq(prepared, direct));
+        assert_eq!(5, prepared[0].load(Ordering::Relaxed));
+        batch.pass_all();
+    }
+}
+
+/// Verifies that an object's receiver borrow resolves through a linking module.
+#[test]
+fn test_linked_prepared_value_borrows_its_object_receiver() {
+    // SAFETY: the module links the object at index zero and uses no devices.
+    let mut ectx = unsafe {
+        Ectx::<Borrower>::new(&[0], |arena, _, context| {
+            link::<BorrowedSlots>(arena, context);
+        })
+    };
+    ectx.run(&mut numbered(0));
+    ectx.run(&mut numbered(0));
 }

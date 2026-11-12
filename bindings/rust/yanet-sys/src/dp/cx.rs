@@ -39,8 +39,8 @@ const DEVICE_ABSENT: u16 = u16::MAX;
 /// ```compile_fail
 /// # use yanet_shm::rel::ShmBox;
 /// # use yanet_sys::dp::{Cx, Module};
-/// fn cross<'a, 'b, M: Module<Config = ShmBox<u64>>>(a: &mut Cx<'a, M>, b: &mut Cx<'b, M>) -> u64 {
-///     *a.config().get(b)
+/// fn cross<'a, 'b, M: Module + AsRef<ShmBox<u64>>>(a: &mut Cx<'a, M>, b: &mut Cx<'b, M>) -> u64 {
+///     *a.config().as_ref().get(b)
 /// }
 /// ```
 ///
@@ -49,8 +49,8 @@ const DEVICE_ABSENT: u16 = u16::MAX;
 /// ```
 /// # use yanet_shm::rel::ShmBox;
 /// # use yanet_sys::dp::{Cx, Module};
-/// fn own<'a, M: Module<Config = ShmBox<u64>>>(a: &mut Cx<'a, M>) -> u64 {
-///     *a.config().get(a)
+/// fn own<'a, M: Module + AsRef<ShmBox<u64>>>(a: &mut Cx<'a, M>) -> u64 {
+///     *a.config().as_ref().get(a)
 /// }
 /// ```
 ///
@@ -91,7 +91,7 @@ pub struct Cx<'id, M: Module> {
     root: ShmRoot,
     ectx: NonNull<bindings::module_ectx>,
     worker: NonNull<bindings::dp_worker>,
-    config: &'id M::Config,
+    config: &'id M,
     prepared: NonNull<M::Prepared<'id>>,
     // Invariant brand: values of two different contexts never unify, so they cannot be mixed.
     _brand: PhantomData<fn(&'id ()) -> &'id ()>,
@@ -114,11 +114,11 @@ pub struct Cx<'id, M: Module> {
 ///
 /// ```compile_fail
 /// # use yanet_sys::dp::{CommitCx, Counter, CounterRef, Module};
-/// fn keep<'p, M: Module<Config = Counter>>(
+/// fn keep<'p, M: Module + AsRef<Counter>>(
 ///     cx: &CommitCx<'p, M>,
 ///     kept: &mut Option<CounterRef<'static>>,
 /// ) {
-///     *kept = Some(cx.config().resolve(cx));
+///     *kept = Some(cx.config().as_ref().resolve(cx));
 /// }
 /// ```
 ///
@@ -126,11 +126,11 @@ pub struct Cx<'id, M: Module> {
 ///
 /// ```
 /// # use yanet_sys::dp::{CommitCx, Counter, CounterRef, Module};
-/// fn keep<'p, M: Module<Config = Counter>>(
+/// fn keep<'p, M: Module + AsRef<Counter>>(
 ///     cx: &CommitCx<'p, M>,
 ///     kept: &mut Option<CounterRef<'p>>,
 /// ) {
-///     *kept = Some(cx.config().resolve(cx));
+///     *kept = Some(cx.config().as_ref().resolve(cx));
 /// }
 /// ```
 pub struct CounterRef<'p, T = u64> {
@@ -165,8 +165,8 @@ impl<'id, T> CounterRef<'id, T> {
     ///
     /// ```compile_fail,E0308
     /// # use yanet_sys::dp::{CommitCx, Counter, Module};
-    /// fn early<'p, M: Module<Config = Counter>>(cx: &CommitCx<'p, M>) {
-    ///     cx.config().resolve(cx).bind(cx).add(1);
+    /// fn early<'p, M: Module + AsRef<Counter>>(cx: &CommitCx<'p, M>) {
+    ///     cx.config().as_ref().resolve(cx).bind(cx).add(1);
     /// }
     /// ```
     ///
@@ -174,18 +174,21 @@ impl<'id, T> CounterRef<'id, T> {
     ///
     /// ```
     /// use yanet_sys::dp::{Batch, CommitCx, Counter, CounterRef, Cx, Module, Verdict};
-    /// struct Mine;
+    /// #[derive(yanet_sdk::ShmLayout)]
+    /// #[repr(C)]
+    /// struct Mine {
+    ///     config: Counter,
+    /// }
     /// impl Module for Mine {
     ///     const NAME: &'static str = "mine";
-    ///     type Config = Counter;
     ///     type Prepared<'p> = CounterRef<'p>;
-    ///     fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    ///     fn handle<'id>(&'id self, cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
     ///         let mut hits = cx.prepared().bind(cx);
     ///         hits += 1;
     ///         batch.dispatch(|_| Verdict::Pass);
     ///     }
-    ///     fn prepare<'p>(cx: &CommitCx<'p, Self>) -> CounterRef<'p> {
-    ///         cx.config().resolve(cx)
+    ///     fn prepare<'p>(&'p self, cx: &CommitCx<'p, Self>) -> CounterRef<'p> {
+    ///         self.config.resolve(cx)
     ///     }
     /// }
     /// ```
@@ -334,12 +337,15 @@ where
     /// use yanet_sys::dp::{Batch, CommitCx, Counter, CounterRef, Cx, Module, Traffic, Verdict};
     /// const SHORT: usize = 0;
     /// const LONG: usize = 1;
-    /// struct Mine;
+    /// #[derive(yanet_sdk::ShmLayout)]
+    /// #[repr(C)]
+    /// struct Mine {
+    ///     config: Counter<[Traffic; 2]>,
+    /// }
     /// impl Module for Mine {
     ///     const NAME: &'static str = "mine";
-    ///     type Config = Counter<[Traffic; 2]>;
     ///     type Prepared<'p> = CounterRef<'p, [Traffic; 2]>;
-    ///     fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    ///     fn handle<'id>(&'id self, cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
     ///         let sizes = cx.prepared().bind(cx);
     ///         batch.dispatch(|packet| {
     ///             let len = packet.data().len() as u64;
@@ -352,8 +358,8 @@ where
     ///             Verdict::Pass
     ///         });
     ///     }
-    ///     fn prepare<'p>(cx: &CommitCx<'p, Self>) -> CounterRef<'p, [Traffic; 2]> {
-    ///         cx.config().resolve(cx)
+    ///     fn prepare<'p>(&'p self, cx: &CommitCx<'p, Self>) -> CounterRef<'p, [Traffic; 2]> {
+    ///         self.config.resolve(cx)
     ///     }
     /// }
     /// ```
@@ -385,8 +391,8 @@ where
 ///
 /// ```compile_fail,E0308
 /// # use yanet_sys::dp::{CommitCx, Module, TaggedCounters};
-/// fn early<'p, M: Module<Config = TaggedCounters>>(cx: &CommitCx<'p, M>) {
-///     cx.config().resolve(cx).bind(cx).add(0, 1);
+/// fn early<'p, M: Module + AsRef<TaggedCounters>>(cx: &CommitCx<'p, M>) {
+///     cx.config().as_ref().resolve(cx).bind(cx).add(0, 1);
 /// }
 /// ```
 ///
@@ -396,12 +402,15 @@ where
 /// use yanet_sys::dp::{
 ///     Batch, CommitCx, Cx, Module, TaggedCounters, TaggedCountersRef, Traffic, Verdict,
 /// };
-/// struct Mine;
+/// #[derive(yanet_sdk::ShmLayout)]
+/// #[repr(C)]
+/// struct Mine {
+///     config: TaggedCounters<Traffic>,
+/// }
 /// impl Module for Mine {
 ///     const NAME: &'static str = "mine";
-///     type Config = TaggedCounters<Traffic>;
 ///     type Prepared<'p> = TaggedCountersRef<'p, Traffic>;
-///     fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+///     fn handle<'id>(&'id self, cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
 ///         let counters = cx.prepared().bind(cx);
 ///         batch.dispatch(|packet| {
 ///             let id = packet.data().first().copied().unwrap_or_default();
@@ -409,8 +418,8 @@ where
 ///             Verdict::Pass
 ///         });
 ///     }
-///     fn prepare<'p>(cx: &CommitCx<'p, Self>) -> TaggedCountersRef<'p, Traffic> {
-///         cx.config().resolve(cx)
+///     fn prepare<'p>(&'p self, cx: &CommitCx<'p, Self>) -> TaggedCountersRef<'p, Traffic> {
+///         self.config.resolve(cx)
 ///     }
 /// }
 /// ```
@@ -529,7 +538,7 @@ impl<'id, M: Module> Cx<'id, M> {
         root: ShmRoot,
         ectx: NonNull<bindings::module_ectx>,
         worker: NonNull<bindings::dp_worker>,
-        config: &'id M::Config,
+        config: &'id M,
         prepared: NonNull<M::Prepared<'id>>,
     ) -> Self {
         Self {
@@ -545,7 +554,7 @@ impl<'id, M: Module> Cx<'id, M> {
 
     /// The module's configuration for this generation.
     #[inline(always)]
-    pub fn config(&self) -> &'id M::Config {
+    pub fn config(&self) -> &'id M {
         self.config
     }
 
@@ -598,7 +607,7 @@ unsafe impl<'id, M: Module> Resolve<'id> for Cx<'id, M> {
 pub struct CommitCx<'c, M: Module> {
     root: ShmRoot,
     ectx: NonNull<bindings::module_ectx>,
-    config: &'c M::Config,
+    config: &'c M,
     // Invariant brand: values of two different contexts never unify, so they cannot be mixed.
     _brand: PhantomData<fn(&'c ()) -> &'c ()>,
     // Neither Send nor Sync on purpose, independent of the pointer fields.
@@ -615,7 +624,7 @@ impl<'c, M: Module> CommitCx<'c, M> {
     /// derived, and the configuration is the published one of this module,
     /// frozen for the pass.
     #[inline(always)]
-    pub(crate) unsafe fn new(root: ShmRoot, ectx: NonNull<bindings::module_ectx>, config: &'c M::Config) -> Self {
+    pub(crate) unsafe fn new(root: ShmRoot, ectx: NonNull<bindings::module_ectx>, config: &'c M) -> Self {
         Self {
             root,
             ectx,
@@ -627,7 +636,7 @@ impl<'c, M: Module> CommitCx<'c, M> {
 
     /// The module's configuration for the generation being committed.
     #[inline(always)]
-    pub fn config(&self) -> &'c M::Config {
+    pub fn config(&self) -> &'c M {
         self.config
     }
 
@@ -663,7 +672,7 @@ unsafe impl<'c, M: Module> Resolve<'c> for CommitCx<'c, M> {
 pub struct ObjectCommitCx<'c, O: Object> {
     root: ShmRoot,
     ectx: NonNull<bindings::object_ectx>,
-    config: &'c O::Config,
+    config: &'c O,
     // Invariant brand: values of two different contexts never unify, so they cannot be mixed.
     _brand: PhantomData<fn(&'c ()) -> &'c ()>,
     // Neither Send nor Sync on purpose, independent of the pointer fields.
@@ -680,7 +689,7 @@ impl<'c, O: Object> ObjectCommitCx<'c, O> {
     /// being committed, frozen for the pass but for its atomics and mutex
     /// payloads.
     #[inline(always)]
-    pub(crate) unsafe fn new(root: ShmRoot, ectx: NonNull<bindings::object_ectx>, config: &'c O::Config) -> Self {
+    pub(crate) unsafe fn new(root: ShmRoot, ectx: NonNull<bindings::object_ectx>, config: &'c O) -> Self {
         Self {
             root,
             ectx,
@@ -692,7 +701,7 @@ impl<'c, O: Object> ObjectCommitCx<'c, O> {
 
     /// The object's configuration in the generation being committed.
     #[inline(always)]
-    pub fn config(&self) -> &'c O::Config {
+    pub fn config(&self) -> &'c O {
         self.config
     }
 
@@ -826,8 +835,8 @@ impl<T: CounterLayout> Counter<T> {
     ///
     /// ```compile_fail,E0308
     /// # use yanet_sys::dp::{Counter, Cx, Module};
-    /// fn wrong<'id, M: Module<Config = Counter>>(cx: &Cx<'id, M>) {
-    ///     let _ = cx.config().resolve(cx);
+    /// fn wrong<'id, M: Module + AsRef<Counter>>(cx: &Cx<'id, M>) {
+    ///     let _ = cx.config().as_ref().resolve(cx);
     /// }
     /// ```
     ///
@@ -835,8 +844,8 @@ impl<T: CounterLayout> Counter<T> {
     ///
     /// ```
     /// # use yanet_sys::dp::{CommitCx, Counter, Module};
-    /// fn right<'p, M: Module<Config = Counter>>(cx: &CommitCx<'p, M>) {
-    ///     let _ = cx.config().resolve(cx);
+    /// fn right<'p, M: Module + AsRef<Counter>>(cx: &CommitCx<'p, M>) {
+    ///     let _ = cx.config().as_ref().resolve(cx);
     /// }
     /// ```
     #[doc(alias = "counter_get_address")]
@@ -1043,8 +1052,8 @@ where
     ///
     /// ```compile_fail,E0308
     /// # use yanet_sys::dp::{CommitCx, Module, ObjectCounter};
-    /// fn wrong<'p, M: Module<Config = ObjectCounter>>(cx: &CommitCx<'p, M>) {
-    ///     let _ = cx.config().resolve(cx);
+    /// fn wrong<'p, M: Module + AsRef<ObjectCounter>>(cx: &CommitCx<'p, M>) {
+    ///     let _ = cx.config().as_ref().resolve(cx);
     /// }
     /// ```
     ///
@@ -1052,8 +1061,8 @@ where
     ///
     /// ```
     /// # use yanet_sys::dp::{Object, ObjectCommitCx, ObjectCounter};
-    /// fn right<'p, O: Object<Config = ObjectCounter>>(cx: &ObjectCommitCx<'p, O>) {
-    ///     let _ = cx.config().resolve(cx);
+    /// fn right<'p, O: Object + AsRef<ObjectCounter>>(cx: &ObjectCommitCx<'p, O>) {
+    ///     let _ = cx.config().as_ref().resolve(cx);
     /// }
     /// ```
     #[doc(alias = "counter_get_address")]
@@ -1134,7 +1143,7 @@ impl<O: Object> ObjectLink<O> {
     /// resolve to an object of the type and name.
     #[doc(alias = "object_link_get_address")]
     #[inline(always)]
-    pub fn get<'id>(&'id self, cx: &impl ModuleCx<'id>) -> &'id O::Config {
+    pub fn get<'id>(&'id self, cx: &impl ModuleCx<'id>) -> &'id O {
         let root = cx.shm_root();
         let object_ectx = linked_object_ectx(cx, self.index());
         // SAFETY: the object context is frozen and its absolute fields were
@@ -1144,7 +1153,7 @@ impl<O: Object> ObjectLink<O> {
         // the generation (attach: binding, frozen, reclaim).
         unsafe {
             let cp_object = (*object_ectx).abs_cp_object;
-            (*root.ptr::<ObjectConfig<O::Config>>(cp_object.addr())).body()
+            (*root.ptr::<ObjectConfig<O>>(cp_object.addr())).body()
         }
     }
 

@@ -100,7 +100,7 @@ impl<M: Module> Ectx<M> {
     /// # Safety
     ///
     /// The words, laid out from the start of the configuration body, must
-    /// form a valid `M::Config`, with zeros valid for the rest of it, and the
+    /// form a valid `M`, with zeros valid for the rest of it, and the
     /// counter ids in it must be below the number of slots `setup` provides.
     /// The handler must not redirect a packet: the targets have no routing
     /// state.
@@ -110,23 +110,20 @@ impl<M: Module> Ectx<M> {
     ) -> Self {
         const {
             assert!(
-                align_of::<ModuleConfig<M::Config>>() <= 64,
+                align_of::<ModuleConfig<M>>() <= 64,
                 "the configuration is aligned beyond a block of the arena"
             )
         };
         let (handler, commit) = module_hooks::<M>();
-        assert!(
-            size_of_val(config) <= size_of::<M::Config>(),
-            "the words exceed the body"
-        );
+        assert!(size_of_val(config) <= size_of::<M>(), "the words exceed the body");
         let arena = BlockArena::new();
         let root = arena.root();
         let alloc = |size: usize| arena.alloc(size).as_ptr().addr();
-        let cp_module = alloc(size_of::<ModuleConfig<M::Config>>());
+        let cp_module = alloc(size_of::<ModuleConfig<M>>());
         // SAFETY: inside the configuration block just allocated, whose body
         // holds the words (size checked above).
         unsafe {
-            root.ptr::<u64>(cp_module + ModuleConfig::<M::Config>::BODY_OFFSET)
+            root.ptr::<u64>(cp_module + ModuleConfig::<M>::BODY_OFFSET)
                 .copy_from_nonoverlapping(config.as_ptr(), config.len())
         };
         let mut context = bindings::module_ectx {
@@ -136,7 +133,7 @@ impl<M: Module> Ectx<M> {
         if size_of::<M::Prepared<'static>>() != 0 {
             context.abs_module_prepared = root.ptr(alloc(size_of::<M::Prepared<'static>>()));
         }
-        setup(arena, cp_module + ModuleConfig::<M::Config>::BODY_OFFSET, &mut context);
+        setup(arena, cp_module + ModuleConfig::<M>::BODY_OFFSET, &mut context);
         let ectx = alloc(size_of::<bindings::module_ectx>());
         // SAFETY: the context block was just allocated.
         unsafe { write(arena, ectx, context) };

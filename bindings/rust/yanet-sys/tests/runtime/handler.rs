@@ -48,19 +48,18 @@ unsafe impl Build for Config {
     unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
 }
 
-/// Reads everything the runtime hands a module: the configuration, prepared
-/// counter handles, counters by value, those of a tagged registry included,
-/// and a device target.
-///
-/// It adds to every counter per packet, through the handles and by value, to
-/// the registry's pair of the id its first byte names and to the second pair
-/// of the counter of two, reads the counters it holds handles on, and passes
-/// the packets whose first byte is zero while the device is present.
-struct Reach;
+// Reads everything the runtime hands a module: the configuration, prepared
+// counter handles, counters by value, those of a tagged registry included,
+// and a device target.
+//
+// It adds to every counter per packet, through the handles and by value, to
+// the registry's pair of the id its first byte names and to the second pair
+// of the counter of two, reads the counters it holds handles on, and passes
+// the packets whose first byte is zero while the device is present.
+yanet_sdk_testing::test_body!(Reach = Config);
 
 impl Module for Reach {
     const NAME: &'static str = "reach";
-    type Config = Config;
     type Prepared<'p> = (
         CounterRef<'p>,
         CounterRef<'p, Traffic>,
@@ -69,8 +68,8 @@ impl Module for Reach {
         CounterRef<'p, [Traffic; 2]>,
     );
 
-    fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
-        let config = cx.config();
+    fn handle<'id>(&'id self, cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+        let config = self;
         let (mut held, mut held_pair, mut held_tagged, by_id, pairs) = (
             cx.prepared().0.bind(cx),
             cx.prepared().1.bind(cx),
@@ -98,8 +97,8 @@ impl Module for Reach {
         });
     }
 
-    fn prepare<'p>(cx: &CommitCx<'p, Self>) -> Self::Prepared<'p> {
-        let config = cx.config();
+    fn prepare<'p>(&'p self, cx: &CommitCx<'p, Self>) -> Self::Prepared<'p> {
+        let config = self;
         (
             config.counter.resolve(cx),
             config.pair.resolve(cx),
@@ -176,4 +175,35 @@ fn test_miri_reach_of_the_handler_and_commit_entries() {
     // Passing means Miri found no undefined behaviour on the way; what the
     // module decided is not checked here.
     ectx.run(&mut packets);
+}
+
+// A prepared reference borrows the receiver stored after the C header.
+yanet_sdk_testing::test_body!(Borrowed = u64);
+
+impl Module for Borrowed {
+    const NAME: &'static str = "borrowed";
+    type Prepared<'p> = &'p u64;
+
+    fn prepare<'p>(&'p self, _: &CommitCx<'p, Self>) -> Self::Prepared<'p> {
+        &self.body
+    }
+
+    fn handle<'id>(&'id self, cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+        assert_eq!(self.body, **cx.prepared());
+        batch.pass_all();
+    }
+}
+
+/// Verifies that distinct contexts retain references to their own published
+/// bodies.
+#[test]
+fn test_prepared_value_borrows_its_module_receiver() {
+    // SAFETY: each body is one initialized word; no counter or device is used.
+    let mut first = unsafe { Ectx::<Borrowed>::new(&[11], |_, _, _| {}) };
+    // SAFETY: the same layout, in a separate context with its own body.
+    let mut second = unsafe { Ectx::<Borrowed>::new(&[23], |_, _, _| {}) };
+    first.run(&mut numbered(0));
+    second.run(&mut numbered(0));
+    first.run(&mut numbered(0));
+    assert_eq!((11, 23), (**first.prepared(), **second.prepared()));
 }

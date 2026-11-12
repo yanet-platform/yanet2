@@ -1,10 +1,40 @@
 //! Module-crate surface of the Rust module SDK.
 //!
 //! A module is one `impl Module` in a `#![no_std]`, `#![forbid(unsafe_code)]`
-//! crate: shared-memory types derive [`ShmLayout`], the handler receives the
-//! invocation context [`Cx`] and the packet [`Batch`], and edges of the
-//! configuration resolve through the context. The control plane builds a
-//! configuration in place: the derive generates the `<Type>Parts` struct that a
+//! crate. Its fields are the published configuration, built in shared memory
+//! by deriving [`ShmLayout`]. The handler borrows that body through `&self`
+//! alongside the invocation context [`Cx`] and the packet [`Batch`]:
+//!
+//! ```
+//! use yanet_sdk::{Batch, CommitCx, Cx, Device, Module, ShmLayout, Verdict};
+//!
+//! #[derive(ShmLayout)]
+//! #[repr(C)]
+//! struct Forward {
+//!     output: Device,
+//! }
+//!
+//! impl Module for Forward {
+//!     const NAME: &'static str = "forward";
+//!     type Prepared<'p> = ();
+//!
+//!     fn prepare<'p>(&'p self, _: &CommitCx<'p, Self>) {}
+//!
+//!     fn handle<'id>(&'id self, cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+//!         batch.dispatch(|_| {
+//!             self.output
+//!                 .resolve(cx)
+//!                 .map_or(Verdict::Drop, Verdict::Redirect)
+//!         });
+//!     }
+//! }
+//! ```
+//!
+//! Ordinary fields stay frozen after publication. Mutable state uses explicit
+//! shared or per-worker storage, and [`ObjectLink`] fields name state that can
+//! outlive module updates. The prepared value may borrow fields of the receiver
+//! for its commit lifetime. Both entity traits require [`Build`] and `Sync`.
+//! The derive generates the `<Type>Parts` struct that a
 //! build closure returns, and the scope the closure receives allocates the
 //! owned blocks and registers counters and devices. A device is registered once
 //! and the [`Registered`] it returns is copied into every entry that uses it.
@@ -68,8 +98,8 @@
 //!     })
 //! }
 //!
-//! fn weight<'id, M: Module<Config = Config>>(cx: &Cx<'id, M>, host: Ipv4Addr) -> Option<u64> {
-//!     let config = cx.config();
+//! fn weight<'id, M: Module + AsRef<Config>>(cx: &Cx<'id, M>, host: Ipv4Addr) -> Option<u64> {
+//!     let config = cx.config().as_ref();
 //!     let position = config.hosts.resolve(cx).get(host)?;
 //!     config.weights.as_slice(cx).get(position as usize).copied()
 //! }
@@ -105,19 +135,16 @@
 //!
 //! #[derive(ShmLayout)]
 //! #[repr(C)]
-//! struct StateConfig {
+//! struct State {
 //!     slots: ShmSlice<AtomicU64>,
 //! }
 //!
-//! struct State;
-//!
 //! impl Object for State {
 //!     const TYPE: &'static str = "state";
-//!     type Config = StateConfig;
 //!     type Prepared<'p> = u64;
 //!
-//!     fn prepare(cx: &ObjectCommitCx<'_, Self>) -> u64 {
-//!         cx.config().slots.as_slice(cx).len() as u64
+//!     fn prepare<'p>(&'p self, cx: &ObjectCommitCx<'p, Self>) -> u64 {
+//!         self.slots.as_slice(cx).len() as u64
 //!     }
 //! }
 //!
@@ -135,8 +162,8 @@
 //!     })
 //! }
 //!
-//! fn touch<'id, M: Module<Config = Config>>(cx: &Cx<'id, M>) {
-//!     let link = &cx.config().state;
+//! fn touch<'id, M: Module + AsRef<Config>>(cx: &Cx<'id, M>) {
+//!     let link = &cx.config().as_ref().state;
 //!     if let Some(slot) = link.get(cx).slots.as_slice(cx).first() {
 //!         slot.fetch_add(*link.prepared(cx), Ordering::Relaxed);
 //!     }
@@ -279,12 +306,13 @@ mod doctests {
     ///
     /// ```compile_fail,E0599
     /// use yanet_sdk::{BuildError, Object, ObjectCommitCx, ObjectKind, Owner, Scope};
-    /// struct State;
+    /// #[derive(yanet_sdk::ShmLayout)]
+    /// #[repr(C)]
+    /// struct State { config: u64 }
     /// impl Object for State {
     ///     const TYPE: &'static str = "state";
-    ///     type Config = u64;
     ///     type Prepared<'p> = ();
-    ///     fn prepare(_: &ObjectCommitCx<'_, Self>) {}
+    ///     fn prepare<'p>(&'p self, _: &ObjectCommitCx<'p, Self>) {}
     /// }
     /// fn link<W: Owner>(scope: Scope<'_, '_, W, BuildError<W::Error>, ObjectKind>) {
     ///     let _ = scope.object::<State>("state");
@@ -298,12 +326,15 @@ mod doctests {
     ///
     /// ```
     /// use yanet_sdk::{BuildError, ModuleKind, Object, ObjectCommitCx, Owner, Scope};
-    /// struct State;
+    /// #[derive(yanet_sdk::ShmLayout)]
+    /// #[repr(C)]
+    /// struct State {
+    ///     config: u64,
+    /// }
     /// impl Object for State {
     ///     const TYPE: &'static str = "state";
-    ///     type Config = u64;
     ///     type Prepared<'p> = ();
-    ///     fn prepare(_: &ObjectCommitCx<'_, Self>) {}
+    ///     fn prepare<'p>(&'p self, _: &ObjectCommitCx<'p, Self>) {}
     /// }
     /// fn register<W: Owner>(scope: Scope<'_, '_, W, BuildError<W::Error>, ModuleKind>) {
     ///     let _ = scope.counter::<u64>("hits");
@@ -432,23 +463,25 @@ mod doctests {
     /// ```compile_fail
     /// # use yanet_sdk::{prelude::*, BuildError, Builder};
     /// # use yanet_sdk_testing::cp::{TestError, TestOwner};
-    /// # struct Outer;
+    /// # #[derive(yanet_sdk::ShmLayout)]
+    /// # #[repr(C)]
+    /// # struct Outer { config: u64 }
     /// # impl Module for Outer {
     /// #     const NAME: &'static str = "outer";
-    /// #     type Config = u64;
     /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sdk::CommitCx<'_, Self>) {}
-    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    /// #     fn prepare<'p>(&'p self, _: &yanet_sdk::CommitCx<'p, Self>) {}
+    /// #     fn handle<'id>(&'id self, _: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
     /// #         batch.dispatch(|_| Verdict::Pass);
     /// #     }
     /// # }
-    /// # struct Inner;
+    /// # #[derive(yanet_sdk::ShmLayout)]
+    /// # #[repr(C)]
+    /// # struct Inner { config: ShmBox<u64> }
     /// # impl Module for Inner {
     /// #     const NAME: &'static str = "inner";
-    /// #     type Config = ShmBox<u64>;
     /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sdk::CommitCx<'_, Self>) {}
-    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    /// #     fn prepare<'p>(&'p self, _: &yanet_sdk::CommitCx<'p, Self>) {}
+    /// #     fn handle<'id>(&'id self, _: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
     /// #         batch.dispatch(|_| Verdict::Pass);
     /// #     }
     /// # }
@@ -457,8 +490,8 @@ mod doctests {
     /// let owner = unsafe { TestOwner::new() };
     /// Builder::<Outer>::build::<BuildError<TestError>, _>(&owner, "outer", |outer| {
     ///     let block = outer.boxed::<u64>(1)?;
-    ///     Builder::<Inner>::build::<BuildError<TestError>, _>(&owner, "inner", |_| Ok(block))?;
-    ///     Ok(0)
+    ///     Builder::<Inner>::build::<BuildError<TestError>, _>(&owner, "inner", |_| Ok(InnerParts { config: block }))?;
+    ///     Ok(OuterParts { config: 0 })
     /// })
     /// .unwrap();
     /// # }
@@ -470,13 +503,14 @@ mod doctests {
     /// ```compile_fail,E0521
     /// # use yanet_sdk::{prelude::*, BuildError, Builder};
     /// # use yanet_sdk_testing::cp::{TestError, TestOwner};
-    /// # struct Mine;
+    /// # #[derive(yanet_sdk::ShmLayout)]
+    /// # #[repr(C)]
+    /// # struct Mine { config: u64 }
     /// # impl Module for Mine {
     /// #     const NAME: &'static str = "mine";
-    /// #     type Config = u64;
     /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sdk::CommitCx<'_, Self>) {}
-    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    /// #     fn prepare<'p>(&'p self, _: &yanet_sdk::CommitCx<'p, Self>) {}
+    /// #     fn handle<'id>(&'id self, _: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
     /// #         batch.dispatch(|_| Verdict::Pass);
     /// #     }
     /// # }
@@ -486,7 +520,7 @@ mod doctests {
     /// let mut leaked = None;
     /// Builder::<Mine>::build::<BuildError<TestError>, _>(&owner, "mine", |scope| {
     ///     leaked = Some(scope.boxed::<u64>(1)?);
-    ///     Ok(0)
+    ///     Ok(MineParts { config: 0 })
     /// })
     /// .unwrap();
     /// # }
@@ -498,20 +532,21 @@ mod doctests {
     /// ```compile_fail,E0515
     /// # use yanet_sdk::{prelude::*, BuildError, Builder, Lpm4, LpmRange};
     /// # use yanet_sdk_testing::cp::{TestError, TestOwner};
-    /// # struct Mine;
+    /// # #[derive(yanet_sdk::ShmLayout)]
+    /// # #[repr(C)]
+    /// # struct Mine { config: Lpm4 }
     /// # impl Module for Mine {
     /// #     const NAME: &'static str = "mine";
-    /// #     type Config = Lpm4;
     /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sdk::CommitCx<'_, Self>) {}
-    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    /// #     fn prepare<'p>(&'p self, _: &yanet_sdk::CommitCx<'p, Self>) {}
+    /// #     fn handle<'id>(&'id self, _: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
     /// #         batch.dispatch(|_| Verdict::Pass);
     /// #     }
     /// # }
     /// fn build(owner: &TestOwner) {
     ///     Builder::<Mine>::build::<BuildError<TestError>, _>(owner, "mine", |_| {
     ///         let ranges = [LpmRange { from: [0; 4], to: [255; 4], value: 1 }];
-    ///         Ok(&ranges[..])
+    ///         Ok(MineParts { config: &ranges[..] })
     ///     })
     ///     .unwrap();
     /// }
@@ -523,20 +558,23 @@ mod doctests {
     /// ```
     /// # use yanet_sdk::{prelude::*, BuildError, Builder, Lpm4, LpmRange};
     /// # use yanet_sdk_testing::cp::{TestError, TestOwner};
-    /// # struct Mine;
+    /// # #[derive(yanet_sdk::ShmLayout)]
+    /// # #[repr(C)]
+    /// # struct Mine { config: Lpm4 }
     /// # impl Module for Mine {
     /// #     const NAME: &'static str = "mine";
-    /// #     type Config = Lpm4;
     /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sdk::CommitCx<'_, Self>) {}
-    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    /// #     fn prepare<'p>(&'p self, _: &yanet_sdk::CommitCx<'p, Self>) {}
+    /// #     fn handle<'id>(&'id self, _: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
     /// #         batch.dispatch(|_| Verdict::Pass);
     /// #     }
     /// # }
     /// fn build(owner: &TestOwner) {
     ///     let ranges = [LpmRange { from: [0; 4], to: [255; 4], value: 1 }];
-    ///     Builder::<Mine>::build::<BuildError<TestError>, _>(owner, "mine", |_| Ok(&ranges[..]))
-    ///         .unwrap();
+    ///     Builder::<Mine>::build::<BuildError<TestError>, _>(owner, "mine", |_| {
+    ///         Ok(MineParts { config: &ranges[..] })
+    ///     })
+    ///     .unwrap();
     /// }
     /// ```
     struct RangesMadeBeforeBuildAccepted;
@@ -546,20 +584,21 @@ mod doctests {
     /// ```compile_fail,E0080
     /// # use yanet_sdk::{prelude::*, BuildError, Builder};
     /// # use yanet_sdk_testing::cp::{TestError, TestOwner};
-    /// # struct Mine;
+    /// # #[derive(yanet_sdk::ShmLayout)]
+    /// # #[repr(C)]
+    /// # struct Mine { config: ShmBox<()> }
     /// # impl Module for Mine {
     /// #     const NAME: &'static str = "mine";
-    /// #     type Config = ShmBox<()>;
     /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sdk::CommitCx<'_, Self>) {}
-    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    /// #     fn prepare<'p>(&'p self, _: &yanet_sdk::CommitCx<'p, Self>) {}
+    /// #     fn handle<'id>(&'id self, _: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
     /// #         batch.dispatch(|_| Verdict::Pass);
     /// #     }
     /// # }
     /// # fn main() {
     /// // SAFETY: no C object is built.
     /// let owner = unsafe { TestOwner::new() };
-    /// Builder::<Mine>::build::<BuildError<TestError>, _>(&owner, "mine", |scope| scope.boxed::<()>(())).unwrap();
+    /// Builder::<Mine>::build::<BuildError<TestError>, _>(&owner, "mine", |scope| Ok(MineParts { config: scope.boxed::<()>(())? })).unwrap();
     /// # }
     /// ```
     struct ZeroSizedBlockRefused;

@@ -37,3 +37,6 @@ pub mod __private {
         ffi::{build, c_str, free, handle, out_record, out_slice, query, record, slice_of, zeroed, zeroed_slice},
     };
 }
+
+#[cfg(test)]
+use yanet_sdk as _;

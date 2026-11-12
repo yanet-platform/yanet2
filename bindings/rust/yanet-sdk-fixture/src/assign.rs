@@ -40,7 +40,7 @@ pub struct Action {
 /// of any family and an action per rule, by the rule's index.
 #[derive(ShmLayout)]
 #[repr(C)]
-pub struct AssignConfig {
+pub struct Assign {
     pub v4: ShmBox<Assign4>,
     pub v6: ShmBox<Assign6>,
     pub any: ShmBox<AssignAny>,
@@ -52,16 +52,12 @@ pub struct AssignConfig {
 ///
 /// A packet without a usable transport header, a fragment after the first
 /// among them, classifies as of port zero.
-pub struct Assign;
-
 impl Module for Assign {
     const NAME: &'static str = "assign";
-    type Config = AssignConfig;
     type Prepared<'p> = ();
 
-    fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
-        let config = cx.config();
-        let actions = config.actions.as_slice(cx);
+    fn handle<'id>(&'id self, cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+        let actions = self.actions.as_slice(cx);
         batch.dispatch(|packet| {
             let (data, network) = (packet.data(), usize::from(packet.network_offset()));
             let port = (packet.transport_header_available() && matches!(packet.transport_protocol(), 6 | 17))
@@ -73,12 +69,12 @@ impl Module for Assign {
                 0x0800 => match (bytes(data, network + 12), bytes(data, network + 16)) {
                     (Some(src), Some(dst)) => {
                         let nets = (Addr4::from(src), Addr4::from(dst));
-                        Some(config.v4.get(cx).lookup(cx, (nets, (proto, port))))
+                        Some(self.v4.get(cx).lookup(cx, (nets, (proto, port))))
                     }
                     _ => None,
                 },
                 0x86dd => match (bytes(data, network + 8), bytes(data, network + 24)) {
-                    (Some(src), Some(dst)) => Some(config.v6.get(cx).lookup(cx, ((src, dst), (proto, port)))),
+                    (Some(src), Some(dst)) => Some(self.v6.get(cx).lookup(cx, ((src, dst), (proto, port)))),
                     _ => None,
                 },
                 _ => None,
@@ -87,7 +83,7 @@ impl Module for Assign {
                 return Verdict::Drop;
             };
             let mut rule = [family];
-            results_min(&mut rule, &[config.any.get(cx).lookup(cx, (proto, port))]);
+            results_min(&mut rule, &[self.any.get(cx).lookup(cx, (proto, port))]);
             let [rule] = rule;
             let Some(action) = rule.index().and_then(|rule| actions.get(rule)) else {
                 return Verdict::Drop;
@@ -97,7 +93,7 @@ impl Module for Assign {
         });
     }
 
-    fn prepare(_: &CommitCx<'_, Self>) {}
+    fn prepare<'p>(&'p self, _: &CommitCx<'p, Self>) {}
 }
 
 /// The `N` bytes of the frame at the offset, if it holds them.

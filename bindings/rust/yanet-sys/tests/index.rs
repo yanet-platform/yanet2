@@ -49,19 +49,18 @@ impl HashIndexKey for Fragile {
     }
 }
 
-/// A module whose configuration is one index, never run.
-struct Index<K>(K);
+// A module whose configuration is one index, never run.
+yanet_sdk_testing::test_body!(Index<K> = HashIndex<K>);
 
 macro_rules! index_module {
     ($($key:ty: $name:literal;)*) => {$(
         impl Module for Index<$key> {
             const NAME: &'static str = $name;
-            type Config = HashIndex<$key>;
             type Prepared<'p> = ();
 
-            fn handle<'id>(_: &mut Cx<'id, Self>, _: &mut Batch<'id>) {}
+            fn handle<'id>(&'id self, _: &mut Cx<'id, Self>, _: &mut Batch<'id>) {}
 
-            fn prepare<'p>(_: &CommitCx<'p, Self>) {}
+            fn prepare<'p>(&'p self, _: &CommitCx<'p, Self>) {}
         }
     )*};
 }
@@ -75,7 +74,7 @@ index_module! {
 /// Builds an index of the records over the owner.
 fn build<K: HashIndexKey>(owner: &ArenaOwner, records: &[(K, u32)]) -> Result<Built<Index<K>, ArenaOwner>, Error>
 where
-    Index<K>: Module<Config = HashIndex<K>>,
+    Index<K>: Module + for<'b> yanet_sys::cp::Build<Parts<'b, ArenaOwner> = &'b [(K, u32)]>,
 {
     Builder::build(owner, "index", |_| Ok(records))
 }
@@ -233,3 +232,6 @@ fn test_hash_index_build_returns_everything_when_the_hash_of_a_key_panics() {
     assert!(result.is_err());
     assert_eq!(baseline, owner.free_bytes());
 }
+
+// The public facade supplies the layout derive used in documentation tests.
+use yanet_sdk as _;

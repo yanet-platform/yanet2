@@ -15,17 +15,16 @@ use yanet_sys::{
     dp::{Batch, CommitCx, Cx, Module, Verdict},
 };
 
-/// A module with a prepared value of eight bytes.
-struct Exported;
+// A module with a prepared value of eight bytes.
+yanet_sdk_testing::test_body!(Exported = u64);
 
 impl Module for Exported {
     const NAME: &'static str = "exported";
-    type Config = u64;
     type Prepared<'p> = u64;
-    fn handle(_: &mut Cx<'_, Self>, batch: &mut Batch<'_>) {
+    fn handle<'id>(&'id self, _: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
         batch.dispatch(|_| Verdict::Pass);
     }
-    fn prepare(_: &CommitCx<'_, Self>) -> u64 {
+    fn prepare<'p>(&'p self, _: &CommitCx<'p, Self>) -> u64 {
         0
     }
 }
@@ -72,3 +71,6 @@ fn test_plugin_exports_the_abi_version() {
 
     assert_eq!(bindings::YANET_MODULE_ABI_VERSION, version);
 }
+
+// The public facade supplies the layout derive used in documentation tests.
+use yanet_sdk as _;

@@ -150,15 +150,16 @@ impl Agent {
     /// # use yanet_sdk_api::Agent;
     /// # use yanet_shm::rel::ShmSlice;
     /// # use yanet_sys::{cp::BuiltObject, dp::Object};
-    /// # struct Mine;
+    /// # #[derive(yanet_sdk::ShmLayout)]
+    /// # #[repr(C)]
+    /// # struct Mine { config: ShmSlice<u64> }
     /// # impl Object for Mine {
     /// #     const TYPE: &'static str = "mine";
-    /// #     type Config = ShmSlice<u64>;
     /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sys::dp::ObjectCommitCx<'_, Self>) {}
+    /// #     fn prepare<'p>(&'p self, _: &yanet_sys::dp::ObjectCommitCx<'p, Self>) {}
     /// # }
     /// fn mixed(agent: &Agent, first: &BuiltObject<Mine, Agent>, second: &BuiltObject<Mine, Agent>) -> usize {
-    ///     agent.read(first, |_, outer| agent.read(second, |cx, _| outer.as_slice(&cx).len()))
+    ///     agent.read(first, |_, outer| agent.read(second, |cx, _| outer.config.as_slice(&cx).len()))
     /// }
     /// ```
     ///
@@ -168,15 +169,16 @@ impl Agent {
     /// # use yanet_sdk_api::Agent;
     /// # use yanet_shm::rel::ShmSlice;
     /// # use yanet_sys::{cp::BuiltObject, dp::Object};
-    /// # struct Mine;
+    /// # #[derive(yanet_sdk::ShmLayout)]
+    /// # #[repr(C)]
+    /// # struct Mine { config: ShmSlice<u64> }
     /// # impl Object for Mine {
     /// #     const TYPE: &'static str = "mine";
-    /// #     type Config = ShmSlice<u64>;
     /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sys::dp::ObjectCommitCx<'_, Self>) {}
+    /// #     fn prepare<'p>(&'p self, _: &yanet_sys::dp::ObjectCommitCx<'p, Self>) {}
     /// # }
     /// fn escape<'a>(agent: &'a Agent, built: &'a BuiltObject<Mine, Agent>) -> &'a ShmSlice<u64> {
-    ///     agent.read(built, |_, config| config)
+    ///     agent.read(built, |_, config| &config.config)
     /// }
     /// ```
     ///
@@ -186,12 +188,13 @@ impl Agent {
     /// # use yanet_sdk_api::{Agent, ObjectCx};
     /// # use yanet_shm::rel::ShmSlice;
     /// # use yanet_sys::{cp::BuiltObject, dp::Object};
-    /// # struct Mine;
+    /// # #[derive(yanet_sdk::ShmLayout)]
+    /// # #[repr(C)]
+    /// # struct Mine { config: ShmSlice<u64> }
     /// # impl Object for Mine {
     /// #     const TYPE: &'static str = "mine";
-    /// #     type Config = ShmSlice<u64>;
     /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sys::dp::ObjectCommitCx<'_, Self>) {}
+    /// #     fn prepare<'p>(&'p self, _: &yanet_sys::dp::ObjectCommitCx<'p, Self>) {}
     /// # }
     /// fn escape<'a>(agent: &'a Agent, built: &'a BuiltObject<Mine, Agent>) -> ObjectCx<'a> {
     ///     agent.read(built, |cx, _| cx)
@@ -204,21 +207,22 @@ impl Agent {
     /// # use yanet_sdk_api::Agent;
     /// # use yanet_shm::rel::ShmSlice;
     /// # use yanet_sys::{cp::BuiltObject, dp::Object};
-    /// # struct Mine;
+    /// # #[derive(yanet_sdk::ShmLayout)]
+    /// # #[repr(C)]
+    /// # struct Mine { config: ShmSlice<u64> }
     /// # impl Object for Mine {
     /// #     const TYPE: &'static str = "mine";
-    /// #     type Config = ShmSlice<u64>;
     /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sys::dp::ObjectCommitCx<'_, Self>) {}
+    /// #     fn prepare<'p>(&'p self, _: &yanet_sys::dp::ObjectCommitCx<'p, Self>) {}
     /// # }
     /// fn sum(agent: &Agent, built: &BuiltObject<Mine, Agent>) -> u64 {
-    ///     agent.read(built, |cx, config| config.as_slice(&cx).iter().sum())
+    ///     agent.read(built, |cx, config| config.config.as_slice(&cx).iter().sum())
     /// }
     /// ```
     pub fn read<O: Object, R>(
         &self,
         built: &BuiltObject<O, Agent>,
-        f: impl for<'g> FnOnce(ObjectCx<'g>, &'g O::Config) -> R,
+        f: impl for<'g> FnOnce(ObjectCx<'g>, &'g O) -> R,
     ) -> R {
         // SAFETY: every agent a process makes handles for is of one mapping
         // (constructor contract), so the memory the object was built in is
@@ -254,33 +258,35 @@ impl Agent {
     /// # use yanet_sdk_api::Agent;
     /// # use yanet_shm::rel::ShmSlice;
     /// # use yanet_sys::dp::{Batch, CommitCx, Cx, Module, Object, ObjectLink, Verdict};
-    /// # struct Counts;
+    /// # #[derive(yanet_sdk::ShmLayout)]
+    /// # #[repr(C)]
+    /// # struct Counts { config: ShmSlice<u64> }
     /// # impl Object for Counts {
     /// #     const TYPE: &'static str = "counts";
-    /// #     type Config = ShmSlice<u64>;
     /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sys::dp::ObjectCommitCx<'_, Self>) {}
+    /// #     fn prepare<'p>(&'p self, _: &yanet_sys::dp::ObjectCommitCx<'p, Self>) {}
     /// # }
-    /// # struct Mine;
+    /// # #[derive(yanet_sdk::ShmLayout)]
+    /// # #[repr(C)]
+    /// # struct Mine { config: ObjectLink<Counts> }
     /// # impl Module for Mine {
     /// #     const NAME: &'static str = "mine";
-    /// #     type Config = ObjectLink<Counts>;
     /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &CommitCx<'_, Self>) {}
-    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    /// #     fn prepare<'p>(&'p self, _: &CommitCx<'p, Self>) {}
+    /// #     fn handle<'id>(&'id self, _: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
     /// #         batch.dispatch(|_| Verdict::Pass);
     /// #     }
     /// # }
     /// fn total(agent: &Agent, name: &str) -> Result<u64, yanet_sdk_api::Error> {
     ///     agent.read_published::<Mine, _>(name, |cx, counts| {
-    ///         cx.object(counts).as_slice(&cx).iter().sum()
+    ///         cx.object(&counts.config).config.as_slice(&cx).iter().sum()
     ///     })
     /// }
     /// ```
     pub fn read_published<M: Module, R>(
         &self,
         name: &str,
-        f: impl for<'g> FnOnce(PublishedCx<'g>, &'g M::Config) -> R,
+        f: impl for<'g> FnOnce(PublishedCx<'g>, &'g M) -> R,
     ) -> Result<R, Error> {
         let module_type = c_name::<{ CP_MODULE_TYPE_LEN as usize }>(M::NAME)?;
         let module_name = c_name::<{ CP_MODULE_NAME_LEN as usize }>(name)?;
@@ -305,7 +311,7 @@ impl Agent {
         // trusts, written whole and frozen but for its atomics and mutex
         // payloads; the pin keeps it live until the read returns. C
         // returned a pointer of the mapping.
-        let config = unsafe { (*root.ptr::<ModuleConfig<M::Config>>(module.addr().get())).body() };
+        let config = unsafe { (*root.ptr::<ModuleConfig<M>>(module.addr().get())).body() };
         Ok(f(
             PublishedCx {
                 root,
@@ -374,7 +380,7 @@ impl<'g> PublishedCx<'g> {
     /// For a link that is not the configuration's, which only another read
     /// reaches: C resolved each link of this one to an object of the link's
     /// type when it installed the configuration.
-    pub fn object<O: Object>(&self, link: &'g ObjectLink<O>) -> &'g O::Config {
+    pub fn object<O: Object>(&self, link: &'g ObjectLink<O>) -> &'g O {
         let index = link.index() as usize;
         assert!(index < self.link_count(), "the link is not the configuration's");
         let key = self.key(index);
@@ -391,7 +397,7 @@ impl<'g> PublishedCx<'g> {
         // whole and frozen but for its atomics and mutex payloads; the pin
         // keeps it live until the read returns. C returned a pointer of
         // the mapping.
-        unsafe { (*self.root.ptr::<ObjectConfig<O::Config>>(object.addr().get())).body() }
+        unsafe { (*self.root.ptr::<ObjectConfig<O>>(object.addr().get())).body() }
     }
 
     fn link_count(&self) -> usize {

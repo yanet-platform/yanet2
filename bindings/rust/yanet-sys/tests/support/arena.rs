@@ -60,11 +60,11 @@ impl ArenaOwner {
 
     /// The body of a configuration this owner built, as the dataplane reads
     /// it.
-    pub fn body<M: Module>(&self, built: &Built<M, Self>) -> &M::Config {
-        let addr = built.header().get() + ModuleConfig::<M::Config>::BODY_OFFSET;
+    pub fn body<M: Module>(&self, built: &Built<M, Self>) -> &M {
+        let addr = built.header().get() + ModuleConfig::<M>::BODY_OFFSET;
         // SAFETY: the body of a configuration built in the arena, written
         // whole and never released.
-        unsafe { &*self.root.ptr::<M::Config>(addr) }
+        unsafe { &*self.root.ptr::<M>(addr) }
     }
 
     /// The bytes of the arena no block holds, which a release brings back to

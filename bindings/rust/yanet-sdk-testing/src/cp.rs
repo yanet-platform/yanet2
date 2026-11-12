@@ -413,3 +413,54 @@ unsafe impl Owner for TestOwner {
         Ok(index)
     }
 }
+
+/// Defines a test entity with the layout and build inputs of one field.
+///
+/// The wrapper keeps distinct module and object identities for tests that
+/// exercise the same body layout under different registered names.
+#[macro_export]
+macro_rules! test_body {
+    ($name:ident $(<$param:ident>)? = $body:ty) => {
+        #[repr(C)]
+        struct $name $(<$param>)? {
+            body: $body,
+        }
+
+        // SAFETY: the single field is a shared-memory layout at offset zero.
+        unsafe impl $(<$param: 'static>)? yanet_shm::shm::ShmLayout for $name $(<$param>)?
+        where $body: yanet_sys::cp::Build {}
+
+        // SAFETY: the single field starts at the wrapper's address; its
+        // builder owns and releases exactly the wrapper's owning edges.
+        unsafe impl $(<$param: 'static>)? yanet_sys::cp::Build for $name $(<$param>)?
+        where $body: yanet_sys::cp::Build {
+            type Parts<'b, W: yanet_sys::cp::Owner> = <$body as yanet_sys::cp::Build>::Parts<'b, W>;
+
+            // Hand-laid runtime fixtures can have uninhabited build inputs.
+            #[allow(unreachable_code)]
+            unsafe fn write<W: yanet_sys::cp::Owner>(
+                parts: Self::Parts<'_, W>,
+                memory: &yanet_sys::cp::MemoryContext<'_, W>,
+                addr: usize,
+            ) -> Result<(), yanet_sys::cp::Refusal> {
+                // SAFETY: the caller supplies the wrapper's uninitialised storage.
+                unsafe { <$body as yanet_sys::cp::Build>::write(parts, memory, addr) }
+            }
+
+            unsafe fn free<W: yanet_sys::cp::Owner>(
+                addr: usize,
+                memory: &yanet_sys::cp::MemoryContext<'_, W>,
+            ) {
+                // SAFETY: the caller owns the built wrapper and its edges.
+                unsafe { <$body as yanet_sys::cp::Build>::free(addr, memory) }
+            }
+        }
+
+        impl $(<$param>)? core::ops::Deref for $name $(<$param>)? {
+            type Target = $body;
+            fn deref(&self) -> &Self::Target {
+                &self.body
+            }
+        }
+    };
+}

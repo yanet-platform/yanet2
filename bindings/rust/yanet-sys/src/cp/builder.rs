@@ -1614,7 +1614,7 @@ impl<M: Module> Builder<M> {
     pub fn build<'env, E, W>(
         owner: &W,
         name: &str,
-        f: impl for<'b> FnOnce(Scope<'b, 'env, W, E>) -> Result<<M::Config as Build>::Parts<'b, W>, E>,
+        f: impl for<'b> FnOnce(Scope<'b, 'env, W, E>) -> Result<<M as Build>::Parts<'b, W>, E>,
     ) -> Result<Built<M, W>, E>
     where
         W: Owner,
@@ -1622,16 +1622,16 @@ impl<M: Module> Builder<M> {
     {
         const {
             assert!(
-                size_of::<ModuleConfig<M::Config>>() <= bindings::MEMORY_BLOCK_ALLOCATOR_MAX_SIZE as usize,
+                size_of::<ModuleConfig<M>>() <= bindings::MEMORY_BLOCK_ALLOCATOR_MAX_SIZE as usize,
                 "a configuration larger than the largest block of the allocator"
             )
         };
-        let header = build_root::<ModuleKind, M::Config, W, E>(
+        let header = build_root::<ModuleKind, M, W, E>(
             owner,
             M::NAME,
             name,
-            size_of::<ModuleConfig<M::Config>>(),
-            ModuleConfig::<M::Config>::BODY_OFFSET,
+            size_of::<ModuleConfig<M>>(),
+            ModuleConfig::<M>::BODY_OFFSET,
             f,
         )?;
         Ok(Built { header, _kind: PhantomData })
@@ -1657,7 +1657,7 @@ impl<O: Object> ObjectBuilder<O> {
     pub fn build<'env, E, W>(
         owner: &W,
         name: &str,
-        f: impl for<'b> FnOnce(Scope<'b, 'env, W, E, ObjectKind>) -> Result<<O::Config as Build>::Parts<'b, W>, E>,
+        f: impl for<'b> FnOnce(Scope<'b, 'env, W, E, ObjectKind>) -> Result<<O as Build>::Parts<'b, W>, E>,
     ) -> Result<BuiltObject<O, W>, E>
     where
         W: Owner,
@@ -1665,16 +1665,16 @@ impl<O: Object> ObjectBuilder<O> {
     {
         const {
             assert!(
-                size_of::<ObjectConfig<O::Config>>() <= bindings::MEMORY_BLOCK_ALLOCATOR_MAX_SIZE as usize,
+                size_of::<ObjectConfig<O>>() <= bindings::MEMORY_BLOCK_ALLOCATOR_MAX_SIZE as usize,
                 "an object larger than the largest block of the allocator"
             )
         };
-        let header = build_root::<ObjectKind, O::Config, W, E>(
+        let header = build_root::<ObjectKind, O, W, E>(
             owner,
             O::TYPE,
             name,
-            size_of::<ObjectConfig<O::Config>>(),
-            ObjectConfig::<O::Config>::BODY_OFFSET,
+            size_of::<ObjectConfig<O>>(),
+            ObjectConfig::<O>::BODY_OFFSET,
             f,
         )?;
         Ok(BuiltObject { header, _kind: PhantomData })
@@ -1774,13 +1774,13 @@ impl<M: Module, W: Owner> Built<M, W> {
     /// configuration any longer.
     pub unsafe fn destroy(self, owner: &W) {
         let memory = MemoryContext::new(owner, self.header);
-        let body = self.header.get() + ModuleConfig::<M::Config>::BODY_OFFSET;
+        let body = self.header.get() + ModuleConfig::<M>::BODY_OFFSET;
         // SAFETY: the body was written whole by the build, and every block it
         // owns came from the header's context (caller contract).
-        unsafe { M::Config::free::<W>(body, &memory) };
+        unsafe { M::free::<W>(body, &memory) };
         // SAFETY: every block the body owns is returned, and a block leaked
         // during the build is never referenced.
-        unsafe { release_root::<W, ModuleKind>(owner, self.header, size_of::<ModuleConfig<M::Config>>()) }
+        unsafe { release_root::<W, ModuleKind>(owner, self.header, size_of::<ModuleConfig<M>>()) }
     }
 }
 
@@ -1829,12 +1829,12 @@ impl<O: Object, W: Owner> BuiltObject<O, W> {
     /// # Safety
     ///
     /// The owner's memory is the one the object was built in.
-    pub unsafe fn config<'a>(&'a self, owner: &'a W) -> &'a O::Config {
-        let body = self.header.get() + ObjectConfig::<O::Config>::BODY_OFFSET;
+    pub unsafe fn config<'a>(&'a self, owner: &'a W) -> &'a O {
+        let body = self.header.get() + ObjectConfig::<O>::BODY_OFFSET;
         // SAFETY: the body was written whole by the build and is not released
         // while `self` lives, as release takes it; it lies in the owner's
         // memory (caller contract).
-        unsafe { &*owner.root().ptr::<O::Config>(body) }
+        unsafe { &*owner.root().ptr::<O>(body) }
     }
 
     /// Releases the object with everything it owns.
@@ -1845,13 +1845,13 @@ impl<O: Object, W: Owner> BuiltObject<O, W> {
     /// any longer.
     pub unsafe fn destroy(self, owner: &W) {
         let memory = MemoryContext::new(owner, self.header);
-        let body = self.header.get() + ObjectConfig::<O::Config>::BODY_OFFSET;
+        let body = self.header.get() + ObjectConfig::<O>::BODY_OFFSET;
         // SAFETY: the body was written whole by the build, and every block it
         // owns came from the header's context (caller contract).
-        unsafe { O::Config::free::<W>(body, &memory) };
+        unsafe { O::free::<W>(body, &memory) };
         // SAFETY: every block the body owns is returned, and a block leaked
         // during the build is never referenced.
-        unsafe { release_root::<W, ObjectKind>(owner, self.header, size_of::<ObjectConfig<O::Config>>()) }
+        unsafe { release_root::<W, ObjectKind>(owner, self.header, size_of::<ObjectConfig<O>>()) }
     }
 }
 

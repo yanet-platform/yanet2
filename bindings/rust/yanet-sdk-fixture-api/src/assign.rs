@@ -10,7 +10,7 @@ use yanet_sdk::{
     Ports, Rules, Scope,
 };
 use yanet_sdk_api::{Agent, Error, ErrorKind};
-use yanet_sdk_fixture::assign::{ActionParts, AssignAny, AssignConfigParts, Transport};
+use yanet_sdk_fixture::assign::{ActionParts, AssignAny, AssignParts, Transport};
 
 use crate::text;
 
@@ -86,7 +86,7 @@ impl Assign {
                     counter: scope.counter(text(&rules[idx].counter)?)?,
                 })
             })?;
-            Ok(AssignConfigParts { v4, v6, any, actions })
+            Ok(AssignParts { v4, v6, any, actions })
         })
     }
 }

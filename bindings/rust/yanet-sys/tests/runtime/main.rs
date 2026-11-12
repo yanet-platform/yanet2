@@ -18,3 +18,6 @@ mod handler;
 mod link;
 mod per_worker;
 mod tagged;
+
+// The public facade supplies the layout derive used in documentation tests.
+use yanet_sdk as _;

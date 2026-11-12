@@ -22,9 +22,7 @@ use core::{
 
 use yanet_sdk::{Builder, Built, BuiltObject, FfiRecord, LpmRange, ObjectBuilder, Refusal};
 use yanet_sdk_api::{Agent, Error, ErrorKind};
-use yanet_sdk_fixture::{
-    ConfigParts, RouteFibParts, RouteListParts, RouteParts, StashConfigParts, StateConfigParts, TallyConfigParts,
-};
+use yanet_sdk_fixture::{FibParts, FixtureParts, RouteListParts, RouteParts, StashParts, StateParts, TallyParts};
 
 /// Bytes of a name in a record, the terminating NUL included.
 pub const FIB_NAME_LEN: usize = 64;
@@ -142,7 +140,7 @@ impl Fixture {
                 FIXTURE_FAULT_PANIC_PAYLOAD => std::panic::panic_any(PanicOnDrop),
                 _ => return Err(Error::new(ErrorKind::InvalidArgument, "unknown fault")),
             }
-            Ok(ConfigParts {
+            Ok(FixtureParts {
                 mode: spec.mode,
                 arg: spec.arg,
                 counter: scope.counter(counter)?,
@@ -185,7 +183,7 @@ impl Tally {
             for name in ["wide", "narrow", "wide"] {
                 lanes.counter(name)?;
             }
-            Ok(TallyConfigParts {
+            Ok(TallyParts {
                 word,
                 by_value: [v0, v1, v2],
                 held,
@@ -223,7 +221,7 @@ impl Fib {
                 .iter()
                 .map(|device| scope.device(text(&device.name)?))
                 .collect::<Result<Vec<_>, Error>>()?;
-            Ok(RouteFibParts {
+            Ok(FibParts {
                 lpm_v6: v6,
                 lpm_v4: v4,
                 routes: scope.slice(routes.len(), |idx| {
@@ -260,7 +258,7 @@ impl Stash {
     /// in `seen` and `filled`.
     pub fn build(agent: &Agent, name: &str, state: &str) -> Result<Built<yanet_sdk_fixture::Stash, Agent>, Error> {
         Builder::<yanet_sdk_fixture::Stash>::build::<Error, _>(agent, name, |scope| {
-            Ok(StashConfigParts {
+            Ok(StashParts {
                 state: scope.object(state)?,
                 seen: scope.counter("seen")?,
                 filled: scope.counter("filled")?,
@@ -350,7 +348,7 @@ impl State {
                 FIXTURE_FAULT_PANIC => panic!("fixture fault"),
                 _ => return Err(Error::new(ErrorKind::InvalidArgument, "unknown fault")),
             }
-            Ok(StateConfigParts { seed, slots, workers, regions, held })
+            Ok(StateParts { seed, slots, workers, regions, held })
         })
     }
 

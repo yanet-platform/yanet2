@@ -20,6 +20,30 @@ builder, the derive, the module-crate facade and the packet header views.
 | `yanet-sdk-fixture-api` | `std`, `forbid(unsafe_code)` | the api crate of the fixture modules and object type: the records and the `build` and `free` exports per module and object type, and the queries of the object, that the Go tests call over an agent; its header carries the records and the modes |
 | `yanet-packet` | `no_std` | packet header views, extractable to its own repository |
 
+## Module and object bodies
+
+The type implementing `Module` or `Object` is the body published in shared
+memory. It derives `ShmLayout`, which also implements `Build` and generates
+`<Type>Parts` for its builder. There is no separate `Config` associated type.
+The runtime calls `handle(&self, ...)` and `prepare(&self, ...)` on that body;
+ordinary fields are the immutable configuration of one generation. An
+`ObjectLink<O>` field resolves to `&O` in the active generation.
+
+`Prepared<'p>` remains a per-worker, per-placement value; it can borrow fields
+of the receiver for `'p` and hold handles resolved at commit. Mutable state
+uses `PerWorker`, `PerWorkerSlice`, atomics or `Mutex`. State that must survive
+module configuration replacement belongs in a linked object. These lifetimes
+and the C publication and reclamation protocol are unchanged.
+
+To migrate a module, move its former configuration fields onto its module
+type, move the derive onto that type, remove `type Config`, and add the shared
+receiver to both methods. Return the module's generated parts from its build
+closure and replace handler accesses through `cx.config()` with `self`.
+The context accessor remains available and now returns the module itself;
+object builders and readers follow the same rule. See
+[`yanet-sdk-fixture/src/lib.rs`](yanet-sdk-fixture/src/lib.rs) for counters,
+tables and object links using this API.
+
 ## Api crates
 
 An api crate is the control-plane side of a module, `#![forbid(unsafe_code)]`,

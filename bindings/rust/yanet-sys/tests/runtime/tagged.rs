@@ -38,16 +38,15 @@ unsafe impl Build for Config {
     unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
 }
 
-/// Adds each packet to the counter of id 0 through the handle its prepare
-/// step resolved, and passes the packets.
-struct Tally;
+// Adds each packet to the counter of id 0 through the handle its prepare
+// step resolved, and passes the packets.
+yanet_sdk_testing::test_body!(Tally = Config);
 
 impl Module for Tally {
     const NAME: &'static str = "tally";
-    type Config = Config;
     type Prepared<'p> = TaggedCountersRef<'p, Traffic>;
 
-    fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    fn handle<'id>(&'id self, cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
         let by_id = cx.prepared().bind(cx);
         batch.dispatch(|packet| {
             by_id.add(0, Traffic::packet(packet.data().len() as u64));
@@ -55,8 +54,8 @@ impl Module for Tally {
         });
     }
 
-    fn prepare<'p>(cx: &CommitCx<'p, Self>) -> Self::Prepared<'p> {
-        cx.config().by_id.resolve(cx)
+    fn prepare<'p>(&'p self, cx: &CommitCx<'p, Self>) -> Self::Prepared<'p> {
+        self.by_id.resolve(cx)
     }
 }
 

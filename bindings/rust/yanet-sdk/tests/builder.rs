@@ -8,7 +8,6 @@
 //! the Go tests over `bindings/go/dataplane_ut`.
 
 use core::{
-    marker::PhantomData,
     mem::offset_of,
     net::{Ipv4Addr, Ipv6Addr},
     sync::atomic::{AtomicU32, Ordering},
@@ -228,18 +227,17 @@ struct Indexes {
     v6: HashIndex<Ipv6Addr>,
 }
 
-/// A module with a given configuration type: the builder reads only its name
-/// and that type.
-struct Fixture<C>(PhantomData<fn() -> C>);
+// A module with a given configuration type: the builder reads only its name
+// and that type.
+yanet_sdk_testing::test_body!(Fixture<C> = C);
 
 impl<C: Build + Sync> Module for Fixture<C> {
     const NAME: &'static str = "fixture";
-    type Config = C;
     type Prepared<'p> = ();
 
-    fn prepare(_: &CommitCx<'_, Self>) {}
+    fn prepare<'p>(&'p self, _: &CommitCx<'p, Self>) {}
 
-    fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    fn handle<'id>(&'id self, _: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
         batch.dispatch(|_| Verdict::Pass);
     }
 }
@@ -341,7 +339,7 @@ fn entries<'b>(b: Scope<'b, '_, TestOwner>) -> Result<OwnedSlice<'b, Entry, Test
 /// own errors.
 fn build<'env, M: Module>(
     owner: &TestOwner,
-    f: impl for<'b> FnOnce(Scope<'b, 'env, TestOwner>) -> Result<<M::Config as Build>::Parts<'b, TestOwner>, Failure>,
+    f: impl for<'b> FnOnce(Scope<'b, 'env, TestOwner>) -> Result<<M as Build>::Parts<'b, TestOwner>, Failure>,
 ) -> Result<Built<M, TestOwner>, Failure> {
     Builder::<M>::build(owner, M::NAME, f)
 }
@@ -374,11 +372,11 @@ fn build_policy(owner: &TestOwner, rules: &[(u64, &[u64])]) -> Result<Built<Poli
 ///
 /// The references live no longer than the borrow of the built configuration,
 /// so releasing it while they live does not compile.
-fn body<'a, M: Module>(owner: &'a TestOwner, built: &'a Built<M, TestOwner>) -> (&'a M::Config, View<'a>) {
+fn body<'a, M: Module>(owner: &'a TestOwner, built: &'a Built<M, TestOwner>) -> (&'a M, View<'a>) {
     // SAFETY: a configuration the builder handed over, frozen for the test;
     // the view resolves through the root of the arena it lives in.
     unsafe {
-        let config = &*owner.root().ptr::<ModuleConfig<M::Config>>(built.header().get());
+        let config = &*owner.root().ptr::<ModuleConfig<M>>(built.header().get());
         (config.body(), View::new(owner.root()))
     }
 }
@@ -1327,16 +1325,15 @@ fn test_build_writes_every_word_of_a_faulty_config_when_none_is_refused() {
     owner.assert_released();
 }
 
-/// An object of policy state: the builder reads only its type name and its
-/// configuration type.
-struct PolicyState;
+// An object of policy state: the builder reads only its type name and its
+// configuration type.
+yanet_sdk_testing::test_body!(PolicyState = Policy);
 
 impl Object for PolicyState {
     const TYPE: &'static str = "policy_state";
-    type Config = Policy;
     type Prepared<'p> = ();
 
-    fn prepare(_: &ObjectCommitCx<'_, Self>) {}
+    fn prepare<'p>(&'p self, _: &ObjectCommitCx<'p, Self>) {}
 }
 
 /// Builds the policy object with the rules, each an id and its ports.
@@ -1476,14 +1473,13 @@ fn test_object_build_releases_everything_when_the_closure_panics() {
 
 #[test]
 fn test_object_build_returns_everything_when_a_write_is_refused() {
-    struct FlakyState;
+    yanet_sdk_testing::test_body!(FlakyState = [Flaky; 2]);
 
     impl Object for FlakyState {
         const TYPE: &'static str = "flaky_state";
-        type Config = [Flaky; 2];
         type Prepared<'p> = ();
 
-        fn prepare(_: &ObjectCommitCx<'_, Self>) {}
+        fn prepare<'p>(&'p self, _: &ObjectCommitCx<'p, Self>) {}
     }
 
     let owner = owner();
@@ -1510,16 +1506,15 @@ struct Held {
     last: ObjectCounter,
 }
 
-/// An object of counters of its own: the builder reads only its type name and
-/// its configuration type.
-struct HeldState;
+// An object of counters of its own: the builder reads only its type name and
+// its configuration type.
+yanet_sdk_testing::test_body!(HeldState = Held);
 
 impl Object for HeldState {
     const TYPE: &'static str = "held_state";
-    type Config = Held;
     type Prepared<'p> = ();
 
-    fn prepare(_: &ObjectCommitCx<'_, Self>) {}
+    fn prepare<'p>(&'p self, _: &ObjectCommitCx<'p, Self>) {}
 }
 
 /// Builds the object of counters, its last counter under the given name.
@@ -1745,15 +1740,14 @@ fn test_build_links_the_same_object_twice_at_one_index() {
     owner.assert_released();
 }
 
-/// An object type other than [`PolicyState`] of the same configuration.
-struct OtherState;
+// An object type other than [`PolicyState`] of the same configuration.
+yanet_sdk_testing::test_body!(OtherState = Policy);
 
 impl Object for OtherState {
     const TYPE: &'static str = "other_state";
-    type Config = Policy;
     type Prepared<'p> = ();
 
-    fn prepare(_: &ObjectCommitCx<'_, Self>) {}
+    fn prepare<'p>(&'p self, _: &ObjectCommitCx<'p, Self>) {}
 }
 
 /// A counter, then links to one name under two object types.
@@ -1832,15 +1826,14 @@ struct Budgets {
 type BudgetsModule = Fixture<Budgets>;
 type WideModule = Fixture<PerWorker<Wide>>;
 
-/// An object of per-worker budgets.
-struct BudgetsState;
+// An object of per-worker budgets.
+yanet_sdk_testing::test_body!(BudgetsState = Budgets);
 
 impl Object for BudgetsState {
     const TYPE: &'static str = "budgets_state";
-    type Config = Budgets;
     type Prepared<'p> = ();
 
-    fn prepare(_: &ObjectCommitCx<'_, Self>) {}
+    fn prepare<'p>(&'p self, _: &ObjectCommitCx<'p, Self>) {}
 }
 
 const BUDGET: Budget = Budget { tokens: 7, last: 11, spent: 13 };
@@ -2160,15 +2153,14 @@ struct Flows {
 
 type FlowsModule = Fixture<Flows>;
 
-/// An object of a region of budgets per worker.
-struct FlowsState;
+// An object of a region of budgets per worker.
+yanet_sdk_testing::test_body!(FlowsState = Flows);
 
 impl Object for FlowsState {
     const TYPE: &'static str = "flows_state";
-    type Config = Flows;
     type Prepared<'p> = ();
 
-    fn prepare(_: &ObjectCommitCx<'_, Self>) {}
+    fn prepare<'p>(&'p self, _: &ObjectCommitCx<'p, Self>) {}
 }
 
 /// Builds a region of `len` budgets per worker, every one the same budget.

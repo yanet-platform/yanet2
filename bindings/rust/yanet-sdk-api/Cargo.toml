@@ -12,3 +12,6 @@ workspace = true
 [dependencies]
 yanet-shm = { path = "../yanet-shm" }
 yanet-sys = { path = "../yanet-sys" }
+
+[dev-dependencies]
+yanet-sdk = { path = "../yanet-sdk" }

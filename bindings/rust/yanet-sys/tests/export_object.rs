@@ -16,27 +16,25 @@ use yanet_sys::{
     dp::{__private::new_object, Object, ObjectCommitCx},
 };
 
-/// An object type of one word, with no prepared value.
-struct Exported;
+// An object type of one word, with no prepared value.
+yanet_sdk_testing::test_body!(Exported = u64);
 
 impl Object for Exported {
     const TYPE: &'static str = "exported_state";
-    type Config = u64;
     type Prepared<'p> = ();
 
-    fn prepare(_: &ObjectCommitCx<'_, Self>) {}
+    fn prepare<'p>(&'p self, _: &ObjectCommitCx<'p, Self>) {}
 }
 
-/// An object type of one word, with a prepared value of two words.
-struct Prepared;
+// An object type of one word, with a prepared value of two words.
+yanet_sdk_testing::test_body!(Prepared = u64);
 
 impl Object for Prepared {
     const TYPE: &'static str = "prepared_state";
-    type Config = u64;
     type Prepared<'p> = [u64; 2];
 
-    fn prepare(cx: &ObjectCommitCx<'_, Self>) -> [u64; 2] {
-        [*cx.config(), 0]
+    fn prepare<'p>(&'p self, _: &ObjectCommitCx<'p, Self>) -> [u64; 2] {
+        [self.body, 0]
     }
 }
 
@@ -95,3 +93,6 @@ fn test_new_object_with_a_prepared_value_registers_its_hook_and_size() {
 
     assert_eq!((true, 16), (commit, prepared_size));
 }
+
+// The public facade supplies the layout derive used in documentation tests.
+use yanet_sdk as _;

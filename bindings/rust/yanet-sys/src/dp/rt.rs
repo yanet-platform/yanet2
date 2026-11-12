@@ -76,10 +76,10 @@ unsafe extern "C" fn handle<M: Module>(
     // SAFETY: the context's configuration is set and is this module's
     // (attach: call, binding); its C header bytes stay opaque and the body
     // is frozen and live for the call (attach: frozen, reclaim).
-    let config = unsafe { (*root.ptr::<ModuleConfig<M::Config>>(config.addr())).body() };
+    let config = unsafe { (*root.ptr::<ModuleConfig<M>>(config.addr())).body() };
     // SAFETY: every argument comes from the dataplane call (attach: call).
     let mut cx = unsafe { Cx::<M>::new(root, ectx, worker, config, prepared) };
-    M::handle(&mut cx, &mut batch);
+    config.handle(&mut cx, &mut batch);
 }
 
 /// The execution-context commit hook the descriptor of `new_module`
@@ -109,7 +109,7 @@ unsafe extern "C" fn commit_ectx<M: Module>(ectx: *mut bindings::module_ectx, cp
     // frozen, publish).
     let out = root.ptr::<M::Prepared<'_>>(unsafe { (*ectx.as_ptr()).abs_module_prepared }.addr());
     // SAFETY: the header is this module's configuration (attach: binding).
-    let config = unsafe { (*root.ptr::<ModuleConfig<M::Config>>(cp_module.addr())).body() };
+    let config = unsafe { (*root.ptr::<ModuleConfig<M>>(cp_module.addr())).body() };
     // SAFETY: root, context and configuration as stated above; the
     // context's counter storage was derived before the pass (attach: call).
     let cx = unsafe { CommitCx::<M>::new(root, ectx, config) };
@@ -118,7 +118,7 @@ unsafe extern "C" fn commit_ectx<M: Module>(ectx: *mut bindings::module_ectx, cp
     // its `check_module` bounds the alignment by `MAX_ALIGN` and refuses a
     // value that needs a drop) and exclusively owned by this pass; a value
     // needing no drop leaks nothing if the buffer is overwritten.
-    unsafe { out.write(M::prepare(&cx)) };
+    unsafe { out.write(config.prepare(&cx)) };
 }
 
 /// Allocates the module descriptor the loader copies and frees, with the
@@ -130,16 +130,17 @@ unsafe extern "C" fn commit_ectx<M: Module>(ectx: *mut bindings::module_ectx, cp
 ///
 /// ```compile_fail,E0080
 /// use yanet_sys::dp::{Batch, CommitCx, Cx, Module, Verdict};
-/// struct Mine;
+/// #[derive(yanet_sdk::ShmLayout)]
+/// #[repr(C)]
+/// struct Mine { config: u64 }
 /// impl Module for Mine {
 ///     const NAME: &'static str =
 ///         "module_of_a_name_long_enough_to_overflow_the_eighty_bytes_of_the_c_module_type_field";
-///     type Config = u64;
 ///     type Prepared<'p> = ();
-///     fn handle(_: &mut Cx<Self>, batch: &mut Batch) {
+///     fn handle<'id>(&'id self, _: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
 ///         batch.dispatch(|_| Verdict::Pass);
 ///     }
-///     fn prepare(_: &CommitCx<'_, Self>) {}
+///     fn prepare<'p>(&'p self, _: &CommitCx<'p, Self>) {}
 /// }
 /// let _ = yanet_sys::dp::__private::new_module::<Mine>();
 /// ```
@@ -148,15 +149,18 @@ unsafe extern "C" fn commit_ectx<M: Module>(ectx: *mut bindings::module_ectx, cp
 ///
 /// ```no_run
 /// use yanet_sys::dp::{Batch, CommitCx, Cx, Module, Verdict};
-/// struct Mine;
+/// #[derive(yanet_sdk::ShmLayout)]
+/// #[repr(C)]
+/// struct Mine {
+///     config: u64,
+/// }
 /// impl Module for Mine {
 ///     const NAME: &'static str = "module_of_a_name_short_enough_to_fit_the_c_module_type_field";
-///     type Config = u64;
 ///     type Prepared<'p> = ();
-///     fn handle(_: &mut Cx<Self>, batch: &mut Batch) {
+///     fn handle<'id>(&'id self, _: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
 ///         batch.dispatch(|_| Verdict::Pass);
 ///     }
-///     fn prepare(_: &CommitCx<'_, Self>) {}
+///     fn prepare<'p>(&'p self, _: &CommitCx<'p, Self>) {}
 /// }
 /// let _ = yanet_sys::dp::__private::new_module::<Mine>();
 /// ```
@@ -208,13 +212,13 @@ unsafe extern "C" fn commit_object_ectx<O: Object>(
     let out = root.ptr::<O::Prepared<'_>>(unsafe { (*ectx).abs_object_prepared }.addr());
     // SAFETY: the header is an object of this type, its body frozen but for
     // its atomics and mutex payloads (attach: binding, frozen).
-    let config = unsafe { (*root.ptr::<ObjectConfig<O::Config>>(cp_object.addr())).body() };
+    let config = unsafe { (*root.ptr::<ObjectConfig<O>>(cp_object.addr())).body() };
     // SAFETY: root, context and configuration as stated above.
     let cx = unsafe { ObjectCommitCx::<O>::new(root, NonNull::new_unchecked(ectx), config) };
     // SAFETY: the buffer holds the prepared value's size, aligned by the
     // allocator, and is owned by this pass, as for a module (attach: align;
     // only `new_object` registers this hook, after its `check_object`).
-    unsafe { out.write(O::prepare(&cx)) };
+    unsafe { out.write(config.prepare(&cx)) };
 }
 
 /// Allocates the object type descriptor the loader copies and frees, with
@@ -229,13 +233,14 @@ unsafe extern "C" fn commit_object_ectx<O: Object>(
 ///
 /// ```compile_fail,E0080
 /// use yanet_sys::dp::{Object, ObjectCommitCx};
-/// struct Mine;
+/// #[derive(yanet_sdk::ShmLayout)]
+/// #[repr(C)]
+/// struct Mine { config: u64 }
 /// impl Object for Mine {
 ///     const TYPE: &'static str =
 ///         "state_of_a_name_long_enough_to_overflow_the_eighty_bytes_of_the_c_object_type_field";
-///     type Config = u64;
 ///     type Prepared<'p> = ();
-///     fn prepare(_: &ObjectCommitCx<'_, Self>) {}
+///     fn prepare<'p>(&'p self, _: &ObjectCommitCx<'p, Self>) {}
 /// }
 /// let _ = yanet_sys::dp::__private::new_object::<Mine>();
 /// ```
@@ -244,12 +249,15 @@ unsafe extern "C" fn commit_object_ectx<O: Object>(
 ///
 /// ```no_run
 /// use yanet_sys::dp::{Object, ObjectCommitCx};
-/// struct Mine;
+/// #[derive(yanet_sdk::ShmLayout)]
+/// #[repr(C)]
+/// struct Mine {
+///     config: u64,
+/// }
 /// impl Object for Mine {
 ///     const TYPE: &'static str = "state_of_a_name_short_enough_to_fit_the_c_object_type_field";
-///     type Config = u64;
 ///     type Prepared<'p> = ();
-///     fn prepare(_: &ObjectCommitCx<'_, Self>) {}
+///     fn prepare<'p>(&'p self, _: &ObjectCommitCx<'p, Self>) {}
 /// }
 /// let _ = yanet_sys::dp::__private::new_object::<Mine>();
 /// ```
@@ -300,15 +308,16 @@ pub fn new_object<O: Object>() -> *mut bindings::object {
 ///
 /// ```compile_fail,E0080
 /// use yanet_sys::dp::{Batch, CommitCx, Cx, Module, Verdict};
-/// struct Mine;
+/// #[derive(yanet_sdk::ShmLayout)]
+/// #[repr(C)]
+/// struct Mine { config: u64 }
 /// impl Module for Mine {
 ///     const NAME: &'static str = "mine";
-///     type Config = u64;
 ///     type Prepared<'p> = ();
-///     fn handle(_: &mut Cx<Self>, batch: &mut Batch) {
+///     fn handle<'id>(&'id self, _: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
 ///         batch.dispatch(|_| Verdict::Pass);
 ///     }
-///     fn prepare(_: &CommitCx<'_, Self>) {}
+///     fn prepare<'p>(&'p self, _: &CommitCx<'p, Self>) {}
 /// }
 /// yanet_sys::export_module!(name = other, module = Mine);
 /// ```
@@ -317,15 +326,18 @@ pub fn new_object<O: Object>() -> *mut bindings::object {
 ///
 /// ```
 /// use yanet_sys::dp::{Batch, CommitCx, Cx, Module, Verdict};
-/// struct RouteMpls;
+/// #[derive(yanet_sdk::ShmLayout)]
+/// #[repr(C)]
+/// struct RouteMpls {
+///     config: u64,
+/// }
 /// impl Module for RouteMpls {
 ///     const NAME: &'static str = "route-mpls";
-///     type Config = u64;
 ///     type Prepared<'p> = ();
-///     fn handle(_: &mut Cx<Self>, batch: &mut Batch) {
+///     fn handle<'id>(&'id self, _: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
 ///         batch.dispatch(|_| Verdict::Pass);
 ///     }
-///     fn prepare(_: &CommitCx<'_, Self>) {}
+///     fn prepare<'p>(&'p self, _: &CommitCx<'p, Self>) {}
 /// }
 /// yanet_sys::export_module!(name = route_mpls, module = RouteMpls);
 /// ```
@@ -335,29 +347,38 @@ pub fn new_object<O: Object>() -> *mut bindings::object {
 ///
 /// ```
 /// use yanet_sys::dp::{Batch, CommitCx, Cx, Module, Object, ObjectCommitCx, Verdict};
-/// struct Mine;
+/// #[derive(yanet_sdk::ShmLayout)]
+/// #[repr(C)]
+/// struct Mine {
+///     config: u64,
+/// }
 /// impl Module for Mine {
 ///     const NAME: &'static str = "mine";
-///     type Config = u64;
 ///     type Prepared<'p> = ();
-///     fn handle(_: &mut Cx<Self>, batch: &mut Batch) {
+///     fn handle<'id>(&'id self, _: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
 ///         batch.dispatch(|_| Verdict::Pass);
 ///     }
-///     fn prepare(_: &CommitCx<'_, Self>) {}
+///     fn prepare<'p>(&'p self, _: &CommitCx<'p, Self>) {}
 /// }
-/// struct Table;
+/// #[derive(yanet_sdk::ShmLayout)]
+/// #[repr(C)]
+/// struct Table {
+///     config: u64,
+/// }
 /// impl Object for Table {
 ///     const TYPE: &'static str = "mine_table";
-///     type Config = u64;
 ///     type Prepared<'p> = ();
-///     fn prepare(_: &ObjectCommitCx<'_, Self>) {}
+///     fn prepare<'p>(&'p self, _: &ObjectCommitCx<'p, Self>) {}
 /// }
-/// struct Set;
+/// #[derive(yanet_sdk::ShmLayout)]
+/// #[repr(C)]
+/// struct Set {
+///     config: u64,
+/// }
 /// impl Object for Set {
 ///     const TYPE: &'static str = "mine_set";
-///     type Config = u64;
 ///     type Prepared<'p> = ();
-///     fn prepare(_: &ObjectCommitCx<'_, Self>) {}
+///     fn prepare<'p>(&'p self, _: &ObjectCommitCx<'p, Self>) {}
 /// }
 /// yanet_sys::export_module!(
 ///     name = mine,
@@ -371,22 +392,24 @@ pub fn new_object<O: Object>() -> *mut bindings::object {
 ///
 /// ```compile_fail,E0080
 /// use yanet_sys::dp::{Batch, CommitCx, Cx, Module, Object, ObjectCommitCx, Verdict};
-/// struct Mine;
+/// #[derive(yanet_sdk::ShmLayout)]
+/// #[repr(C)]
+/// struct Mine { config: u64 }
 /// impl Module for Mine {
 ///     const NAME: &'static str = "mine";
-///     type Config = u64;
 ///     type Prepared<'p> = ();
-///     fn handle(_: &mut Cx<Self>, batch: &mut Batch) {
+///     fn handle<'id>(&'id self, _: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
 ///         batch.dispatch(|_| Verdict::Pass);
 ///     }
-///     fn prepare(_: &CommitCx<'_, Self>) {}
+///     fn prepare<'p>(&'p self, _: &CommitCx<'p, Self>) {}
 /// }
-/// struct Table;
+/// #[derive(yanet_sdk::ShmLayout)]
+/// #[repr(C)]
+/// struct Table { config: u64 }
 /// impl Object for Table {
 ///     const TYPE: &'static str = "mine_table";
-///     type Config = u64;
 ///     type Prepared<'p> = ();
-///     fn prepare(_: &ObjectCommitCx<'_, Self>) {}
+///     fn prepare<'p>(&'p self, _: &ObjectCommitCx<'p, Self>) {}
 /// }
 /// yanet_sys::export_module!(name = mine, module = Mine, objects = [table = Table]);
 /// ```
@@ -441,12 +464,13 @@ macro_rules! export_module {
 ///
 /// ```compile_fail,E0080
 /// use yanet_sys::dp::{Object, ObjectCommitCx};
-/// struct Mine;
+/// #[derive(yanet_sdk::ShmLayout)]
+/// #[repr(C)]
+/// struct Mine { config: u64 }
 /// impl Object for Mine {
 ///     const TYPE: &'static str = "mine";
-///     type Config = u64;
 ///     type Prepared<'p> = ();
-///     fn prepare(_: &ObjectCommitCx<'_, Self>) {}
+///     fn prepare<'p>(&'p self, _: &ObjectCommitCx<'p, Self>) {}
 /// }
 /// yanet_sys::export_object!(name = other, object = Mine);
 /// ```
@@ -455,12 +479,13 @@ macro_rules! export_module {
 ///
 /// ```compile_fail,E0080
 /// use yanet_sys::dp::{Object, ObjectCommitCx};
-/// struct Mine;
+/// #[derive(yanet_sdk::ShmLayout)]
+/// #[repr(C)]
+/// struct Mine { config: u64 }
 /// impl Object for Mine {
 ///     const TYPE: &'static str = "my-state";
-///     type Config = u64;
 ///     type Prepared<'p> = ();
-///     fn prepare(_: &ObjectCommitCx<'_, Self>) {}
+///     fn prepare<'p>(&'p self, _: &ObjectCommitCx<'p, Self>) {}
 /// }
 /// yanet_sys::export_object!(name = my_state, object = Mine);
 /// ```
@@ -470,13 +495,14 @@ macro_rules! export_module {
 ///
 /// ```compile_fail,E0080
 /// use yanet_sys::dp::{Object, ObjectCommitCx};
-/// struct Mine;
+/// #[derive(yanet_sdk::ShmLayout)]
+/// #[repr(C)]
+/// struct Mine { config: u64 }
 /// impl Object for Mine {
 ///     const TYPE: &'static str =
 ///         "state_of_a_name_long_enough_to_overflow_the_eighty_bytes_of_the_c_object_type_field";
-///     type Config = u64;
 ///     type Prepared<'p> = ();
-///     fn prepare(_: &ObjectCommitCx<'_, Self>) {}
+///     fn prepare<'p>(&'p self, _: &ObjectCommitCx<'p, Self>) {}
 /// }
 /// yanet_sys::export_object!(
 ///     name = state_of_a_name_long_enough_to_overflow_the_eighty_bytes_of_the_c_object_type_field,
@@ -488,12 +514,15 @@ macro_rules! export_module {
 ///
 /// ```
 /// use yanet_sys::dp::{Object, ObjectCommitCx};
-/// struct Mine;
+/// #[derive(yanet_sdk::ShmLayout)]
+/// #[repr(C)]
+/// struct Mine {
+///     config: u64,
+/// }
 /// impl Object for Mine {
 ///     const TYPE: &'static str = "my_state";
-///     type Config = u64;
 ///     type Prepared<'p> = ();
-///     fn prepare(_: &ObjectCommitCx<'_, Self>) {}
+///     fn prepare<'p>(&'p self, _: &ObjectCommitCx<'p, Self>) {}
 /// }
 /// yanet_sys::export_object!(name = my_state, object = Mine);
 /// ```

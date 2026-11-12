@@ -84,3 +84,6 @@ fn test_lpm_lookup_walks_pages() {
         [[10, 0, 7, 7], [10, 1, 3, 4], [11, 0, 0, 0], [10, 2, 0, 0]].map(|key| lpm.lookup(&view, &key))
     );
 }
+
+// The public facade supplies the layout derive used in documentation tests.
+use yanet_sdk as _;

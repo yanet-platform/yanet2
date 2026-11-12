@@ -164,13 +164,16 @@ pub fn derive_ffi_record(input: TokenStream) -> TokenStream {
 /// use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
 /// use yanet_sdk_api::{Agent, Error};
 ///
-/// struct Mine;
+/// #[derive(yanet_sdk::ShmLayout)]
+/// #[repr(C)]
+/// struct Mine {
+///     config: u64,
+/// }
 /// impl Module for Mine {
 ///     const NAME: &'static str = "mine";
-///     type Config = u64;
 ///     type Prepared<'p> = ();
-///     fn prepare(_: &CommitCx<'_, Self>) {}
-///     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+///     fn prepare<'p>(&'p self, _: &CommitCx<'p, Self>) {}
+///     fn handle<'id>(&'id self, _: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
 ///         batch.dispatch(|_| Verdict::Pass);
 ///     }
 /// }
@@ -191,7 +194,11 @@ pub fn derive_ffi_record(input: TokenStream) -> TokenStream {
 ///         input: &Input,
 ///         ranges: &[u32],
 ///     ) -> Result<Built<Mine, Agent>, Error> {
-///         Builder::<Mine>::build(agent, name, |_| Ok(input.weight + ranges.len() as u64))
+///         Builder::<Mine>::build(agent, name, |_| {
+///             Ok(MineParts {
+///                 config: input.weight + ranges.len() as u64,
+///             })
+///         })
 ///     }
 /// }
 /// ```
@@ -677,14 +684,15 @@ mod doctests {
     /// ```compile_fail
     /// # use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
     /// # use yanet_sdk_api::{Agent, Error};
-    /// # struct Mine;
+    /// # #[derive(yanet_sdk::ShmLayout)]
+    /// # #[repr(C)]
+    /// # struct Mine { config: u64 }
     /// # struct Other;
     /// # impl Module for Mine {
     /// #     const NAME: &'static str = "mine";
-    /// #     type Config = u64;
     /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &CommitCx<'_, Self>) {}
-    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    /// #     fn prepare<'p>(&'p self, _: &CommitCx<'p, Self>) {}
+    /// #     fn handle<'id>(&'id self, _: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
     /// #         batch.dispatch(|_| Verdict::Pass);
     /// #     }
     /// # }
@@ -692,7 +700,7 @@ mod doctests {
     /// #[yanet_sdk::api(module = Mine)]
     /// impl Api {
     ///     pub fn new(agent: &Agent, name: &str, _flag: bool) -> Result<Built<Mine, Agent>, Error> {
-    ///         Builder::<Mine>::build(agent, name, |_| Ok(0))
+    ///         Builder::<Mine>::build(agent, name, |_| Ok(MineParts { config: 0 }))
     ///     }
     /// }
     /// ```
@@ -703,14 +711,15 @@ mod doctests {
     /// ```no_run
     /// # use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
     /// # use yanet_sdk_api::{Agent, Error};
-    /// # struct Mine;
+    /// # #[derive(yanet_sdk::ShmLayout)]
+    /// # #[repr(C)]
+    /// # struct Mine { config: u64 }
     /// # struct Other;
     /// # impl Module for Mine {
     /// #     const NAME: &'static str = "mine";
-    /// #     type Config = u64;
     /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &CommitCx<'_, Self>) {}
-    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    /// #     fn prepare<'p>(&'p self, _: &CommitCx<'p, Self>) {}
+    /// #     fn handle<'id>(&'id self, _: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
     /// #         batch.dispatch(|_| Verdict::Pass);
     /// #     }
     /// # }
@@ -718,7 +727,7 @@ mod doctests {
     /// #[yanet_sdk::api(module = Mine)]
     /// impl Api {
     ///     pub fn new(agent: &Agent, name: &str, _flag: u8) -> Result<Built<Mine, Agent>, Error> {
-    ///         Builder::<Mine>::build(agent, name, |_| Ok(0))
+    ///         Builder::<Mine>::build(agent, name, |_| Ok(MineParts { config: 0 }))
     ///     }
     /// }
     /// ```
@@ -729,14 +738,15 @@ mod doctests {
     /// ```compile_fail
     /// # use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
     /// # use yanet_sdk_api::{Agent, Error};
-    /// # struct Mine;
+    /// # #[derive(yanet_sdk::ShmLayout)]
+    /// # #[repr(C)]
+    /// # struct Mine { config: u64 }
     /// # struct Other;
     /// # impl Module for Mine {
     /// #     const NAME: &'static str = "mine";
-    /// #     type Config = u64;
     /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &CommitCx<'_, Self>) {}
-    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    /// #     fn prepare<'p>(&'p self, _: &CommitCx<'p, Self>) {}
+    /// #     fn handle<'id>(&'id self, _: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
     /// #         batch.dispatch(|_| Verdict::Pass);
     /// #     }
     /// # }
@@ -755,14 +765,15 @@ mod doctests {
     /// ```no_run
     /// # use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
     /// # use yanet_sdk_api::{Agent, Error};
-    /// # struct Mine;
+    /// # #[derive(yanet_sdk::ShmLayout)]
+    /// # #[repr(C)]
+    /// # struct Mine { config: u64 }
     /// # struct Other;
     /// # impl Module for Mine {
     /// #     const NAME: &'static str = "mine";
-    /// #     type Config = u64;
     /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &CommitCx<'_, Self>) {}
-    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    /// #     fn prepare<'p>(&'p self, _: &CommitCx<'p, Self>) {}
+    /// #     fn handle<'id>(&'id self, _: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
     /// #         batch.dispatch(|_| Verdict::Pass);
     /// #     }
     /// # }
@@ -770,7 +781,7 @@ mod doctests {
     /// #[yanet_sdk::api(module = Mine)]
     /// impl Api {
     ///     pub fn new(agent: &Agent, name: &str, _flag: u8) -> Result<Built<Mine, Agent>, Error> {
-    ///         Builder::<Mine>::build(agent, name, |_| Ok(0))
+    ///         Builder::<Mine>::build(agent, name, |_| Ok(MineParts { config: 0 }))
     ///     }
     /// }
     /// ```
@@ -781,14 +792,15 @@ mod doctests {
     /// ```compile_fail
     /// # use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
     /// # use yanet_sdk_api::{Agent, Error};
-    /// # struct Mine;
+    /// # #[derive(yanet_sdk::ShmLayout)]
+    /// # #[repr(C)]
+    /// # struct Mine { config: u64 }
     /// # struct Other;
     /// # impl Module for Mine {
     /// #     const NAME: &'static str = "mine";
-    /// #     type Config = u64;
     /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &CommitCx<'_, Self>) {}
-    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    /// #     fn prepare<'p>(&'p self, _: &CommitCx<'p, Self>) {}
+    /// #     fn handle<'id>(&'id self, _: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
     /// #         batch.dispatch(|_| Verdict::Pass);
     /// #     }
     /// # }
@@ -807,14 +819,15 @@ mod doctests {
     /// ```no_run
     /// # use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
     /// # use yanet_sdk_api::{Agent, Error};
-    /// # struct Mine;
+    /// # #[derive(yanet_sdk::ShmLayout)]
+    /// # #[repr(C)]
+    /// # struct Mine { config: u64 }
     /// # struct Other;
     /// # impl Module for Mine {
     /// #     const NAME: &'static str = "mine";
-    /// #     type Config = u64;
     /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &CommitCx<'_, Self>) {}
-    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    /// #     fn prepare<'p>(&'p self, _: &CommitCx<'p, Self>) {}
+    /// #     fn handle<'id>(&'id self, _: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
     /// #         batch.dispatch(|_| Verdict::Pass);
     /// #     }
     /// # }
@@ -822,7 +835,7 @@ mod doctests {
     /// #[yanet_sdk::api(module = Mine)]
     /// impl Api {
     ///     pub fn new(agent: &Agent, name: &str, _flag: u8) -> Result<Built<Mine, Agent>, Error> {
-    ///         Builder::<Mine>::build(agent, name, |_| Ok(0))
+    ///         Builder::<Mine>::build(agent, name, |_| Ok(MineParts { config: 0 }))
     ///     }
     /// }
     /// ```
@@ -834,12 +847,13 @@ mod doctests {
     /// ```no_run
     /// # use yanet_sdk::{BuiltObject, Object, ObjectBuilder};
     /// # use yanet_sdk_api::{Agent, Error};
-    /// # struct Mine;
+    /// # #[derive(yanet_sdk::ShmLayout)]
+    /// # #[repr(C)]
+    /// # struct Mine { config: u64 }
     /// # impl Object for Mine {
     /// #     const TYPE: &'static str = "mine";
-    /// #     type Config = u64;
     /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
+    /// #     fn prepare<'p>(&'p self, _: &yanet_sdk::ObjectCommitCx<'p, Self>) {}
     /// # }
     /// # pub struct Api;
     /// #[yanet_sdk::api(object = Mine)]
@@ -849,11 +863,11 @@ mod doctests {
     ///         name: &str,
     ///         word: u64,
     ///     ) -> Result<BuiltObject<Mine, Agent>, Error> {
-    ///         ObjectBuilder::<Mine>::build(agent, name, |_| Ok(word))
+    ///         ObjectBuilder::<Mine>::build(agent, name, |_| Ok(MineParts { config: word }))
     ///     }
     ///
     ///     pub fn word(agent: &Agent, mine: &BuiltObject<Mine, Agent>) -> Result<u64, Error> {
-    ///         Ok(agent.read(mine, |_, word| *word))
+    ///         Ok(agent.read(mine, |_, word| word.config))
     ///     }
     /// }
     /// ```
@@ -864,25 +878,27 @@ mod doctests {
     /// ```compile_fail,E0308
     /// # use yanet_sdk::{BuiltObject, Object, ObjectBuilder};
     /// # use yanet_sdk_api::{Agent, Error};
-    /// # struct Mine;
-    /// # struct Other;
+    /// # #[derive(yanet_sdk::ShmLayout)]
+    /// # #[repr(C)]
+    /// # struct Mine { config: u64 }
+    /// # #[derive(yanet_sdk::ShmLayout)]
+    /// # #[repr(C)]
+    /// # struct Other { config: u64 }
     /// # impl Object for Mine {
     /// #     const TYPE: &'static str = "mine";
-    /// #     type Config = u64;
     /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
+    /// #     fn prepare<'p>(&'p self, _: &yanet_sdk::ObjectCommitCx<'p, Self>) {}
     /// # }
     /// # impl Object for Other {
     /// #     const TYPE: &'static str = "other";
-    /// #     type Config = u64;
     /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
+    /// #     fn prepare<'p>(&'p self, _: &yanet_sdk::ObjectCommitCx<'p, Self>) {}
     /// # }
     /// # pub struct Api;
     /// #[yanet_sdk::api(object = Mine)]
     /// impl Api {
     ///     pub fn new(agent: &Agent, name: &str) -> Result<BuiltObject<Other, Agent>, Error> {
-    ///         ObjectBuilder::<Other>::build(agent, name, |_| Ok(0))
+    ///         ObjectBuilder::<Other>::build(agent, name, |_| Ok(OtherParts { config: 0 }))
     ///     }
     /// }
     /// ```
@@ -893,25 +909,27 @@ mod doctests {
     /// ```compile_fail,E0308
     /// # use yanet_sdk::{BuiltObject, Object};
     /// # use yanet_sdk_api::{Agent, Error};
-    /// # struct Mine;
-    /// # struct Other;
+    /// # #[derive(yanet_sdk::ShmLayout)]
+    /// # #[repr(C)]
+    /// # struct Mine { config: u64 }
+    /// # #[derive(yanet_sdk::ShmLayout)]
+    /// # #[repr(C)]
+    /// # struct Other { config: u64 }
     /// # impl Object for Mine {
     /// #     const TYPE: &'static str = "mine";
-    /// #     type Config = u64;
     /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
+    /// #     fn prepare<'p>(&'p self, _: &yanet_sdk::ObjectCommitCx<'p, Self>) {}
     /// # }
     /// # impl Object for Other {
     /// #     const TYPE: &'static str = "other";
-    /// #     type Config = u64;
     /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
+    /// #     fn prepare<'p>(&'p self, _: &yanet_sdk::ObjectCommitCx<'p, Self>) {}
     /// # }
     /// # pub struct Api;
     /// #[yanet_sdk::api(object = Mine)]
     /// impl Api {
     ///     pub fn word(agent: &Agent, other: &BuiltObject<Other, Agent>) -> Result<u64, Error> {
-    ///         Ok(agent.read(other, |_, word| *word))
+    ///         Ok(agent.read(other, |_, word| word.config))
     ///     }
     /// }
     /// ```
@@ -922,19 +940,20 @@ mod doctests {
     /// ```compile_fail
     /// # use yanet_sdk::{BuiltObject, Object, ObjectBuilder};
     /// # use yanet_sdk_api::{Agent, Error};
-    /// # struct Mine;
+    /// # #[derive(yanet_sdk::ShmLayout)]
+    /// # #[repr(C)]
+    /// # struct Mine { config: u64 }
     /// # impl Object for Mine {
     /// #     const TYPE: &'static str = "mine";
-    /// #     type Config = u64;
     /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
+    /// #     fn prepare<'p>(&'p self, _: &yanet_sdk::ObjectCommitCx<'p, Self>) {}
     /// # }
     /// # pub struct Api;
     /// #[yanet_sdk::api(object = Mine)]
     /// impl Api {
     ///     pub fn new(agent: &Agent, name: &str, words: &mut [u64]) -> Result<BuiltObject<Mine, Agent>, Error> {
     ///         words.fill(0);
-    ///         ObjectBuilder::<Mine>::build(agent, name, |_| Ok(0))
+    ///         ObjectBuilder::<Mine>::build(agent, name, |_| Ok(MineParts { config: 0 }))
     ///     }
     /// }
     /// ```
@@ -945,12 +964,13 @@ mod doctests {
     /// ```no_run
     /// # use yanet_sdk::{BuiltObject, FfiRecord, Object};
     /// # use yanet_sdk_api::{Agent, Error};
-    /// # struct Mine;
+    /// # #[derive(yanet_sdk::ShmLayout)]
+    /// # #[repr(C)]
+    /// # struct Mine { config: u64 }
     /// # impl Object for Mine {
     /// #     const TYPE: &'static str = "mine";
-    /// #     type Config = u64;
     /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
+    /// #     fn prepare<'p>(&'p self, _: &yanet_sdk::ObjectCommitCx<'p, Self>) {}
     /// # }
     /// #[derive(FfiRecord)]
     /// #[repr(C)]
@@ -967,7 +987,7 @@ mod doctests {
     ///         shape: &mut Shape,
     ///         words: &mut [u64],
     ///     ) -> Result<u64, Error> {
-    ///         shape.word = agent.read(mine, |_, word| *word);
+    ///         shape.word = agent.read(mine, |_, word| word.config);
     ///         words.fill(shape.word);
     ///         Ok(words.len() as u64)
     ///     }
@@ -980,19 +1000,20 @@ mod doctests {
     /// ```compile_fail
     /// # use yanet_sdk::{BuiltObject, Object};
     /// # use yanet_sdk_api::{Agent, Error};
-    /// # struct Mine;
+    /// # #[derive(yanet_sdk::ShmLayout)]
+    /// # #[repr(C)]
+    /// # struct Mine { config: u64 }
     /// # impl Object for Mine {
     /// #     const TYPE: &'static str = "mine";
-    /// #     type Config = u64;
     /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
+    /// #     fn prepare<'p>(&'p self, _: &yanet_sdk::ObjectCommitCx<'p, Self>) {}
     /// # }
     /// # pub struct Api;
     /// #[yanet_sdk::api(object = Mine)]
     /// impl Api {
     ///     pub fn word(agent: &Agent, mine: &BuiltObject<Mine, Agent>, name: &mut str) -> Result<u64, Error> {
     ///         name.make_ascii_lowercase();
-    ///         Ok(agent.read(mine, |_, word| *word))
+    ///         Ok(agent.read(mine, |_, word| word.config))
     ///     }
     /// }
     /// ```
@@ -1003,19 +1024,20 @@ mod doctests {
     /// ```compile_fail,E0277
     /// # use yanet_sdk::{BuiltObject, Object};
     /// # use yanet_sdk_api::{Agent, Error};
-    /// # struct Mine;
+    /// # #[derive(yanet_sdk::ShmLayout)]
+    /// # #[repr(C)]
+    /// # struct Mine { config: u64 }
     /// # impl Object for Mine {
     /// #     const TYPE: &'static str = "mine";
-    /// #     type Config = u64;
     /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
+    /// #     fn prepare<'p>(&'p self, _: &yanet_sdk::ObjectCommitCx<'p, Self>) {}
     /// # }
     /// # pub struct Api;
     /// #[yanet_sdk::api(object = Mine)]
     /// impl Api {
     ///     pub fn word(agent: &Agent, mine: &BuiltObject<Mine, Agent>, set: &mut bool) -> Result<u64, Error> {
     ///         *set = true;
-    ///         Ok(agent.read(mine, |_, word| *word))
+    ///         Ok(agent.read(mine, |_, word| word.config))
     ///     }
     /// }
     /// ```
@@ -1026,28 +1048,28 @@ mod doctests {
     /// ```compile_fail
     /// # use yanet_sdk::{Batch, Builder, Built, BuiltObject, CommitCx, Cx, Module, Object, Verdict};
     /// # use yanet_sdk_api::{Agent, Error};
-    /// # struct Mine;
+    /// # #[derive(yanet_sdk::ShmLayout)]
+    /// # #[repr(C)]
+    /// # struct Mine { config: u64 }
     /// # impl Module for Mine {
     /// #     const NAME: &'static str = "mine";
-    /// #     type Config = u64;
     /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &CommitCx<'_, Self>) {}
-    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    /// #     fn prepare<'p>(&'p self, _: &CommitCx<'p, Self>) {}
+    /// #     fn handle<'id>(&'id self, _: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
     /// #         batch.dispatch(|_| Verdict::Pass);
     /// #     }
     /// # }
     /// # impl Object for Mine {
     /// #     const TYPE: &'static str = "mine";
-    /// #     type Config = u64;
     /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
+    /// #     fn prepare<'p>(&'p self, _: &yanet_sdk::ObjectCommitCx<'p, Self>) {}
     /// # }
     /// # pub struct Api;
     /// #[yanet_sdk::api(module = Mine)]
     /// impl Api {
     ///     pub fn new(agent: &Agent, name: &str, mine: &BuiltObject<Mine, Agent>) -> Result<Built<Mine, Agent>, Error> {
-    ///         let word = agent.read(mine, |_, word| *word);
-    ///         Builder::<Mine>::build(agent, name, |_| Ok(word))
+    ///         let word = agent.read(mine, |_, word| word.config);
+    ///         Builder::<Mine>::build(agent, name, |_| Ok(MineParts { config: word }))
     ///     }
     /// }
     /// ```
@@ -1058,27 +1080,27 @@ mod doctests {
     /// ```compile_fail,E0308
     /// # use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, Module, Object, Verdict};
     /// # use yanet_sdk_api::{Agent, Error};
-    /// # struct Mine;
+    /// # #[derive(yanet_sdk::ShmLayout)]
+    /// # #[repr(C)]
+    /// # struct Mine { config: u64 }
     /// # impl Module for Mine {
     /// #     const NAME: &'static str = "mine";
-    /// #     type Config = u64;
     /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &CommitCx<'_, Self>) {}
-    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    /// #     fn prepare<'p>(&'p self, _: &CommitCx<'p, Self>) {}
+    /// #     fn handle<'id>(&'id self, _: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
     /// #         batch.dispatch(|_| Verdict::Pass);
     /// #     }
     /// # }
     /// # impl Object for Mine {
     /// #     const TYPE: &'static str = "mine";
-    /// #     type Config = u64;
     /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
+    /// #     fn prepare<'p>(&'p self, _: &yanet_sdk::ObjectCommitCx<'p, Self>) {}
     /// # }
     /// # pub struct Api;
     /// #[yanet_sdk::api(object = Mine)]
     /// impl Api {
     ///     pub fn new(agent: &Agent, name: &str) -> Result<Built<Mine, Agent>, Error> {
-    ///         Builder::<Mine>::build(agent, name, |_| Ok(0))
+    ///         Builder::<Mine>::build(agent, name, |_| Ok(MineParts { config: 0 }))
     ///     }
     /// }
     /// ```

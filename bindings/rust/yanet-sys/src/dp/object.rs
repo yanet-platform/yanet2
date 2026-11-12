@@ -1,5 +1,4 @@
-//! The object trait: one impl per object type binds its type name and its
-//! configuration.
+//! A published shared object body with its type name and prepared value.
 
 use core::mem::{align_of, size_of};
 
@@ -9,6 +8,10 @@ use crate::{bindings, cp::Build, dp::cx::ObjectCommitCx};
 
 /// A shared object written in Rust: named state that outlives the module
 /// configurations linking it, as C's `cp_object`.
+///
+/// The receiver is the shared-memory body built by the control plane.
+/// Its ordinary fields stay frozen, while explicit shared and per-worker
+/// storage holds mutable state.
 ///
 /// An object is built once by the control plane, published into a
 /// generation by name, and replaced by publishing another of the same type
@@ -20,14 +23,10 @@ use crate::{bindings, cp::Build, dp::cx::ObjectCommitCx};
 /// `export_module!`, or in a plugin of its own through `export_object!`, as
 /// every plugin exports one `yanet_module_abi_version`.
 #[doc(alias = "cp_object")]
-pub trait Object: Sized + 'static {
+pub trait Object: Build + Sync {
     /// Object type name, as the dataplane registers the type and as the
     /// object's plugin exports it.
     const TYPE: &'static str;
-    /// Configuration body, the object's state; the control plane builds it
-    /// with [`Build`] and may read it while it is published, so it is `Sync`.
-    type Config: Build + Sync;
-
     /// Value of each worker context of the object in a generation, made by
     /// the prepare step and read by the modules linking the object; the unit
     /// type when unused.
@@ -47,12 +46,13 @@ pub trait Object: Sized + 'static {
     /// use yanet_sys::dp::{Object, ObjectCommitCx};
     /// #[repr(align(128))]
     /// struct Wide(u64);
-    /// struct Mine;
+    /// #[derive(yanet_sdk::ShmLayout)]
+    /// #[repr(C)]
+    /// struct Mine { config: u64 }
     /// impl Object for Mine {
     ///     const TYPE: &'static str = "mine";
-    ///     type Config = u64;
     ///     type Prepared<'p> = Wide;
-    ///     fn prepare(_: &ObjectCommitCx<'_, Self>) -> Wide {
+    ///     fn prepare<'p>(&'p self, _: &ObjectCommitCx<'p, Self>) -> Wide {
     ///         Wide(0)
     ///     }
     /// }
@@ -64,12 +64,13 @@ pub trait Object: Sized + 'static {
     /// ```compile_fail,E0080
     /// use yanet_sys::dp::{Object, ObjectCommitCx};
     /// enum Never {}
-    /// struct Mine;
+    /// #[derive(yanet_sdk::ShmLayout)]
+    /// #[repr(C)]
+    /// struct Mine { config: u64 }
     /// impl Object for Mine {
     ///     const TYPE: &'static str = "mine";
-    ///     type Config = u64;
     ///     type Prepared<'p> = Never;
-    ///     fn prepare(_: &ObjectCommitCx<'_, Self>) -> Never {
+    ///     fn prepare<'p>(&'p self, _: &ObjectCommitCx<'p, Self>) -> Never {
     ///         panic!()
     ///     }
     /// }
@@ -82,12 +83,15 @@ pub trait Object: Sized + 'static {
     /// use yanet_sys::dp::{Object, ObjectCommitCx};
     /// #[repr(align(64))]
     /// struct Line(u64);
-    /// struct Mine;
+    /// #[derive(yanet_sdk::ShmLayout)]
+    /// #[repr(C)]
+    /// struct Mine {
+    ///     config: u64,
+    /// }
     /// impl Object for Mine {
     ///     const TYPE: &'static str = "mine";
-    ///     type Config = u64;
     ///     type Prepared<'p> = Line;
-    ///     fn prepare(_: &ObjectCommitCx<'_, Self>) -> Line {
+    ///     fn prepare<'p>(&'p self, _: &ObjectCommitCx<'p, Self>) -> Line {
     ///         Line(0)
     ///     }
     /// }
@@ -102,7 +106,7 @@ pub trait Object: Sized + 'static {
     /// object in a generation, before the module contexts linking it are
     /// prepared. A zero-sized prepared value has no buffer and no commit hook,
     /// so for it this is not called.
-    fn prepare<'p>(cx: &ObjectCommitCx<'p, Self>) -> Self::Prepared<'p>;
+    fn prepare<'p>(&'p self, cx: &ObjectCommitCx<'p, Self>) -> Self::Prepared<'p>;
 }
 
 /// The root block of an object: the C object header, then the body the

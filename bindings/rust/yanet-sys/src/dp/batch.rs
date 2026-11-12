@@ -168,7 +168,7 @@ pub enum DscpMark {
 ///
 /// ```compile_fail
 /// # use yanet_sys::dp::{Batch, Cx, Device, Module};
-/// fn cross<'a, 'b, M: Module<Config = Device>>(
+/// fn cross<'a, 'b, M: Module + AsRef<Device>>(
 ///     cx: &Cx<'a, M>,
 ///     device: &'a Device,
 ///     batch: &mut Batch<'b>,
@@ -183,7 +183,7 @@ pub enum DscpMark {
 ///
 /// ```
 /// # use yanet_sys::dp::{Batch, Cx, Device, Module};
-/// fn cross<'a, M: Module<Config = Device>>(
+/// fn cross<'a, M: Module + AsRef<Device>>(
 ///     cx: &Cx<'a, M>,
 ///     device: &'a Device,
 ///     batch: &mut Batch<'a>,

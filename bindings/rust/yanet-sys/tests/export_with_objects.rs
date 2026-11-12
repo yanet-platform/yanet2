@@ -13,40 +13,37 @@ use yanet_sys::{
     dp::{Batch, CommitCx, Cx, Module, Object, ObjectCommitCx, Verdict},
 };
 
-/// A module with no prepared value, which carries both object types below.
-struct Carrier;
+// A module with no prepared value, which carries both object types below.
+yanet_sdk_testing::test_body!(Carrier = u64);
 
 impl Module for Carrier {
     const NAME: &'static str = "carrier";
-    type Config = u64;
     type Prepared<'p> = ();
-    fn handle(_: &mut Cx<'_, Self>, batch: &mut Batch<'_>) {
+    fn handle<'id>(&'id self, _: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
         batch.dispatch(|_| Verdict::Pass);
     }
-    fn prepare(_: &CommitCx<'_, Self>) {}
+    fn prepare<'p>(&'p self, _: &CommitCx<'p, Self>) {}
 }
 
-/// An object type of one word, with no prepared value.
-struct Table;
+// An object type of one word, with no prepared value.
+yanet_sdk_testing::test_body!(Table = u64);
 
 impl Object for Table {
     const TYPE: &'static str = "carrier_table";
-    type Config = u64;
     type Prepared<'p> = ();
 
-    fn prepare(_: &ObjectCommitCx<'_, Self>) {}
+    fn prepare<'p>(&'p self, _: &ObjectCommitCx<'p, Self>) {}
 }
 
-/// An object type of one word, with a prepared value of two words.
-struct Set;
+// An object type of one word, with a prepared value of two words.
+yanet_sdk_testing::test_body!(Set = u64);
 
 impl Object for Set {
     const TYPE: &'static str = "carrier_set";
-    type Config = u64;
     type Prepared<'p> = [u64; 2];
 
-    fn prepare(cx: &ObjectCommitCx<'_, Self>) -> [u64; 2] {
-        [*cx.config(), 0]
+    fn prepare<'p>(&'p self, _: &ObjectCommitCx<'p, Self>) -> [u64; 2] {
+        [self.body, 0]
     }
 }
 
@@ -131,3 +128,6 @@ fn test_plugin_with_objects_exports_the_abi_version() {
 
     assert_eq!(bindings::YANET_MODULE_ABI_VERSION, version);
 }
+
+// The public facade supplies the layout derive used in documentation tests.
+use yanet_sdk as _;

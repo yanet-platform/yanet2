@@ -53,7 +53,7 @@ unsafe impl<T: Copy + ShmLayout> Build for Config<T> {
 
 /// The committed context of a module of a counting configuration over a slot
 /// block of [`WORKERS`] zeroed slots, and the block's address.
-fn seen<T: Copy + ShmLayout, M: Module<Config = Config<T>>>() -> (Ectx<M>, usize) {
+fn seen<T: Copy + ShmLayout, M: Module + core::ops::Deref<Target = Config<T>>>() -> (Ectx<M>, usize) {
     let mut slots = 0;
     // SAFETY: the words are a null per-worker field the setup points at the
     // slot block before the commit; the module counts no counter and
@@ -98,18 +98,17 @@ extern "C" fn yanet_sys_dp_module_worker_idx(_: *mut bindings::module_ectx) -> u
     PREPARE_WORKER.with(Cell::get)
 }
 
-/// Counts the packets of its worker through the handle its prepare step made,
-/// when it made one, and passes them: one of an even first byte in place, in
-/// the low half, and the others by a copy read out and written back, in the
-/// high half.
-struct Held;
+// Counts the packets of its worker through the handle its prepare step made,
+// when it made one, and passes them: one of an even first byte in place, in
+// the low half, and the others by a copy read out and written back, in the
+// high half.
+yanet_sdk_testing::test_body!(Held = Config);
 
 impl Module for Held {
     const NAME: &'static str = "held";
-    type Config = Config;
     type Prepared<'p> = Option<WorkerSlot<'p, u64>>;
 
-    fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    fn handle<'id>(&'id self, cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
         let seen = cx.prepared();
         batch.dispatch(|packet| {
             match seen {
@@ -124,8 +123,8 @@ impl Module for Held {
         });
     }
 
-    fn prepare<'p>(cx: &CommitCx<'p, Self>) -> Self::Prepared<'p> {
-        cx.config().seen.handle(cx)
+    fn prepare<'p>(&'p self, cx: &CommitCx<'p, Self>) -> Self::Prepared<'p> {
+        self.seen.handle(cx)
     }
 }
 
@@ -175,19 +174,18 @@ fn test_per_worker_handle_of_a_worker_past_the_slots_is_none() {
     assert_eq!([0, 0, 0], slots::<u64, _>(&ectx, block));
 }
 
-/// Counts the packets of its worker in place, in the value of its worker's
-/// array slot that the first byte selects, through the handle its prepare
-/// step made, and passes them.
+// Counts the packets of its worker in place, in the value of its worker's
+// array slot that the first byte selects, through the handle its prepare
+// step made, and passes them.
 #[cfg(miri)]
-struct InPlace;
+yanet_sdk_testing::test_body!(InPlace = Config<[u64; VALUES]>);
 
 #[cfg(miri)]
 impl Module for InPlace {
     const NAME: &'static str = "in_place";
-    type Config = Config<[u64; VALUES]>;
     type Prepared<'p> = Option<WorkerSlot<'p, [u64; VALUES]>>;
 
-    fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    fn handle<'id>(&'id self, cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
         let seen = cx.prepared();
         batch.dispatch(|packet| {
             let byte = usize::from(packet.data()[0]);
@@ -198,8 +196,8 @@ impl Module for InPlace {
         });
     }
 
-    fn prepare<'p>(cx: &CommitCx<'p, Self>) -> Self::Prepared<'p> {
-        cx.config().seen.handle(cx)
+    fn prepare<'p>(&'p self, cx: &CommitCx<'p, Self>) -> Self::Prepared<'p> {
+        self.seen.handle(cx)
     }
 }
 
@@ -223,19 +221,18 @@ fn test_per_worker_get_mut_changes_a_slot_in_place_across_calls() {
     );
 }
 
-/// Per packet, counts in the first value of its worker's array slot through an
-/// exclusive borrow, sets the second to ten times the first as a shared borrow
-/// reads it, and the third to one more than the second, then passes it.
+// Per packet, counts in the first value of its worker's array slot through an
+// exclusive borrow, sets the second to ten times the first as a shared borrow
+// reads it, and the third to one more than the second, then passes it.
 #[cfg(miri)]
-struct Mixed;
+yanet_sdk_testing::test_body!(Mixed = Config<[u64; VALUES]>);
 
 #[cfg(miri)]
 impl Module for Mixed {
     const NAME: &'static str = "mixed";
-    type Config = Config<[u64; VALUES]>;
     type Prepared<'p> = Option<WorkerSlot<'p, [u64; VALUES]>>;
 
-    fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    fn handle<'id>(&'id self, cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
         let seen = cx.prepared();
         batch.dispatch(|_| {
             if let Some(seen) = seen {
@@ -249,8 +246,8 @@ impl Module for Mixed {
         });
     }
 
-    fn prepare<'p>(cx: &CommitCx<'p, Self>) -> Self::Prepared<'p> {
-        cx.config().seen.handle(cx)
+    fn prepare<'p>(&'p self, cx: &CommitCx<'p, Self>) -> Self::Prepared<'p> {
+        self.seen.handle(cx)
     }
 }
 
@@ -271,31 +268,29 @@ fn test_per_worker_get_mut_and_get_see_the_same_value() {
     );
 }
 
-/// An object with a slot per worker, which prepares the handle of its
-/// context's worker.
-struct Budgets;
+// An object with a slot per worker, which prepares the handle of its
+// context's worker.
+yanet_sdk_testing::test_body!(Budgets = PerWorker<u64>);
 
 impl Object for Budgets {
     const TYPE: &'static str = "budgets";
-    type Config = PerWorker<u64>;
     type Prepared<'p> = Option<WorkerSlot<'p, u64>>;
 
-    fn prepare<'p>(cx: &ObjectCommitCx<'p, Self>) -> Self::Prepared<'p> {
-        cx.config().handle(cx)
+    fn prepare<'p>(&'p self, cx: &ObjectCommitCx<'p, Self>) -> Self::Prepared<'p> {
+        self.handle(cx)
     }
 }
 
-/// Counts the packets of its worker through the handle the linked object
-/// prepared, and passes them.
-struct Linked;
+// Counts the packets of its worker through the handle the linked object
+// prepared, and passes them.
+yanet_sdk_testing::test_body!(Linked = ObjectLink<Budgets>);
 
 impl Module for Linked {
     const NAME: &'static str = "linked";
-    type Config = ObjectLink<Budgets>;
     type Prepared<'p> = ();
 
-    fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
-        let seen = cx.config().prepared(cx);
+    fn handle<'id>(&'id self, cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+        let seen = self.prepared(cx);
         batch.dispatch(|_| {
             if let Some(seen) = seen {
                 *seen.get_mut(cx) += 1;
@@ -304,7 +299,7 @@ impl Module for Linked {
         });
     }
 
-    fn prepare(_: &CommitCx<'_, Self>) {}
+    fn prepare<'p>(&'p self, _: &CommitCx<'p, Self>) {}
 }
 
 /// Lays out an object of per-worker budgets, committed for the given worker,
@@ -365,18 +360,17 @@ fn test_per_worker_handle_of_an_object_is_read_through_a_link() {
     assert_eq!([0, 3, 0], slots::<u64, _>(&ectx, block.get()));
 }
 
-/// Counts the packets of its worker through the handle its prepare step made
-/// on the linked object's slots, when it made one, and passes them.
+// Counts the packets of its worker through the handle its prepare step made
+// on the linked object's slots, when it made one, and passes them.
 #[cfg(miri)]
-struct LinkHeld;
+yanet_sdk_testing::test_body!(LinkHeld = ObjectLink<Budgets>);
 
 #[cfg(miri)]
 impl Module for LinkHeld {
     const NAME: &'static str = "link_held";
-    type Config = ObjectLink<Budgets>;
     type Prepared<'p> = Option<WorkerSlot<'p, u64>>;
 
-    fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    fn handle<'id>(&'id self, cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
         let seen = cx.prepared();
         batch.dispatch(|_| {
             if let Some(seen) = seen {
@@ -386,8 +380,8 @@ impl Module for LinkHeld {
         });
     }
 
-    fn prepare<'p>(cx: &CommitCx<'p, Self>) -> Self::Prepared<'p> {
-        cx.config().get(cx).handle(cx)
+    fn prepare<'p>(&'p self, cx: &CommitCx<'p, Self>) -> Self::Prepared<'p> {
+        self.get(cx).handle(cx)
     }
 }
 
@@ -471,21 +465,20 @@ fn regions<M: Module>(ectx: &Ectx<M>, blocks: [usize; WORKERS], len: usize) -> [
     })
 }
 
-/// Counts each packet of its worker in place, in the value of its worker's
-/// region that the first byte selects modulo the number of values before the
-/// last, and keeps in the last one more than the sum of those values it read
-/// before the count, through the handle its prepare step made, and passes the
-/// packets.
+// Counts each packet of its worker in place, in the value of its worker's
+// region that the first byte selects modulo the number of values before the
+// last, and keeps in the last one more than the sum of those values it read
+// before the count, through the handle its prepare step made, and passes the
+// packets.
 #[cfg(miri)]
-struct Spread;
+yanet_sdk_testing::test_body!(Spread = Regions);
 
 #[cfg(miri)]
 impl Module for Spread {
     const NAME: &'static str = "spread";
-    type Config = Regions;
     type Prepared<'p> = Option<WorkerSlice<'p, u64>>;
 
-    fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    fn handle<'id>(&'id self, cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
         let table = *cx.prepared();
         batch.dispatch(|packet| {
             let Some(table) = table else {
@@ -504,8 +497,8 @@ impl Module for Spread {
         });
     }
 
-    fn prepare<'p>(cx: &CommitCx<'p, Self>) -> Self::Prepared<'p> {
-        cx.config().table.handle(cx)
+    fn prepare<'p>(&'p self, cx: &CommitCx<'p, Self>) -> Self::Prepared<'p> {
+        self.table.handle(cx)
     }
 }
 
@@ -567,31 +560,29 @@ fn test_per_worker_slice_handle_of_a_worker_past_the_regions_is_none() {
     assert_eq!([vec![0; LEN], vec![0; LEN], vec![0; LEN]], regions(&ectx, blocks, LEN));
 }
 
-/// An object with a region per worker, which prepares the handle of its
-/// context's worker.
-struct Flows;
+// An object with a region per worker, which prepares the handle of its
+// context's worker.
+yanet_sdk_testing::test_body!(Flows = Regions);
 
 impl Object for Flows {
     const TYPE: &'static str = "flows";
-    type Config = Regions;
     type Prepared<'p> = Option<WorkerSlice<'p, u64>>;
 
-    fn prepare<'p>(cx: &ObjectCommitCx<'p, Self>) -> Self::Prepared<'p> {
-        cx.config().table.handle(cx)
+    fn prepare<'p>(&'p self, cx: &ObjectCommitCx<'p, Self>) -> Self::Prepared<'p> {
+        self.table.handle(cx)
     }
 }
 
-/// Counts each packet of its worker in the first value of the region the
-/// linked object prepared, and passes them.
-struct LinkedFlows;
+// Counts each packet of its worker in the first value of the region the
+// linked object prepared, and passes them.
+yanet_sdk_testing::test_body!(LinkedFlows = ObjectLink<Flows>);
 
 impl Module for LinkedFlows {
     const NAME: &'static str = "linked_flows";
-    type Config = ObjectLink<Flows>;
     type Prepared<'p> = ();
 
-    fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
-        let table = *cx.config().prepared(cx);
+    fn handle<'id>(&'id self, cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+        let table = *self.prepared(cx);
         batch.dispatch(|_| {
             if let Some(table) = table {
                 table.get_mut(cx)[0] += 1;
@@ -600,7 +591,7 @@ impl Module for LinkedFlows {
         });
     }
 
-    fn prepare(_: &CommitCx<'_, Self>) {}
+    fn prepare<'p>(&'p self, _: &CommitCx<'p, Self>) {}
 }
 
 /// verifies that an object's prepare step makes the handle of the region of

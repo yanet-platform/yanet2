@@ -32,8 +32,8 @@ use crate::{
 ///
 /// ```compile_fail,E0308
 /// # use yanet_sys::dp::{Counter, Cx, Module, Traffic};
-/// fn count<'id, M: Module<Config = Counter<Traffic>>>(cx: &Cx<'id, M>) {
-///     cx.config().add(cx, 1);
+/// fn count<'id, M: Module + AsRef<Counter<Traffic>>>(cx: &Cx<'id, M>) {
+///     cx.config().as_ref().add(cx, 1);
 /// }
 /// ```
 ///
@@ -41,8 +41,8 @@ use crate::{
 ///
 /// ```
 /// # use yanet_sys::dp::{Counter, Cx, Module, Traffic};
-/// fn count<'id, M: Module<Config = Counter<Traffic>>>(cx: &Cx<'id, M>, len: u64) {
-///     cx.config().add(cx, Traffic::packet(len));
+/// fn count<'id, M: Module + AsRef<Counter<Traffic>>>(cx: &Cx<'id, M>, len: u64) {
+///     cx.config().as_ref().add(cx, Traffic::packet(len));
 /// }
 /// ```
 #[repr(C)]
@@ -161,8 +161,8 @@ const _: () = assert!(size_of::<TaggedCounters>() == 2 * size_of::<u64>());
 ///
 /// ```compile_fail,E0599
 /// # use yanet_sys::dp::{Cx, Module, ObjectCounter};
-/// fn count<'id, M: Module<Config = ObjectCounter>>(cx: &Cx<'id, M>) {
-///     cx.config().add(cx, 1);
+/// fn count<'id, M: Module + AsRef<ObjectCounter>>(cx: &Cx<'id, M>) {
+///     cx.config().as_ref().add(cx, 1);
 /// }
 /// ```
 ///
@@ -313,12 +313,15 @@ impl CounterLayout for Traffic {
 ///
 /// ```
 /// use yanet_sys::dp::{Batch, CommitCx, Counter, CounterRef, Cx, Gauge, Module, Verdict};
-/// struct Mine;
+/// #[derive(yanet_sdk::ShmLayout)]
+/// #[repr(C)]
+/// struct Mine {
+///     config: Counter<Gauge>,
+/// }
 /// impl Module for Mine {
 ///     const NAME: &'static str = "mine";
-///     type Config = Counter<Gauge>;
 ///     type Prepared<'p> = CounterRef<'p, Gauge>;
-///     fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+///     fn handle<'id>(&'id self, cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
 ///         let held = cx.prepared().bind(cx);
 ///         batch.dispatch(|packet| {
 ///             if !packet.data().is_empty() {
@@ -329,8 +332,8 @@ impl CounterLayout for Traffic {
 ///             Verdict::Pass
 ///         });
 ///     }
-///     fn prepare<'p>(cx: &CommitCx<'p, Self>) -> CounterRef<'p, Gauge> {
-///         cx.config().resolve(cx)
+///     fn prepare<'p>(&'p self, cx: &CommitCx<'p, Self>) -> CounterRef<'p, Gauge> {
+///         self.config.resolve(cx)
 ///     }
 /// }
 /// ```
@@ -581,19 +584,22 @@ impl<T: Copy + ShmLayout> PerWorker<T> {
     ///
     /// ```
     /// use yanet_sys::dp::{Batch, CommitCx, Cx, Module, PerWorker, Verdict, WorkerSlot};
-    /// struct Mine;
+    /// #[derive(yanet_sdk::ShmLayout)]
+    /// #[repr(C)]
+    /// struct Mine {
+    ///     config: PerWorker<u64>,
+    /// }
     /// impl Module for Mine {
     ///     const NAME: &'static str = "mine";
-    ///     type Config = PerWorker<u64>;
     ///     type Prepared<'p> = Option<WorkerSlot<'p, u64>>;
-    ///     fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    ///     fn handle<'id>(&'id self, cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
     ///         if let Some(seen) = cx.prepared() {
     ///             *seen.get_mut(cx) += 1;
     ///         }
     ///         batch.dispatch(|_| Verdict::Pass);
     ///     }
-    ///     fn prepare<'p>(cx: &CommitCx<'p, Self>) -> Option<WorkerSlot<'p, u64>> {
-    ///         cx.config().handle(cx)
+    ///     fn prepare<'p>(&'p self, cx: &CommitCx<'p, Self>) -> Option<WorkerSlot<'p, u64>> {
+    ///         self.config.handle(cx)
     ///     }
     /// }
     /// ```
@@ -602,8 +608,8 @@ impl<T: Copy + ShmLayout> PerWorker<T> {
     ///
     /// ```compile_fail,E0277
     /// # use yanet_sys::dp::{Cx, Module, PerWorker};
-    /// fn late<'id, M: Module<Config = PerWorker<u64>>>(cx: &Cx<'id, M>) {
-    ///     let _ = cx.config().handle(cx);
+    /// fn late<'id, M: Module + AsRef<PerWorker<u64>>>(cx: &Cx<'id, M>) {
+    ///     let _ = cx.config().as_ref().handle(cx);
     /// }
     /// ```
     #[inline(always)]
@@ -649,8 +655,8 @@ impl<T: Copy + ShmLayout> PerWorker<T> {
 ///
 /// ```compile_fail,E0308
 /// # use yanet_sys::dp::{CommitCx, Module, PerWorker};
-/// fn early<'p, M: Module<Config = PerWorker<u64>>>(cx: &CommitCx<'p, M>) -> u64 {
-///     cx.config().handle(cx).map_or(0, |seen| *seen.get(cx))
+/// fn early<'p, M: Module + AsRef<PerWorker<u64>>>(cx: &CommitCx<'p, M>) -> u64 {
+///     cx.config().as_ref().handle(cx).map_or(0, |seen| *seen.get(cx))
 /// }
 /// ```
 ///
@@ -768,11 +774,11 @@ impl<'id, T: Copy + ShmLayout> WorkerSlot<'id, T> {
     /// # use yanet_sys::dp::{Counter, Cx, Module, WorkerSlot};
     /// fn count<'id, M>(cx: &mut Cx<'id, M>)
     /// where
-    ///     M: Module<Config = Counter, Prepared<'id> = Option<WorkerSlot<'id, u64>>>,
+    ///     M: Module<Prepared<'id> = Option<WorkerSlot<'id, u64>>> + AsRef<Counter>,
     /// {
     ///     if let Some(slot) = cx.prepared() {
     ///         let seen = *slot.get(cx);
-    ///         cx.config().add(cx, seen);
+    ///         cx.config().as_ref().add(cx, seen);
     ///         *slot.get_mut(cx) = 0;
     ///     }
     /// }
@@ -855,12 +861,12 @@ impl<'id, T: Copy + ShmLayout> WorkerSlot<'id, T> {
     /// # use yanet_sys::dp::{Counter, Cx, Module, WorkerSlot};
     /// fn count<'id, M>(cx: &mut Cx<'id, M>)
     /// where
-    ///     M: Module<Config = Counter, Prepared<'id> = Option<WorkerSlot<'id, [u64; 96]>>>,
+    ///     M: Module<Prepared<'id> = Option<WorkerSlot<'id, [u64; 96]>>> + AsRef<Counter>,
     /// {
     ///     if let Some(slot) = cx.prepared() {
     ///         let values = slot.get_mut(cx);
     ///         values[0] += 1;
-    ///         cx.config().add(cx, 1);
+    ///         cx.config().as_ref().add(cx, 1);
     ///     }
     /// }
     /// ```
@@ -987,12 +993,15 @@ impl<T: Copy + ShmLayout> PerWorkerSlice<T> {
     ///
     /// ```
     /// use yanet_sys::dp::{Batch, CommitCx, Cx, Module, PerWorkerSlice, Verdict, WorkerSlice};
-    /// struct Mine;
+    /// #[derive(yanet_sdk::ShmLayout)]
+    /// #[repr(C)]
+    /// struct Mine {
+    ///     config: PerWorkerSlice<u64>,
+    /// }
     /// impl Module for Mine {
     ///     const NAME: &'static str = "mine";
-    ///     type Config = PerWorkerSlice<u64>;
     ///     type Prepared<'p> = Option<WorkerSlice<'p, u64>>;
-    ///     fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+    ///     fn handle<'id>(&'id self, cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
     ///         let table = *cx.prepared();
     ///         batch.dispatch(|packet| {
     ///             if let Some(table) = table {
@@ -1007,8 +1016,8 @@ impl<T: Copy + ShmLayout> PerWorkerSlice<T> {
     ///             Verdict::Pass
     ///         });
     ///     }
-    ///     fn prepare<'p>(cx: &CommitCx<'p, Self>) -> Option<WorkerSlice<'p, u64>> {
-    ///         cx.config().handle(cx)
+    ///     fn prepare<'p>(&'p self, cx: &CommitCx<'p, Self>) -> Option<WorkerSlice<'p, u64>> {
+    ///         self.config.handle(cx)
     ///     }
     /// }
     /// ```
@@ -1017,8 +1026,8 @@ impl<T: Copy + ShmLayout> PerWorkerSlice<T> {
     ///
     /// ```compile_fail,E0277
     /// # use yanet_sys::dp::{Cx, Module, PerWorkerSlice};
-    /// fn late<'id, M: Module<Config = PerWorkerSlice<u64>>>(cx: &Cx<'id, M>) {
-    ///     let _ = cx.config().handle(cx);
+    /// fn late<'id, M: Module + AsRef<PerWorkerSlice<u64>>>(cx: &Cx<'id, M>) {
+    ///     let _ = cx.config().as_ref().handle(cx);
     /// }
     /// ```
     #[inline(always)]
@@ -1067,8 +1076,8 @@ impl<T: Copy + ShmLayout> PerWorkerSlice<T> {
 ///
 /// ```compile_fail,E0308
 /// # use yanet_sys::dp::{CommitCx, Module, PerWorkerSlice};
-/// fn early<'p, M: Module<Config = PerWorkerSlice<u64>>>(cx: &CommitCx<'p, M>) {
-///     if let Some(table) = cx.config().handle(cx) {
+/// fn early<'p, M: Module + AsRef<PerWorkerSlice<u64>>>(cx: &CommitCx<'p, M>) {
+///     if let Some(table) = cx.config().as_ref().handle(cx) {
 ///         table.get_mut(cx)[0] = 1;
 ///     }
 /// }
@@ -1164,12 +1173,12 @@ impl<'id, T: Copy + ShmLayout> WorkerSlice<'id, T> {
     /// # use yanet_sys::dp::{Counter, Cx, Module, WorkerSlice};
     /// fn count<'id, M>(cx: &mut Cx<'id, M>)
     /// where
-    ///     M: Module<Config = Counter, Prepared<'id> = Option<WorkerSlice<'id, u64>>>,
+    ///     M: Module<Prepared<'id> = Option<WorkerSlice<'id, u64>>> + AsRef<Counter>,
     /// {
     ///     if let Some(table) = cx.prepared() {
     ///         let first = table.get(cx);
     ///         let again = table.get(cx);
-    ///         cx.config().add(cx, first[0] + again[1]);
+    ///         cx.config().as_ref().add(cx, first[0] + again[1]);
     ///     }
     /// }
     /// ```
@@ -1270,13 +1279,13 @@ impl<'id, T: Copy + ShmLayout> WorkerSlice<'id, T> {
     /// # use yanet_sys::dp::{Counter, Cx, Module, WorkerSlice};
     /// fn count<'id, M>(cx: &mut Cx<'id, M>)
     /// where
-    ///     M: Module<Config = Counter, Prepared<'id> = Option<WorkerSlice<'id, u64>>>,
+    ///     M: Module<Prepared<'id> = Option<WorkerSlice<'id, u64>>> + AsRef<Counter>,
     /// {
     ///     if let Some(table) = cx.prepared() {
     ///         let seen = table.get(cx)[1];
     ///         let values = table.get_mut(cx);
     ///         values[0] += seen;
-    ///         cx.config().add(cx, table.get(cx)[0]);
+    ///         cx.config().as_ref().add(cx, table.get(cx)[0]);
     ///     }
     /// }
     /// ```

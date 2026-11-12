@@ -1,5 +1,4 @@
-//! The module trait: one impl per module binds its name, configuration,
-//! prepared value and handler.
+//! A published module body with its name, prepared value and handler.
 
 use core::mem::{align_of, size_of};
 
@@ -14,18 +13,19 @@ use crate::{
     },
 };
 
-/// A dataplane module written in Rust.
+/// A published dataplane module body written in Rust.
+///
+/// The control plane builds the receiver in shared memory; workers borrow
+/// its fields for a call. Ordinary fields stay frozen after publication.
+/// Mutable state uses explicit shared or per-worker storage. Prepared values
+/// may borrow the receiver, with the same lifetime as their context.
 ///
 /// One impl feeds both the generated plugin and the module's api crate, so
 /// the body the control plane builds and the body the handler reads are one
 /// type.
-pub trait Module: Sized + 'static {
+pub trait Module: Build + Sync {
     /// Module type name, as the dataplane registers the module.
     const NAME: &'static str;
-
-    /// Configuration body, frozen for a generation and shared by workers; the
-    /// control plane builds it with [`Build`].
-    type Config: Build + Sync;
 
     /// Per-worker value of each placement and generation, made by the
     /// prepare step; the unit type when unused.
@@ -38,15 +38,16 @@ pub trait Module: Sized + 'static {
     /// ```compile_fail,E0277
     /// use core::marker::PhantomData;
     /// use yanet_sys::dp::{Batch, CommitCx, Cx, Module, Verdict};
-    /// struct Mine;
+    /// #[derive(yanet_sdk::ShmLayout)]
+    /// #[repr(C)]
+    /// struct Mine { config: u64 }
     /// impl Module for Mine {
     ///     const NAME: &'static str = "mine";
-    ///     type Config = u64;
     ///     type Prepared<'p> = PhantomData<*const ()>;
-    ///     fn handle(_: &mut Cx<Self>, batch: &mut Batch) {
+    ///     fn handle<'id>(&'id self, _: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
     ///         batch.dispatch(|_| Verdict::Pass);
     ///     }
-    ///     fn prepare(_: &CommitCx<'_, Self>) -> PhantomData<*const ()> {
+    ///     fn prepare<'p>(&'p self, _: &CommitCx<'p, Self>) -> PhantomData<*const ()> {
     ///         PhantomData
     ///     }
     /// }
@@ -59,15 +60,16 @@ pub trait Module: Sized + 'static {
     /// use yanet_sys::dp::{Batch, CommitCx, Cx, Module, Verdict};
     /// #[repr(align(128))]
     /// struct Wide(u64);
-    /// struct Mine;
+    /// #[derive(yanet_sdk::ShmLayout)]
+    /// #[repr(C)]
+    /// struct Mine { config: u64 }
     /// impl Module for Mine {
     ///     const NAME: &'static str = "mine";
-    ///     type Config = u64;
     ///     type Prepared<'p> = Wide;
-    ///     fn handle(_: &mut Cx<Self>, batch: &mut Batch) {
+    ///     fn handle<'id>(&'id self, _: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
     ///         batch.dispatch(|_| Verdict::Pass);
     ///     }
-    ///     fn prepare(_: &CommitCx<'_, Self>) -> Wide {
+    ///     fn prepare<'p>(&'p self, _: &CommitCx<'p, Self>) -> Wide {
     ///         Wide(0)
     ///     }
     /// }
@@ -79,15 +81,16 @@ pub trait Module: Sized + 'static {
     /// ```compile_fail,E0080
     /// use yanet_sys::dp::{Batch, CommitCx, Cx, Module, Verdict};
     /// enum Never {}
-    /// struct Mine;
+    /// #[derive(yanet_sdk::ShmLayout)]
+    /// #[repr(C)]
+    /// struct Mine { config: u64 }
     /// impl Module for Mine {
     ///     const NAME: &'static str = "mine";
-    ///     type Config = u64;
     ///     type Prepared<'p> = Never;
-    ///     fn handle(_: &mut Cx<Self>, batch: &mut Batch) {
+    ///     fn handle<'id>(&'id self, _: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
     ///         batch.dispatch(|_| Verdict::Pass);
     ///     }
-    ///     fn prepare(_: &CommitCx<'_, Self>) -> Never {
+    ///     fn prepare<'p>(&'p self, _: &CommitCx<'p, Self>) -> Never {
     ///         panic!()
     ///     }
     /// }
@@ -100,15 +103,18 @@ pub trait Module: Sized + 'static {
     /// use yanet_sys::dp::{Batch, CommitCx, Cx, Module, Verdict};
     /// #[repr(align(64))]
     /// struct Line(u64);
-    /// struct Mine;
+    /// #[derive(yanet_sdk::ShmLayout)]
+    /// #[repr(C)]
+    /// struct Mine {
+    ///     config: u64,
+    /// }
     /// impl Module for Mine {
     ///     const NAME: &'static str = "mine";
-    ///     type Config = u64;
     ///     type Prepared<'p> = Line;
-    ///     fn handle(_: &mut Cx<Self>, batch: &mut Batch) {
+    ///     fn handle<'id>(&'id self, _: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
     ///         batch.dispatch(|_| Verdict::Pass);
     ///     }
-    ///     fn prepare(_: &CommitCx<'_, Self>) -> Line {
+    ///     fn prepare<'p>(&'p self, _: &CommitCx<'p, Self>) -> Line {
     ///         Line(0)
     ///     }
     /// }
@@ -120,7 +126,7 @@ pub trait Module: Sized + 'static {
     ///
     /// Every input packet is passed, dropped or routed to a device (module:
     /// drain); a packet ends where its verdict puts it.
-    fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>);
+    fn handle<'id>(&'id self, cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>);
 
     /// Makes the prepared value from the configuration and the context's
     /// worker.
@@ -135,7 +141,7 @@ pub trait Module: Sized + 'static {
     /// module's commit handler does, and must not reach a worker's memory:
     /// the handles it makes only hold addresses. A module without a prepared
     /// value returns the unit value.
-    fn prepare<'p>(cx: &CommitCx<'p, Self>) -> Self::Prepared<'p>;
+    fn prepare<'p>(&'p self, cx: &CommitCx<'p, Self>) -> Self::Prepared<'p>;
 }
 
 /// Module configuration block: the C module header, then the module body.
