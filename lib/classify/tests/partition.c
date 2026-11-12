@@ -248,7 +248,7 @@ test_check_partition(
 	struct test_reference ref;
 	test_reference_build(mctx, key_bits, prefixes, count, &ref);
 
-	struct classify_prefixes input = {NULL, 0};
+	struct classify_prefixes input = {0};
 	for (uint32_t idx = 0; idx < count; ++idx) {
 		assert(classify_prefixes_add(
 			       mctx,
@@ -257,15 +257,14 @@ test_check_partition(
 			       prefixes[idx].len
 		       ) == 0);
 	}
+	// The set holds every distinct prefix once, whatever repeats.
+	assert(input.count == test_unique_count(prefixes, count));
 	struct classify_partition partition;
 	assert(classify_partition_build(mctx, key_bits, &input, &partition) == 0
 	);
 	classify_prefixes_free(mctx, &input);
 
 	assert(partition.count == ref.index.count);
-	// Repeated prefixes do not grow the piece arrays.
-	assert(partition.capacity <= 2 * test_unique_count(prefixes, count) + 1
-	);
 	assert(partition.region_count == ref.collector.count);
 	assert(partition.region_count == ref.index.max_value + 1);
 	assert(memcmp(partition.values,
@@ -432,7 +431,8 @@ run_equal_end_nesting_test(struct memory_context *mctx) {
 	test_check_widths(mctx, prefixes, 3);
 }
 
-// Verifies that repeated prefixes split the domain like one.
+// Verifies that repeated prefixes are kept once and split the domain like
+// one.
 static void
 run_duplicates_test(struct memory_context *mctx) {
 	const struct classify_prefix prefixes[] = {
@@ -580,6 +580,47 @@ run_net6_mix_workload_test(struct memory_context *mctx) {
 	test_check_net6_workload(mctx, TEST_NET6_MIX);
 }
 
+// Verifies that distinct short prefixes of a wide key, all of whose low
+// bits are zero, spread over the set slots: none sits more than 64 slots
+// past its home slot, where a hash of the low bits alone piles them into
+// one run.
+static void
+run_prefix_set_spread_test(struct memory_context *mctx) {
+	const uint8_t widths[] = {32, 64};
+	const uint64_t lens[] = {12, 16, 20, 24, 28};
+	for (uint32_t width_idx = 0; width_idx < 2; ++width_idx) {
+		uint8_t key_bits = widths[width_idx];
+		for (uint32_t len_idx = 0; len_idx < 5; ++len_idx) {
+			uint64_t len = lens[len_idx];
+			struct classify_prefixes set = {0};
+			for (uint64_t idx = 0; idx < 4096; ++idx) {
+				assert(classify_prefixes_add(
+					       mctx,
+					       &set,
+					       idx << (key_bits - len),
+					       len
+				       ) == 0);
+			}
+			assert(set.count == 4096);
+
+			uint64_t mask = set.slot_count - 1;
+			for (uint64_t slot = 0; slot < set.slot_count; ++slot) {
+				if (set.slots[slot] == 0) {
+					continue;
+				}
+				const struct classify_prefix *item =
+					set.items + set.slots[slot] - 1;
+				uint64_t home = classify_prefix_hash(
+							item->from, item->len
+						) &
+						mask;
+				assert(((slot - home) & mask) <= 64);
+			}
+			classify_prefixes_free(mctx, &set);
+		}
+	}
+}
+
 // Verifies that a piece carrying the invalid LPM value is left out of
 // the trie.
 static void
@@ -639,6 +680,7 @@ main(void) {
 	run_scenario(run_net6_contiguous_workload_test);
 	run_scenario(run_net6_bicontiguous_workload_test);
 	run_scenario(run_net6_mix_workload_test);
+	run_scenario(run_prefix_set_spread_test);
 	run_scenario(run_lpm_invalid_values_test);
 
 	return 0;

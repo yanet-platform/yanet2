@@ -69,7 +69,7 @@ classify_compile_net4_create(
 	compile->get_net4s = get_net4s;
 	compile->name = name;
 
-	struct classify_prefixes prefixes = {NULL, 0};
+	struct classify_prefixes prefixes = {0};
 
 	for (uint32_t rule_idx = 0; rule_idx < rule_count; ++rule_idx) {
 		const struct classifier_rule *rule = rules[rule_idx];

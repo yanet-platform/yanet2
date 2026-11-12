@@ -25,16 +25,30 @@
 
 #define CLASSIFY_PARTITION_INVALID 0xffffffffu
 
+// The most prefixes a partition takes: its pieces, two per prefix and
+// one more, are indexed in 32 bits.
+#define CLASSIFY_PREFIXES_MAX ((UINT32_MAX - 1) / 2)
+
 // A prefix of the key domain: its start key and its length in bits.
 struct classify_prefix {
 	uint64_t from;
 	uint64_t len;
 };
 
-// Growable array of the prefixes of a partition build.
+/*
+ * Growable set of the prefixes of a partition build.
+ *
+ * A ruleset repeats prefixes, a network shared by many rules above all,
+ * so the set keeps each one once: the open addressing slots index the
+ * items by prefix, a slot holding the item index plus one or zero when
+ * empty, and the item count and the memory scale with the distinct
+ * prefixes rather than the occurrences.
+ */
 struct classify_prefixes {
 	struct classify_prefix *items;
 	uint64_t count;
+	uint32_t *slots;
+	uint64_t slot_count;
 };
 
 struct classify_partition {
@@ -79,7 +93,79 @@ classify_key_store(uint64_t key, uint8_t key_bits, uint8_t bytes[8]) {
 	}
 }
 
-// Appends a prefix; the start must carry no bits past the length.
+/*
+ * A full avalanche hash of the prefix (the MurmurHash3 finalizer).
+ *
+ * The short prefixes of a wide key have all their low bits zero; every
+ * input bit moves the low hash bits that pick the slot, so they spread.
+ */
+static inline uint64_t
+classify_prefix_hash(uint64_t from, uint64_t len) {
+	uint64_t hash = from ^ (len * 0x9e3779b97f4a7c15ull);
+	hash ^= hash >> 33;
+	hash *= 0xff51afd7ed558ccdull;
+	hash ^= hash >> 33;
+	hash *= 0xc4ceb9fe1a85ec53ull;
+	return hash ^ (hash >> 33);
+}
+
+// The slot of the prefix: the one holding it or the empty one ending its
+// probe sequence.
+static inline uint64_t
+classify_prefixes_slot(
+	const struct classify_prefixes *prefixes, uint64_t from, uint64_t len
+) {
+	uint64_t mask = prefixes->slot_count - 1;
+	uint64_t slot = classify_prefix_hash(from, len) & mask;
+	while (prefixes->slots[slot] != 0) {
+		const struct classify_prefix *item =
+			prefixes->items + prefixes->slots[slot] - 1;
+		if (item->from == from && item->len == len) {
+			break;
+		}
+		slot = (slot + 1) & mask;
+	}
+	return slot;
+}
+
+// Doubles the slots, keeping them at most half full, and reindexes the
+// items.
+static inline int
+classify_prefixes_grow(
+	struct memory_context *memory_context,
+	struct classify_prefixes *prefixes
+) {
+	uint64_t slot_count =
+		prefixes->slot_count ? 2 * prefixes->slot_count : 64;
+	uint32_t *slots =
+		memory_balloc(memory_context, slot_count * sizeof(uint32_t));
+	if (slots == NULL) {
+		return -1;
+	}
+	memset(slots, 0, slot_count * sizeof(uint32_t));
+
+	if (prefixes->slot_count != 0) {
+		memory_bfree(
+			memory_context,
+			prefixes->slots,
+			prefixes->slot_count * sizeof(uint32_t)
+		);
+	}
+	prefixes->slots = slots;
+	prefixes->slot_count = slot_count;
+
+	for (uint64_t idx = 0; idx < prefixes->count; ++idx) {
+		const struct classify_prefix *item = prefixes->items + idx;
+		slots[classify_prefixes_slot(prefixes, item->from, item->len)] =
+			idx + 1;
+	}
+	return 0;
+}
+
+/*
+ * Adds a prefix unless the set already holds it; the start must carry no
+ * bits past the length.
+ */
 static inline int
 classify_prefixes_add(
 	struct memory_context *memory_context,
@@ -87,6 +173,19 @@ classify_prefixes_add(
 	uint64_t from,
 	uint64_t len
 ) {
+	if (2 * (prefixes->count + 1) > prefixes->slot_count &&
+	    classify_prefixes_grow(memory_context, prefixes)) {
+		return -1;
+	}
+
+	uint64_t slot = classify_prefixes_slot(prefixes, from, len);
+	if (prefixes->slots[slot] != 0) {
+		return 0;
+	}
+	if (prefixes->count >= CLASSIFY_PREFIXES_MAX) {
+		return -1;
+	}
+
 	if (mem_array_expand_exp(
 		    memory_context,
 		    (void **)&prefixes->items,
@@ -98,6 +197,7 @@ classify_prefixes_add(
 
 	prefixes->items[prefixes->count - 1] =
 		(struct classify_prefix){from, len};
+	prefixes->slots[slot] = prefixes->count;
 	return 0;
 }
 
@@ -112,8 +212,14 @@ classify_prefixes_free(
 		sizeof(*prefixes->items),
 		prefixes->count
 	);
-	prefixes->items = NULL;
-	prefixes->count = 0;
+	if (prefixes->slot_count != 0) {
+		memory_bfree(
+			memory_context,
+			prefixes->slots,
+			prefixes->slot_count * sizeof(uint32_t)
+		);
+	}
+	memset(prefixes, 0, sizeof(*prefixes));
 }
 
 /*
@@ -205,26 +311,6 @@ classify_prefixes_sort(
 }
 
 /*
- * Moves the unique prefixes of the sorted array to its front and
- * returns their count.
- *
- * The array keeps its count, so it releases the capacity it was
- * allocated with.
- */
-static inline uint64_t
-classify_prefixes_unique(struct classify_prefixes *prefixes) {
-	struct classify_prefix *items = prefixes->items;
-	uint64_t unique = 0;
-	for (uint64_t idx = 0; idx < prefixes->count; ++idx) {
-		if (unique == 0 || items[idx].from != items[unique - 1].from ||
-		    items[idx].len != items[unique - 1].len) {
-			items[unique++] = items[idx];
-		}
-	}
-	return unique;
-}
-
-/*
  * The sweep state: the stack of the prefixes enclosing the current
  * position, outermost first, with the region value of each, and the
  * first key not yet emitted.
@@ -259,8 +345,8 @@ classify_partition_sweep_emit(
 }
 
 /*
- * Builds the partition of the prefixes; the prefix array is sorted and
- * its unique prefixes are moved to the front.
+ * Builds the partition of the prefix set; the items are sorted in place,
+ * so the set takes no further prefixes.
  *
  * The sweep visits the prefixes in order, closing every open prefix that
  * ends before the next start and emitting the gap up to it into the
@@ -279,19 +365,25 @@ classify_partition_build(
 	memset(partition, 0, sizeof(*partition));
 	partition->key_bits = key_bits;
 
+	// The sort moves the items away from their slots: release the slots
+	// before the sort scratch and the piece arrays take memory.
+	if (prefixes->slot_count != 0) {
+		memory_bfree(
+			memory_context,
+			prefixes->slots,
+			prefixes->slot_count * sizeof(uint32_t)
+		);
+		prefixes->slots = NULL;
+		prefixes->slot_count = 0;
+	}
+
 	if (classify_prefixes_sort(memory_context, prefixes, key_bits)) {
 		return -1;
 	}
 
-	// Every unique prefix opens at most one piece before its start and
-	// closes at most one at its end, beside the closing of the whole
-	// domain; sizing by the unique ones keeps a ruleset repeating its
-	// prefixes from growing the arrays.
-	uint64_t unique = classify_prefixes_unique(prefixes);
-	uint64_t capacity = 2 * unique + 1;
-	if (capacity > UINT32_MAX) {
-		return -1;
-	}
+	// Every prefix opens at most one piece before its start and closes
+	// at most one at its end, beside the closing of the whole domain.
+	uint64_t capacity = 2 * prefixes->count + 1;
 	partition->starts =
 		memory_balloc(memory_context, capacity * sizeof(uint64_t));
 	partition->values =
@@ -308,7 +400,7 @@ classify_partition_build(
 	sweep.to[0] = classify_key_max(key_bits);
 	sweep.value[0] = CLASSIFY_PARTITION_INVALID;
 
-	for (uint64_t idx = 0; idx < unique; ++idx) {
+	for (uint64_t idx = 0; idx < prefixes->count; ++idx) {
 		uint64_t from = prefixes->items[idx].from;
 		uint64_t to = classify_prefix_to(
 			key_bits, from, prefixes->items[idx].len

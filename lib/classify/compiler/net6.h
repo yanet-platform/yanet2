@@ -206,7 +206,7 @@ filter_net6_build_part(
 	net6_get_part_func get_part,
 	struct classify_partition *partition
 ) {
-	struct classify_prefixes prefixes = {NULL, 0};
+	struct classify_prefixes prefixes = {0};
 
 	for (uint32_t net_idx = 0; net_idx < net_count; ++net_idx) {
 		uint8_t *addr;
