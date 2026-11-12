@@ -15,7 +15,7 @@ configs:
     descriptors: /usr/share/yanet2/example.protoset
 ```
 
-The module config file is written as for a linked module. A field whose linked type has a JSON form of its own, such as an address or a prefix, keeps that form, a key the descriptor lacks is ignored, and an enum takes its declared name or a number. A named set decides even for a module the binary links. Such an entry reads one thing the linked types do not: a oneof member, which the generated types ignore, is read by its field name.
+The module config file is written as for a linked module. A field whose linked type has a JSON form of its own, such as an address or a prefix, keeps that form, a key the descriptor lacks is ignored, and an enum takes its declared name or a number. A named set decides even for a module the binary links. Such an entry reads one thing the linked types do not: a oneof member, which the generated types ignore, is read by its field name. When a message of the set has a field that the binary's type with a JSON form of its own lacks, as the set of a newer module may, a value of that message is refused at load rather than published without the field: upgrade the operator.
 
 Go callers of the framework pass the set as a new last argument of `operator.NewMethodRequest` and of the generic operator's `LoadRequest`, nil meaning the descriptors linked into the binary, and `operator.StaticTarget.Descriptors` names the set a target is resolved in.
 

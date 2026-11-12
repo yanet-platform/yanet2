@@ -226,3 +226,28 @@ func Test_LoadRequest_RefusesWrongKindThroughDescriptorSet(t *testing.T) {
 	require.ErrorContains(t, err, path)
 	require.ErrorContains(t, err, `within "/hop_limit"`)
 }
+
+// Test_LoadRequest_RefusesJSONFormOlderThanTheSet verifies that a set whose
+// config has a field the linked JSON form does not read, as a newer
+// module's set has for an older binary, is refused with the field named
+// rather than published without it.
+func Test_LoadRequest_RefusesJSONFormOlderThanTheSet(t *testing.T) {
+	module := protodesc.ToFileDescriptorProto((&dscppb.UpdateConfigRequest{}).ProtoReflect().Descriptor().ParentFile())
+	for _, message := range module.GetMessageType() {
+		if message.GetName() == "Config" {
+			message.Field = append(message.Field, &descriptorpb.FieldDescriptorProto{
+				Name:   new("future_prefixes"),
+				Number: proto.Int32(99),
+				Label:  descriptorpb.FieldDescriptorProto_LABEL_REPEATED.Enum(),
+				Type:   descriptorpb.FieldDescriptorProto_TYPE_STRING.Enum(),
+			})
+		}
+	}
+	path := writeModuleConfig(t, "name: dscp0\nconfig:\n  prefixes4: [192.0.2.0/24]\n")
+
+	_, err := operator.LoadRequest(dscpUpdateMethod, path, loadDescriptorSet(t, module))
+
+	require.ErrorContains(t, err, "the JSON form of modules.dscp.controlplane.dscppb.v1.Config in this binary "+
+		"does not read field modules.dscp.controlplane.dscppb.v1.Config.future_prefixes of the descriptor set")
+	require.ErrorContains(t, err, `within "/config"`)
+}

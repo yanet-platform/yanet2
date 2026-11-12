@@ -70,7 +70,7 @@ message_type {
 // newSample returns an empty dynamic message of the sample file, built from
 // a full set that carries its own copies of the address files, as a set
 // written with its imports does.
-func newSample(t *testing.T) *dynamicpb.Message {
+func newSample(t *testing.T, edits ...func(file *descriptorpb.FileDescriptorProto)) *dynamicpb.Message {
 	t.Helper()
 	sample := &descriptorpb.FileDescriptorProto{}
 	require.NoError(t, prototext.Unmarshal([]byte(sampleFile), sample))
@@ -82,7 +82,11 @@ func newSample(t *testing.T) *dynamicpb.Message {
 			return
 		}
 		copied[file.Path()] = true
-		set.File = append(set.File, protodesc.ToFileDescriptorProto(file))
+		copiedFile := protodesc.ToFileDescriptorProto(file)
+		for _, edit := range edits {
+			edit(copiedFile)
+		}
+		set.File = append(set.File, copiedFile)
 		imports := file.Imports()
 		for idx := range imports.Len() {
 			copyFile(imports.Get(idx).FileDescriptor)
@@ -191,6 +195,34 @@ hosts: {"443": "2001:db8::1"}
 	requireLinkedForm(t, &commonpb.IPAddress{}, `"2001:db8::1"`, host)
 
 	require.True(t, proto.Equal(message, proto.Clone(message)))
+}
+
+// Test_Unmarshal_DynamicMessageRefusesJSONFormMissingFields verifies that a
+// linked JSON form that does not read a field of the set's message, as an
+// older binary's would not, refuses a value of that message, and that a
+// document without such a value still decodes.
+func Test_Unmarshal_DynamicMessageRefusesJSONFormMissingFields(t *testing.T) {
+	withZone := func(file *descriptorpb.FileDescriptorProto) {
+		if file.GetName() != "common/commonpb/v1/ipaddr.proto" {
+			return
+		}
+		for _, message := range file.GetMessageType() {
+			if message.GetName() == "IPAddress" {
+				message.Field = append(message.Field, &descriptorpb.FieldDescriptorProto{
+					Name:   new("zone"),
+					Number: proto.Int32(15),
+					Label:  descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(),
+					Type:   descriptorpb.FieldDescriptorProto_TYPE_STRING.Enum(),
+				})
+			}
+		}
+	}
+
+	err := xproto.Unmarshal([]byte("mode: MODE_FAST\naddress: 198.51.100.7\n"), newSample(t, withZone))
+	require.ErrorContains(t, err, "the JSON form of common.commonpb.v1.IPAddress in this binary "+
+		`does not read field common.commonpb.v1.IPAddress.zone of the descriptor set within "/address"`)
+
+	require.NoError(t, xproto.Unmarshal([]byte("mode: MODE_FAST\n"), newSample(t, withZone)))
 }
 
 // Test_Unmarshal_DynamicMessageReadsEnumsByNameOrNumber verifies that an

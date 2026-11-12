@@ -22,8 +22,9 @@ import (
 // A dynamic message, such as one built from a module's descriptor set, is
 // read by its descriptor with the same rules. A part of it whose linked Go
 // type has a JSON form of its own, such as an IP address, is read by that
-// form, an enum by its declared name or a number, and a oneof member by its
-// field name.
+// form, and refused when the form would drop a field of the set's message.
+// An enum is read by its declared name or a number, and a oneof member by
+// its field name.
 func Unmarshal(data []byte, msg proto.Message) error {
 	if msg == nil || !msg.ProtoReflect().IsValid() {
 		return errors.New("the target message is nil")

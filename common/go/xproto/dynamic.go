@@ -20,26 +20,109 @@ import (
 // as the Go type a generated message holds it in, so numbers, bytes, nulls
 // and the pointers in errors come out alike on both paths.
 func unmarshalDynamic(encoded []byte, message *dynamicpb.Message) error {
-	return decodeMessageValue(jsontext.NewDecoder(bytes.NewReader(encoded)), message)
+	decoder := &dynamicDecoder{
+		Decoder: jsontext.NewDecoder(bytes.NewReader(encoded)),
+		forms:   map[protoreflect.FullName]jsonForm{},
+	}
+	return decodeMessageValue(decoder, message)
 }
 
-// decodeMessageValue reads a message value into the message: by the JSON
-// form of its linked Go type when that type has one, else by its
-// descriptor.
+// dynamicDecoder reads the JSON text of one document into a dynamic
+// message.
+type dynamicDecoder struct {
+	*jsontext.Decoder
+	// forms remembers, by message, how its values are read, decided on the
+	// first value of the message.
+	forms map[protoreflect.FullName]jsonForm
+}
+
+// jsonForm tells how the values of one message of the descriptor set are
+// read.
+type jsonForm struct {
+	// Linked is the linked Go type whose JSON form reads the message, nil
+	// when the descriptor reads it.
+	Linked protoreflect.MessageType
+	// Err refuses the message, whose linked JSON form would drop a field of
+	// the set.
+	Err error
+}
+
+// Form decides how the values of the message are read: by the JSON form of
+// its linked Go type when that type has one, else by the descriptor.
+//
+// A JSON form that does not read every field of the set's message is
+// refused rather than used, so a set newer than this binary loses no field
+// in silence.
+func (m *dynamicDecoder) Form(message protoreflect.MessageDescriptor) jsonForm {
+	if form, ok := m.forms[message.FullName()]; ok {
+		return form
+	}
+	var form jsonForm
+	if linked := jsonFormType(message.FullName()); linked != nil {
+		form.Linked = linked
+		form.Err = coverFields(message.FullName(), message, linked.Descriptor(), map[protoreflect.FullName]bool{})
+	}
+	m.forms[message.FullName()] = form
+	return form
+}
+
+// coverFields reports the first field of the set's message that the linked
+// message lacks, looking into the messages of its fields too, since a JSON
+// form reads its whole value.
+func coverFields(
+	form protoreflect.FullName,
+	set protoreflect.MessageDescriptor,
+	linked protoreflect.MessageDescriptor,
+	seen map[protoreflect.FullName]bool,
+) error {
+	if seen[set.FullName()] {
+		return nil
+	}
+	seen[set.FullName()] = true
+
+	fields := set.Fields()
+	for idx := range fields.Len() {
+		field := fields.Get(idx)
+		match := linked.Fields().ByNumber(field.Number())
+		if match == nil || match.Name() != field.Name() || match.Kind() != field.Kind() ||
+			match.Cardinality() != field.Cardinality() {
+			return fmt.Errorf(
+				"the JSON form of %s in this binary does not read field %s of the descriptor set",
+				form, field.FullName(),
+			)
+		}
+		if field.Message() == nil {
+			continue
+		}
+		if err := coverFields(form, field.Message(), match.Message(), seen); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// decodeMessageValue reads a message value into the message, as its form
+// tells.
 //
 // A null leaves the message empty, as it leaves a generated message nil.
-func decodeMessageValue(decoder *jsontext.Decoder, message protoreflect.Message) error {
+func decodeMessageValue(decoder *dynamicDecoder, message protoreflect.Message) error {
 	if decoder.PeekKind() == 'n' {
 		_, err := decoder.ReadToken()
 		return err
 	}
-	linked := jsonFormType(message.Descriptor().FullName())
-	if linked == nil {
+	form := decoder.Form(message.Descriptor())
+	if form.Err != nil {
+		if _, err := decoder.ReadValue(); err != nil {
+			return err
+		}
+		return fmt.Errorf("%w within %q", form.Err, decoder.StackPointer())
+	}
+	if form.Linked == nil {
 		return decodeMessage(decoder, message)
 	}
 
-	decoded := linked.New().Interface()
-	if err := json.UnmarshalDecode(decoder, decoded); err != nil {
+	decoded := form.Linked.New().Interface()
+	if err := json.UnmarshalDecode(decoder.Decoder, decoded); err != nil {
 		return err
 	}
 	// The value reaches the dynamic message through its encoding, so no
@@ -70,7 +153,7 @@ func jsonFormType(name protoreflect.FullName) protoreflect.MessageType {
 //
 // A member whose name no field of the descriptor has is skipped, as
 // encoding/json/v2 skips it for a generated message.
-func decodeMessage(decoder *jsontext.Decoder, message protoreflect.Message) error {
+func decodeMessage(decoder *dynamicDecoder, message protoreflect.Message) error {
 	if decoder.PeekKind() != '{' {
 		return kindError(decoder, "message "+string(message.Descriptor().FullName()))
 	}
@@ -104,7 +187,7 @@ func decodeMessage(decoder *jsontext.Decoder, message protoreflect.Message) erro
 // A null leaves the field unset, as it leaves a generated field at its zero
 // value or nil.
 func decodeField(
-	decoder *jsontext.Decoder,
+	decoder *dynamicDecoder,
 	message protoreflect.Message,
 	field protoreflect.FieldDescriptor,
 ) error {
@@ -137,7 +220,7 @@ func decodeField(
 
 // decodeList reads a JSON array into the list of a repeated field.
 func decodeList(
-	decoder *jsontext.Decoder,
+	decoder *dynamicDecoder,
 	list protoreflect.List,
 	field protoreflect.FieldDescriptor,
 ) error {
@@ -160,7 +243,7 @@ func decodeList(
 
 // decodeMap reads a JSON object into the map of a map field.
 func decodeMap(
-	decoder *jsontext.Decoder,
+	decoder *dynamicDecoder,
 	entries protoreflect.Map,
 	field protoreflect.FieldDescriptor,
 ) error {
@@ -227,7 +310,7 @@ func decodeIntegerKey[T int32 | int64 | uint32 | uint64](
 //
 // The fresh value is the message a message value is read into.
 func decodeValue(
-	decoder *jsontext.Decoder,
+	decoder *dynamicDecoder,
 	field protoreflect.FieldDescriptor,
 	fresh protoreflect.Value,
 ) (protoreflect.Value, error) {
@@ -264,11 +347,11 @@ func decodeValue(
 // decodeScalar reads a scalar as encoding/json/v2 reads it into the Go type
 // a generated message holds it in.
 func decodeScalar[T any](
-	decoder *jsontext.Decoder,
+	decoder *dynamicDecoder,
 	valueOf func(T) protoreflect.Value,
 ) (protoreflect.Value, error) {
 	var value T
-	if err := json.UnmarshalDecode(decoder, &value); err != nil {
+	if err := json.UnmarshalDecode(decoder.Decoder, &value); err != nil {
 		return protoreflect.Value{}, err
 	}
 	return valueOf(value), nil
@@ -277,7 +360,7 @@ func decodeScalar[T any](
 // decodeEnum reads an enum as its declared name or as a number, the rule of
 // UnmarshalEnumJSON, and a null as the number zero.
 func decodeEnum(
-	decoder *jsontext.Decoder,
+	decoder *dynamicDecoder,
 	enum protoreflect.EnumDescriptor,
 ) (protoreflect.Value, error) {
 	raw, err := decoder.ReadValue()
@@ -296,7 +379,7 @@ func decodeEnum(
 
 // kindError consumes the value the decoder stands at and reports that it is
 // not the wanted kind.
-func kindError(decoder *jsontext.Decoder, want string) error {
+func kindError(decoder *dynamicDecoder, want string) error {
 	raw, err := decoder.ReadValue()
 	if err != nil {
 		return err
