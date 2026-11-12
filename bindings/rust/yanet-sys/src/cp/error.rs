@@ -52,6 +52,11 @@ pub enum Refusal {
     ///
     /// Reported as `YANET_ERROR_INVALID_ARGUMENT`.
     InvalidPosition,
+    /// The iterator of a hash index yields fewer or more records than its
+    /// declared length.
+    ///
+    /// Reported as `YANET_ERROR_INVALID_ARGUMENT`.
+    IndexLengthMismatch,
 }
 
 impl Refusal {
@@ -71,6 +76,7 @@ impl Refusal {
             Self::ForeignCounter => "a counter registered amid a registrar's counters other than through it",
             Self::DuplicateKey { .. } => "a key of a hash index is given twice",
             Self::InvalidPosition => "a record of a hash index names the position of a free slot",
+            Self::IndexLengthMismatch => "a hash index iterator yields a different number of records than declared",
         }
     }
 
@@ -86,7 +92,8 @@ impl Refusal {
             | Self::InvalidName
             | Self::ForeignCounter
             | Self::DuplicateKey { .. }
-            | Self::InvalidPosition => bindings::yanet_error_kind_YANET_ERROR_INVALID_ARGUMENT,
+            | Self::InvalidPosition
+            | Self::IndexLengthMismatch => bindings::yanet_error_kind_YANET_ERROR_INVALID_ARGUMENT,
         }
     }
 }

@@ -419,7 +419,8 @@ fn test_build_leaves_tables_of_no_ranges_empty_and_unallocated() {
 fn test_build_leaves_indexes_of_no_records_empty_and_unallocated() {
     let owner = owner();
 
-    let built = build::<IndexesModule>(&owner, |_| Ok(IndexesParts { v4: &[], v6: &[] })).expect("built");
+    let built =
+        build::<IndexesModule>(&owner, |_| Ok(IndexesParts { v4: (&[]).into(), v6: (&[]).into() })).expect("built");
 
     let (config, view) = body::<IndexesModule>(&owner, &built);
     assert_eq!(
