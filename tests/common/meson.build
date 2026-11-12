@@ -26,6 +26,14 @@ lpm_test = executable(
 )
 test('lpm', lpm_test, suite: ['common'])
 
+fast_lpm_test = executable(
+  'fast_lpm_test',
+  ['fast_lpm_test.c',],
+  c_args: yanet_test_c_args,
+  dependencies: lib_common_dep,
+)
+test('fast_lpm', fast_lpm_test, suite: ['common'], timeout: 300)
+
 radix_test = executable(
   'radix_test',
   ['radix_test.c',],
