@@ -864,6 +864,8 @@ dataplane_init(
 		static const char *objects[] = {
 			"fwstate_map_v4",
 			"fwstate_map_v6",
+			"nat64state_lan_map",
+			"nat64state_wan_map",
 			"route_fib",
 			"l3b_virtual_service",
 			"l3b_session_table",
