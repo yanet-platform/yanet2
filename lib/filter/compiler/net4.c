@@ -87,8 +87,14 @@ net4_collect_registry(
 			      ~*(const net4_word *)net4->mask;
 		filter_key_inc(4, (uint8_t *)&to);
 
-		uint32_t first =
-			radix_lookup(&range_index->radix, 4, net4->addr);
+		// A network of no mask bits spans the whole partition, whatever
+		// its address.
+		uint32_t first = 0;
+		if (*(const net4_word *)net4->mask != 0) {
+			first = radix_lookup(
+				&range_index->radix, 4, net4->addr
+			);
+		}
 		uint32_t stop = range_index->count;
 		if (to != 0) {
 			stop = radix_lookup(

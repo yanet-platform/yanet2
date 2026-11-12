@@ -45,8 +45,9 @@ yanet_sys_common_lpm_insert(
 
 // fast_lpm_build (common/fast_lpm_build.h): compiles the staged inserts.
 //
-// Returns 0, or -1 with errno ENOMEM; the LPM then stays valid for
-// yanet_sys_common_lpm_free.
+// Returns 0, or -1 with errno ENOMEM, ERANGE when memory blocks lie too far
+// apart for a node link, or EBUSY for a built LPM; the LPM then stays valid
+// for yanet_sys_common_lpm_free.
 YANET_SYS_HIDDEN int
 yanet_sys_common_lpm_build(struct fast_lpm *lpm);
 

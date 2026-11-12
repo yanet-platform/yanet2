@@ -634,7 +634,8 @@ unsafe impl<const K: usize> Build for Lpm<K> {
         // SAFETY: freeing is sound after a failed init, insert or build: init
         // clears the table before it allocates the root, and the context
         // stays linked under the header until the free unlinks it
-        // (`common/fast_lpm.h`). Memory is C's only failure here.
+        // (`common/fast_lpm.h`). C fails on memory only: blocks too far
+        // apart for a node link would need an arena beyond 16 GiB.
         unsafe { bindings::yanet_sys_common_lpm_free(lpm) };
         Err(Refusal::OutOfMemory)
     }

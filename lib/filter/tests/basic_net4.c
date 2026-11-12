@@ -173,6 +173,41 @@ test_stress_seed12_regression(void *memory, size_t memory_size) {
 	LOG(INFO, "Regression test passed!");
 }
 
+// A network of no mask bits matches every address, also one below the
+// address bits it carries.
+static void
+test_any_network_with_address_bits(struct memory_context *memory_context) {
+	struct filter_rule_builder narrow;
+	builder_init(&narrow);
+	builder_add_net4_src(&narrow, ip(10, 0, 0, 0), ip(255, 0, 0, 0));
+	builder_add_net4_dst(&narrow, ip(10, 0, 0, 0), ip(255, 0, 0, 0));
+	struct filter_rule narrow_rule = build_rule(&narrow);
+
+	struct filter_rule_builder any;
+	builder_init(&any);
+	builder_add_net4_src(&any, ip(1, 2, 3, 4), ip(0, 0, 0, 0));
+	builder_add_net4_dst(&any, ip(20, 0, 0, 0), ip(255, 0, 0, 0));
+	struct filter_rule any_rule = build_rule(&any);
+
+	const struct filter_rule *rule_ptrs[] = {&narrow_rule, &any_rule};
+	struct filter filter;
+	int res = filter_init(
+		&filter,
+		sign_net4_compile,
+		rule_ptrs,
+		2,
+		memory_context,
+		"filter",
+		NULL
+	);
+	assert(res == 0);
+
+	query_and_expect_action(&filter, ip(0, 0, 0, 1), ip(20, 0, 0, 1), 1);
+	query_and_expect_action(&filter, ip(200, 0, 0, 1), ip(20, 0, 0, 1), 1);
+
+	filter_free(&filter, sign_net4_compile);
+}
+
 int
 main() {
 	log_enable_name("debug");
@@ -282,6 +317,8 @@ main() {
 	// test_stress_seed12_regression(memory, 1 << 28);
 
 	(void)test_stress_seed12_regression;
+
+	test_any_network_with_address_bits(&memory_context);
 
 	memory_context_fini(&memory_context);
 	free(memory);

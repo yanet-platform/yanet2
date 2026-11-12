@@ -161,7 +161,7 @@ struct dp_worker {
 // against a different layout of the control-plane zone or the dataplane
 // structures recognises a foreign magic and refuses the attach instead
 // of misreading shifted fields. Bump it on every layout change.
-#define DP_CONFIG_READY_MAGIC UINT64_C(0xDEAD10CC0000000C)
+#define DP_CONFIG_READY_MAGIC UINT64_C(0xDEAD10CC0000000D)
 
 struct dp_config {
 	uint32_t instance_count;

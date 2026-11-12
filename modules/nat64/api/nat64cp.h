@@ -118,6 +118,8 @@ nat64_module_config_add_prefix(struct cp_module *cp_module, uint8_t prefix[12]);
  * @param cp_module Pointer to the module data structure
  * @return 0 on success, -1 on failure with errno set:
  *         - ENOMEM: Memory allocation failed
+ *         - ERANGE: Memory blocks too far apart for a node link
+ *         - EBUSY: The config was built already
  */
 int
 nat64_module_config_build(struct cp_module *cp_module);

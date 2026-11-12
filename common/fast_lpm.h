@@ -3,7 +3,7 @@
 /*
  * Frozen longest prefix match: a read-only map of n-byte keys to values.
  *
- * A builder (fast_lpm_builder.h) compiles every insert at once into a trie
+ * A builder (fast_lpm_build.h) compiles every insert at once into a trie
  * that is never modified afterwards. A node is either full, 256 entries
  * indexed by one key byte, or a bucket, a subtree of at most four range
  * boundaries searched with one compare of the remaining key. Keys are 4, 8,
@@ -156,7 +156,7 @@ fast_lpm_leaf_value(uint32_t entry) {
 	return entry >> 1;
 }
 
-// The key as an integer: bytes [from, from + 8) or [from, from + 4).
+// Big-endian key bytes as an integer: 8 bytes, or 4 below.
 static inline uint64_t
 fast_lpm_key_be64(const uint8_t *key) {
 	uint64_t word;

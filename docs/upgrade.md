@@ -3,6 +3,19 @@
 Manual steps required when upgrading an existing deployment. The packaging
 does not perform these automatically.
 
+## Longest prefix match tables are frozen tries
+
+The route FIB, the decap, dscp and nat64 prefix tables and the network
+classifiers of the filter modules store their longest prefix match tables in
+a new shared-memory layout, several times smaller than before. Values stay
+below `0x7fffffff`, which now marks a key no prefix covers. No configuration
+migration is needed.
+
+The shared-memory layout changes. Upgrade and restart the dataplane and
+control plane together; the shared-memory version prevents attaching
+processes built against different layouts. Out-of-tree modules rebuild
+against module ABI version 50.
+
 ## The generic operator configures modules it does not link
 
 A config entry of a generic operator instance may name the module's descriptor set in `descriptors`: a FileDescriptorSet as protoc writes it with `--descriptor_set_out`, installed by the module's package. The operator then resolves the method, its request and its reply from the set, so the stock binary configures a module built outside this tree. A file of the set resolves its imports in the set first, then among the files linked into the binary, so a set written without `--include_imports` serves too. An entry without `descriptors` works as before.
