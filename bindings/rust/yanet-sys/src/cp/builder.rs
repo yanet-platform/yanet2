@@ -1693,10 +1693,9 @@ fn build_root<'env, K: Kind, C: Build, W: Owner, E: From<BuildError<W::Error>>>(
     f: impl for<'b> FnOnce(Scope<'b, 'env, W, E, K>) -> Result<C::Parts<'b, W>, E>,
 ) -> Result<Header, E> {
     let block = owner.alloc(size).ok_or_else(|| refused::<W, E>(Refusal::OutOfMemory))?;
-    // SAFETY: the root block holds the header and the body, so it is large
-    // enough for the header.
-    let header = unsafe { Header::at(block) };
-    // SAFETY: the block is ours and the header sits at its start.
+    let header = Header::at(block);
+    // SAFETY: the block is ours and the header sits at its start; the block
+    // holds the header and the body, so it is large enough for the header.
     if let Err(err) = unsafe { K::init(owner, header, ty, name) } {
         // SAFETY: the block came from the owner's allocation with this size,
         // and a refused header leaves nothing to finalise.

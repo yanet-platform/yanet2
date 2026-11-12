@@ -101,24 +101,13 @@ pub unsafe fn slice_of<'a, T: FfiRecord>(pointer: *const T, len: usize, argument
 
 /// A record a query writes, checked and not yet touched: [`zeroed`] makes it
 /// the method's once every argument is accepted.
-///
-/// # Safety
-///
-/// `pointer` is null, misaligned or points at `size_of::<T>()` writable bytes
-/// that nothing else reads or writes during the call, the other arguments
-/// included.
-pub unsafe fn out_record<T: FfiRecord>(pointer: *mut T, argument: &str) -> Result<NonNull<T>, Error> {
+pub fn out_record<T: FfiRecord>(pointer: *mut T, argument: &str) -> Result<NonNull<T>, Error> {
     checked(pointer, argument)
 }
 
 /// Records a query writes, checked and not yet touched: [`zeroed_slice`] makes
 /// them the method's once every argument is accepted; `(NULL, 0)` is empty.
-///
-/// # Safety
-///
-/// `pointer` is null, misaligned or points at `len` records writable as for
-/// [`out_record`].
-pub unsafe fn out_slice<T: FfiRecord>(pointer: *mut T, len: usize, argument: &str) -> Result<NonNull<[T]>, Error> {
+pub fn out_slice<T: FfiRecord>(pointer: *mut T, len: usize, argument: &str) -> Result<NonNull<[T]>, Error> {
     if pointer.is_null() && len == 0 {
         return Ok(NonNull::slice_from_raw_parts(NonNull::dangling(), 0));
     }
@@ -137,7 +126,9 @@ pub unsafe fn out_slice<T: FfiRecord>(pointer: *mut T, len: usize, argument: &st
 ///
 /// # Safety
 ///
-/// `out` came from [`out_record`], whose contract holds while `'a` lives.
+/// `out` came from [`out_record`], and the pointer passed to it points at
+/// `size_of::<T>()` writable bytes that nothing else reads or writes while `'a`
+/// lives, the method's other arguments included.
 pub unsafe fn zeroed<'a, T: FfiRecord>(mut out: NonNull<T>) -> &'a mut T {
     // SAFETY: writable, aligned and reached by nothing else (caller
     // contract); all-zero bytes are a value of `T` (`FfiRecord`).
@@ -151,7 +142,9 @@ pub unsafe fn zeroed<'a, T: FfiRecord>(mut out: NonNull<T>) -> &'a mut T {
 ///
 /// # Safety
 ///
-/// `out` came from [`out_slice`], whose contract holds while `'a` lives.
+/// `out` came from [`out_slice`] and, unless it is empty, the pointer passed to
+/// it points at its records, writable and reached by nothing else as for
+/// [`zeroed`].
 pub unsafe fn zeroed_slice<'a, T: FfiRecord>(mut out: NonNull<[T]>) -> &'a mut [T] {
     // SAFETY: as for `zeroed`, over the `len` records of a slice that fits
     // the address space (checked); an empty one is dangling and aligned.

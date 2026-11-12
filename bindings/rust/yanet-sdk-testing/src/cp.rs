@@ -215,8 +215,7 @@ impl TestOwner {
         // SAFETY: the arena returned a block of at least the size, or one byte
         // for an empty request.
         unsafe { block.as_ptr().write_bytes(0xA5, size.max(1)) };
-        // SAFETY: the arena's block is the payload of a block of this owner.
-        let addr = unsafe { BlockAddr::new(block.as_ptr().addr()) };
+        let addr = BlockAddr::new(block.as_ptr().addr());
         self.blocks.borrow_mut().push((addr, size, context));
         Some(addr)
     }

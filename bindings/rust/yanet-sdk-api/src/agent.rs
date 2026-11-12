@@ -96,9 +96,7 @@ impl Agent {
 
     /// The block whose payload C returned, none for null.
     fn block(&self, payload: *mut core::ffi::c_void) -> Option<BlockAddr> {
-        // SAFETY: a non-null payload C returned from a memory context is the
-        // payload of a block of the mapping.
-        (!payload.is_null()).then(|| unsafe { BlockAddr::new(payload.addr()) })
+        (!payload.is_null()).then(|| BlockAddr::new(payload.addr()))
     }
 
     /// Releases a configuration as a C module's free routine does; the
@@ -634,9 +632,10 @@ pub unsafe fn handle_at<B: Releasable>(raw: NonNull<B::Raw>) -> Result<B, Error>
             "the handle is of another module or object type",
         ));
     }
-    // SAFETY: the address is a header of this mapping of the handle's type
-    // (caller contract).
-    Ok(unsafe { B::from_header(Header::at(BlockAddr::new(raw.addr().get()))) })
+    let header = Header::at(BlockAddr::new(raw.addr().get()));
+    // SAFETY: the header is one of this mapping of the handle's type (caller
+    // contract).
+    Ok(unsafe { B::from_header(header) })
 }
 
 /// Releases the configuration or object whose header is at `raw`, as
@@ -653,8 +652,7 @@ pub unsafe fn release_at<B: Releasable>(raw: NonNull<B::Raw>) -> Result<(), Reta
     // SAFETY: the pointer has the provenance of the whole mapping (caller
     // contract).
     let root = unsafe { ShmRoot::from_mapping(raw.cast()) };
-    // SAFETY: the address is a header of this mapping (caller contract).
-    let header = unsafe { Header::at(BlockAddr::new(raw.addr().get())) };
+    let header = Header::at(BlockAddr::new(raw.addr().get()));
     // SAFETY: the header is the one of such a handle (caller contract).
     let built = unsafe { B::from_header(header) };
     let mut chain = ptr::null_mut();
