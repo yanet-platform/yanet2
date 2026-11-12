@@ -132,3 +132,14 @@ func (m *ModuleConfig) SetDscpMarking(flag uint8, mark uint8) error {
 
 	return nil
 }
+
+// Build compiles the added prefixes; the config takes no prefixes afterwards.
+//
+// Publish the config only after a successful build: before it a selection
+// that has prefixes matches no address.
+func (m *ModuleConfig) Build() error {
+	if rc, err := C.dscp_module_config_build(m.asRawPtr()); rc != 0 {
+		return fmt.Errorf("failed to build prefixes: %w", err)
+	}
+	return nil
+}

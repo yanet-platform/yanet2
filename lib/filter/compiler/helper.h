@@ -34,12 +34,6 @@ init_dummy_registry(
 	struct value_registry *registry
 );
 
-static inline int
-lpm_collect_registry_iterator(uint32_t value, void *data) {
-	struct value_registry *registry = (struct value_registry *)data;
-	return value_registry_collect(registry, value);
-}
-
 // Checks that an IPv4 network mask is a contiguous prefix mask.
 //
 // A contiguous prefix mask is a run of set high bits followed only by zero

@@ -23,15 +23,15 @@ dscp_handle_v4(struct dscp_module_config *config, struct packet *packet) {
 	);
 
 	if (config->has_source_prefixes &&
-	    lpm_lookup(
+	    fast_lpm_lookup(
 		    &config->source_lpm_v4, 4, (uint8_t *)&header->src_addr
-	    ) == LPM_VALUE_INVALID) {
+	    ) == FAST_LPM_VALUE_INVALID) {
 		return -1;
 	}
 	if (config->has_destination_prefixes &&
-	    lpm_lookup(
+	    fast_lpm_lookup(
 		    &config->destination_lpm_v4, 4, (uint8_t *)&header->dst_addr
-	    ) == LPM_VALUE_INVALID) {
+	    ) == FAST_LPM_VALUE_INVALID) {
 		return -1;
 	}
 	return dscp_mark_v4(header, config->dscp);
@@ -46,17 +46,17 @@ dscp_handle_v6(struct dscp_module_config *config, struct packet *packet) {
 	);
 
 	if (config->has_source_prefixes &&
-	    lpm_lookup(
+	    fast_lpm_lookup(
 		    &config->source_lpm_v6, 16, (uint8_t *)&header->src_addr
-	    ) == LPM_VALUE_INVALID) {
+	    ) == FAST_LPM_VALUE_INVALID) {
 		return -1;
 	}
 	if (config->has_destination_prefixes &&
-	    lpm_lookup(
+	    fast_lpm_lookup(
 		    &config->destination_lpm_v6,
 		    16,
 		    (uint8_t *)&header->dst_addr
-	    ) == LPM_VALUE_INVALID) {
+	    ) == FAST_LPM_VALUE_INVALID) {
 		return -1;
 	}
 	return dscp_mark_v6(header, config->dscp);

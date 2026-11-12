@@ -35,32 +35,17 @@ nat64_test_config(struct cp_module **cp_module) {
 
 	config->cp_module.dp_module_idx = 0;
 	config->cp_module.entity.agent = NULL;
-	config->mappings.count = 0;
-	config->mappings.list = NULL;
-	config->prefixes.prefixes = NULL;
-	config->prefixes.count = 0;
-	config->mtu.ipv4 = 1450;
-	config->mtu.ipv6 = 1280;
-
 	struct memory_context *memory_context =
 		&config->cp_module.entity.memory_context;
-	if (lpm_init(&config->mappings.v4_to_v6, memory_context, "v4_to_v6")) {
+	if (nat64_module_config_data_init(config, memory_context)) {
 		goto error_config;
-	}
-	if (lpm_init(&config->mappings.v6_to_v4, memory_context, "v6_to_v4")) {
-		goto error_lpm_v4;
-	}
-	if (lpm_init(
-		    &config->prefixes.v6_prefixes, memory_context, "v6_prefixes"
-	    )) {
-		goto error_lpm_v6;
 	}
 
 	// Add prefix
 	uint8_t pfx[12] = {0x20, 0x01, 0x0d, 0xb8, [11] = 0x00};
 	if (nat64_module_config_add_prefix((struct cp_module *)config, pfx) <
 	    0) {
-		goto error_lpm_prefixes;
+		goto error_data;
 	}
 
 	struct mapping_item {
@@ -93,37 +78,18 @@ nat64_test_config(struct cp_module **cp_module) {
 			    (uint8_t *)mappings[i].ip6,
 			    0
 		    ) < 0) {
-			goto error_mappings;
+			goto error_data;
 		}
+	}
+	if (nat64_module_config_build((struct cp_module *)config)) {
+		goto error_data;
 	}
 
 	*cp_module = (struct cp_module *)config;
 	return 0;
 
-error_mappings:
-	if (config->mappings.list) {
-		memory_bfree(
-			&config->cp_module.entity.memory_context,
-			config->mappings.list,
-			sizeof(struct ip4to6) * config->mappings.count
-		);
-	}
-	if (config->prefixes.prefixes) {
-		memory_bfree(
-			&config->cp_module.entity.memory_context,
-			config->prefixes.prefixes,
-			sizeof(struct nat64_prefix) * config->prefixes.count
-		);
-	}
-
-error_lpm_prefixes:
-	lpm_free(&config->prefixes.v6_prefixes);
-
-error_lpm_v6:
-	lpm_free(&config->mappings.v6_to_v4);
-
-error_lpm_v4:
-	lpm_free(&config->mappings.v4_to_v6);
+error_data:
+	nat64_module_config_data_destroy(config, memory_context);
 
 error_config:
 	if (config) {

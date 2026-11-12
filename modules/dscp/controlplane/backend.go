@@ -44,7 +44,7 @@ func (m *backend) Update(name string, payload *config) (crud.Handle, error) {
 		if err := module.SetDscpMarking(payload.Config.Flag, payload.Config.Mark); err != nil {
 			return fmt.Errorf("failed to set DSCP marking: %w", err)
 		}
-		return nil
+		return module.Build()
 	}
 	if err := crud.PublishModule(m.agent, module, build); err != nil {
 		return nil, err

@@ -591,38 +591,50 @@ unsafe impl<const K: usize> Build for Lpm<K> {
         memory: &MemoryContext<'_, W>,
         addr: usize,
     ) -> Result<(), Refusal> {
-        const { assert!(K >= 1 && K <= 16, "LPM keys are 1 to 16 bytes") };
+        const {
+            assert!(
+                K == 4 || K == 8 || K == 12 || K == 16,
+                "LPM keys are 4, 8, 12 or 16 bytes"
+            )
+        };
         if parts.iter().any(|range| range.from > range.to) {
             return Err(Refusal::InvalidRange);
+        }
+        if parts
+            .iter()
+            .any(|range| range.value >= bindings::FAST_LPM_VALUE_INVALID)
+        {
+            return Err(Refusal::InvalidValue);
         }
         let root = memory.root();
         if parts.is_empty() {
             // SAFETY: the table's bytes lie in a block of the build, exclusive
             // (caller contract), and a zeroed table is the empty one: a null
-            // directory and no C memory context to close.
+            // root and no C memory context to close.
             unsafe { root.ptr::<u8>(addr).write_bytes(0, size_of::<Lpm<K>>()) };
             return Ok(());
         }
-        let lpm = root.ptr::<bindings::lpm>(addr);
+        let lpm = root.ptr::<bindings::fast_lpm>(addr);
         // SAFETY: the table lies in a block of the build (caller contract),
         // and the context is the header's, which the owner set up for C.
         let initialised = unsafe {
             let context = root.ptr::<bindings::memory_context>(memory.context.get());
-            bindings::yanet_sys_common_lpm_init(lpm, context, c"lpm".as_ptr()) == 0
+            bindings::yanet_sys_common_lpm_init(lpm, context, c"lpm".as_ptr(), K as u8) == 0
         };
-        // SAFETY: an initialised table takes ranges of the key size.
+        // SAFETY: an initialised table takes ranges of its key size and
+        // values below the invalid one, then compiles them.
         let built = initialised
             && parts.iter().all(|range| unsafe {
-                bindings::yanet_sys_common_lpm_insert(lpm, K as u8, range.from.as_ptr(), range.to.as_ptr(), range.value)
-                    == 0
-            });
+                bindings::yanet_sys_common_lpm_insert(lpm, range.from.as_ptr(), range.to.as_ptr(), range.value) == 0
+            })
+            && unsafe { bindings::yanet_sys_common_lpm_build(lpm) == 0 };
         if built {
             return Ok(());
         }
-        // SAFETY: freeing is sound after a failed init or insert: init clears
-        // the directory before it allocates the first page, and the context
+        // SAFETY: freeing is sound after a failed init, insert or build: init
+        // clears the table before it allocates the root, and the context
         // stays linked under the header until the free unlinks it
-        // (`common/lpm.h`). Memory is C's only failure here.
+        // (`common/fast_lpm.h`). Memory is C's only failure here.
         unsafe { bindings::yanet_sys_common_lpm_free(lpm) };
         Err(Refusal::OutOfMemory)
     }
@@ -634,7 +646,7 @@ unsafe impl<const K: usize> Build for Lpm<K> {
             // An empty table opened nothing in C.
             return;
         }
-        // SAFETY: a table that is not empty was initialised, so its pages and
+        // SAFETY: a table that is not empty was initialised, so its nodes and
         // context are live.
         unsafe { bindings::yanet_sys_common_lpm_free(memory.root().ptr(addr)) };
     }

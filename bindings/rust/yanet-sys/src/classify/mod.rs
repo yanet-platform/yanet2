@@ -531,8 +531,8 @@ const _: () = {
 };
 
 // The mirrored fields keep the C types, not only their places.
-const _: fn(&bindings::classify_attr_net4) -> &bindings::lpm = |attr| &attr.lpm;
-const _: fn(&bindings::classify_attr_net6) -> (&bindings::lpm, &bindings::lpm, &bindings::value_table) =
+const _: fn(&bindings::classify_attr_net4) -> &bindings::fast_lpm = |attr| &attr.lpm;
+const _: fn(&bindings::classify_attr_net6) -> (&bindings::fast_lpm, &bindings::fast_lpm, &bindings::value_table) =
     |attr| (&attr.hi, &attr.lo, &attr.comb);
 const _: fn(&bindings::classify_attr_port) -> &bindings::vline = |attr| &attr.line;
 const _: fn(&bindings::classify_attr_line) -> &bindings::vline = |attr| &attr.line;
@@ -614,7 +614,7 @@ const ROW_MARK: u32 = bindings::FILTER_NET6_ROW_MARK;
 /// invalid value where no range covers the key, which a compile never leaves.
 #[inline(always)]
 fn lpm_value<'g, const K: usize>(lpm: &'g Lpm<K>, cx: &impl Resolve<'g>, key: &[u8; K]) -> u32 {
-    lpm.lookup(cx, key).unwrap_or(bindings::LPM_VALUE_INVALID)
+    lpm.lookup(cx, key).unwrap_or(bindings::FAST_LPM_VALUE_INVALID)
 }
 
 /// The high and the low half of an IPv6 address.
@@ -732,19 +732,16 @@ mod tests {
         lay_rows(arena, table + offset_of!(bindings::value_table, values), rows);
     }
 
-    /// Lays an LPM out at an address as C does, of one page of leaves: a key
-    /// maps to the value of its first byte.
+    /// Lays an LPM out at an address as C does, of a root node of leaves: a
+    /// key maps to the value of its first byte.
     pub fn lay_lpm(arena: &'static BlockArena, lpm: usize, value: impl Fn(u8) -> u32) {
-        let page = block(arena, 256 * size_of::<u64>());
+        let node = block(arena, 256 * size_of::<u32>());
         for byte in 0..=u8::MAX {
-            // A leaf stores its value as the C insert does.
-            let leaf = (u64::from(value(byte)) << 1) | u64::from(bindings::LPM_VALUE_FLAG);
-            put(arena, page + usize::from(byte) * size_of::<u64>(), leaf);
+            // A leaf stores its value as the C build does.
+            let leaf = (value(byte) << 1) | bindings::FAST_LPM_ENTRY_LEAF;
+            put(arena, node + usize::from(byte) * size_of::<u32>(), leaf);
         }
-        let directory = block(arena, size_of::<isize>());
-        point(arena, directory, page);
-        point(arena, lpm + offset_of!(bindings::lpm, pages), directory);
-        put(arena, lpm + offset_of!(bindings::lpm, page_count), 1usize);
+        point(arena, lpm + offset_of!(bindings::fast_lpm, root), node);
     }
 
     /// verifies that an IPv6 classifier takes the class of an address from

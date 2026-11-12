@@ -72,6 +72,9 @@ run_round_restore_test(void) {
 		dscp_module_config_set_dscp_marking(dscp, DSCP_MARK_ALWAYS, 42),
 		"dscp marking setup failed"
 	);
+	TEST_ASSERT_SUCCESS(
+		dscp_module_config_build(dscp), "dscp prefix build failed"
+	);
 
 	struct cp_module *forward =
 		forward_module_config_init(agent, "loop", &err);
@@ -301,6 +304,9 @@ run_rounds_geometry_mismatch_test(void) {
 	TEST_ASSERT_SUCCESS(
 		decap_module_config_add_prefix_v4(decap, first_addr, last_addr),
 		"decap prefix setup failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		decap_module_config_build(decap), "decap prefix build failed"
 	);
 
 	struct cp_module *modules[] = {decap};

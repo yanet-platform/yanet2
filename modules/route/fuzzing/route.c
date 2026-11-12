@@ -95,6 +95,9 @@ route_test_fib(yanet_error **err) {
 	if (rc != 0) {
 		goto error_table;
 	}
+	if (route_fib_build(&fuzz_fib.fib) != 0) {
+		goto error_table;
+	}
 
 	// The handler resolves the link's counter storage on every batch, so
 	// the link needs one spawned from the object's registry.

@@ -4,8 +4,8 @@
 #include "numutils.h"
 #include "radix.h"
 
+#include "fast_lpm_build.h"
 #include "key.h"
-#include "lpm.h"
 
 #include <strings.h>
 
@@ -117,6 +117,9 @@ range_index_free(struct range_index *range_index) {
 	radix_free(&range_index->radix);
 }
 
+// The value of a range left out of an LPM built from a range index.
+#define RANGE_INDEX_VALUE_NONE UINT32_MAX
+
 /*
  * Build an LPM from a range_index.
  *
@@ -124,12 +127,13 @@ range_index_free(struct range_index *range_index) {
  * of the full keyspace: radix maps each range-start key -> an index into the
  * values[] array.  This function walks the radix in ascending order, derives
  * each range's upper bound from the next key, and inserts [from..to] -> value
- * into the LPM.  The LPM must already be initialised by the caller.
+ * into the LPM, then builds it.  The LPM must be initialised by the caller
+ * and must not be built yet.
  */
 struct range_index_lpm_ctx {
-	struct lpm *lpm;
+	struct fast_lpm *lpm;
 	const uint32_t *values;
-	uint8_t prev_from[LPM_KEY_SIZE_MAX];
+	uint8_t prev_from[FAST_LPM_KEY_SIZE_MAX];
 	uint32_t prev_value;
 };
 
@@ -139,16 +143,12 @@ range_index_lpm_cb(
 ) {
 	struct range_index_lpm_ctx *ctx = (struct range_index_lpm_ctx *)data;
 
-	if (ctx->prev_value != LPM_VALUE_INVALID) {
+	if (ctx->prev_value != RANGE_INDEX_VALUE_NONE) {
 		uint8_t to[key_size];
 		memcpy(to, from, key_size);
 		filter_key_dec(key_size, to);
-		if (lpm_insert(
-			    ctx->lpm,
-			    key_size,
-			    ctx->prev_from,
-			    to,
-			    ctx->prev_value
+		if (fast_lpm_insert(
+			    ctx->lpm, ctx->prev_from, to, ctx->prev_value
 		    )) {
 			return -1;
 		}
@@ -164,21 +164,21 @@ range_index_lpm_cb(
  *
  * The caller values are indexed like the stored ones and hold at least
  * one entry per range of the index: every range receives the caller
- * value at its index instead of the stored value. LPM_VALUE_INVALID is
- * not a valid value: the walk marks the absence of a previous range
- * with it, so a range carrying it is left out of the LPM.
+ * value at its index instead of the stored value. A range carrying the
+ * all-ones value is left out of the LPM, which maps its keys to the
+ * invalid value; any other value must be below the invalid value.
  */
 static inline int
 range_index_build_lpm_values(
 	const struct range_index *range_index,
 	uint8_t key_size,
 	const uint32_t *values,
-	struct lpm *lpm
+	struct fast_lpm *lpm
 ) {
 	struct range_index_lpm_ctx ctx;
 	ctx.lpm = lpm;
 	ctx.values = values;
-	ctx.prev_value = LPM_VALUE_INVALID;
+	ctx.prev_value = RANGE_INDEX_VALUE_NONE;
 
 	if (radix_walk(
 		    &range_index->radix, key_size, range_index_lpm_cb, &ctx
@@ -186,22 +186,22 @@ range_index_build_lpm_values(
 		return -1;
 	}
 
-	if (ctx.prev_value != LPM_VALUE_INVALID) {
+	if (ctx.prev_value != RANGE_INDEX_VALUE_NONE) {
 		uint8_t to[key_size];
 		memset(to, 0xff, key_size);
-		if (lpm_insert(
-			    lpm, key_size, ctx.prev_from, to, ctx.prev_value
-		    )) {
+		if (fast_lpm_insert(lpm, ctx.prev_from, to, ctx.prev_value)) {
 			return -1;
 		}
 	}
 
-	return 0;
+	return fast_lpm_build(lpm);
 }
 
 static inline int
 range_index_build_lpm(
-	const struct range_index *range_index, uint8_t key_size, struct lpm *lpm
+	const struct range_index *range_index,
+	uint8_t key_size,
+	struct fast_lpm *lpm
 ) {
 	return range_index_build_lpm_values(
 		range_index, key_size, ADDR_OF(&range_index->values), lpm

@@ -36,7 +36,7 @@ func (m *backend) Update(name string, payload PrefixSets) (crud.Handle, error) {
 				return fmt.Errorf("failed to add prefix %v: %w", prefix, err)
 			}
 		}
-		return nil
+		return module.Build()
 	}
 	if err := crud.PublishModule(m.agent, module, build); err != nil {
 		return nil, err

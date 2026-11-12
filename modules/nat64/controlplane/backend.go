@@ -52,7 +52,7 @@ func (m *backend) Update(name string, config *NAT64Config) (crud.Handle, error) 
 		if err := module.SetMTU(config.MTU.IPv4MTU, config.MTU.IPv6MTU); err != nil {
 			return fmt.Errorf("failed to set MTU: %w", err)
 		}
-		return nil
+		return module.Build()
 	}
 	if err := crud.PublishModule(m.agent, module, build); err != nil {
 		return nil, err

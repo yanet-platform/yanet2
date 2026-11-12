@@ -263,6 +263,9 @@ func buildFIB(fib *croute.FIBObject, devices []string, entries []*routepb.FIBEnt
 			return fmt.Errorf("failed to add range [%s, %s]: %w", start, end, err)
 		}
 	}
+	if err := fib.Build(); err != nil {
+		return fmt.Errorf("failed to build the table: %w", err)
+	}
 	return nil
 }
 

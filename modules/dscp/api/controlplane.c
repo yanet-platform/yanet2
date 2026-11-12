@@ -1,10 +1,11 @@
 #include <errno.h>
+#include <string.h>
 
-#include "common/lpm.h"
 #include "config.h"
 #include "controlplane.h"
 
 #include "common/container_of.h"
+#include "common/fast_lpm_build.h"
 #include "common/memory_address.h"
 #include "common/strutils.h"
 #include "lib/errors/errors.h"
@@ -96,30 +97,34 @@ int
 dscp_module_config_data_init(
 	struct dscp_module_config *config, struct memory_context *memory_context
 ) {
-	if (lpm_init(&config->source_lpm_v4, memory_context, "source_lpm_v4")) {
-		return -1;
-	}
-	if (lpm_init(&config->source_lpm_v6, memory_context, "source_lpm_v6")) {
-		lpm_free(&config->source_lpm_v4);
-		return -1;
-	}
-	if (lpm_init(
+	// A failed init leaves the other prefix sets safe to free.
+	memset(&config->source_lpm_v4, 0, sizeof(config->source_lpm_v4));
+	memset(&config->source_lpm_v6, 0, sizeof(config->source_lpm_v6));
+	memset(&config->destination_lpm_v4,
+	       0,
+	       sizeof(config->destination_lpm_v4));
+	memset(&config->destination_lpm_v6,
+	       0,
+	       sizeof(config->destination_lpm_v6));
+	if (fast_lpm_init(
+		    &config->source_lpm_v4, memory_context, "source_lpm_v4", 4
+	    ) ||
+	    fast_lpm_init(
+		    &config->source_lpm_v6, memory_context, "source_lpm_v6", 16
+	    ) ||
+	    fast_lpm_init(
 		    &config->destination_lpm_v4,
 		    memory_context,
-		    "destination_lpm_v4"
-	    )) {
-		lpm_free(&config->source_lpm_v6);
-		lpm_free(&config->source_lpm_v4);
-		return -1;
-	}
-	if (lpm_init(
+		    "destination_lpm_v4",
+		    4
+	    ) ||
+	    fast_lpm_init(
 		    &config->destination_lpm_v6,
 		    memory_context,
-		    "destination_lpm_v6"
+		    "destination_lpm_v6",
+		    16
 	    )) {
-		lpm_free(&config->destination_lpm_v4);
-		lpm_free(&config->source_lpm_v6);
-		lpm_free(&config->source_lpm_v4);
+		dscp_module_config_data_fini(config);
 		return -1;
 	}
 
@@ -134,10 +139,10 @@ dscp_module_config_data_init(
 
 void
 dscp_module_config_data_fini(struct dscp_module_config *config) {
-	lpm_free(&config->source_lpm_v4);
-	lpm_free(&config->source_lpm_v6);
-	lpm_free(&config->destination_lpm_v4);
-	lpm_free(&config->destination_lpm_v6);
+	fast_lpm_free(&config->source_lpm_v4);
+	fast_lpm_free(&config->source_lpm_v6);
+	fast_lpm_free(&config->destination_lpm_v4);
+	fast_lpm_free(&config->destination_lpm_v6);
 }
 
 int
@@ -147,8 +152,9 @@ dscp_module_config_add_source_prefix_v4(
 	struct dscp_module_config *config =
 		container_of(module, struct dscp_module_config, cp_module);
 
-	int result =
-		lpm_insert(&config->source_lpm_v4, 4, addr_start, addr_end, 1);
+	int result = fast_lpm_insert(
+		&config->source_lpm_v4, addr_start, addr_end, 1
+	);
 	if (result == 0) {
 		config->has_source_prefixes = 1;
 	}
@@ -162,8 +168,9 @@ dscp_module_config_add_source_prefix_v6(
 	struct dscp_module_config *config =
 		container_of(module, struct dscp_module_config, cp_module);
 
-	int result =
-		lpm_insert(&config->source_lpm_v6, 16, addr_start, addr_end, 1);
+	int result = fast_lpm_insert(
+		&config->source_lpm_v6, addr_start, addr_end, 1
+	);
 	if (result == 0) {
 		config->has_source_prefixes = 1;
 	}
@@ -177,8 +184,8 @@ dscp_module_config_add_destination_prefix_v4(
 	struct dscp_module_config *config =
 		container_of(module, struct dscp_module_config, cp_module);
 
-	int result = lpm_insert(
-		&config->destination_lpm_v4, 4, addr_start, addr_end, 1
+	int result = fast_lpm_insert(
+		&config->destination_lpm_v4, addr_start, addr_end, 1
 	);
 	if (result == 0) {
 		config->has_destination_prefixes = 1;
@@ -193,8 +200,8 @@ dscp_module_config_add_destination_prefix_v6(
 	struct dscp_module_config *config =
 		container_of(module, struct dscp_module_config, cp_module);
 
-	int result = lpm_insert(
-		&config->destination_lpm_v6, 16, addr_start, addr_end, 1
+	int result = fast_lpm_insert(
+		&config->destination_lpm_v6, addr_start, addr_end, 1
 	);
 	if (result == 0) {
 		config->has_destination_prefixes = 1;
@@ -212,5 +219,18 @@ dscp_module_config_set_dscp_marking(
 	config->dscp.flag = flag;
 	config->dscp.mark = mark;
 
+	return 0;
+}
+
+int
+dscp_module_config_build(struct cp_module *module) {
+	struct dscp_module_config *config =
+		container_of(module, struct dscp_module_config, cp_module);
+	if (fast_lpm_build(&config->source_lpm_v4) ||
+	    fast_lpm_build(&config->source_lpm_v6) ||
+	    fast_lpm_build(&config->destination_lpm_v4) ||
+	    fast_lpm_build(&config->destination_lpm_v6)) {
+		return -1;
+	}
 	return 0;
 }

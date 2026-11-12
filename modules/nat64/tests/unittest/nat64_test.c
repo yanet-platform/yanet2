@@ -301,6 +301,9 @@ nat64_test_config(struct nat64_module_config *module_config) {
 			goto error_add;
 		}
 	}
+	if (nat64_module_config_build(&module_config->cp_module)) {
+		goto error_add;
+	}
 
 	LOG_DBG(NAT64_TEST,
 		"NAT64 module configured successfully\n"

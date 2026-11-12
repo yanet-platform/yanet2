@@ -3,15 +3,17 @@
 #include <string.h>
 
 #include "common/exp_array.h"
+#include "common/fast_lpm_build.h"
 #include "common/memory_address.h"
 
 int
 route_fib_init(struct route_fib *fib, struct memory_context *memory_context) {
-	if (lpm_init(&fib->lpm_v4, memory_context, "lpm_v4")) {
-		return -1;
-	}
-	if (lpm_init(&fib->lpm_v6, memory_context, "lpm_v6")) {
-		lpm_free(&fib->lpm_v4);
+	// A failed init leaves the other tree safe to free.
+	memset(&fib->lpm_v6, 0, sizeof(fib->lpm_v6));
+	if (fast_lpm_init(&fib->lpm_v4, memory_context, "lpm_v4", 4) ||
+	    fast_lpm_init(&fib->lpm_v6, memory_context, "lpm_v6", 16)) {
+		fast_lpm_free(&fib->lpm_v4);
+		fast_lpm_free(&fib->lpm_v6);
 		return -1;
 	}
 
@@ -50,8 +52,8 @@ route_fib_fini(struct route_fib *fib, struct memory_context *memory_context) {
 		fib->route_index_count
 	);
 
-	lpm_free(&fib->lpm_v6);
-	lpm_free(&fib->lpm_v4);
+	fast_lpm_free(&fib->lpm_v6);
+	fast_lpm_free(&fib->lpm_v4);
 }
 
 int
@@ -139,7 +141,7 @@ route_fib_add_prefix_v4(
 	const uint8_t *to,
 	uint32_t route_list_index
 ) {
-	return lpm_insert(&fib->lpm_v4, 4, from, to, route_list_index);
+	return fast_lpm_insert(&fib->lpm_v4, from, to, route_list_index);
 }
 
 int
@@ -149,22 +151,25 @@ route_fib_add_prefix_v6(
 	const uint8_t *to,
 	uint32_t route_list_index
 ) {
-	return lpm_insert(&fib->lpm_v6, 16, from, to, route_list_index);
+	return fast_lpm_insert(&fib->lpm_v6, from, to, route_list_index);
+}
+
+int
+route_fib_build(struct route_fib *fib) {
+	if (fast_lpm_build(&fib->lpm_v4) || fast_lpm_build(&fib->lpm_v6)) {
+		return -1;
+	}
+	return 0;
 }
 
 // Counts the LPM ranges over the whole key space of the given tree.
 static uint64_t
-route_lpm_range_count(const struct lpm *lpm, uint8_t key_size) {
-	uint8_t from[LPM_KEY_SIZE_MAX];
-	uint8_t to[LPM_KEY_SIZE_MAX];
-	memset(from, 0x00, key_size);
-	memset(to, 0xff, key_size);
-
-	struct lpm_iter it;
-	lpm_iter_init(&it, lpm, key_size, from, to);
+route_lpm_range_count(const struct fast_lpm *lpm) {
+	struct fast_lpm_iter it;
+	fast_lpm_iter_init(&it, lpm);
 
 	uint64_t count = 0;
-	while (lpm_iter_next(&it)) {
+	while (fast_lpm_iter_next(&it)) {
 		++count;
 	}
 
@@ -173,12 +178,12 @@ route_lpm_range_count(const struct lpm *lpm, uint8_t key_size) {
 
 uint64_t
 route_fib_range_count_v4(const struct route_fib *fib) {
-	return route_lpm_range_count(&fib->lpm_v4, 4);
+	return route_lpm_range_count(&fib->lpm_v4);
 }
 
 uint64_t
 route_fib_range_count_v6(const struct route_fib *fib) {
-	return route_lpm_range_count(&fib->lpm_v6, 16);
+	return route_lpm_range_count(&fib->lpm_v6);
 }
 
 uint64_t
@@ -230,28 +235,22 @@ route_fib_iter_next(struct route_fib_iter *it) {
 	}
 
 	if (it->phase == route_fib_iter_phase_start) {
-		uint8_t from[4] = {0, 0, 0, 0};
-		uint8_t to[4] = {0xff, 0xff, 0xff, 0xff};
-		lpm_iter_init(&it->lpm_it, &it->fib->lpm_v4, 4, from, to);
+		fast_lpm_iter_init(&it->lpm_it, &it->fib->lpm_v4);
 		it->phase = route_fib_iter_phase_ipv4;
 	}
 
 	if (it->phase == route_fib_iter_phase_ipv4) {
-		if (lpm_iter_next(&it->lpm_it)) {
+		if (fast_lpm_iter_next(&it->lpm_it)) {
 			return true;
 		}
 
 		// IPv4 exhausted, start IPv6.
-		uint8_t from[16];
-		uint8_t to[16];
-		memset(from, 0x00, 16);
-		memset(to, 0xff, 16);
-		lpm_iter_init(&it->lpm_it, &it->fib->lpm_v6, 16, from, to);
+		fast_lpm_iter_init(&it->lpm_it, &it->fib->lpm_v6);
 		it->phase = route_fib_iter_phase_ipv6;
 	}
 
 	if (it->phase == route_fib_iter_phase_ipv6) {
-		if (lpm_iter_next(&it->lpm_it)) {
+		if (fast_lpm_iter_next(&it->lpm_it)) {
 			return true;
 		}
 

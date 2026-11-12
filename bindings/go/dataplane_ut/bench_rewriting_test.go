@@ -224,6 +224,7 @@ func stripTunnel(t *testing.T) func(agent *ffi.Agent) ffi.ChainModuleConfig {
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = decap.Free() })
 		require.NoError(t, decap.PrefixAdd(netip.PrefixFrom(tunnelEndpoint, 32)))
+		require.NoError(t, decap.Build())
 		require.NoError(t, agent.UpdateModules(
 			[]ffi.ModuleConfig{decap.AsFFIModule()},
 		))

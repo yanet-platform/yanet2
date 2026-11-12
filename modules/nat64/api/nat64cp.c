@@ -12,7 +12,7 @@
 /* Common headers */
 #include "common/container_of.h"
 #include "common/exp_array.h"
-#include "common/lpm.h"
+#include "common/fast_lpm_build.h"
 #include "common/memory_address.h"
 #include "common/strutils.h"
 #include "lib/errors/errors.h"
@@ -144,23 +144,31 @@ nat64_module_config_data_init(
 	struct nat64_module_config *config,
 	struct memory_context *memory_context
 ) {
-	// Initialize LPM structures
-	if (lpm_init(&config->mappings.v4_to_v6, memory_context, "v4_to_v6")) {
-		LOG(ERROR, "Failed to initialize v4_to_v6 LPM");
-		goto error_lpm_v4;
-	}
-
-	if (lpm_init(&config->mappings.v6_to_v4, memory_context, "v6_to_v4")) {
-		LOG(ERROR, "Failed to initialize v6_to_v4 LPM");
-		goto error_lpm_v6;
-	}
-
-	// Initialize v6 prefixes LPM
-	if (lpm_init(
-		    &config->prefixes.v6_prefixes, memory_context, "v6_prefixes"
+	// A failed init leaves the other tables safe to free.
+	memset(&config->mappings.v4_to_v6, 0, sizeof(config->mappings.v4_to_v6)
+	);
+	memset(&config->mappings.v6_to_v4, 0, sizeof(config->mappings.v6_to_v4)
+	);
+	memset(&config->prefixes.v6_prefixes,
+	       0,
+	       sizeof(config->prefixes.v6_prefixes));
+	if (fast_lpm_init(
+		    &config->mappings.v4_to_v6, memory_context, "v4_to_v6", 4
+	    ) ||
+	    fast_lpm_init(
+		    &config->mappings.v6_to_v4, memory_context, "v6_to_v4", 16
+	    ) ||
+	    fast_lpm_init(
+		    &config->prefixes.v6_prefixes,
+		    memory_context,
+		    "v6_prefixes",
+		    12
 	    )) {
-		LOG(ERROR, "Failed to initialize v6_prefixes LPM");
-		goto error_lpm_prefixes;
+		LOG(ERROR, "Failed to initialize LPM tables");
+		fast_lpm_free(&config->mappings.v4_to_v6);
+		fast_lpm_free(&config->mappings.v6_to_v4);
+		fast_lpm_free(&config->prefixes.v6_prefixes);
+		return -1;
 	}
 
 	// Initialize other fields
@@ -176,14 +184,6 @@ nat64_module_config_data_init(
 	config->stats.malformed_packets = 0;
 
 	return 0;
-
-error_lpm_prefixes:
-	lpm_free(&config->mappings.v6_to_v4);
-error_lpm_v6:
-	lpm_free(&config->mappings.v4_to_v6);
-error_lpm_v4:
-
-	return -1;
 }
 
 void
@@ -191,9 +191,9 @@ nat64_module_config_data_destroy(
 	struct nat64_module_config *config,
 	struct memory_context *memory_context
 ) {
-	lpm_free(&config->mappings.v4_to_v6);
-	lpm_free(&config->mappings.v6_to_v4);
-	lpm_free(&config->prefixes.v6_prefixes);
+	fast_lpm_free(&config->mappings.v4_to_v6);
+	fast_lpm_free(&config->mappings.v6_to_v4);
+	fast_lpm_free(&config->prefixes.v6_prefixes);
 
 	if (config->mappings.list) {
 		struct ip4to6 *mapping_list = ADDR_OF(&config->mappings.list);
@@ -254,28 +254,24 @@ nat64_module_config_add_mapping(
 
 	// Add to LPM structures
 	// First try to insert into v6_to_v4
-	if (lpm_insert(
+	if (fast_lpm_insert(
 		    &config->mappings.v6_to_v4,
-		    16,
 		    ip6,
 		    ip6,
 		    config->mappings.count - 1
 	    )) {
 		LOG(ERROR, "Failed to insert mapping into v6_to_v4 LPM");
-		errno = ENOMEM;
 		return -1;
 	}
 
 	// Then insert into v4_to_v6
-	if (lpm_insert(
+	if (fast_lpm_insert(
 		    &config->mappings.v4_to_v6,
-		    4,
 		    (uint8_t *)&ip4,
 		    (uint8_t *)&ip4,
 		    config->mappings.count - 1
 	    )) {
 		LOG(ERROR, "Failed to insert mapping into v4_to_v6 LPM");
-		errno = ENOMEM;
 		return -1;
 	}
 
@@ -313,15 +309,13 @@ nat64_module_config_add_prefix(
 	SET_OFFSET_OF(&config->prefixes.prefixes, prefixes);
 
 	// Add to LPM structure
-	if (lpm_insert(
+	if (fast_lpm_insert(
 		    &config->prefixes.v6_prefixes,
-		    12,
 		    prefix,
 		    prefix,
 		    config->prefixes.count - 1
 	    )) {
 		LOG(ERROR, "Failed to insert prefix into v6_prefixes LPM");
-		errno = ENOMEM;
 		return -1;
 	}
 
@@ -389,5 +383,18 @@ nat64_module_config_set_mtu(
 	    ipv4_mtu,
 	    ipv6_mtu);
 
+	return 0;
+}
+
+int
+nat64_module_config_build(struct cp_module *cp_module) {
+	struct nat64_module_config *config =
+		container_of(cp_module, struct nat64_module_config, cp_module);
+	if (fast_lpm_build(&config->mappings.v4_to_v6) ||
+	    fast_lpm_build(&config->mappings.v6_to_v4) ||
+	    fast_lpm_build(&config->prefixes.v6_prefixes)) {
+		LOG(ERROR, "Failed to build LPM tables");
+		return -1;
+	}
 	return 0;
 }

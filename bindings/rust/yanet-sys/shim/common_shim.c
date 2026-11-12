@@ -1,30 +1,37 @@
 #include "common_shim.h"
 
-#include "common/lpm.h"
+#include "common/fast_lpm_build.h"
 #include "common/memory.h"
 #include "common/memory_block.h"
 
 int
 yanet_sys_common_lpm_init(
-	struct lpm *lpm, struct memory_context *memory_context, const char *name
+	struct fast_lpm *lpm,
+	struct memory_context *memory_context,
+	const char *name,
+	uint8_t key_size
 ) {
-	return lpm_init(lpm, memory_context, name);
+	return fast_lpm_init(lpm, memory_context, name, key_size);
 }
 
 int
 yanet_sys_common_lpm_insert(
-	struct lpm *lpm,
-	uint8_t key_size,
+	struct fast_lpm *lpm,
 	const uint8_t *from,
 	const uint8_t *to,
 	uint32_t value
 ) {
-	return lpm_insert(lpm, key_size, from, to, value);
+	return fast_lpm_insert(lpm, from, to, value);
+}
+
+int
+yanet_sys_common_lpm_build(struct fast_lpm *lpm) {
+	return fast_lpm_build(lpm);
 }
 
 void
-yanet_sys_common_lpm_free(struct lpm *lpm) {
-	lpm_free(lpm);
+yanet_sys_common_lpm_free(struct fast_lpm *lpm) {
+	fast_lpm_free(lpm);
 }
 
 void *

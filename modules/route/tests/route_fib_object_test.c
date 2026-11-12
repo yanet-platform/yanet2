@@ -89,6 +89,7 @@ run_table_walk_test(struct yanet_shm *shm) {
 		),
 		"add_prefix_v6 failed"
 	);
+	TEST_ASSERT_SUCCESS(route_fib_object_build(obj), "build failed");
 
 	const struct route_fib *fib = route_fib_object_fib(obj);
 	TEST_ASSERT_EQUAL(

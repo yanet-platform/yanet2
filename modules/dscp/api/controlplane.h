@@ -54,6 +54,13 @@ dscp_module_config_add_destination_prefix_v6(
 	struct cp_module *module, uint8_t *addr_start, uint8_t *addr_end
 );
 
+// Compiles the added prefixes; the config takes no prefixes afterwards.
+//
+// Publish the config only after a successful build: before it a selection
+// that has prefixes matches no address.
+int
+dscp_module_config_build(struct cp_module *module);
+
 // Set DSCP marking options for the module
 int
 dscp_module_config_set_dscp_marking(

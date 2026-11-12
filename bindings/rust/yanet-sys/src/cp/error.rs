@@ -21,6 +21,9 @@ pub enum Refusal {
     /// A range that ends before it starts, of an LPM or of a classifier's
     /// rule; `YANET_ERROR_INVALID_ARGUMENT`.
     InvalidRange,
+    /// An LPM value at or above the invalid value, `0x7fffffff`, which the C
+    /// table cannot hold; `YANET_ERROR_INVALID_ARGUMENT`.
+    InvalidValue,
     /// A network mask of a classifier's rule that is not contiguous (for
     /// IPv6, in each 64-bit half), which the C compile would read as another
     /// network; `YANET_ERROR_INVALID_ARGUMENT`.
@@ -64,6 +67,7 @@ impl Refusal {
             Self::OutOfMemory => "the shared memory is exhausted",
             Self::BlockTooLarge => "an owned block larger than the largest block of the allocator",
             Self::InvalidRange => "a range ends before it starts",
+            Self::InvalidValue => "an LPM value at or above the invalid value",
             Self::InvalidMask => "a network mask is not contiguous",
             Self::TooManyItems => "more items than C counts",
             Self::RuleSetMismatch => "a join or a decode over rulesets of different sizes",
@@ -80,6 +84,7 @@ impl Refusal {
             Self::OutOfMemory => bindings::yanet_error_kind_YANET_ERROR_RESOURCE_EXHAUSTED,
             Self::BlockTooLarge
             | Self::InvalidRange
+            | Self::InvalidValue
             | Self::InvalidMask
             | Self::TooManyItems
             | Self::RuleSetMismatch

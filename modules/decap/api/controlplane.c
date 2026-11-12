@@ -1,10 +1,12 @@
 #include <errno.h>
+#include <string.h>
 
 #include "controlplane.h"
 
 #include "config.h"
 
 #include "common/container_of.h"
+#include "common/fast_lpm_build.h"
 #include "common/memory_address.h"
 #include "common/strutils.h"
 #include "lib/errors/errors.h"
@@ -96,25 +98,24 @@ decap_module_config_data_init(
 	struct decap_module_config *config,
 	struct memory_context *memory_context
 ) {
-	if (lpm_init(&config->prefixes4, memory_context, "prefixes4")) {
+	// A failed init leaves the other prefix set safe to free.
+	memset(&config->prefixes4, 0, sizeof(config->prefixes4));
+	memset(&config->prefixes6, 0, sizeof(config->prefixes6));
+	if (fast_lpm_init(&config->prefixes4, memory_context, "prefixes4", 4) ||
+	    fast_lpm_init(
+		    &config->prefixes6, memory_context, "prefixes6", 16
+	    )) {
+		decap_module_config_data_fini(config);
 		return -1;
-	}
-	if (lpm_init(&config->prefixes6, memory_context, "prefixes6")) {
-		goto error_lpm_v6;
 	}
 
 	return 0;
-
-error_lpm_v6:
-	lpm_free(&config->prefixes4);
-
-	return -1;
 }
 
 void
 decap_module_config_data_fini(struct decap_module_config *config) {
-	lpm_free(&config->prefixes4);
-	lpm_free(&config->prefixes6);
+	fast_lpm_free(&config->prefixes4);
+	fast_lpm_free(&config->prefixes6);
 }
 
 int
@@ -123,7 +124,7 @@ decap_module_config_add_prefix_v4(
 ) {
 	struct decap_module_config *config =
 		container_of(cp_module, struct decap_module_config, cp_module);
-	return lpm_insert(&config->prefixes4, 4, from, to, 1);
+	return fast_lpm_insert(&config->prefixes4, from, to, 1);
 }
 
 int
@@ -132,5 +133,16 @@ decap_module_config_add_prefix_v6(
 ) {
 	struct decap_module_config *config =
 		container_of(cp_module, struct decap_module_config, cp_module);
-	return lpm_insert(&config->prefixes6, 16, from, to, 1);
+	return fast_lpm_insert(&config->prefixes6, from, to, 1);
+}
+
+int
+decap_module_config_build(struct cp_module *cp_module) {
+	struct decap_module_config *config =
+		container_of(cp_module, struct decap_module_config, cp_module);
+	if (fast_lpm_build(&config->prefixes4) ||
+	    fast_lpm_build(&config->prefixes6)) {
+		return -1;
+	}
+	return 0;
 }

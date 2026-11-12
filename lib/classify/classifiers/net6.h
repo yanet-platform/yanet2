@@ -1,6 +1,6 @@
 #pragma once
 
-#include "common/lpm.h"
+#include "common/fast_lpm.h"
 #include "common/network.h"
 #include "common/value.h"
 
@@ -28,8 +28,8 @@ struct classify_attr_net6 {
 	// The high half trie value is the final result class, or the dense
 	// join table row behind FILTER_NET6_ROW_MARK; the table itself
 	// holds only the rows referenced from the marked values.
-	struct lpm hi;
-	struct lpm lo;
+	struct fast_lpm hi;
+	struct fast_lpm lo;
 	struct value_table comb;
 };
 
@@ -41,8 +41,8 @@ classify_attr_net6_free(
 ) {
 	(void)memory_context;
 
-	lpm_free(&attr->hi);
-	lpm_free(&attr->lo);
+	fast_lpm_free(&attr->hi);
+	fast_lpm_free(&attr->lo);
 	value_table_free(&attr->comb);
 	memset(attr, 0, sizeof(*attr));
 }
@@ -65,12 +65,12 @@ classify_net6_lookup(
 ) {
 	for (uint32_t idx = 0; idx < count; ++idx) {
 		const uint8_t *addr = addrs + idx * NET6_LEN;
-		uint32_t hi = lpm8_lookup(&attr->hi, addr);
+		uint32_t hi = fast_lpm8_lookup(&attr->hi, addr);
 		if (!(hi & FILTER_NET6_ROW_MARK)) {
 			results[idx] = hi;
 			continue;
 		}
-		uint32_t lo = lpm8_lookup(&attr->lo, addr + 8);
+		uint32_t lo = fast_lpm8_lookup(&attr->lo, addr + 8);
 		results[idx] = *value_table_get_ptr(
 			&attr->comb, hi & ~FILTER_NET6_ROW_MARK, lo
 		);

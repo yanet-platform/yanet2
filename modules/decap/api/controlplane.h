@@ -39,3 +39,10 @@ int
 decap_module_config_add_prefix_v6(
 	struct cp_module *cp_module, const uint8_t *from, const uint8_t *to
 );
+
+// Compiles the added prefixes; the config takes no prefixes afterwards.
+//
+// Publish the config only after a successful build: before it the config
+// matches no address.
+int
+decap_module_config_build(struct cp_module *cp_module);

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "common/lpm.h"
+#include "common/fast_lpm.h"
 #include "common/value.h"
 
 #include "lib/classify/classify.h"
@@ -15,7 +15,7 @@
  * dies with the consumer through the free below.
  */
 struct classify_attr_net4 {
-	struct lpm lpm;
+	struct fast_lpm lpm;
 };
 
 // Releases the internals of an embedded IPv4 network classifier and
@@ -26,7 +26,7 @@ classify_attr_net4_free(
 ) {
 	(void)memory_context;
 
-	lpm_free(&attr->lpm);
+	fast_lpm_free(&attr->lpm);
 	memset(attr, 0, sizeof(*attr));
 }
 
@@ -45,7 +45,8 @@ classify_net4_lookup(
 	uint32_t count
 ) {
 	for (uint32_t idx = 0; idx < count; ++idx) {
-		results[idx] =
-			lpm4_lookup(&attr->lpm, (const uint8_t *)(addrs + idx));
+		results[idx] = fast_lpm4_lookup(
+			&attr->lpm, (const uint8_t *)(addrs + idx)
+		);
 	}
 }

@@ -152,7 +152,7 @@ range_collector_stack_push(
 		struct range_collector_stack_item item =
 			range_collector_stack_last(ctx, key_size);
 		if (filter_key_cmp(key_size, to, item.to) == 0) {
-			*item.value = LPM_VALUE_INVALID;
+			*item.value = RANGE_INDEX_VALUE_NONE;
 			return;
 		}
 	}
@@ -160,7 +160,7 @@ range_collector_stack_push(
 	++ctx->stack_depth;
 	struct range_collector_stack_item item =
 		range_collector_stack_last(ctx, key_size);
-	*item.value = LPM_VALUE_INVALID;
+	*item.value = RANGE_INDEX_VALUE_NONE;
 	memcpy(item.to, to, key_size);
 }
 
@@ -171,7 +171,7 @@ range_collector_stack_emit(
 	struct range_collector_stack_item item =
 		range_collector_stack_last(ctx, key_size);
 
-	if (*item.value == LPM_VALUE_INVALID) {
+	if (*item.value == RANGE_INDEX_VALUE_NONE) {
 		*item.value = ctx->max_value++;
 	}
 

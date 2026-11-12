@@ -134,8 +134,8 @@ find_ip6to4(struct nat64_module_config *config, uint8_t *ip6) {
 	}
 
 	// Search for a match in the LPM table
-	uint32_t index = lpm_lookup(&config->mappings.v6_to_v4, 16, ip6);
-	if (index == LPM_VALUE_INVALID) {
+	uint32_t index = fast_lpm_lookup(&config->mappings.v6_to_v4, 16, ip6);
+	if (index == FAST_LPM_VALUE_INVALID) {
 		return NULL;
 	}
 
@@ -187,8 +187,8 @@ find_ip4to6(struct nat64_module_config *config, uint32_t *ip4) {
 
 	// Search for a match in the LPM table
 	uint32_t index =
-		lpm_lookup(&config->mappings.v4_to_v6, 4, (uint8_t *)ip4);
-	if (index == LPM_VALUE_INVALID) {
+		fast_lpm_lookup(&config->mappings.v4_to_v6, 4, (uint8_t *)ip4);
+	if (index == FAST_LPM_VALUE_INVALID) {
 		return NULL;
 	}
 
@@ -1793,12 +1793,12 @@ nat64_handle_v6(
 			"not found mapping for " IPv6_BYTES_FMT "\n",
 			IPv6_BYTES(ipv6_header->src_addr));
 		if (nat64_config->prefixes.drop_unknown_prefix) {
-			uint32_t prefix_index = lpm_lookup(
+			uint32_t prefix_index = fast_lpm_lookup(
 				&nat64_config->prefixes.v6_prefixes,
 				12,
 				(uint8_t *)&ipv6_header->src_addr
 			);
-			if (prefix_index == LPM_VALUE_INVALID) {
+			if (prefix_index == FAST_LPM_VALUE_INVALID) {
 				LOG_DBG(NAT64,
 					"Dropping packet due to unknown IPv6 "
 					"prefix\n");

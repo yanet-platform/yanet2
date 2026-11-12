@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "common/lpm.h"
+#include "common/fast_lpm.h"
 #include "common/network.h"
 
 #include "modules/route/dataplane/fib.h"
@@ -65,6 +65,13 @@ route_fib_add_prefix_v6(
 	uint32_t route_list_index
 );
 
+// Compiles the added prefixes; the table takes no prefixes afterwards.
+//
+// Publish the table only after a successful build: before it no
+// destination has a route.
+int
+route_fib_build(struct route_fib *fib);
+
 // Count the IPv4 ranges a walk of the table would yield, without
 // materializing them.
 uint64_t
@@ -100,7 +107,7 @@ enum route_fib_iter_phase {
 // in place from shared memory.
 struct route_fib_iter {
 	const struct route_fib *fib;
-	struct lpm_iter lpm_it;
+	struct fast_lpm_iter lpm_it;
 	enum route_fib_iter_phase phase;
 };
 

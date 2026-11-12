@@ -1,6 +1,6 @@
 #pragma once
 
-#include "common/lpm.h"
+#include "common/fast_lpm.h"
 #include "declare.h"
 #include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/packet/packet.h"
@@ -14,7 +14,7 @@ static inline void
 FILTER_ATTR_QUERY_FUNC(net4_src)(
 	void *data, struct packet **packets, uint32_t *result, uint32_t count
 ) {
-	struct lpm *lpm = (struct lpm *)data;
+	struct fast_lpm *lpm = (struct fast_lpm *)data;
 
 	for (uint32_t idx = 0; idx < count; ++idx) {
 		struct rte_mbuf *mbuf = packet_to_mbuf(packets[idx]);
@@ -23,7 +23,8 @@ FILTER_ATTR_QUERY_FUNC(net4_src)(
 			struct rte_ipv4_hdr *,
 			packets[idx]->network_header.offset
 		);
-		result[idx] = lpm4_lookup(lpm, (uint8_t *)&ipv4_hdr->src_addr);
+		result[idx] =
+			fast_lpm4_lookup(lpm, (uint8_t *)&ipv4_hdr->src_addr);
 	}
 }
 
@@ -31,7 +32,7 @@ static inline void
 FILTER_ATTR_QUERY_FUNC(net4_dst)(
 	void *data, struct packet **packets, uint32_t *result, uint32_t count
 ) {
-	struct lpm *lpm = (struct lpm *)data;
+	struct fast_lpm *lpm = (struct fast_lpm *)data;
 
 	for (uint32_t idx = 0; idx < count; ++idx) {
 		struct rte_mbuf *mbuf = packet_to_mbuf(packets[idx]);
@@ -40,6 +41,7 @@ FILTER_ATTR_QUERY_FUNC(net4_dst)(
 			struct rte_ipv4_hdr *,
 			packets[idx]->network_header.offset
 		);
-		result[idx] = lpm4_lookup(lpm, (uint8_t *)&ipv4_hdr->dst_addr);
+		result[idx] =
+			fast_lpm4_lookup(lpm, (uint8_t *)&ipv4_hdr->dst_addr);
 	}
 }

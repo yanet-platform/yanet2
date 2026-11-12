@@ -1,6 +1,6 @@
 //! LPM lookup over the block arena, under Miri.
 //!
-//! The LPM is laid out by hand as the C insert lays it out.
+//! The trie is laid out by hand as the C build lays it out.
 
 use core::mem::{offset_of, size_of};
 
@@ -10,77 +10,139 @@ use netip as _;
 use yanet_packet as _;
 use yanet_sdk_testing::{BlockArena, View};
 use yanet_shm as _;
-use yanet_sys::{bindings, common::lpm::Lpm4};
+use yanet_sys::{
+    bindings,
+    common::lpm::{Lpm4, Lpm6},
+};
 
-fn write(arena: &'static BlockArena, addr: usize, value: u64) {
+fn write<T>(arena: &'static BlockArena, addr: usize, value: T) {
     // SAFETY: a word of a live block of the arena; nothing references it.
-    unsafe { arena.root().ptr::<u64>(addr).write(value) }
+    unsafe { arena.root().ptr::<T>(addr).write(value) }
 }
 
-/// Slots of one LPM page.
-const PAGE_SLOTS: usize = 256;
-/// Bytes of one LPM page.
-const PAGE: usize = PAGE_SLOTS * 8;
-
-/// Leaf slot of `value`, as `LPM_VALUE_SET` stores it.
-const fn leaf(value: u32) -> u64 {
-    ((value << 1) | bindings::LPM_VALUE_FLAG) as u64
+/// Entry of a leaf of `value`, as the C build stores it.
+const fn leaf(value: u32) -> u32 {
+    (value << 1) | bindings::FAST_LPM_ENTRY_LEAF
 }
 
-/// Points the relative slot at `slot` to `target`.
-fn point(arena: &'static BlockArena, slot: usize, target: usize) {
-    write(arena, slot, target.wrapping_sub(slot) as u64);
+/// Entry of a link from the node at `node` to a child of `kind` at `child`.
+fn link(node: usize, child: usize, kind: u32) -> u32 {
+    let units = (child as isize - node as isize) / bindings::FAST_LPM_NODE_ALIGN as isize;
+    ((units as i32 as u32) << 3) | kind
 }
 
-/// Addresses of a hand-built LPM.
-struct LpmAt {
-    directory: usize,
-    chunk: usize,
-}
+/// Bytes of one full node.
+const NODE: usize = 256 * size_of::<u32>();
 
-impl LpmAt {
-    fn page(&self, idx: usize) -> usize {
-        self.chunk + idx * PAGE
+/// A full node at `node` with every entry `entry`.
+fn fill(arena: &'static BlockArena, node: usize, entry: u32) {
+    for slot in 0..256 {
+        write(arena, node + slot * size_of::<u32>(), entry);
     }
 }
 
-/// Lays an IPv4 LPM at `lpm` out as the C insert lays it out: one
-/// directory entry, one chunk, three pages in use. `10.0.0.0/16` maps to 5
-/// on page 1, `10.1.0.0/16` reaches page 2, whose every slot maps to 9;
-/// every other slot is the invalid mark.
-fn fill_lpm(arena: &'static BlockArena, lpm: usize) -> LpmAt {
-    let at = LpmAt {
-        directory: arena.alloc(8).as_ptr().addr(),
-        chunk: arena.alloc(bindings::LPM_CHUNK_SIZE as usize * PAGE).as_ptr().addr(),
-    };
-    for slot in 0..3 * PAGE_SLOTS {
-        write(arena, at.chunk + slot * 8, u64::MAX);
-    }
-    point(arena, at.page(0) + 10 * 8, at.page(1));
-    write(arena, at.page(1), leaf(5));
-    point(arena, at.page(1) + 8, at.page(2));
-    for slot in 0..PAGE_SLOTS {
-        write(arena, at.page(2) + slot * 8, leaf(9));
-    }
-    point(arena, at.directory, at.chunk);
-    point(arena, lpm + offset_of!(bindings::lpm, pages), at.directory);
-    write(arena, lpm + offset_of!(bindings::lpm, page_count), 3);
-    at
+/// Points the root slot of the LPM at `lpm` to the node at `root`.
+fn set_root(arena: &'static BlockArena, lpm: usize, root: usize) {
+    let slot = lpm + offset_of!(bindings::fast_lpm, root);
+    write(arena, slot, root.wrapping_sub(slot) as u64);
 }
 
-/// verifies that the lookup walks a hand-built LPM's pages to the leaf of
-/// each key, or to none.
+/// Lays an IPv4 trie at `lpm` out as the C build lays it out: `10.0.0.0/16`
+/// maps to 5 through a second full node, and below `10.1.0.0/16`, which
+/// maps to 9, a narrow bucket maps `10.1.3.0/24` to 11; every other key maps
+/// to the invalid value.
+fn lay_ipv4(arena: &'static BlockArena, lpm: usize) {
+    let nodes = arena.alloc(4 * NODE).as_ptr().addr();
+    let (root, second, bucket) = (nodes, nodes + NODE, nodes + 2 * NODE);
+    fill(arena, root, u32::MAX);
+    fill(arena, second, u32::MAX);
+    write(arena, root + 10 * 4, link(root, second, bindings::FAST_LPM_KIND_FULL));
+    write(arena, second, leaf(5));
+    write(arena, second + 4, link(second, bucket, bindings::FAST_LPM_KIND_NARROW));
+    // Values in reverse order: the count of bounds above the key picks one.
+    for (idx, value) in [9, 9, 9, 11, 9].into_iter().enumerate() {
+        write(arena, bucket + 4 * idx, leaf(value));
+    }
+    let bounds = [0x0a01_0300u32, 0x0a01_0400, u32::MAX, u32::MAX];
+    for (idx, bound) in bounds.into_iter().enumerate() {
+        let at = bucket + bindings::FAST_LPM_NARROW_BOUNDS_OFFSET as usize + 4 * idx;
+        write(arena, at, bound ^ 0x8000_0000);
+    }
+    set_root(arena, lpm, root);
+}
+
+/// verifies that the lookup walks a hand-built IPv4 trie through its full
+/// nodes and narrow bucket to the leaf of each key, or to none.
 #[test]
-fn test_lpm_lookup_walks_pages() {
+fn test_lpm_lookup_walks_nodes_and_narrow_bucket() {
     let arena = BlockArena::new();
     let addr = arena.alloc(size_of::<Lpm4>()).as_ptr().addr();
-    fill_lpm(arena, addr);
+    lay_ipv4(arena, addr);
 
-    // SAFETY: the LPM is laid out as C lays it out and stays frozen for the
+    // SAFETY: the trie is laid out as C lays it out and stays frozen for the
     // test.
     let (view, lpm) = unsafe { (View::new(arena.root()), &*arena.root().ptr::<Lpm4>(addr)) };
     assert_eq!(
-        [Some(5), Some(9), None, None],
-        [[10, 0, 7, 7], [10, 1, 3, 4], [11, 0, 0, 0], [10, 2, 0, 0]].map(|key| lpm.lookup(&view, &key))
+        [Some(5), Some(9), Some(11), Some(9), None, None],
+        [
+            [10, 0, 7, 7],
+            [10, 1, 2, 255],
+            [10, 1, 3, 4],
+            [10, 1, 4, 0],
+            [11, 0, 0, 0],
+            [10, 2, 0, 0]
+        ]
+        .map(|key| lpm.lookup(&view, &key))
+    );
+}
+
+/// Lays an IPv6 trie at `lpm` out as the C build lays it out: below the
+/// first byte `0x20` a wide bucket maps `2001:db8::/64` to 8 and the rest to
+/// 7; every other key maps to the invalid value.
+fn lay_ipv6(arena: &'static BlockArena, lpm: usize) {
+    let nodes = arena.alloc(2 * NODE).as_ptr().addr();
+    let (root, bucket) = (nodes, nodes + NODE);
+    fill(arena, root, u32::MAX);
+    write(arena, root + 0x20 * 4, link(root, bucket, bindings::FAST_LPM_KIND_WIDE));
+    for (idx, value) in [7, 8, 7].into_iter().enumerate() {
+        write(arena, bucket + 4 * idx, leaf(value));
+    }
+    let bounds = [(0x2001_0db8_0000_0000u64, 0u64), (0x2001_0db8_0000_0001, 0)];
+    for (idx, (high, low)) in bounds.into_iter().enumerate() {
+        let at = bucket + bindings::FAST_LPM_WIDE_BOUNDS_OFFSET as usize + 16 * idx;
+        write(arena, at, high);
+        write(arena, at + 8, low);
+    }
+    set_root(arena, lpm, root);
+}
+
+/// The IPv6 address of a high and a low word.
+fn ipv6(high: u64, low: u64) -> [u8; 16] {
+    let mut key = [0; 16];
+    key[..8].copy_from_slice(&high.to_be_bytes());
+    key[8..].copy_from_slice(&low.to_be_bytes());
+    key
+}
+
+/// verifies that the lookup compares a key with the bounds of a wide bucket
+/// across its high and low words.
+#[test]
+fn test_lpm_lookup_compares_wide_bucket_bounds() {
+    let arena = BlockArena::new();
+    let addr = arena.alloc(size_of::<Lpm6>()).as_ptr().addr();
+    lay_ipv6(arena, addr);
+
+    // SAFETY: as above.
+    let (view, lpm) = unsafe { (View::new(arena.root()), &*arena.root().ptr::<Lpm6>(addr)) };
+    assert_eq!(
+        [Some(7), Some(8), Some(8), Some(7), None],
+        [
+            ipv6(0x2001_0db7_ffff_ffff, u64::MAX),
+            ipv6(0x2001_0db8_0000_0000, 0),
+            ipv6(0x2001_0db8_0000_0000, u64::MAX),
+            ipv6(0x2001_0db8_0000_0001, 0),
+            ipv6(0x3000_0000_0000_0000, 0),
+        ]
+        .map(|key| lpm.lookup(&view, &key))
     );
 }

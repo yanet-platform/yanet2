@@ -1,7 +1,7 @@
 #pragma once
 
+#include "common/fast_lpm_build.h"
 #include "common/key.h"
-#include "common/lpm.h"
 #include "common/memory.h"
 #include "common/radix.h"
 #include "common/range_collector.h"
@@ -14,6 +14,7 @@
 #include "lib/classify/rule.h"
 
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 /*
@@ -256,39 +257,51 @@ classify_compile_net4_commit(
 	struct classify_attr_net4 *net4_attr = attr;
 
 	/*
-	 * The match is built directly in the embedded attribute: its pages
+	 * The match is built directly in the embedded attribute: its nodes
 	 * are addressed through relative pointers, so a built elsewhere
-	 * tree cannot move in. The region identifiers of the partition are
-	 * remapped through the compacted class table in one pass.
+	 * tree cannot move in. The region identifiers of the partition map
+	 * to their classes through the compacted class table.
 	 */
 	char lpm_name[MEMORY_CONTEXT_NAME_SIZE];
 	classify_leaf_name(
 		lpm_name, sizeof(lpm_name), net4_compile->name, "lpm"
 	);
-	if (lpm_init(&net4_attr->lpm, memory_context, lpm_name)) {
+	if (fast_lpm_init(&net4_attr->lpm, memory_context, lpm_name, 4)) {
 		// The init links the embedded context into its parent before
-		// the root page allocates, so the zeroing goes through the
+		// the root node allocates, so the zeroing goes through the
 		// free to unlink it first.
-		lpm_free(&net4_attr->lpm);
+		fast_lpm_free(&net4_attr->lpm);
 		memset(net4_attr, 0, sizeof(*net4_attr));
 		return -1;
 	}
 
-	if (range_index_build_lpm(
-		    &net4_compile->range_index, 4, &net4_attr->lpm
-	    )) {
+	const struct range_index *range_index = &net4_compile->range_index;
+	const uint32_t *regions = ADDR_OF(&range_index->values);
+	uint32_t *classes =
+		malloc(sizeof(*classes) *
+		       (range_index->count ? range_index->count : 1));
+	if (classes == NULL) {
 		goto error;
 	}
-
-	lpm4_remap(&net4_attr->lpm, &net4_compile->value_table);
-	lpm4_compact(&net4_attr->lpm);
+	for (uint32_t idx = 0; idx < range_index->count; ++idx) {
+		classes[idx] = value_table_get(
+			&net4_compile->value_table, 0, regions[idx]
+		);
+	}
+	int rc = range_index_build_lpm_values(
+		range_index, 4, classes, &net4_attr->lpm
+	);
+	free(classes);
+	if (rc) {
+		goto error;
+	}
 
 	classify_compile_net4_free(memory_context, compile);
 
 	return 0;
 
 error:
-	lpm_free(&net4_attr->lpm);
+	fast_lpm_free(&net4_attr->lpm);
 	memset(net4_attr, 0, sizeof(*net4_attr));
 	return -1;
 }

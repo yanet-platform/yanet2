@@ -110,6 +110,19 @@ int
 nat64_module_config_add_prefix(struct cp_module *cp_module, uint8_t prefix[12]);
 
 /**
+ * @brief Compiles the added prefixes and mappings
+ *
+ * The config takes no prefixes or mappings afterwards. Publish the config
+ * only after a successful build: before it no prefix or mapping matches.
+ *
+ * @param cp_module Pointer to the module data structure
+ * @return 0 on success, -1 on failure with errno set:
+ *         - ENOMEM: Memory allocation failed
+ */
+int
+nat64_module_config_build(struct cp_module *cp_module);
+
+/**
  * @brief Sets drop_unknown_prefix and drop_unknown_mapping flags
  *
  * Configures whether packets with unknown prefixes or mappings should be

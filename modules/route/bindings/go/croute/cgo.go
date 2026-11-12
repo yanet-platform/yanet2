@@ -178,6 +178,17 @@ func (m *FIBObject) addRouteList(indices []uint32) (int, error) {
 	return int(idx), nil
 }
 
+// Build compiles the added ranges; the table takes no ranges afterwards.
+//
+// Publish the table only after a successful build: before it no
+// destination has a route.
+func (m *FIBObject) Build() error {
+	if rc, err := C.route_fib_object_build(m.asRawPtr()); rc != 0 {
+		return fmt.Errorf("route_fib_object_build: %w", err)
+	}
+	return nil
+}
+
 // addPrefixV4 maps 1:1 to route_fib_object_add_prefix_v4.
 func (m *FIBObject) addPrefixV4(from [4]byte, to [4]byte, routeListIndex uint32) error {
 	if rc := C.route_fib_object_add_prefix_v4(

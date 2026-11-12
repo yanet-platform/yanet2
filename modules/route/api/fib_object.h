@@ -63,6 +63,13 @@ route_fib_object_add_prefix_v6(
 	uint32_t route_list_index
 );
 
+// Compiles the added prefixes; the table takes no prefixes afterwards.
+//
+// Publish the object only after a successful build: before it no
+// destination has a route.
+int
+route_fib_object_build(struct cp_object *cp_object);
+
 // The table behind the object, for walks and lookups.
 const struct route_fib *
 route_fib_object_fib(const struct cp_object *cp_object);

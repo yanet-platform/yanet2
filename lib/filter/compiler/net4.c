@@ -1,5 +1,7 @@
+#include <stdlib.h>
+
 #include "../rule.h"
-#include "common/lpm.h"
+#include "common/fast_lpm_build.h"
 #include "common/range_collector.h"
 #include "common/registry.h"
 #include "common/value.h"
@@ -66,25 +68,43 @@ net4_collect_values(
 	return 0;
 }
 
+/*
+ * Collects the classes of every network of a rule into the registry.
+ *
+ * A network spans whole ranges of the partition, in key order; a class
+ * repeated by adjacent ranges is collected once.
+ */
 static inline int
 net4_collect_registry(
 	struct net4 *start,
 	uint32_t count,
-	struct lpm *lpm,
+	const struct range_index *range_index,
+	const uint32_t *classes,
 	struct value_registry *registry
 ) {
 	for (struct net4 *net4 = start; net4 < start + count; ++net4) {
-		uint32_t addr = *(const net4_word *)net4->addr;
-		uint32_t mask = *(const net4_word *)net4->mask;
-		uint32_t to = addr | ~mask;
-		if (lpm4_collect_values(
-			    lpm,
-			    (uint8_t *)&addr,
-			    (uint8_t *)&to,
-			    lpm_collect_registry_iterator,
-			    registry
-		    )) {
-			return -1;
+		uint32_t to = *(const net4_word *)net4->addr |
+			      ~*(const net4_word *)net4->mask;
+		filter_key_inc(4, (uint8_t *)&to);
+
+		uint32_t first =
+			radix_lookup(&range_index->radix, 4, net4->addr);
+		uint32_t stop = range_index->count;
+		if (to != 0) {
+			stop = radix_lookup(
+				&range_index->radix, 4, (uint8_t *)&to
+			);
+		}
+
+		uint32_t prev = RANGE_INDEX_VALUE_NONE;
+		for (uint32_t idx = first; idx < stop; ++idx) {
+			if (classes[idx] == prev) {
+				continue;
+			}
+			prev = classes[idx];
+			if (value_registry_collect(registry, prev)) {
+				return -1;
+			}
 		}
 	}
 
@@ -97,7 +117,7 @@ collect_net4_values(
 	const struct filter_rule **actions,
 	uint32_t count,
 	rule_get_net4_func get_net4,
-	struct lpm *lpm,
+	struct fast_lpm *lpm,
 	struct value_registry *registry
 ) {
 	struct range_collector collector;
@@ -134,7 +154,8 @@ collect_net4_values(
 			}
 		}
 	}
-	if (lpm_init(lpm, memory_context, "lpm")) {
+	uint32_t *classes = NULL;
+	if (fast_lpm_init(lpm, memory_context, "lpm", 4)) {
 		goto error_lpm;
 	}
 	struct range_index range_index;
@@ -143,10 +164,6 @@ collect_net4_values(
 	}
 
 	if (range_collector_collect(&collector, 4, &range_index)) {
-		goto error_range_collect;
-	}
-
-	if (range_index_build_lpm(&range_index, 4, lpm)) {
 		goto error_range_collect;
 	}
 
@@ -187,8 +204,23 @@ collect_net4_values(
 
 	remap_table_compact(&remap_table);
 	value_table_compact(&table, &remap_table);
-	lpm4_remap(lpm, &table);
-	lpm4_compact(lpm);
+
+	// The region identifiers of the partition map to their classes
+	// through the compacted table.
+	const uint32_t *regions = ADDR_OF(&range_index.values);
+	classes =
+		malloc(sizeof(*classes) *
+		       (range_index.count ? range_index.count : 1));
+	if (classes == NULL) {
+		goto error_net_collect;
+	}
+	for (uint32_t idx = 0; idx < range_index.count; ++idx) {
+		classes[idx] = value_table_get(&table, 0, regions[idx]);
+	}
+	if (range_index_build_lpm_values(&range_index, 4, classes, lpm)) {
+		goto error_net_collect;
+	}
+
 	for (const struct filter_rule **action_ptr = actions;
 	     action_ptr < actions + count;
 	     ++action_ptr) {
@@ -206,11 +238,14 @@ collect_net4_values(
 		uint32_t net_count;
 		get_net4(action, &nets, &net_count);
 
-		if (net4_collect_registry(nets, net_count, lpm, registry)) {
+		if (net4_collect_registry(
+			    nets, net_count, &range_index, classes, registry
+		    )) {
 			goto error_net_collect;
 		}
 	}
 
+	free(classes);
 	remap_table_free(&remap_table);
 	value_table_free(&table);
 	range_index_free(&range_index);
@@ -218,6 +253,7 @@ collect_net4_values(
 	return 0;
 
 error_net_collect:
+	free(classes);
 	remap_table_free(&remap_table);
 
 error_remap:
@@ -229,7 +265,7 @@ error_range_collect:
 	range_index_free(&range_index);
 
 error_lpm:
-	lpm_free(lpm);
+	fast_lpm_free(lpm);
 
 error_collector:
 	range_collector_free(&collector, 4);
@@ -247,7 +283,8 @@ FILTER_ATTR_COMPILER_INIT_FUNC(net4_src)(
 	size_t actions_count,
 	struct memory_context *memory_context
 ) {
-	struct lpm *lpm = memory_balloc(memory_context, sizeof(struct lpm));
+	struct fast_lpm *lpm =
+		memory_balloc(memory_context, sizeof(struct fast_lpm));
 	if (lpm == NULL) {
 		return -1;
 	}
@@ -261,7 +298,7 @@ FILTER_ATTR_COMPILER_INIT_FUNC(net4_src)(
 		    registry
 	    )) {
 		SET_OFFSET_OF(data, NULL);
-		memory_bfree(memory_context, lpm, sizeof(struct lpm));
+		memory_bfree(memory_context, lpm, sizeof(struct fast_lpm));
 		return -1;
 	}
 	return 0;
@@ -276,7 +313,8 @@ FILTER_ATTR_COMPILER_INIT_FUNC(net4_dst)(
 	size_t actions_count,
 	struct memory_context *memory_context
 ) {
-	struct lpm *lpm = memory_balloc(memory_context, sizeof(struct lpm));
+	struct fast_lpm *lpm =
+		memory_balloc(memory_context, sizeof(struct fast_lpm));
 	if (lpm == NULL) {
 		return -1;
 	}
@@ -290,7 +328,7 @@ FILTER_ATTR_COMPILER_INIT_FUNC(net4_dst)(
 		    registry
 	    )) {
 		SET_OFFSET_OF(data, NULL);
-		memory_bfree(memory_context, lpm, sizeof(struct lpm));
+		memory_bfree(memory_context, lpm, sizeof(struct fast_lpm));
 		return -1;
 	}
 	return 0;
@@ -299,12 +337,12 @@ FILTER_ATTR_COMPILER_INIT_FUNC(net4_dst)(
 // Allows to free data for IPv4 classification.
 static void
 free_net4(void *data, struct memory_context *memory_context) {
-	struct lpm *lpm = (struct lpm *)data;
+	struct fast_lpm *lpm = (struct fast_lpm *)data;
 	if (lpm == NULL) {
 		return;
 	}
-	lpm_free(lpm);
-	memory_bfree(memory_context, lpm, sizeof(struct lpm));
+	fast_lpm_free(lpm);
+	memory_bfree(memory_context, lpm, sizeof(struct fast_lpm));
 }
 
 void

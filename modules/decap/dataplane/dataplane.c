@@ -19,7 +19,7 @@ struct decap_module {
 };
 
 static int
-decap_handle_v4(const struct lpm *lpm, struct packet *packet) {
+decap_handle_v4(const struct fast_lpm *lpm, struct packet *packet) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
 	struct rte_ipv4_hdr *ipv4_hdr = rte_pktmbuf_mtod_offset(
@@ -29,8 +29,8 @@ decap_handle_v4(const struct lpm *lpm, struct packet *packet) {
 		return -1; // Fragmented packet
 	}
 
-	if (lpm_lookup(lpm, 4, (uint8_t *)&ipv4_hdr->dst_addr) !=
-	    LPM_VALUE_INVALID) {
+	if (fast_lpm_lookup(lpm, 4, (uint8_t *)&ipv4_hdr->dst_addr) !=
+	    FAST_LPM_VALUE_INVALID) {
 		return packet_decap(packet);
 	}
 
@@ -38,7 +38,7 @@ decap_handle_v4(const struct lpm *lpm, struct packet *packet) {
 }
 
 static int
-decap_handle_v6(const struct lpm *lpm, struct packet *packet) {
+decap_handle_v6(const struct fast_lpm *lpm, struct packet *packet) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
 	struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
@@ -48,8 +48,8 @@ decap_handle_v6(const struct lpm *lpm, struct packet *packet) {
 		return -1; // Fragmented packet
 	}
 
-	if (lpm_lookup(lpm, 16, (uint8_t *)&ipv6_hdr->dst_addr) !=
-	    LPM_VALUE_INVALID) {
+	if (fast_lpm_lookup(lpm, 16, (uint8_t *)&ipv6_hdr->dst_addr) !=
+	    FAST_LPM_VALUE_INVALID) {
 		packet->flow_label =
 			rte_be_to_cpu_32(ipv6_hdr->vtc_flow) & 0x000FFFFF;
 		return packet_decap(packet);

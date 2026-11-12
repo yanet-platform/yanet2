@@ -77,6 +77,9 @@ dscp_test_config(struct cp_module **cp_module) {
 	if (rc != 0) {
 		goto error_data;
 	}
+	if (dscp_module_config_build(&config->cp_module) != 0) {
+		goto error_data;
+	}
 
 	rc = dscp_module_config_set_dscp_marking(
 		&config->cp_module, DSCP_MARK_DEFAULT, 46

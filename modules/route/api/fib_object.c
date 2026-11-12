@@ -161,6 +161,12 @@ route_fib_object_add_prefix_v6(
 	return route_fib_add_prefix_v6(&self->fib, from, to, route_list_index);
 }
 
+int
+route_fib_object_build(struct cp_object *cp_object) {
+	struct route_fib_object *self = route_fib_object_of(cp_object);
+	return route_fib_build(&self->fib);
+}
+
 const struct route_fib *
 route_fib_object_fib(const struct cp_object *cp_object) {
 	const struct route_fib_object *self = container_of(

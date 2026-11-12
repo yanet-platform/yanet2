@@ -11,40 +11,51 @@
 
 #include "shim_visibility.h"
 
-struct lpm;
+struct fast_lpm;
 struct memory_context;
 
-// lpm_init (common/lpm.h): opens an LPM at the given address as a child of
-// the given memory context, with a name and its first page.
+// fast_lpm_init (common/fast_lpm_build.h): an LPM of keys of the given
+// size that maps every key to the invalid value.
 //
-// Returns 0, or -1 with errno ENOMEM when the context's memory is exhausted.
-// The LPM is then not usable but must still be passed to
-// yanet_sys_common_lpm_free, which unlinks its context from the parent.
+// Returns 0, or -1 with errno ENOMEM when the context's memory is exhausted
+// (EINVAL for a key size other than 4, 8, 12 or 16). The LPM is then not
+// usable but must still be passed to yanet_sys_common_lpm_free, which
+// unlinks its context from the parent.
 YANET_SYS_HIDDEN int
 yanet_sys_common_lpm_init(
-	struct lpm *lpm, struct memory_context *memory_context, const char *name
+	struct fast_lpm *lpm,
+	struct memory_context *memory_context,
+	const char *name,
+	uint8_t key_size
 );
 
-// lpm_insert (common/lpm.h): maps an inclusive big-endian range of keys of
-// the given size to a value.
+// fast_lpm_insert (common/fast_lpm_build.h): stages the mapping of an
+// inclusive big-endian range of keys to a value; the later insert wins.
 //
-// Returns 0, or -1 with errno ENOMEM when a page cannot be allocated; the
-// LPM then stays valid for yanet_sys_common_lpm_free.
+// Returns 0, or -1 with errno ENOMEM when the staging cannot grow (EINVAL
+// for a value at or above the invalid value); the LPM then stays valid for
+// yanet_sys_common_lpm_free.
 YANET_SYS_HIDDEN int
 yanet_sys_common_lpm_insert(
-	struct lpm *lpm,
-	uint8_t key_size,
+	struct fast_lpm *lpm,
 	const uint8_t *from,
 	const uint8_t *to,
 	uint32_t value
 );
 
-// lpm_free (common/lpm.h): returns every page of the LPM and unlinks its
-// context from the parent.
+// fast_lpm_build (common/fast_lpm_build.h): compiles the staged inserts.
 //
-// Cannot fail. Sound after a failed init or insert.
+// Returns 0, or -1 with errno ENOMEM; the LPM then stays valid for
+// yanet_sys_common_lpm_free.
+YANET_SYS_HIDDEN int
+yanet_sys_common_lpm_build(struct fast_lpm *lpm);
+
+// fast_lpm_free (common/fast_lpm.h): returns every block of the LPM and
+// unlinks its context from the parent.
+//
+// Cannot fail. Sound after a failed init, insert or build.
 YANET_SYS_HIDDEN void
-yanet_sys_common_lpm_free(struct lpm *lpm);
+yanet_sys_common_lpm_free(struct fast_lpm *lpm);
 
 // memory_balloc (common/memory.h): a block of the given size from the
 // memory context, rounded up as its allocator does.

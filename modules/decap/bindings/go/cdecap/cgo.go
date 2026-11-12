@@ -78,3 +78,14 @@ func (m *ModuleConfig) addPrefixV6(from [16]byte, to [16]byte) error {
 	}
 	return nil
 }
+
+// Build compiles the added prefixes; the config takes no prefixes afterwards.
+//
+// Publish the config only after a successful build: before it the config
+// matches no address.
+func (m *ModuleConfig) Build() error {
+	if rc, err := C.decap_module_config_build(m.asRawPtr()); rc != 0 {
+		return fmt.Errorf("failed to build prefixes: %w", err)
+	}
+	return nil
+}

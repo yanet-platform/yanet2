@@ -1,9 +1,9 @@
 #pragma once
 
 #include "common/exp_array.h"
+#include "common/fast_lpm_build.h"
 #include "common/hash_index.h"
 #include "common/key.h"
-#include "common/lpm.h"
 #include "common/memory.h"
 #include "common/network.h"
 #include "common/radix.h"
@@ -911,7 +911,7 @@ classify_compile_net6_commit(
 
 	/*
 	 * The half matches are built directly in the embedded attribute:
-	 * their pages are addressed through relative pointers, so trees
+	 * their nodes are addressed through relative pointers, so trees
 	 * built elsewhere cannot move in.
 	 *
 	 * The high half trie stays empty until its values are resolved
@@ -919,12 +919,12 @@ classify_compile_net6_commit(
 	 */
 	char hi_name[MEMORY_CONTEXT_NAME_SIZE];
 	classify_leaf_name(hi_name, sizeof(hi_name), net6_compile->name, "hi");
-	if (lpm_init(&net6_attr->hi, memory_context, hi_name)) {
+	if (fast_lpm_init(&net6_attr->hi, memory_context, hi_name, 8)) {
 		goto error;
 	}
 	char lo_name[MEMORY_CONTEXT_NAME_SIZE];
 	classify_leaf_name(lo_name, sizeof(lo_name), net6_compile->name, "lo");
-	if (lpm_init(&net6_attr->lo, memory_context, lo_name)) {
+	if (fast_lpm_init(&net6_attr->lo, memory_context, lo_name, 8)) {
 		goto error;
 	}
 	if (range_index_build_lpm(&net6_compile->ri_lo, 8, &net6_attr->lo)) {
@@ -1092,8 +1092,8 @@ classify_compile_net6_commit(
 	return 0;
 
 error:
-	lpm_free(&net6_attr->hi);
-	lpm_free(&net6_attr->lo);
+	fast_lpm_free(&net6_attr->hi);
+	fast_lpm_free(&net6_attr->lo);
 	value_table_free(&net6_attr->comb);
 	memset(net6_attr, 0, sizeof(*net6_attr));
 	return -1;

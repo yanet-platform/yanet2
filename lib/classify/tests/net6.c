@@ -14,6 +14,7 @@
 // failed attribute commit.
 
 #include "lib/classify/compiler/net6.h"
+#include "common/fast_lpm_build.h"
 #include "lib/classify/classify.h"
 #include "lib/classify/compiler/helper.h"
 #include "lib/classify/query.h"
@@ -640,11 +641,10 @@ run_failed_commit_zeroes_attr_test(struct memory_context *mctx, void *memory) {
 /*
  * Reference of the high half trie of one compile: the partition range
  * starts captured before the commit releases them and a trie built over
- * them twice, first with the region ordinals and then with the values
- * the commit resolved.
+ * them with the values the commit resolved.
  */
 struct test_hi_reference {
-	struct lpm lpm;
+	struct fast_lpm lpm;
 	uint8_t (*starts)[8];
 	uint32_t count;
 };
@@ -668,8 +668,7 @@ test_hi_reference_collect(
 	return 0;
 }
 
-// Builds the ordinal pass of the reference out of the partition and
-// commits the attribute.
+// Captures the partition range starts and commits the attribute.
 static int
 test_commit_with_hi_reference(
 	struct memory_context *mctx, void *compile, void *attr
@@ -677,8 +676,6 @@ test_commit_with_hi_reference(
 	struct classify_compile_net6 *net6_compile = compile;
 	struct test_hi_reference *ref = &test_hi_ref;
 
-	assert(lpm_init(&ref->lpm, mctx, "hi_ref") == 0);
-	assert(range_index_build_lpm(&net6_compile->ri_hi, 8, &ref->lpm) == 0);
 	assert(radix_walk(
 		       &net6_compile->ri_hi.radix,
 		       8,
@@ -689,10 +686,15 @@ test_commit_with_hi_reference(
 	return classify_compile_net6_commit(mctx, compile, attr);
 }
 
-// Overwrites every partition range of the reference with the value the
+// Builds the reference: every partition range carries the value the
 // committed trie holds at the range start.
 static void
-test_hi_reference_revalue(struct test_hi_reference *ref, const struct lpm *hi) {
+test_hi_reference_build(
+	struct memory_context *mctx,
+	struct test_hi_reference *ref,
+	const struct fast_lpm *hi
+) {
+	assert(fast_lpm_init(&ref->lpm, mctx, "hi_ref", 8) == 0);
 	for (uint32_t idx = 0; idx < ref->count; ++idx) {
 		uint8_t to[8];
 		if (idx + 1 < ref->count) {
@@ -701,51 +703,34 @@ test_hi_reference_revalue(struct test_hi_reference *ref, const struct lpm *hi) {
 		} else {
 			memset(to, 0xff, 8);
 		}
-		uint32_t value = lpm_lookup(hi, 8, ref->starts[idx]);
-		assert(lpm_insert(&ref->lpm, 8, ref->starts[idx], to, value) ==
-		       0);
+		uint32_t value = fast_lpm_lookup(hi, 8, ref->starts[idx]);
+		assert(fast_lpm_insert(
+			       &ref->lpm, ref->starts[idx], to, value
+		       ) == 0);
 	}
+	assert(fast_lpm_build(&ref->lpm) == 0);
 }
 
-// Returns the index of a page of the trie.
+// Asserts that two tries map the key space to the same ranges with the
+// same values, and returns the number of ranges.
 static uint32_t
-test_lpm_page_index(const struct lpm *lpm, const struct lpm_page *page) {
-	for (uint32_t idx = 0; idx < lpm->page_count; ++idx) {
-		if (lpm_page(lpm, idx) == page) {
-			return idx;
+assert_lpm_equal(const struct fast_lpm *first, const struct fast_lpm *second) {
+	struct fast_lpm_iter first_it;
+	struct fast_lpm_iter second_it;
+	fast_lpm_iter_init(&first_it, first);
+	fast_lpm_iter_init(&second_it, second);
+	uint32_t count = 0;
+	for (;;) {
+		bool first_more = fast_lpm_iter_next(&first_it);
+		bool second_more = fast_lpm_iter_next(&second_it);
+		assert(first_more == second_more);
+		if (!first_more) {
+			return count;
 		}
-	}
-	assert(0);
-	return 0;
-}
-
-// Asserts that two tries hold the same pages in the same order with the
-// same leaf values and the same child page indices.
-static void
-assert_lpm_equal(const struct lpm *first, const struct lpm *second) {
-	assert(first->page_count == second->page_count);
-
-	for (uint32_t page_idx = 0; page_idx < first->page_count; ++page_idx) {
-		struct lpm_page *first_page = lpm_page(first, page_idx);
-		struct lpm_page *second_page = lpm_page(second, page_idx);
-		for (uint32_t slot = 0; slot < 256; ++slot) {
-			union lpm_value *first_value =
-				first_page->values + slot;
-			union lpm_value *second_value =
-				second_page->values + slot;
-			if (first_value->value & LPM_VALUE_FLAG) {
-				assert(first_value->value == second_value->value
-				);
-				continue;
-			}
-			assert(!(second_value->value & LPM_VALUE_FLAG));
-			assert(test_lpm_page_index(
-				       first, ADDR_OF(&first_value->page)
-			       ) ==
-			       test_lpm_page_index(
-				       second, ADDR_OF(&second_value->page)
-			       ));
-		}
+		assert(memcmp(first_it.cur_from, second_it.cur_from, 8) == 0);
+		assert(memcmp(first_it.cur_to, second_it.cur_to, 8) == 0);
+		assert(first_it.cur_value == second_it.cur_value);
+		++count;
 	}
 }
 
@@ -796,8 +781,8 @@ test_first_match(
 #define TEST_HI_SINGLE_BUILD_RULES 96
 
 // Verifies that the high half trie built in one pass with the resolved
-// values equals the ordinal build overwritten with the same values, page
-// by page, and classifies seeded overlapping prefixes as the oracle.
+// values equals a trie built over the partition with the same values,
+// range by range, and classifies seeded overlapping prefixes as the oracle.
 static void
 run_hi_single_build_test(struct memory_context *mctx, void *memory) {
 	(void)memory;
@@ -864,9 +849,8 @@ run_hi_single_build_test(struct memory_context *mctx, void *memory) {
 	       ) == 0);
 	classifier_fini(&stage_dst, mctx, TEST_HI_SINGLE_BUILD_RULES);
 
-	test_hi_reference_revalue(&test_hi_ref, &flt.dst_attr.hi);
-	assert(test_hi_ref.lpm.page_count > 1);
-	assert_lpm_equal(&flt.dst_attr.hi, &test_hi_ref.lpm);
+	test_hi_reference_build(mctx, &test_hi_ref, &flt.dst_attr.hi);
+	assert(assert_lpm_equal(&flt.dst_attr.hi, &test_hi_ref.lpm) > 1);
 
 	uint8_t src[NET6_LEN] = {0};
 	for (uint32_t idx = 0; idx < TEST_HI_SINGLE_BUILD_RULES; ++idx) {
@@ -885,7 +869,7 @@ run_hi_single_build_test(struct memory_context *mctx, void *memory) {
 		);
 	}
 
-	lpm_free(&test_hi_ref.lpm);
+	fast_lpm_free(&test_hi_ref.lpm);
 	free(test_hi_ref.starts);
 	test_filter_net6_dst_free(mctx, &flt);
 }

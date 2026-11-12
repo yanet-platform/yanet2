@@ -29,7 +29,7 @@ struct route_module {
 // Why a packet could not be routed.
 //
 // Meaningful only when route_handle_v4 or route_handle_v6 return
-// LPM_VALUE_INVALID. The two are worth telling apart: an expired TTL is
+// FAST_LPM_VALUE_INVALID. The two are worth telling apart: an expired TTL is
 // ordinary traceroute traffic, while a lookup miss is a blackhole.
 enum route_drop_reason {
 	ROUTE_DROP_TTL_EXPIRED,
@@ -60,7 +60,7 @@ route_handle_v4(
 	);
 	if (header->time_to_live <= 1) {
 		*drop_reason = ROUTE_DROP_TTL_EXPIRED;
-		return LPM_VALUE_INVALID;
+		return FAST_LPM_VALUE_INVALID;
 	}
 	header->time_to_live -= 1;
 
@@ -76,7 +76,7 @@ route_handle_v4(
 
 	// Past the TTL check a miss is the only remaining way to fail.
 	*drop_reason = ROUTE_DROP_NO_ROUTE;
-	return lpm_lookup(&fib->lpm_v4, 4, (uint8_t *)&header->dst_addr);
+	return fast_lpm_lookup(&fib->lpm_v4, 4, (uint8_t *)&header->dst_addr);
 }
 
 static uint32_t
@@ -92,13 +92,13 @@ route_handle_v6(
 	);
 	if (header->hop_limits <= 1) {
 		*drop_reason = ROUTE_DROP_TTL_EXPIRED;
-		return LPM_VALUE_INVALID;
+		return FAST_LPM_VALUE_INVALID;
 	}
 	header->hop_limits -= 1;
 
 	// Past the hop limit check a miss is the only remaining way to fail.
 	*drop_reason = ROUTE_DROP_NO_ROUTE;
-	return lpm_lookup(&fib->lpm_v6, 16, header->dst_addr);
+	return fast_lpm_lookup(&fib->lpm_v6, 16, header->dst_addr);
 }
 
 static void
@@ -215,7 +215,7 @@ route_handle_packets(
 			continue;
 		}
 
-		if (route_list_id == LPM_VALUE_INVALID) {
+		if (route_list_id == FAST_LPM_VALUE_INVALID) {
 			route_count_packet(
 				counter_storage,
 				drop_reason == ROUTE_DROP_TTL_EXPIRED

@@ -1,6 +1,6 @@
 #include "../rule.h"
 
-#include "common/lpm.h"
+#include "common/fast_lpm_build.h"
 #include "common/range_collector.h"
 
 #include "common/registry.h"
@@ -61,7 +61,7 @@ collect_net6_range(
 	uint32_t count,
 	action_get_net6_func get_net6,
 	net6_get_part_func get_part,
-	struct lpm *lpm,
+	struct fast_lpm *lpm,
 	const char *lpm_name,
 	struct range_index *ri
 ) {
@@ -102,7 +102,7 @@ collect_net6_range(
 			}
 		}
 	}
-	if (lpm_init(lpm, memory_context, lpm_name)) {
+	if (fast_lpm_init(lpm, memory_context, lpm_name, 8)) {
 		goto error_lpm;
 	}
 
@@ -124,17 +124,17 @@ collect_net6_range(
 
 error_collect:
 	range_index_free(ri);
-	lpm_free(lpm);
+	fast_lpm_free(lpm);
 	range_collector_free(&collector, 8);
 	return -1;
 
 error_ri_init:
-	lpm_free(lpm);
+	fast_lpm_free(lpm);
 	range_collector_free(&collector, 8);
 	return -1;
 
 error_lpm:
-	lpm_free(lpm);
+	fast_lpm_free(lpm);
 
 error_collector:
 	range_collector_free(&collector, 8);
@@ -751,11 +751,11 @@ init_net6(
 
 error_merge:
 	range_index_free(&ri_lo);
-	lpm_free(&net6->lo);
+	fast_lpm_free(&net6->lo);
 
 error_lo:
 	range_index_free(&ri_hi);
-	lpm_free(&net6->hi);
+	fast_lpm_free(&net6->hi);
 
 error_hi:
 	SET_OFFSET_OF(data, NULL);
@@ -814,8 +814,8 @@ free_net6(void *data, struct memory_context *memory_context) {
 	if (c == NULL) {
 		return;
 	}
-	lpm_free(&c->lo);
-	lpm_free(&c->hi);
+	fast_lpm_free(&c->lo);
+	fast_lpm_free(&c->hi);
 	value_table_free(&c->comb);
 	memory_bfree(memory_context, c, sizeof(struct net6_classifier));
 }

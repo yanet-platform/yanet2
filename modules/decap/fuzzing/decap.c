@@ -35,11 +35,8 @@ decap_test_config(struct cp_module **cp_module) {
 
 	struct memory_context *memory_context =
 		&config->cp_module.entity.memory_context;
-	if (lpm_init(&config->prefixes4, memory_context, "prefixes4")) {
-		goto error_lpm_v4;
-	}
-	if (lpm_init(&config->prefixes6, memory_context, "prefixes6")) {
-		goto error_lpm_v6;
+	if (decap_module_config_data_init(config, memory_context)) {
+		goto error;
 	}
 
 	// 127.0.0.0/24
@@ -56,14 +53,15 @@ decap_test_config(struct cp_module **cp_module) {
 		){0xfe, 0x80, [12] = 0xff, [13] = 0xff, [14] = 0xff, [15] = 0xff
 		}
 	);
+	if (decap_module_config_build(&config->cp_module)) {
+		decap_module_config_data_fini(config);
+		goto error;
+	}
 
 	*cp_module = (struct cp_module *)config;
 	return 0;
 
-error_lpm_v6:
-	lpm_free(&config->prefixes4);
-
-error_lpm_v4:
+error:
 	memory_bfree(
 		&fuzz_params.mctx, config, sizeof(struct decap_module_config)
 	);

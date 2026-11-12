@@ -6,7 +6,7 @@
 #pragma once
 
 #include "api/agent.h"
-#include "common/lpm.h"
+#include "common/fast_lpm.h"
 #include "lib/classify/classifiers/line.h"
 #include "lib/classify/classifiers/net4.h"
 #include "lib/classify/classifiers/net6.h"

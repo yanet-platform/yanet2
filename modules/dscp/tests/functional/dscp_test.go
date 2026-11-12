@@ -93,6 +93,7 @@ func setupDSCPSelectionHarness(
 		require.NoError(t, module.DestinationPrefixAdd(prefix))
 	}
 	require.NoError(t, module.SetDscpMarking(flag, mark))
+	require.NoError(t, module.Build())
 
 	sink, err := cforward.NewModuleConfig(agent, "sink")
 	require.NoError(t, err)

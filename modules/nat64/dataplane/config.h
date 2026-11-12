@@ -1,6 +1,6 @@
 #pragma once
 
-#include "common/lpm.h"
+#include "common/fast_lpm.h"
 #include "common/network.h"
 
 #include "lib/controlplane/config/zone.h"
@@ -58,8 +58,8 @@ struct nat64_module_config {
 	struct {
 		uint64_t count;		   /**< Number of mappings */
 		struct ip4to6 *list;	   /**< List of IPv4 to IPv6 mappings */
-		struct lpm v4_to_v6;	   /**< IPv4 to IPv6 LPM table */
-		struct lpm v6_to_v4;	   /**< IPv6 to IPv4 LPM table */
+		struct fast_lpm v4_to_v6;  /**< IPv4 to IPv6 LPM table */
+		struct fast_lpm v6_to_v4;  /**< IPv6 to IPv4 LPM table */
 		bool drop_unknown_mapping; /**< Drop packets with unknown
 					      mapping */
 	} mappings;
@@ -70,7 +70,7 @@ struct nat64_module_config {
 		uint64_t count;		       /**< Number of prefixes */
 		bool drop_unknown_prefix; /**< Drop packets with unknown prefix
 					   */
-		struct lpm v6_prefixes;	  /**< LPM table for IPv6 prefixes */
+		struct fast_lpm v6_prefixes; /**< LPM table for IPv6 prefixes */
 	} prefixes;
 
 	/* MTU configuration */

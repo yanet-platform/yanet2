@@ -1,6 +1,6 @@
 #pragma once
 
-#include "common/lpm.h"
+#include "common/fast_lpm.h"
 #include "common/network.h"
 
 #include "lib/controlplane/config/cp_object.h"
@@ -37,8 +37,8 @@ struct route_list {
 // in the registry the owner chose, so the same layout serves both a module
 // config holding its own table and a shared object linked by name.
 struct route_fib {
-	struct lpm lpm_v6;
-	struct lpm lpm_v4;
+	struct fast_lpm lpm_v6;
+	struct fast_lpm lpm_v4;
 
 	// All known good routes
 	uint64_t route_count;

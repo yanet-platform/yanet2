@@ -46,7 +46,10 @@
 // 47: struct dp_port gained rss_queue_count.
 // 48: struct dp_worker_assignment gained the assignment's rx service
 // weight; the list stays part of dp_worker's plugin-visible contract.
-#define YANET_MODULE_ABI_VERSION 49
+// 50: the longest prefix match tables of the route, decap, dscp and nat64
+// configs and of the classify and filter network classifiers are frozen
+// tries in place of page trees.
+#define YANET_MODULE_ABI_VERSION 50
 
 // Symbol name a module .so exports carrying its compiled-against
 // YANET_MODULE_ABI_VERSION, as a uint32_t global.

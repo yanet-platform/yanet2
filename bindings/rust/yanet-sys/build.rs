@@ -154,9 +154,7 @@ fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
         .wrap_unsafe_ops(true)
         .generate_comments(false)
         .layout_tests(true)
-        .allowlist_type("lpm")
-        .allowlist_type("lpm_page")
-        .allowlist_type("lpm_value")
+        .allowlist_type("fast_lpm")
         .allowlist_type("counter_storage")
         .allowlist_type("cp_module")
         .allowlist_type("cp_object")
@@ -197,7 +195,7 @@ fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
         // errno of a failed C-facing export, set by the API side.
         .allowlist_function("__errno_location")
         .allowlist_var("E(AGAIN|INVAL|IO)")
-        .allowlist_var("LPM_.*")
+        .allowlist_var("FAST_LPM_.*")
         .allowlist_var("CP_(MODULE_TYPE|MODULE_NAME|DEVICE_NAME|OBJECT_TYPE|OBJECT_NAME)_LEN")
         .allowlist_var("COUNTER_NAME_LEN")
         // A tagged counter registry is found by its tag as a counter tag

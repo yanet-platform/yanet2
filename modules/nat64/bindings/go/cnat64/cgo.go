@@ -153,3 +153,15 @@ func (m *ModuleConfig) setMTU(ipv4MTU uint16, ipv6MTU uint16) error {
 
 	return nil
 }
+
+// Build compiles the added prefixes and mappings; the config takes no
+// prefixes or mappings afterwards.
+//
+// Publish the config only after a successful build: before it no prefix or
+// mapping matches.
+func (m *ModuleConfig) Build() error {
+	if rc, err := C.nat64_module_config_build(m.asRawPtr()); rc != 0 {
+		return fmt.Errorf("failed to build prefixes and mappings: %w", err)
+	}
+	return nil
+}
