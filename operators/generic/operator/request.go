@@ -2,12 +2,12 @@ package operator
 
 import (
 	"fmt"
-	"os"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
 	"github.com/yanet-platform/yanet2/common/go/operator"
+	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	"github.com/yanet-platform/yanet2/common/go/xproto"
 )
 
@@ -20,7 +20,7 @@ func LoadRequest(method string, path string, files *protoregistry.Files) (proto.
 		return nil, err
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := xcfg.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read module config %q: %w", path, err)
 	}

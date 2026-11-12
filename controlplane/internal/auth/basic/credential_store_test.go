@@ -9,6 +9,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/basic"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
 )
 
 // Test_FileCredentialStore_VerifyCredentials_RememberedMatchAdmitsNothingElse
@@ -56,4 +57,24 @@ func Test_FileCredentialStore_VerifyCredentials_RememberedMatchAdmitsNothingElse
 			require.Equal(t, tc.accepted, err == nil, "whether the store accepted the password, got %v", err)
 		})
 	}
+}
+
+// Test_FileCredentialStore_Includes verifies that composed credentials admit
+// the intended identity only while its optional source is present.
+func Test_FileCredentialStore_Includes(t *testing.T) {
+	directory := t.TempDir()
+	hash, err := bcrypt.GenerateFromPassword([]byte("alice-secret"), bcrypt.MinCost)
+	require.NoError(t, err)
+	fragment := filepath.Join(directory, "users.yaml")
+	require.NoError(t, os.WriteFile(fragment, []byte("credentials:\n  - username: alice\n    password_hash: "+string(hash)+"\n"), 0o600))
+	path := filepath.Join(directory, "main.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("include: [users.yaml]\n"), 0o600))
+	store, err := basic.NewFileCredentialStore(path)
+	require.NoError(t, err)
+	require.NoError(t, store.VerifyCredentials("alice", "alice-secret"))
+	require.Error(t, store.VerifyCredentials("alice", "wrong"))
+	require.NoError(t, os.Remove(fragment))
+	store, err = basic.NewFileCredentialStore(path)
+	require.NoError(t, err)
+	require.ErrorIs(t, store.VerifyCredentials("alice", "alice-secret"), core.ErrInvalidCredentials)
 }

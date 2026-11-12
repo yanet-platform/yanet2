@@ -2,11 +2,11 @@ package permission
 
 import (
 	"fmt"
-	"os"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/yanet-platform/yanet2/common/go/rcucache"
+	"github.com/yanet-platform/yanet2/common/go/xcfg"
 )
 
 type GroupName = string
@@ -58,7 +58,7 @@ func (m *FilePermissionStore) GetUserPermissions(username string) []Permission {
 
 // load reads and parses the permissions file.
 func (m *FilePermissionStore) load() error {
-	buf, err := os.ReadFile(m.path)
+	buf, err := xcfg.ReadFile(m.path)
 	if err != nil {
 		return fmt.Errorf("failed to read file: %w", err)
 	}

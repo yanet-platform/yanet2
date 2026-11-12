@@ -1,0 +1,319 @@
+package xcfg
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"gopkg.in/yaml.v3"
+)
+
+const (
+	maxIncludeDepth = 32
+	maxIncludeFiles = 256
+	maxIncludeBytes = 16 << 20
+)
+
+// ReadFile composes a YAML configuration and its top-level include list.
+//
+// Entries name files or directories, relative to the declaring file. Directories
+// contribute visible .yaml/.yml files recursively in lexical order. Includes
+// override the declaring file; later includes override earlier ones. Missing
+// include paths and empty sources are ignored. The main path remains required.
+// Mappings merge recursively; other values, including lists, replace. Files
+// without includes retain their original bytes and diagnostic line numbers.
+func ReadFile(path string) ([]byte, error) {
+	reader := &configReader{Active: map[string]bool{}}
+	config, data, included, err := reader.Read(path, 0)
+	if err != nil {
+		return nil, err
+	}
+	if !included {
+		return data, nil
+	}
+	return yaml.Marshal(config)
+}
+
+type configReader struct {
+	Active map[string]bool
+	Files  int
+	Bytes  int64
+}
+
+// Read bounds composition and detects cycles through real file identities.
+func (m *configReader) Read(path string, depth int) (any, []byte, bool, error) {
+	if depth > maxIncludeDepth {
+		return nil, nil, false, fmt.Errorf("%s: include depth exceeds %d", path, maxIncludeDepth)
+	}
+	canonical, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	canonical, err = filepath.Abs(canonical)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if m.Active[canonical] {
+		return nil, nil, false, fmt.Errorf("%s: include cycle", path)
+	}
+	m.Active[canonical] = true
+	defer delete(m.Active, canonical)
+
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if info.IsDir() {
+		config, err := m.ReadDirectory(path, depth)
+		return config, nil, true, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, nil, false, fmt.Errorf("%s: include must be a regular file or directory", path)
+	}
+	m.Files++
+	if m.Files > maxIncludeFiles {
+		return nil, nil, false, fmt.Errorf("%s: includes exceed %d files", path, maxIncludeFiles)
+	}
+	data, err := m.ReadBytes(path)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	value, err := parseConfigValue(data)
+	if err != nil {
+		return nil, nil, false, fmt.Errorf("%s: %w", path, err)
+	}
+	config, mapping := configMapping(value)
+	if !mapping {
+		if value != nil && depth > 0 {
+			return nil, nil, false, fmt.Errorf("%s: included configuration must be a mapping", path)
+		}
+		return value, data, false, nil
+	}
+	includeKey := configKey{Tag: "!!str", Value: "include"}
+	include, included := config[includeKey]
+	if !included {
+		return config, data, false, nil
+	}
+	delete(config, includeKey)
+	entries, ok := include.([]any)
+	if include != nil && !ok {
+		return nil, nil, false, fmt.Errorf("%s: include must be a list of paths", path)
+	}
+	var merged any = config
+	for _, entry := range entries {
+		scalar, ok := entry.(*yaml.Node)
+		if !ok || scalar.Tag != "!!str" || strings.TrimSpace(scalar.Value) == "" {
+			return nil, nil, false, fmt.Errorf("%s: include entries must be non-empty strings", path)
+		}
+		name := scalar.Value
+		if !filepath.IsAbs(name) {
+			name = filepath.Join(filepath.Dir(path), name)
+		}
+		fragment, _, _, err := m.Read(name, depth+1)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, nil, false, fmt.Errorf("%s: include %q: %w", path, name, err)
+		}
+		if fragment != nil {
+			merged = mergeConfig(merged, fragment)
+		}
+	}
+	return merged, data, true, nil
+}
+
+// ReadBytes caps the total input, including files reached more than once.
+func (m *configReader) ReadBytes(path string) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, maxIncludeBytes-m.Bytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	m.Bytes += int64(len(data))
+	if m.Bytes > maxIncludeBytes {
+		return nil, fmt.Errorf("%s: includes exceed %d bytes", path, maxIncludeBytes)
+	}
+	return data, nil
+}
+
+// ReadDirectory follows projected keys while ignoring hidden generations.
+func (m *configReader) ReadDirectory(path string, depth int) (any, error) {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return nil, err
+	}
+	var merged any = map[configKey]any{}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		name := filepath.Join(path, entry.Name())
+		info, err := os.Stat(name)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if !info.IsDir() && filepath.Ext(name) != ".yaml" && filepath.Ext(name) != ".yml" {
+			continue
+		}
+		fragment, _, _, err := m.Read(name, depth+1)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if fragment != nil {
+			merged = mergeConfig(merged, fragment)
+		}
+	}
+	return merged, nil
+}
+
+func parseConfigValue(data []byte) (any, error) {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	var config any
+	for {
+		var document yaml.Node
+		err := decoder.Decode(&document)
+		if errors.Is(err, io.EOF) {
+			return config, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		// Validate the complete alias graph before recursive node-preserving
+		// decoding, including cycles and excessive alias expansion.
+		var validated any
+		if err := document.Decode(&validated); err != nil {
+			return nil, err
+		}
+		if validated != nil {
+			if config != nil {
+				return nil, fmt.Errorf("configuration must contain a single YAML document")
+			}
+			var value configValue
+			if err := document.Decode(&value); err != nil {
+				return nil, err
+			}
+			config = value.Value
+		}
+	}
+}
+
+// configKey retains scalar key spelling while providing comparable merge keys.
+type configKey struct {
+	Tag   string
+	Value string
+}
+
+func (m *configKey) UnmarshalYAML(node *yaml.Node) error {
+	for node.Kind == yaml.AliasNode {
+		node = node.Alias
+	}
+	if node.Kind != yaml.ScalarNode {
+		return fmt.Errorf("configuration mapping keys must be scalars")
+	}
+	m.Tag, m.Value = node.Tag, node.Value
+	return nil
+}
+
+func (m configKey) MarshalYAML() (any, error) {
+	return &yaml.Node{Kind: yaml.ScalarNode, Tag: m.Tag, Value: m.Value}, nil
+}
+
+// configValue keeps scalar nodes intact until the destination schema decodes
+// them; the YAML decoder still validates mappings, aliases and merge keys.
+type configValue struct {
+	Value any
+}
+
+func (m *configValue) UnmarshalYAML(node *yaml.Node) error {
+	switch node.Kind {
+	case yaml.MappingNode:
+		mapping := map[configKey]any{}
+		var inherited []any
+		for idx := 0; idx < len(node.Content); idx += 2 {
+			var value configValue
+			if err := value.UnmarshalYAML(node.Content[idx+1]); err != nil {
+				return err
+			}
+			if node.Content[idx].Tag == "!!merge" {
+				inherited = append(inherited, value.Value)
+				continue
+			}
+			var key configKey
+			if err := key.UnmarshalYAML(node.Content[idx]); err != nil {
+				return err
+			}
+			mapping[key] = value.Value
+		}
+		// Explicit keys win; earlier YAML merge sources supply defaults first.
+		var inherit func(any)
+		inherit = func(value any) {
+			switch value := value.(type) {
+			case map[configKey]any:
+				for key, entry := range value {
+					if _, exists := mapping[key]; !exists {
+						mapping[key] = entry
+					}
+				}
+			case []any:
+				for _, entry := range value {
+					inherit(entry)
+				}
+			}
+		}
+		for _, value := range inherited {
+			inherit(value)
+		}
+		m.Value = mapping
+	case yaml.SequenceNode:
+		values := make([]any, len(node.Content))
+		for idx, entry := range node.Content {
+			var value configValue
+			if err := value.UnmarshalYAML(entry); err != nil {
+				return err
+			}
+			values[idx] = value.Value
+		}
+		m.Value = values
+	case yaml.ScalarNode:
+		if node.Tag != "!!null" {
+			m.Value = node
+		}
+	case yaml.AliasNode:
+		return m.UnmarshalYAML(node.Alias)
+	default:
+		return fmt.Errorf("unsupported configuration node kind %d", node.Kind)
+	}
+	return nil
+}
+
+func configMapping(value any) (map[configKey]any, bool) {
+	mapping, ok := value.(map[configKey]any)
+	return mapping, ok
+}
+
+func mergeConfig(base, overlay any) any {
+	baseMapping, baseOK := configMapping(base)
+	overlayMapping, overlayOK := configMapping(overlay)
+	if baseOK && overlayOK {
+		for key, value := range overlayMapping {
+			baseMapping[key] = mergeConfig(baseMapping[key], value)
+		}
+		return baseMapping
+	}
+	return overlay
+}
