@@ -133,6 +133,14 @@ type ModuleConfig struct {
 	// File is the path to the module config file, the method's request in
 	// YAML.
 	File xcfg.NonEmptyString `yaml:"file"`
+	// Descriptors is the path to the module's descriptor set, which the
+	// module's package installs.
+	//
+	// When set, the method, its request and its reply are resolved from
+	// the set, even for a module linked into this binary, so a module built
+	// outside this tree is configured by the same binary. Empty resolves
+	// them among the descriptors linked into this binary.
+	Descriptors string `yaml:"descriptors"`
 }
 
 // FunctionConfig is one gateway function this instance publishes after

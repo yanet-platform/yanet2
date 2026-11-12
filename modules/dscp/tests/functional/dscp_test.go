@@ -394,6 +394,7 @@ func setupDSCPYAMLHarness(t *testing.T, document string) *dataplaneut.Harness {
 	message, err := operator.LoadRequest(
 		"modules.dscp.controlplane.dscppb.v1.DscpService/UpdateConfig",
 		path,
+		nil,
 	)
 	require.NoError(t, err)
 	request := message.(*dscppb.UpdateConfigRequest)

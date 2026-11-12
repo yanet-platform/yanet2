@@ -46,34 +46,45 @@ func UnmarshalEnumJSON[E Enum](data []byte, target *E) error {
 		return nil
 	}
 
+	number, err := enumNumber(E(0).Descriptor(), data)
+	if err != nil {
+		return err
+	}
+	*target = E(number)
+	return nil
+}
+
+// enumNumber reads an enum value of the descriptor written as its declared
+// name or as a number in the int32 range.
+//
+// It is the rule of UnmarshalEnumJSON, which a message decoded by its
+// descriptor applies to every enum.
+func enumNumber(descriptor protoreflect.EnumDescriptor, data []byte) (protoreflect.EnumNumber, error) {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.UseNumber()
 	var raw any
 	if err := decoder.Decode(&raw); err != nil {
-		return err
+		return 0, err
 	}
 
-	descriptor := E(0).Descriptor()
 	switch value := raw.(type) {
 	case string:
 		declared := descriptor.Values().ByName(protoreflect.Name(value))
 		if declared == nil {
-			return fmt.Errorf(
+			return 0, fmt.Errorf(
 				"%q is not a value of %s, want one of %s",
 				value, descriptor.FullName(), strings.Join(enumNames(descriptor), ", "),
 			)
 		}
-		*target = E(declared.Number())
-		return nil
+		return declared.Number(), nil
 	case json.Number:
 		number, err := strconv.ParseInt(value.String(), 10, 32)
 		if err != nil {
-			return fmt.Errorf("%s is not a valid number for %s", value, descriptor.FullName())
+			return 0, fmt.Errorf("%s is not a valid number for %s", value, descriptor.FullName())
 		}
-		*target = E(number)
-		return nil
+		return protoreflect.EnumNumber(number), nil
 	default:
-		return fmt.Errorf(
+		return 0, fmt.Errorf(
 			"expected a name or a number for %s, got %s", descriptor.FullName(), bytes.TrimSpace(data),
 		)
 	}
