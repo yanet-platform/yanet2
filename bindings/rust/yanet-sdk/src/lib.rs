@@ -41,10 +41,10 @@
 //! }
 //! ```
 //!
-//! An exact-match table is a [`HashIndex`] field: its parts are records of a
-//! key and the position it names in an array of the author's, borrowed for the
-//! build, and the build refuses a key given twice. The handler looks keys up
-//! through the [`HashIndexRef`] it resolves for its batch:
+//! An exact-match table is a [`HashIndex`] field: construction consumes an
+//! iterator of keys and their positions in an array of the author's, refusing
+//! a key given twice. The handler looks keys up through the [`HashIndexRef`]
+//! it resolves for its batch:
 //!
 //! ```
 //! use core::net::Ipv4Addr;
@@ -60,13 +60,19 @@
 //!     weights: ShmSlice<u64>,
 //! }
 //!
-//! fn config<'b, W: yanet_sdk::Owner, E: From<yanet_sdk::BuildError<W::Error>>>(
+//! fn config<'b, W, E, I>(
 //!     scope: yanet_sdk::Scope<'b, '_, W, E>,
-//!     hosts: &'b [(Ipv4Addr, u32)],
-//! ) -> Result<ConfigParts<'b, W>, E> {
+//!     hosts: I,
+//! ) -> Result<ConfigParts<'b, W, I>, E>
+//! where
+//!     W: Owner,
+//!     E: From<BuildError<W::Error>>,
+//!     I: ExactSizeIterator<Item = (Ipv4Addr, u32)>,
+//! {
+//!     let len = hosts.len();
 //!     Ok(ConfigParts {
-//!         hosts: hosts.into(),
-//!         weights: scope.slice(hosts.len(), |i| Ok(10 * i as u64))?,
+//!         hosts: HashIndex::builder(hosts),
+//!         weights: scope.slice(len, |i| Ok(10 * i as u64))?,
 //!     })
 //! }
 //!
@@ -74,13 +80,14 @@
 //!     owner: &W,
 //!     addresses: &[[u8; 4]],
 //! ) -> Result<Built<M, W>, BuildError<W::Error>> {
-//!     let mut records = addresses
-//!         .iter()
-//!         .enumerate()
-//!         .map(|(i, address)| (Ipv4Addr::from(*address), i as u32));
 //!     Builder::build(owner, "hosts", |scope| {
 //!         Ok(ConfigParts {
-//!             hosts: HashIndex::builder(&mut records),
+//!             hosts: HashIndex::builder(
+//!                 addresses
+//!                     .iter()
+//!                     .enumerate()
+//!                     .map(|(i, address)| (Ipv4Addr::from(*address), i as u32)),
+//!             ),
 //!             weights: scope.slice(addresses.len(), |i| Ok(10 * i as u64))?,
 //!         })
 //!     })
@@ -184,9 +191,9 @@ pub use yanet_sys::{
         lpm::{Lpm4, Lpm6, LpmRange},
     },
     cp::{
-        BlockAddr, Branch, Build, BuildError, Builder, Built, BuiltObject, Context, CounterRegistrar, FfiRecord,
-        HashIndexParts, Header, Kind, ModuleKind, ObjectBuilder, ObjectKind, Owned, OwnedRegions, OwnedSlice,
-        OwnedSlots, Owner, Refusal, Registered, Scope,
+        BlockAddr, Branch, Build, BuildError, BuildFrom, Builder, Built, BuiltObject, Context, CounterRegistrar,
+        FfiRecord, HashIndexParts, Header, Kind, ModuleKind, ObjectBuilder, ObjectKind, Owned, OwnedRegions,
+        OwnedSlice, OwnedSlots, Owner, Refusal, Registered, Scope,
     },
     dp::{
         Batch, BoundCounter, CommitCx, Counter, CounterLayout, CounterRef, Cx, Device, DeviceRef, DscpMark, Gauge,
@@ -208,7 +215,7 @@ pub mod prelude {
 #[doc(hidden)]
 pub mod __private {
     pub use yanet_shm::shm::{MAX_ALIGN, ShmLayout};
-    pub use yanet_sys::cp::{Build, FfiRecord, MemoryContext, Owner, Partial, Refusal};
+    pub use yanet_sys::cp::{Build, BuildFrom, FfiRecord, MemoryContext, Owner, Partial, Refusal};
 }
 
 // Test-only dependencies are visible to the library's own test target.
@@ -473,9 +480,9 @@ mod doctests {
     /// # fn main() {
     /// // SAFETY: no C object is built.
     /// let owner = unsafe { TestOwner::new() };
-    /// Builder::<Outer>::build::<BuildError<TestError>, _>(&owner, "outer", |outer| {
-    ///     let block = outer.boxed::<u64>(1)?;
-    ///     Builder::<Inner>::build::<BuildError<TestError>, _>(&owner, "inner", |_| Ok(block))?;
+    /// Builder::<Outer>::build::<BuildError<TestError>, _, _>(&owner, "outer", |outer| {
+    ///     let block = outer.boxed::<u64, _>(1)?;
+    ///     Builder::<Inner>::build::<BuildError<TestError>, _, _>(&owner, "inner", |_| Ok(block))?;
     ///     Ok(0)
     /// })
     /// .unwrap();
@@ -502,8 +509,8 @@ mod doctests {
     /// // SAFETY: no C object is built.
     /// let owner = unsafe { TestOwner::new() };
     /// let mut leaked = None;
-    /// Builder::<Mine>::build::<BuildError<TestError>, _>(&owner, "mine", |scope| {
-    ///     leaked = Some(scope.boxed::<u64>(1)?);
+    /// Builder::<Mine>::build::<BuildError<TestError>, _, _>(&owner, "mine", |scope| {
+    ///     leaked = Some(scope.boxed::<u64, _>(1)?);
     ///     Ok(0)
     /// })
     /// .unwrap();
@@ -527,7 +534,7 @@ mod doctests {
     /// #     }
     /// # }
     /// fn build(owner: &TestOwner) {
-    ///     Builder::<Mine>::build::<BuildError<TestError>, _>(owner, "mine", |_| {
+    ///     Builder::<Mine>::build::<BuildError<TestError>, _, _>(owner, "mine", |_| {
     ///         let ranges = [LpmRange { from: [0; 4], to: [255; 4], value: 1 }];
     ///         Ok(&ranges[..])
     ///     })
@@ -553,7 +560,7 @@ mod doctests {
     /// # }
     /// fn build(owner: &TestOwner) {
     ///     let ranges = [LpmRange { from: [0; 4], to: [255; 4], value: 1 }];
-    ///     Builder::<Mine>::build::<BuildError<TestError>, _>(owner, "mine", |_| Ok(&ranges[..]))
+    ///     Builder::<Mine>::build::<BuildError<TestError>, _, _>(owner, "mine", |_| Ok(&ranges[..]))
     ///         .unwrap();
     /// }
     /// ```
@@ -577,7 +584,7 @@ mod doctests {
     /// # fn main() {
     /// // SAFETY: no C object is built.
     /// let owner = unsafe { TestOwner::new() };
-    /// Builder::<Mine>::build::<BuildError<TestError>, _>(&owner, "mine", |scope| scope.boxed::<()>(())).unwrap();
+    /// Builder::<Mine>::build::<BuildError<TestError>, _, _>(&owner, "mine", |scope| scope.boxed::<(), _>(())).unwrap();
     /// # }
     /// ```
     struct ZeroSizedBlockRefused;

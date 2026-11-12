@@ -114,20 +114,32 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     let mut idents = Vec::new();
     let mut field_idents = Vec::new();
     let mut field_names = Vec::new();
+    let mut field_types = Vec::new();
+    let mut sources = Vec::new();
     for (idx, field) in fields.named.iter().enumerate() {
         let ident = field.ident.as_ref().expect("named field");
         let field_ty = &field.ty;
         let vis = &field.vis;
         let binding = format_ident!("__f{}", idx);
         let guard = format_ident!("__g{}", idx);
+        let mut source = format_ident!("__S{}", idx);
+        while input.generics.params.iter().any(|param| match param {
+            GenericParam::Type(ty) => ty.ident == source,
+            GenericParam::Const(konst) => konst.ident == source,
+            GenericParam::Lifetime(_) => false,
+        }) {
+            source = format_ident!("_{}", source);
+        }
         bounds.push(quote_spanned! {field_ty.span()=>
             __field_is_build::<#field_ty>();
         });
-        parts_fields.push(quote_spanned!(field_ty.span()=> #vis #ident: <#field_ty as #p::Build>::Parts<'b, __W>));
-        debug_bounds
-            .push(quote_spanned!(field_ty.span()=> <#field_ty as #p::Build>::Parts<'b, __W>: #core::fmt::Debug));
+        parts_fields
+            .push(quote_spanned!(field_ty.span()=> #vis #ident: <#field_ty as #p::BuildFrom<#source>>::Parts<'b, __W>));
+        debug_bounds.push(
+            quote_spanned!(field_ty.span()=> <#field_ty as #p::BuildFrom<#source>>::Parts<'b, __W>: #core::fmt::Debug),
+        );
         writes.push(quote_spanned! {field_ty.span()=>
-            <#field_ty as #p::Build>::write::<__W>(
+            <#field_ty as #p::BuildFrom<#source>>::write::<__W>(
                 #binding,
                 __memory,
                 __addr + #core::mem::offset_of!(#ty, #ident),
@@ -148,6 +160,8 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         idents.push(quote!(#ident: #binding));
         field_idents.push(ident);
         field_names.push(ident.to_string());
+        field_types.push(field_ty);
+        sources.push(source);
     }
     let drop_msg = format!("ShmLayout: `{name}` needs drop; shared-memory types are never dropped");
     let align_msg = format!("ShmLayout: `{name}` is aligned to more than the block allocator's MAX_ALIGN");
@@ -157,12 +171,28 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     let parts_doc = format!("Parts of [`{name}`]: one per field, each written at the field's place.");
 
     // The parts take the build's lifetime and owner, then the struct's own
-    // parameters.
+    // parameters and the source of each field.
     let mut parts_generics = generics.clone();
     parts_generics.params.insert(0, syn::parse_quote!(__W: #p::Owner));
     parts_generics.params.insert(0, syn::parse_quote!('b));
+    let mut writer_generics = generics.clone();
+    for (source, field_ty) in sources.iter().zip(&field_types) {
+        parts_generics
+            .params
+            .push(syn::parse_quote!(#source = <#field_ty as #p::Build>::DefaultSource<'b>));
+        parts_generics
+            .make_where_clause()
+            .predicates
+            .push(syn::parse_quote!(#field_ty: #p::BuildFrom<#source>));
+        writer_generics.params.push(syn::parse_quote!(#source));
+        writer_generics
+            .make_where_clause()
+            .predicates
+            .push(syn::parse_quote!(#field_ty: #p::BuildFrom<#source>));
+    }
     let (parts_impl_generics, parts_ty_generics, _) = parts_generics.split_for_impl();
-    let parts_where = &generics.where_clause;
+    let parts_where = &parts_generics.where_clause;
+    let (writer_impl_generics, _, writer_where) = writer_generics.split_for_impl();
 
     // A non-generic type is checked once here. A generic one cannot name its
     // parameters in a constant, so every alignment it asks for is checked here,
@@ -224,6 +254,7 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         impl #parts_impl_generics #core::fmt::Debug for #parts_name #parts_ty_generics
         where
             #(#predicates,)*
+            #(#field_types: #p::BuildFrom<#sources>,)*
             #(#debug_bounds,)*
         {
             fn fmt(&self, __f: &mut #core::fmt::Formatter<'_>) -> #core::result::Result<(), #core::fmt::Error> {
@@ -239,10 +270,29 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         // parts after it are dropped; the blocks owned are exactly those of
         // the fields, each freed once.
         unsafe impl #impl_generics #p::Build for #ty #where_clause {
-            type Parts<'b, __W: #p::Owner> = #parts_name<'b, __W, #(#args),*>;
+            type DefaultSource<'b> = (#(<#field_types as #p::Build>::DefaultSource<'b>,)*);
+
+            unsafe fn free<__W: #p::Owner>(
+                __addr: usize,
+                __memory: &#p::MemoryContext<'_, __W>,
+            ) {
+                #instance_checks
+                // SAFETY: each field lies in the value at the address, which
+                // was written whole (caller contract).
+                unsafe {
+                    #(#frees)*
+                }
+            }
+        }
+
+        // SAFETY: every field is written at its own offset from the parts
+        // of its chosen source. A refused or panicking write releases the
+        // prior fields, last first, and drops the remaining parts.
+        unsafe impl #writer_impl_generics #p::BuildFrom<(#(#sources,)*)> for #ty #writer_where {
+            type Parts<'b, __W: #p::Owner> = #parts_name<'b, __W, #(#args,)* #(#sources),*>;
 
             unsafe fn write<__W: #p::Owner>(
-                __parts: #parts_name<'_, __W, #(#args),*>,
+                __parts: #parts_name<'_, __W, #(#args,)* #(#sources),*>,
                 __memory: &#p::MemoryContext<'_, __W>,
                 __addr: usize,
             ) -> #core::result::Result<(), #p::Refusal> {
@@ -256,18 +306,6 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
                     #(#core::mem::forget(#guards);)*
                 }
                 #core::result::Result::Ok(())
-            }
-
-            unsafe fn free<__W: #p::Owner>(
-                __addr: usize,
-                __memory: &#p::MemoryContext<'_, __W>,
-            ) {
-                #instance_checks
-                // SAFETY: each field lies in the value at the address, which
-                // was written whole (caller contract).
-                unsafe {
-                    #(#frees)*
-                }
             }
         }
     })

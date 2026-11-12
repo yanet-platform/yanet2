@@ -19,7 +19,7 @@ use yanet_shm::{rel::ShmBox, resolve::Resolve, shm::ShmLayout};
 use super::{Addr4, Joint, LineAttr, Net4Attr, Net6Attr, PortAttr, Rule, RuleMap, RuleTable, lpm_value};
 use crate::{
     bindings,
-    cp::{Build, MemoryContext, Owned, Owner, Refusal},
+    cp::{Build, BuildFrom, MemoryContext, Owned, Owner, Refusal},
 };
 
 /// A classifier of a tree: an attribute, or a joint of two classifiers.
@@ -31,17 +31,20 @@ use crate::{
 /// use yanet_shm::{resolve::Resolve, shm::ShmLayout};
 /// use yanet_sys::{
 ///     classify::Node,
-///     cp::{Build, MemoryContext, Owner, Refusal},
+///     cp::{Build, BuildFrom, MemoryContext, Owner, Refusal},
 /// };
 /// #[repr(C)]
 /// struct Mine(u32);
 /// unsafe impl ShmLayout for Mine {}
 /// unsafe impl Build for Mine {
+///     type DefaultSource<'b> = ();
+///     unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
+/// }
+/// unsafe impl BuildFrom<()> for Mine {
 ///     type Parts<'b, W: Owner> = u32;
 ///     unsafe fn write<W: Owner>(_: u32, _: &MemoryContext<'_, W>, _: usize) -> Result<(), Refusal> {
 ///         Ok(())
 ///     }
-///     unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
 /// }
 /// impl Node for Mine {
 ///     type Key = u32;
@@ -384,15 +387,7 @@ macro_rules! holders {
         // build allocated in its context, then its inputs, the right one
         // before the left.
         unsafe impl<$($param: Build),*> Build for $name<$($param),*> {
-            type Parts<'b, W: Owner> = Infallible;
-
-            unsafe fn write<W: Owner>(
-                parts: Infallible,
-                _: &MemoryContext<'_, W>,
-                _: usize,
-            ) -> Result<(), Refusal> {
-                match parts {}
-            }
+            type DefaultSource<'b> = ();
 
             unsafe fn free<W: Owner>(addr: usize, memory: &MemoryContext<'_, W>) {
                 // SAFETY: the node holds a value (caller contract), which only
@@ -402,6 +397,20 @@ macro_rules! holders {
                     bindings::$free(memory.root().ptr::<$raw>(addr + offset_of!(Self, $table)));
                     $(<ShmBox<$ty> as Build>::free::<W>(addr + offset_of!(Self, $edge), memory);)*
                 }
+            }
+        }
+
+        // SAFETY: no input can reach this write; construction uses the
+        // scope's specialized operations.
+        unsafe impl<$($param: Build),*> BuildFrom<()> for $name<$($param),*> {
+            type Parts<'b, W: Owner> = Infallible;
+
+            unsafe fn write<W: Owner>(
+                parts: Infallible,
+                _: &MemoryContext<'_, W>,
+                _: usize,
+            ) -> Result<(), Refusal> {
+                match parts {}
             }
         }
     )*};
@@ -438,7 +447,7 @@ mod sealed {
 pub unsafe fn link<W: Owner, T: Build>(memory: &MemoryContext<'_, W>, edge: usize, part: Owned<'_, T, W>) {
     // SAFETY: the edge is an aligned, unwritten offset word of the node
     // (caller contract); a box write only stores the offset.
-    let written = unsafe { <ShmBox<T> as Build>::write::<W>(part, memory, edge) };
+    let written = unsafe { <ShmBox<T> as BuildFrom<()>>::write::<W>(part, memory, edge) };
     debug_assert!(written.is_ok(), "a box write does not fail");
 }
 

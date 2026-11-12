@@ -45,8 +45,8 @@ mod record;
 
 pub use addr::{BlockAddr, Context, Header};
 pub use builder::{
-    Branch, Build, Builder, Built, BuiltObject, CounterRegistrar, HashIndexParts, Kind, ModuleKind, ObjectBuilder,
-    ObjectKind, Owned, OwnedRegions, OwnedSlice, OwnedSlots, Registered, Scope,
+    Branch, Build, BuildFrom, Builder, Built, BuiltObject, CounterRegistrar, HashIndexParts, Kind, ModuleKind,
+    ObjectBuilder, ObjectKind, Owned, OwnedRegions, OwnedSlice, OwnedSlots, Registered, Scope,
 };
 #[doc(hidden)]
 pub use builder::{MemoryContext, Partial};

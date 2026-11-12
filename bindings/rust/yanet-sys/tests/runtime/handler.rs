@@ -10,7 +10,7 @@ use core::{
 use yanet_shm::{rel::RelPtr, shm::ShmLayout};
 use yanet_sys::{
     bindings,
-    cp::{Build, MemoryContext, Owner, Refusal},
+    cp::{Build, BuildFrom, MemoryContext, Owner, Refusal},
     dp::{
         Batch, CommitCx, Counter, CounterRef, Cx, Device, Module, TaggedCounter, TaggedCounters, TaggedCountersRef,
         Traffic, Verdict,
@@ -39,13 +39,19 @@ unsafe impl ShmLayout for Config {}
 // SAFETY: the configuration is laid out by hand and never built: its parts
 // cannot exist, so nothing is ever written, and it owns no block to free.
 unsafe impl Build for Config {
+    type DefaultSource<'b> = ();
+
+    unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
+}
+
+// SAFETY: the configuration is laid out by hand and never built: its parts
+// cannot exist, so nothing is ever written, and it owns no block to free.
+unsafe impl BuildFrom<()> for Config {
     type Parts<'b, W: Owner> = Infallible;
 
     unsafe fn write<W: Owner>(parts: Infallible, _: &MemoryContext<'_, W>, _: usize) -> Result<(), Refusal> {
         match parts {}
     }
-
-    unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
 }
 
 /// Reads everything the runtime hands a module: the configuration, prepared

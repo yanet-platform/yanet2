@@ -9,7 +9,7 @@ use yanet_sdk_testing::BlockArena;
 use yanet_shm::shm::ShmLayout;
 use yanet_sys::{
     bindings,
-    cp::{Build, MemoryContext, Owner, Refusal},
+    cp::{Build, BuildFrom, MemoryContext, Owner, Refusal},
     dp::{
         Batch, CommitCx, Cx, Module, Object, ObjectCommitCx, ObjectConfig, ObjectLink, PerWorker, PerWorkerSlice,
         Verdict, WorkerSlice, WorkerSlot,
@@ -42,13 +42,20 @@ unsafe impl<T: Copy + ShmLayout> ShmLayout for Config<T> {}
 // cannot exist, so nothing is ever written, and its slot block belongs to the
 // test.
 unsafe impl<T: Copy + ShmLayout> Build for Config<T> {
+    type DefaultSource<'b> = ();
+
+    unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
+}
+
+// SAFETY: the configuration is laid out by hand and never built: its parts
+// cannot exist, so nothing is ever written, and its slot block belongs to the
+// test.
+unsafe impl<T: Copy + ShmLayout> BuildFrom<()> for Config<T> {
     type Parts<'b, W: Owner> = Infallible;
 
     unsafe fn write<W: Owner>(parts: Infallible, _: &MemoryContext<'_, W>, _: usize) -> Result<(), Refusal> {
         match parts {}
     }
-
-    unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
 }
 
 /// The committed context of a module of a counting configuration over a slot
@@ -423,13 +430,18 @@ unsafe impl ShmLayout for Regions {}
 
 // SAFETY: as for `Config`: laid out by hand and never built.
 unsafe impl Build for Regions {
+    type DefaultSource<'b> = ();
+
+    unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
+}
+
+// SAFETY: as for `Config`: laid out by hand and never built.
+unsafe impl BuildFrom<()> for Regions {
     type Parts<'b, W: Owner> = Infallible;
 
     unsafe fn write<W: Owner>(parts: Infallible, _: &MemoryContext<'_, W>, _: usize) -> Result<(), Refusal> {
         match parts {}
     }
-
-    unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
 }
 
 /// Lays out the table and the [`WORKERS`] zeroed regions of `len` values of a

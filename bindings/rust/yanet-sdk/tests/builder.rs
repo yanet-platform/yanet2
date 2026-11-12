@@ -16,7 +16,7 @@ use core::{
 
 use yanet_packet as _;
 use yanet_sdk::{
-    Batch, Build, BuiltObject, CommitCx, Counter, Cx, Device, HashIndex, Kind, Lpm4, Lpm6, Module, Object,
+    Batch, Build, BuildFrom, BuiltObject, CommitCx, Counter, Cx, Device, HashIndex, Kind, Lpm4, Lpm6, Module, Object,
     ObjectBuilder, ObjectCommitCx, ObjectCounter, ObjectLink, OwnedSlice, PerWorker, PerWorkerSlice, Refusal,
     Registered, ShmBox, ShmLayout, ShmSlice, TaggedCounter, TaggedCounters, Traffic, Verdict,
 };
@@ -105,6 +105,15 @@ unsafe impl ShmLayout for Flaky {}
 // stands in, under Miri, for an embedded C object whose initialisation runs
 // out of memory.
 unsafe impl Build for Flaky {
+    type DefaultSource<'b> = ();
+
+    unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
+}
+
+// SAFETY: the word is the whole value, written or refused as a whole. It
+// stands in, under Miri, for an embedded C object whose initialisation runs
+// out of memory.
+unsafe impl BuildFrom<()> for Flaky {
     type Parts<'b, W: Owner> = FlakyParts;
 
     unsafe fn write<W: Owner>(parts: FlakyParts, memory: &MemoryContext<'_, W>, addr: usize) -> Result<(), Refusal> {
@@ -115,8 +124,6 @@ unsafe impl Build for Flaky {
         unsafe { memory.root().ptr::<u64>(addr).write(parts.word) };
         Ok(())
     }
-
-    unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
 }
 
 /// A device, a counter, a block of ports and a word whose write may be
@@ -339,17 +346,20 @@ fn entries<'b>(b: Scope<'b, '_, TestOwner>) -> Result<OwnedSlice<'b, Entry, Test
 
 /// Builds a configuration of a module with the closure, failing with the SDK's
 /// own errors.
-fn build<'env, M: Module>(
+fn build<'env, M: Module, S>(
     owner: &TestOwner,
-    f: impl for<'b> FnOnce(Scope<'b, 'env, TestOwner>) -> Result<<M::Config as Build>::Parts<'b, TestOwner>, Failure>,
-) -> Result<Built<M, TestOwner>, Failure> {
+    f: impl for<'b> FnOnce(Scope<'b, 'env, TestOwner>) -> Result<<M::Config as BuildFrom<S>>::Parts<'b, TestOwner>, Failure>,
+) -> Result<Built<M, TestOwner>, Failure>
+where
+    M::Config: BuildFrom<S>,
+{
     Builder::<M>::build(owner, M::NAME, f)
 }
 
 /// Builds a node of rules, each owning a block of ports: a boxed rule, a run
 /// of two and a fixed pair.
 fn build_node(owner: &TestOwner) -> Result<Built<NodeModule, TestOwner>, Failure> {
-    build::<NodeModule>(owner, |b| {
+    build::<NodeModule, _>(owner, |b| {
         let rule = |id: u64, ports: &[u64]| -> Result<RuleParts<'_, TestOwner>, Failure> {
             Ok(RuleParts {
                 id,
@@ -366,7 +376,7 @@ fn build_node(owner: &TestOwner) -> Result<Built<NodeModule, TestOwner>, Failure
 
 /// Builds the policy configuration with the rules, each an id and its ports.
 fn build_policy(owner: &TestOwner, rules: &[(u64, &[u64])]) -> Result<Built<PolicyModule, TestOwner>, Failure> {
-    build::<PolicyModule>(owner, |b| policy(b, rules))
+    build::<PolicyModule, _>(owner, |b| policy(b, rules))
 }
 
 /// The body of a built configuration, resolved through a view of the owner's
@@ -395,7 +405,7 @@ fn release<M: Module>(owner: &TestOwner, built: Built<M, TestOwner>) {
 fn test_build_leaves_tables_of_no_ranges_empty_and_unallocated() {
     let owner = owner();
 
-    let built = build::<TablesModule>(&owner, |_| Ok(TablesParts { v4: &[], v6: &[] })).expect("built");
+    let built = build::<TablesModule, _>(&owner, |_| Ok(TablesParts { v4: &[], v6: &[] })).expect("built");
 
     let (config, view) = body::<TablesModule>(&owner, &built);
     assert_eq!(
@@ -420,7 +430,7 @@ fn test_build_leaves_indexes_of_no_records_empty_and_unallocated() {
     let owner = owner();
 
     let built =
-        build::<IndexesModule>(&owner, |_| Ok(IndexesParts { v4: (&[]).into(), v6: (&[]).into() })).expect("built");
+        build::<IndexesModule, _>(&owner, |_| Ok(IndexesParts { v4: (&[]).into(), v6: (&[]).into() })).expect("built");
 
     let (config, view) = body::<IndexesModule>(&owner, &built);
     assert_eq!(
@@ -433,6 +443,47 @@ fn test_build_leaves_indexes_of_no_records_empty_and_unallocated() {
     // Only the root block.
     assert_eq!(1, owner.live_blocks());
     release::<IndexesModule>(&owner, built);
+    owner.assert_released();
+}
+
+#[test]
+fn test_build_infers_inline_index_sources_in_nested_boxed_and_slice_parts() {
+    #[derive(ShmLayout)]
+    #[repr(C)]
+    struct NestedIndexes {
+        direct: Indexes,
+        boxed: ShmBox<Indexes>,
+        rows: ShmSlice<Indexes>,
+    }
+
+    let owner = owner();
+    let built = build::<Fixture<NestedIndexes>, _>(&owner, |scope| {
+        Ok(NestedIndexesParts {
+            direct: IndexesParts {
+                v4: HashIndex::builder(core::iter::empty::<(Ipv4Addr, u32)>()),
+                v6: HashIndex::builder([Ipv6Addr::LOCALHOST; 0].into_iter().map(|key| (key, 0))),
+            },
+            boxed: scope.boxed(IndexesParts {
+                v4: HashIndex::builder(
+                    [Ipv4Addr::LOCALHOST; 0]
+                        .into_iter()
+                        .enumerate()
+                        .map(|(idx, key)| (key, idx as u32)),
+                ),
+                v6: HashIndex::builder(core::iter::empty::<(Ipv6Addr, u32)>()),
+            })?,
+            rows: scope.slice(1, |_| {
+                Ok(IndexesParts {
+                    v4: HashIndex::builder(core::iter::empty::<(Ipv4Addr, u32)>()),
+                    v6: HashIndex::builder(core::iter::empty::<(Ipv6Addr, u32)>()),
+                })
+            })?,
+        })
+    })
+    .expect("built");
+
+    assert_eq!(3, owner.live_blocks());
+    release::<Fixture<NestedIndexes>>(&owner, built);
     owner.assert_released();
 }
 
@@ -472,7 +523,7 @@ fn test_build_writes_nested_slices_and_a_box() {
 fn test_build_writes_an_unlocked_mutex_with_plain_state() {
     let owner = owner();
 
-    let built = build::<LockedModule>(&owner, |_| {
+    let built = build::<LockedModule, _>(&owner, |_| {
         Ok(LockedParts {
             state: Counts { packets: 7, bytes: 448 },
         })
@@ -497,7 +548,7 @@ fn test_build_padded_root_mutex_and_slice_use_only_typed_fields() {
     use locked::{Padded, PaddedParts, PaddedRoot, PaddedRootParts};
 
     let owner = owner();
-    let built = build::<Fixture<PaddedRoot>>(&owner, |b| {
+    let built = build::<Fixture<PaddedRoot>, _>(&owner, |b| {
         Ok(PaddedRootParts {
             tag: 1,
             state: Padded { narrow: 7, wide: 11 },
@@ -534,7 +585,7 @@ fn test_build_holds_standard_addresses_as_their_octets() {
     let hosts = [Ipv6Addr::LOCALHOST, Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0xa1b, 0x2c3d)];
 
     let owner = owner();
-    let built = build::<Fixture<Addresses>>(&owner, |b| {
+    let built = build::<Fixture<Addresses>, _>(&owner, |b| {
         Ok(AddressesParts {
             tag: 7,
             v4,
@@ -561,7 +612,7 @@ fn test_build_padded_worker_slots_and_regions_use_typed_copies() {
 
     let owner = owner_of_workers(3);
     let initial = Padded { narrow: 5, wide: 17 };
-    let built = build::<Fixture<PaddedWorkers>>(&owner, |b| {
+    let built = build::<Fixture<PaddedWorkers>, _>(&owner, |b| {
         Ok(PaddedWorkersParts {
             slots: b.per_worker(initial)?,
             regions: b.per_worker_slice(2, initial)?,
@@ -585,7 +636,7 @@ fn test_build_padded_worker_allocation_failure_releases_every_block() {
         let owner = owner_of_workers(3);
         owner.fail_after(Call::Alloc, allowed);
         let initial = Padded { narrow: 5, wide: 17 };
-        let err = build::<Fixture<PaddedWorkers>>(&owner, |b| {
+        let err = build::<Fixture<PaddedWorkers>, _>(&owner, |b| {
             Ok(PaddedWorkersParts {
                 slots: b.per_worker(initial)?,
                 regions: b.per_worker_slice(2, initial)?,
@@ -604,7 +655,7 @@ fn test_build_padded_field_failure_releases_written_and_unwritten_children() {
     use locked::PaddedParts;
 
     let owner = owner();
-    let err = build::<Fixture<PaddedFaulty>>(&owner, |b| {
+    let err = build::<Fixture<PaddedFaulty>, _>(&owner, |b| {
         Ok(PaddedFaultyParts {
             tag: 1,
             items: b.slice(2, |_| Ok(PaddedParts { narrow: 5, wide: 17 }))?,
@@ -621,7 +672,7 @@ fn test_build_padded_field_failure_releases_written_and_unwritten_children() {
 fn test_build_leaves_an_empty_slice_null_and_unallocated() {
     let owner = owner();
 
-    let built = build::<WordsModule>(&owner, |b| b.slice(0, |_| Ok(0))).expect("built");
+    let built = build::<WordsModule, _>(&owner, |b| b.slice(0, |_| Ok(0))).expect("built");
 
     let (config, view) = body::<WordsModule>(&owner, &built);
     assert_eq!((0, 0, 0), (config.offset(), config.len(), config.as_slice(&view).len()));
@@ -694,7 +745,7 @@ fn test_build_releases_everything_when_a_registration_fails_at_each_call() {
         let owner = owner();
         owner.fail_after(Call::Registration, allowed);
 
-        let err = build::<EntriesModule>(&owner, entries).expect_err("refused registration");
+        let err = build::<EntriesModule, _>(&owner, entries).expect_err("refused registration");
 
         assert_eq!(BuildError::Owner(TestError::Registration), err);
         owner.assert_released();
@@ -706,7 +757,7 @@ fn test_build_frees_the_root_block_of_a_refused_header() {
     let owner = owner();
     owner.fail_after(Call::Header, 0);
 
-    let err = build::<EntriesModule>(&owner, entries).expect_err("refused header");
+    let err = build::<EntriesModule, _>(&owner, entries).expect_err("refused header");
 
     assert!(matches!(err, BuildError::Owner(_)), "{err:?}");
     owner.assert_released();
@@ -717,7 +768,7 @@ fn test_build_refuses_invalid_names_before_allocating() {
     let overlong = "x".repeat(CP_MODULE_NAME_LEN as usize);
     for name in ["", "a\0b", overlong.as_str()] {
         let owner = owner_failing_alloc_after(0);
-        let err = Builder::<PolicyModule>::build::<Failure, _>(&owner, name, |_| panic!("invalid name"))
+        let err = Builder::<PolicyModule>::build::<Failure, _, _>(&owner, name, |_| panic!("invalid name"))
             .expect_err("refused name");
 
         assert_eq!(BuildError::Refused(Refusal::InvalidName), err, "{name:?}");
@@ -729,7 +780,7 @@ fn test_build_refuses_invalid_names_before_allocating() {
 fn test_build_accepts_a_name_that_fills_its_c_field() {
     let owner = owner();
     let name = "x".repeat(CP_MODULE_NAME_LEN as usize - 1);
-    let built = Builder::<PolicyModule>::build::<Failure, _>(&owner, &name, |b| policy(b, &[])).expect("built");
+    let built = Builder::<PolicyModule>::build::<Failure, _, _>(&owner, &name, |b| policy(b, &[])).expect("built");
 
     release(&owner, built);
     owner.assert_released();
@@ -740,7 +791,7 @@ fn test_build_reports_exhausted_memory_for_the_root_block() {
     let owner = owner();
     owner.fail_after(Call::Alloc, 0);
 
-    let err = build::<EntriesModule>(&owner, entries).expect_err("no memory");
+    let err = build::<EntriesModule, _>(&owner, entries).expect_err("no memory");
 
     assert_eq!(BuildError::Refused(Refusal::OutOfMemory), err);
     owner.assert_released();
@@ -750,7 +801,7 @@ fn test_build_reports_exhausted_memory_for_the_root_block() {
 fn test_build_refuses_a_slice_whose_size_overflows() {
     let owner = owner();
 
-    let err = build::<WordsModule>(&owner, |b| b.slice(usize::MAX, |_| Ok(0))).expect_err("overflowing slice");
+    let err = build::<WordsModule, _>(&owner, |b| b.slice(usize::MAX, |_| Ok(0))).expect_err("overflowing slice");
 
     assert_eq!(BuildError::Refused(Refusal::BlockTooLarge), err);
     owner.assert_released();
@@ -764,7 +815,7 @@ fn test_build_refuses_a_slice_beyond_the_largest_block_without_asking_the_owner(
     // exhaust the memory.
     owner.fail_after(Call::Alloc, 1);
 
-    let err = build::<WordsModule>(&owner, |b| b.slice(len, |_| Ok(0))).expect_err("slice beyond the largest block");
+    let err = build::<WordsModule, _>(&owner, |b| b.slice(len, |_| Ok(0))).expect_err("slice beyond the largest block");
 
     assert_eq!(BuildError::Refused(Refusal::BlockTooLarge), err);
     owner.assert_released();
@@ -774,7 +825,7 @@ fn test_build_refuses_a_slice_beyond_the_largest_block_without_asking_the_owner(
 fn test_build_returns_the_error_of_a_slice_item_and_releases() {
     let owner = owner();
 
-    let err = Builder::<PolicyModule>::build::<AuthorError, _>(&owner, "policy0", |b| {
+    let err = Builder::<PolicyModule>::build::<AuthorError, _, _>(&owner, "policy0", |b| {
         Ok(PolicyParts {
             rules: b.slice(3, |idx| {
                 let id = idx as u64 + 1;
@@ -803,8 +854,8 @@ fn test_build_releases_everything_when_the_closure_panics() {
     let owner = owner();
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        Builder::<PolicyModule>::build::<Failure, _>(&owner, "policy0", |b| {
-            let _rule = b.boxed::<Rule>(RuleParts {
+        Builder::<PolicyModule>::build::<Failure, _, _>(&owner, "policy0", |b| {
+            let _rule = b.boxed::<Rule, _>(RuleParts {
                 id: 1,
                 ports: b.slice(1, |_| Ok(80))?,
             })?;
@@ -821,7 +872,7 @@ fn test_build_releases_everything_when_an_item_of_a_nested_slice_fails() {
     let owner = owner();
 
     // Rule 1 owns a finished ports block when rule 2's ports fail halfway.
-    let err = Builder::<PolicyModule>::build::<AuthorError, _>(&owner, "policy0", |b| {
+    let err = Builder::<PolicyModule>::build::<AuthorError, _, _>(&owner, "policy0", |b| {
         Ok(PolicyParts {
             rules: b.slice(2, |idx| {
                 let id = idx as u64 + 1;
@@ -855,7 +906,7 @@ fn test_build_releases_everything_when_a_nested_fill_panics() {
     let owner = owner();
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        Builder::<PolicyModule>::build::<Failure, _>(&owner, "policy0", |b| {
+        Builder::<PolicyModule>::build::<Failure, _, _>(&owner, "policy0", |b| {
             Ok(PolicyParts {
                 rules: b.slice(2, |idx| {
                     let id = idx as u64 + 1;
@@ -882,9 +933,9 @@ fn test_build_releases_everything_when_a_nested_fill_panics() {
 fn test_build_frees_a_block_dropped_unused_at_once() {
     let owner = owner();
 
-    let built = build::<WordsModule>(&owner, |b| {
+    let built = build::<WordsModule, _>(&owner, |b| {
         let before = owner.live_blocks();
-        let unused = b.boxed::<Rule>(RuleParts {
+        let unused = b.boxed::<Rule, _>(RuleParts {
             id: 1,
             ports: b.slice(2, |idx| Ok([80, 443][idx]))?,
         })?;
@@ -905,7 +956,7 @@ fn test_build_frees_a_block_dropped_unused_at_once() {
 fn test_derive_expansion_is_hygienic_for_field_names() {
     let owner = owner();
 
-    let built = build::<HygieneModule>(&owner, |b| {
+    let built = build::<HygieneModule, _>(&owner, |b| {
         Ok(HygieneParts {
             __addr: 1,
             __root: 2,
@@ -1024,7 +1075,7 @@ const FAULTY_WORDS: usize = 7;
 fn test_build_registers_each_counter_with_the_size_of_its_layout() {
     let owner = owner();
 
-    let built = build::<CountedModule>(&owner, |b| {
+    let built = build::<CountedModule, _>(&owner, |b| {
         Ok(CountedParts {
             hits: b.counter("hits")?,
             traffic: b.counter("traffic")?,
@@ -1063,7 +1114,7 @@ fn tagged<'b>(b: Scope<'b, '_, TestOwner>, last: &str) -> Result<TaggedParts<'b,
 fn test_build_writes_each_tagged_counter_with_the_registry_of_its_tag() {
     let owner = owner();
 
-    let built = build::<TaggedModule>(&owner, |b| tagged(b, "rules")).expect("built");
+    let built = build::<TaggedModule, _>(&owner, |b| tagged(b, "rules")).expect("built");
 
     let (config, _) = body::<TaggedModule>(&owner, &built);
     assert_eq!(
@@ -1083,7 +1134,7 @@ fn test_build_writes_each_tagged_counter_with_the_registry_of_its_tag() {
 fn test_build_registers_each_tagged_counter_with_the_size_of_its_layout() {
     let owner = owner();
 
-    let built = build::<TaggedModule>(&owner, |b| tagged(b, "rules")).expect("built");
+    let built = build::<TaggedModule, _>(&owner, |b| tagged(b, "rules")).expect("built");
 
     let (config, _) = body::<TaggedModule>(&owner, &built);
     assert_eq!(
@@ -1105,7 +1156,7 @@ fn test_build_releases_everything_when_a_tagged_counter_fails_at_each_call() {
         let owner = owner();
         owner.fail_after(Call::Registration, allowed);
 
-        let err = build::<TaggedModule>(&owner, |b| tagged(b, "rules")).expect_err("refused registration");
+        let err = build::<TaggedModule, _>(&owner, |b| tagged(b, "rules")).expect_err("refused registration");
 
         assert_eq!(BuildError::Owner(TestError::Registration), err);
         owner.assert_released();
@@ -1120,7 +1171,7 @@ fn test_build_refuses_a_counter_tag_that_does_not_fit_its_c_field() {
     for tag in [overlong.as_str(), "ru\0les", ""] {
         let owner = owner();
 
-        let err = build::<TaggedModule>(&owner, |b| tagged(b, tag)).expect_err("refused tag");
+        let err = build::<TaggedModule, _>(&owner, |b| tagged(b, tag)).expect_err("refused tag");
 
         assert_eq!(
             (BuildError::Refused(Refusal::InvalidName), 2),
@@ -1154,7 +1205,7 @@ fn test_build_writes_tagged_counters_with_their_registry_and_count() {
     let owner = owner();
     let mut ids = Vec::new();
 
-    let built = build::<ByRuleModule>(&owner, |b| by_rule(b, &["deny", "allow", "deny"], &mut ids)).expect("built");
+    let built = build::<ByRuleModule, _>(&owner, |b| by_rule(b, &["deny", "allow", "deny"], &mut ids)).expect("built");
 
     let (config, _) = body::<ByRuleModule>(&owner, &built);
     assert_eq!(
@@ -1171,7 +1222,7 @@ fn test_build_writes_tagged_counters_with_their_registry_and_count() {
 fn test_build_registers_each_counter_of_a_registrar_with_the_size_of_its_layout() {
     let owner = owner();
 
-    let built = build::<ByRuleModule>(&owner, |b| by_rule(b, &["deny", "allow"], &mut Vec::new())).expect("built");
+    let built = build::<ByRuleModule, _>(&owner, |b| by_rule(b, &["deny", "allow"], &mut Vec::new())).expect("built");
 
     assert_eq!(vec![1, 2, 2], owner.counter_sizes());
     release::<ByRuleModule>(&owner, built);
@@ -1184,7 +1235,7 @@ fn test_build_registers_each_counter_of_a_registrar_with_the_size_of_its_layout(
 fn test_build_writes_an_empty_registrar_without_counters() {
     let owner = owner();
 
-    let built = build::<ByRuleModule>(&owner, |b| by_rule(b, &[], &mut Vec::new())).expect("built");
+    let built = build::<ByRuleModule, _>(&owner, |b| by_rule(b, &[], &mut Vec::new())).expect("built");
 
     let (config, _) = body::<ByRuleModule>(&owner, &built);
     assert_eq!(
@@ -1205,7 +1256,7 @@ fn test_build_writes_an_empty_registrar_without_counters() {
 fn test_build_refuses_a_counter_registered_amid_a_registrars_own() {
     let owner = owner();
 
-    let err = build::<ByRuleModule>(&owner, |b| {
+    let err = build::<ByRuleModule, _>(&owner, |b| {
         let route = b.counter_in("routes", "allow")?;
         let mut rules = b.counters_in("rules")?;
         rules.counter("allow")?;
@@ -1226,7 +1277,7 @@ fn test_build_refuses_a_counter_registered_amid_a_registrars_own() {
 fn test_build_refuses_a_registrar_name_registered_before_with_another_size() {
     let owner = owner();
 
-    let err = build::<ByRuleModule>(&owner, |b| {
+    let err = build::<ByRuleModule, _>(&owner, |b| {
         let route = b.counter_in("routes", "allow")?;
         let _ = b.counter_in::<u64>("rules", "allow")?;
         let mut rules = b.counters_in("rules")?;
@@ -1247,7 +1298,7 @@ fn test_build_refuses_a_registrar_tag_that_does_not_fit_its_c_field() {
     for tag in [overlong.as_str(), "ru\0les", ""] {
         let owner = owner();
 
-        let err = build::<ByRuleModule>(&owner, |b| {
+        let err = build::<ByRuleModule, _>(&owner, |b| {
             let route = b.counter_in("routes", "allow")?;
             let rules = b.counters_in(tag)?;
             Ok(ByRuleParts { route, rules })
@@ -1269,7 +1320,7 @@ fn test_build_registers_a_counter_tag_that_fills_its_c_field() {
     let owner = owner();
     let tag = "r".repeat(COUNTER_TAG_VALUE_LEN as usize - 1);
 
-    let built = build::<TaggedModule>(&owner, |b| tagged(b, &tag)).expect("built");
+    let built = build::<TaggedModule, _>(&owner, |b| tagged(b, &tag)).expect("built");
 
     assert_eq!(Some(tag), owner.counter_registries().pop());
     release::<TaggedModule>(&owner, built);
@@ -1280,7 +1331,7 @@ fn test_build_registers_a_counter_tag_that_fills_its_c_field() {
 fn test_build_writes_an_array_of_edges() {
     let owner = owner();
 
-    let built = build::<LanesModule>(&owner, |b| {
+    let built = build::<LanesModule, _>(&owner, |b| {
         Ok(LanesParts {
             lanes: [b.slice(2, |idx| Ok(1 + idx as u64))?, b.slice(1, |_| Ok(3))?],
         })
@@ -1304,7 +1355,7 @@ fn test_build_returns_everything_when_a_write_is_refused_at_each_word() {
     for fail_at in 0..FAULTY_WORDS {
         let owner = owner();
 
-        let err = build::<FaultyModule>(&owner, |b| faulty(b, fail_at)).expect_err("refused write");
+        let err = build::<FaultyModule, _>(&owner, |b| faulty(b, fail_at)).expect_err("refused write");
 
         assert_eq!(BuildError::Refused(Refusal::OutOfMemory), err);
         owner.assert_released();
@@ -1316,7 +1367,7 @@ fn test_build_writes_every_word_of_a_faulty_config_when_none_is_refused() {
     let owner = owner();
 
     // One past the last word, which proves the sweep reached every one.
-    let built = build::<FaultyModule>(&owner, |b| faulty(b, FAULTY_WORDS)).expect("built");
+    let built = build::<FaultyModule, _>(&owner, |b| faulty(b, FAULTY_WORDS)).expect("built");
 
     let (config, view) = body::<FaultyModule>(&owner, &built);
     // The device takes the first id, then each entry's counter in the order
@@ -1382,7 +1433,7 @@ fn test_object_build_refuses_invalid_names_before_allocating() {
     let overlong = "x".repeat(CP_OBJECT_NAME_LEN as usize);
     for name in ["", "a\0b", overlong.as_str()] {
         let owner = owner_failing_alloc_after(0);
-        let err = ObjectBuilder::<PolicyState>::build::<Failure, _>(&owner, name, |_| panic!("invalid name"))
+        let err = ObjectBuilder::<PolicyState>::build::<Failure, _, _>(&owner, name, |_| panic!("invalid name"))
             .expect_err("refused name");
 
         assert_eq!(BuildError::Refused(Refusal::InvalidName), err, "{name:?}");
@@ -1394,7 +1445,7 @@ fn test_object_build_refuses_invalid_names_before_allocating() {
 fn test_object_build_accepts_a_name_that_fills_its_c_field() {
     let owner = owner();
     let name = "x".repeat(CP_OBJECT_NAME_LEN as usize - 1);
-    let built = ObjectBuilder::<PolicyState>::build::<Failure, _>(&owner, &name, |b| policy(b, &[])).expect("built");
+    let built = ObjectBuilder::<PolicyState>::build::<Failure, _, _>(&owner, &name, |b| policy(b, &[])).expect("built");
 
     release_object(&owner, built);
     owner.assert_released();
@@ -1484,8 +1535,8 @@ fn test_object_build_frees_the_root_block_of_a_refused_header() {
 fn test_object_build_returns_the_error_of_the_closure_and_releases() {
     let owner = owner();
 
-    let err = ObjectBuilder::<PolicyState>::build::<AuthorError, _>(&owner, "state0", |b| {
-        let _rules = b.slice::<Rule>(1, |_| {
+    let err = ObjectBuilder::<PolicyState>::build::<AuthorError, _, _>(&owner, "state0", |b| {
+        let _rules = b.slice::<Rule, _>(1, |_| {
             Ok(RuleParts {
                 id: 1,
                 ports: b.slice(1, |_| Ok(80))?,
@@ -1508,8 +1559,8 @@ fn test_object_build_releases_everything_when_the_closure_panics() {
     let owner = owner();
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        ObjectBuilder::<PolicyState>::build::<Failure, _>(&owner, "state0", |b| {
-            let _rule = b.boxed::<Rule>(RuleParts {
+        ObjectBuilder::<PolicyState>::build::<Failure, _, _>(&owner, "state0", |b| {
+            let _rule = b.boxed::<Rule, _>(RuleParts {
                 id: 1,
                 ports: b.slice(1, |_| Ok(80))?,
             })?;
@@ -1535,7 +1586,7 @@ fn test_object_build_returns_everything_when_a_write_is_refused() {
 
     let owner = owner();
 
-    let err = ObjectBuilder::<FlakyState>::build::<Failure, _>(&owner, "state0", |_| {
+    let err = ObjectBuilder::<FlakyState>::build::<Failure, _, _>(&owner, "state0", |_| {
         Ok([
             FlakyParts { word: 1, fails: false },
             FlakyParts { word: 2, fails: true },
@@ -1610,7 +1661,7 @@ fn test_object_build_registers_each_counter_with_the_objects_registry() {
 #[test]
 fn test_object_build_numbers_its_counters_apart_from_others() {
     let owner = owner();
-    let module = build::<CountedModule>(&owner, |b| {
+    let module = build::<CountedModule, _>(&owner, |b| {
         Ok(CountedParts {
             hits: b.counter("hits")?,
             traffic: b.counter("traffic")?,
@@ -1707,7 +1758,7 @@ fn linked<'b>(b: Scope<'b, '_, TestOwner>, names: [&str; 2]) -> Result<LinkedPar
 fn test_build_links_each_object_by_type_and_name() {
     let owner = owner();
 
-    let built = build::<LinkedModule>(&owner, |b| linked(b, ["state0", "state1"])).expect("built");
+    let built = build::<LinkedModule, _>(&owner, |b| linked(b, ["state0", "state1"])).expect("built");
 
     let (config, _) = body::<LinkedModule>(&owner, &built);
     assert_eq!(
@@ -1732,7 +1783,7 @@ fn test_build_releases_everything_when_a_link_fails_at_each_call() {
         let owner = owner();
         owner.fail_after(Call::Registration, allowed);
 
-        let err = build::<LinkedModule>(&owner, |b| linked(b, ["state0", "state1"])).expect_err("refused link");
+        let err = build::<LinkedModule, _>(&owner, |b| linked(b, ["state0", "state1"])).expect_err("refused link");
 
         assert_eq!(BuildError::Owner(TestError::Registration), err);
         owner.assert_released();
@@ -1747,7 +1798,7 @@ fn test_build_refuses_an_object_name_that_does_not_fit_its_c_field() {
     for name in [overlong.as_str(), "sta\0te", ""] {
         let owner = owner();
 
-        let err = build::<LinkedModule>(&owner, |b| linked(b, ["state0", name])).expect_err("refused name");
+        let err = build::<LinkedModule, _>(&owner, |b| linked(b, ["state0", name])).expect_err("refused name");
 
         assert_eq!(
             (BuildError::Refused(Refusal::InvalidName), 1),
@@ -1764,7 +1815,7 @@ fn test_build_links_an_object_name_that_fills_its_c_field() {
     let owner = owner();
     let name = "s".repeat(CP_OBJECT_NAME_LEN as usize - 1);
 
-    let built = build::<LinkedModule>(&owner, |b| linked(b, ["state0", &name])).expect("built");
+    let built = build::<LinkedModule, _>(&owner, |b| linked(b, ["state0", &name])).expect("built");
 
     assert_eq!(Some(name), owner.object_links().pop().map(|(_, name)| name));
     release::<LinkedModule>(&owner, built);
@@ -1777,7 +1828,7 @@ fn test_build_links_an_object_name_that_fills_its_c_field() {
 fn test_build_links_the_same_object_twice_at_one_index() {
     let owner = owner();
 
-    let built = build::<LinkedModule>(&owner, |b| linked(b, ["state0", "state0"])).expect("built");
+    let built = build::<LinkedModule, _>(&owner, |b| linked(b, ["state0", "state0"])).expect("built");
 
     let (config, _) = body::<LinkedModule>(&owner, &built);
     assert_eq!(
@@ -1815,7 +1866,7 @@ type MixedModule = Fixture<Mixed>;
 
 /// Builds the mixed configuration, linking `state0` under both types.
 fn build_mixed(owner: &TestOwner) -> Built<MixedModule, TestOwner> {
-    build::<MixedModule>(owner, |b| {
+    build::<MixedModule, _>(owner, |b| {
         Ok(MixedParts {
             hits: b.counter("hits")?,
             policy: b.object("state0")?,
@@ -1898,7 +1949,7 @@ fn owner_of_workers(workers: u64) -> TestOwner {
 
 /// Builds per-worker budgets, every slot from the same budget.
 fn build_budgets(owner: &TestOwner) -> Result<Built<BudgetsModule, TestOwner>, Failure> {
-    build::<BudgetsModule>(owner, |b| {
+    build::<BudgetsModule, _>(owner, |b| {
         Ok(BudgetsParts {
             word: 3,
             budgets: b.per_worker(BUDGET)?,
@@ -1990,7 +2041,7 @@ fn test_per_worker_slots_start_on_a_128_byte_line_with_a_stride_of_128_bytes() {
 fn test_per_worker_slots_share_no_128_byte_line_with_each_other_or_outside() {
     let owner = owner_of_workers(4);
 
-    let built = build::<WideModule>(&owner, |b| b.per_worker(Wide { words: [5; 9] })).expect("built");
+    let built = build::<WideModule, _>(&owner, |b| b.per_worker(Wide { words: [5; 9] })).expect("built");
 
     let (config, _) = body::<WideModule>(&owner, &built);
     assert!(own_lines::<Wide>(slot_block(config), 4));
@@ -2050,7 +2101,7 @@ type LaneSetModule = Fixture<LaneSet>;
 fn test_per_worker_nested_in_owned_blocks_is_released_through_its_parents() {
     let owner = owner_of_workers(3);
 
-    let built = build::<LaneSetModule>(&owner, |b| {
+    let built = build::<LaneSetModule, _>(&owner, |b| {
         Ok(LaneSetParts {
             lanes: b.slice(2, |idx| {
                 Ok(LaneParts {
@@ -2118,7 +2169,7 @@ fn test_per_worker_module_build_sizes_the_slots_by_the_owners_workers() {
 fn test_per_worker_object_build_sizes_the_slots_by_the_owners_workers() {
     let owner = owner_of_workers(5);
 
-    let built = ObjectBuilder::<BudgetsState>::build::<Failure, _>(&owner, "state0", |b| {
+    let built = ObjectBuilder::<BudgetsState>::build::<Failure, _, _>(&owner, "state0", |b| {
         Ok(BudgetsParts {
             word: 0,
             budgets: b.per_worker(BUDGET)?,
@@ -2166,7 +2217,7 @@ fn test_per_worker_build_releases_everything_when_the_slot_block_fails() {
 fn test_per_worker_build_returns_the_slots_of_a_failed_closure() {
     let owner = owner_of_workers(4);
 
-    let err = Builder::<BudgetsModule>::build::<AuthorError, _>(&owner, "budgets0", |b| {
+    let err = Builder::<BudgetsModule>::build::<AuthorError, _, _>(&owner, "budgets0", |b| {
         let _budgets = b.per_worker(BUDGET)?;
         Err(AuthorError::Input("the budgets are invalid"))
     })
@@ -2180,7 +2231,7 @@ fn test_per_worker_build_returns_the_slots_of_a_failed_closure() {
 fn test_per_worker_object_build_writes_the_slots_and_releases_them() {
     let owner = owner_of_workers(2);
 
-    let built = ObjectBuilder::<BudgetsState>::build::<Failure, _>(&owner, "state0", |b| {
+    let built = ObjectBuilder::<BudgetsState>::build::<Failure, _, _>(&owner, "state0", |b| {
         Ok(BudgetsParts {
             word: 1,
             budgets: b.per_worker(BUDGET)?,
@@ -2219,7 +2270,7 @@ impl Object for FlowsState {
 
 /// Builds a region of `len` budgets per worker, every one the same budget.
 fn build_flows(owner: &TestOwner, len: usize) -> Result<Built<FlowsModule, TestOwner>, Failure> {
-    build::<FlowsModule>(owner, |b| {
+    build::<FlowsModule, _>(owner, |b| {
         Ok(FlowsParts {
             word: 3,
             table: b.per_worker_slice(len, BUDGET)?,
@@ -2476,7 +2527,7 @@ fn test_per_worker_slice_build_of_the_largest_region_asks_the_owner() {
     // The root block can be allocated; the table cannot.
     owner.fail_after(Call::Alloc, 1);
 
-    let err = build::<Fixture<PerWorkerSlice<u64>>>(&owner, |b| b.per_worker_slice(largest_region_len(), 0))
+    let err = build::<Fixture<PerWorkerSlice<u64>>, _>(&owner, |b| b.per_worker_slice(largest_region_len(), 0))
         .expect_err("no memory for the table");
 
     assert_eq!(BuildError::Refused(Refusal::OutOfMemory), err);
@@ -2494,7 +2545,7 @@ fn test_per_worker_slice_build_refuses_a_region_beyond_the_largest_block_without
         // would exhaust the memory.
         owner.fail_after(Call::Alloc, 1);
 
-        let err = build::<Fixture<PerWorkerSlice<u64>>>(&owner, |b| b.per_worker_slice(len, 0))
+        let err = build::<Fixture<PerWorkerSlice<u64>>, _>(&owner, |b| b.per_worker_slice(len, 0))
             .expect_err("a region beyond the largest block");
 
         assert_eq!(BuildError::Refused(Refusal::BlockTooLarge), err, "{len} values");
@@ -2539,7 +2590,7 @@ fn test_per_worker_slice_build_releases_everything_when_memory_runs_out_at_each_
 fn test_per_worker_slice_build_returns_the_regions_of_a_failed_closure() {
     let owner = owner_of_workers(4);
 
-    let err = Builder::<FlowsModule>::build::<AuthorError, _>(&owner, "flows0", |b| {
+    let err = Builder::<FlowsModule>::build::<AuthorError, _, _>(&owner, "flows0", |b| {
         let _table = b.per_worker_slice(5, BUDGET)?;
         Err(AuthorError::Input("the flows are invalid"))
     })
@@ -2553,7 +2604,7 @@ fn test_per_worker_slice_build_returns_the_regions_of_a_failed_closure() {
 fn test_per_worker_slice_object_build_writes_the_regions_and_releases_them() {
     let owner = owner_of_workers(2);
 
-    let built = ObjectBuilder::<FlowsState>::build::<Failure, _>(&owner, "flows0", |b| {
+    let built = ObjectBuilder::<FlowsState>::build::<Failure, _, _>(&owner, "flows0", |b| {
         Ok(FlowsParts {
             word: 1,
             table: b.per_worker_slice(3, BUDGET)?,

@@ -45,7 +45,7 @@ pub use crate::bindings::{
 use crate::{
     bindings,
     common::lpm::Lpm,
-    cp::{Build, FfiRecord, MemoryContext, Owner, Refusal},
+    cp::{Build, BuildFrom, FfiRecord, MemoryContext, Owner, Refusal},
 };
 
 mod tree;
@@ -582,15 +582,21 @@ macro_rules! classifiers {
         // the decode that wrote it allocated only in the memory context, in
         // blocks and child contexts its C free returns and unlinks.
         unsafe impl Build for $name {
-            type Parts<'b, W: Owner> = Infallible;
-
-            unsafe fn write<W: Owner>(parts: Infallible, _: &MemoryContext<'_, W>, _: usize) -> Result<(), Refusal> {
-                match parts {}
-            }
+            type DefaultSource<'b> = ();
 
             unsafe fn free<W: Owner>(addr: usize, memory: &MemoryContext<'_, W>) {
                 // SAFETY: the object was written whole (caller contract).
                 unsafe { bindings::$free(memory.root().ptr(addr)) };
+            }
+        }
+
+        // SAFETY: no input can reach this write; construction uses the
+        // scope's specialized operations.
+        unsafe impl BuildFrom<()> for $name {
+            type Parts<'b, W: Owner> = Infallible;
+
+            unsafe fn write<W: Owner>(parts: Infallible, _: &MemoryContext<'_, W>, _: usize) -> Result<(), Refusal> {
+                match parts {}
             }
         }
     )*};

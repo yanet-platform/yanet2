@@ -14,6 +14,7 @@ use core::{
     assert_matches,
     cell::Cell,
     ffi::CStr,
+    marker::PhantomData,
     net::{Ipv4Addr, Ipv6Addr},
     ptr,
 };
@@ -24,11 +25,15 @@ use arena::ArenaOwner;
 use netip as _;
 use yanet_packet as _;
 use yanet_sdk_testing as _;
-use yanet_shm::{index::HashIndexKey, shm::ShmLayout};
+use yanet_shm::{
+    index::HashIndexKey,
+    rel::{ShmBox, ShmSlice},
+    shm::ShmLayout,
+};
 use yanet_sys::{
     bindings,
     common::index::HashIndex,
-    cp::{BuildError, Builder, Built, Owner, Refusal},
+    cp::{Build, BuildError, Builder, Built, Owner, Refusal},
     dp::{Batch, CommitCx, Cx, Module},
 };
 
@@ -72,6 +77,32 @@ index_module! {
     Ipv4Addr: "hash-index-v4";
     Ipv6Addr: "hash-index-v6";
     Fragile: "hash-index-fragile";
+}
+
+/// A module with a container root, used only to exercise construction.
+struct Container<C>(PhantomData<C>);
+
+impl<C: Build + Sync> Module for Container<C> {
+    const NAME: &'static str = "hash-index-container";
+    type Config = C;
+    type Prepared<'p> = ();
+
+    fn handle<'id>(_: &mut Cx<'id, Self>, _: &mut Batch<'id>) {}
+
+    fn prepare<'p>(_: &CommitCx<'p, Self>) {}
+}
+
+/// Records destruction of an iterator capture and can panic during it.
+struct Capture<'a> {
+    drops: &'a Cell<usize>,
+    panics: bool,
+}
+
+impl Drop for Capture<'_> {
+    fn drop(&mut self) {
+        self.drops.set(self.drops.get() + 1);
+        assert!(!self.panics, "the iterator capture panics on drop");
+    }
 }
 
 /// Builds an index of the records over the owner.
@@ -250,7 +281,7 @@ fn test_hash_index_iterator_reads_borrowed_records_once_in_order() {
     });
 
     let built =
-        Builder::<Index<Ipv4Addr>>::build::<Error, _>(&owner, "index", |_| Ok(HashIndex::builder(&mut records)))
+        Builder::<Index<Ipv4Addr>>::build::<Error, _, _>(&owner, "index", |_| Ok(HashIndex::builder(&mut records)))
             .expect("built");
 
     assert_eq!(input.len(), calls.get());
@@ -273,7 +304,7 @@ fn test_hash_index_iterator_of_no_records_opens_no_context_and_skips_projection(
     let mut records = (0..0).map(|_| -> (Ipv4Addr, u32) { panic!("an empty index has no records") });
 
     let built =
-        Builder::<Index<Ipv4Addr>>::build::<Error, _>(&owner, "index", |_| Ok(HashIndex::builder(&mut records)))
+        Builder::<Index<Ipv4Addr>>::build::<Error, _, _>(&owner, "index", |_| Ok(HashIndex::builder(&mut records)))
             .expect("built");
 
     assert_matches!(first_child(&owner, &built).map(ptr::from_ref), None);
@@ -295,7 +326,7 @@ fn test_hash_index_iterator_stops_at_duplicate_and_returns_allocations() {
     });
 
     let refused =
-        Builder::<Index<Ipv4Addr>>::build::<Error, _>(&owner, "index", |_| Ok(HashIndex::builder(&mut records)));
+        Builder::<Index<Ipv4Addr>>::build::<Error, _, _>(&owner, "index", |_| Ok(HashIndex::builder(&mut records)));
 
     assert_matches!(
         refused,
@@ -313,7 +344,7 @@ fn test_hash_index_iterator_refuses_invalid_position_and_returns_allocations() {
     let mut records = core::iter::once((Ipv4Addr::LOCALHOST, u32::MAX));
 
     let refused =
-        Builder::<Index<Ipv4Addr>>::build::<Error, _>(&owner, "index", |_| Ok(HashIndex::builder(&mut records)));
+        Builder::<Index<Ipv4Addr>>::build::<Error, _, _>(&owner, "index", |_| Ok(HashIndex::builder(&mut records)));
 
     assert_matches!(refused, Err(BuildError::Refused(Refusal::InvalidPosition)));
     assert_eq!(baseline, owner.free_bytes());
@@ -327,7 +358,7 @@ fn test_hash_index_iterator_refuses_overflow_before_consuming_records() {
     let mut records = (0..usize::MAX).map(|_| -> (Ipv4Addr, u32) { panic!("an oversized index cannot be written") });
 
     let refused =
-        Builder::<Index<Ipv4Addr>>::build::<Error, _>(&owner, "index", |_| Ok(HashIndex::builder(&mut records)));
+        Builder::<Index<Ipv4Addr>>::build::<Error, _, _>(&owner, "index", |_| Ok(HashIndex::builder(&mut records)));
 
     assert_matches!(refused, Err(BuildError::Refused(Refusal::BlockTooLarge)));
     assert_eq!(baseline, owner.free_bytes());
@@ -347,7 +378,7 @@ fn test_hash_index_iterator_returns_allocations_when_projection_panics() {
     });
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        Builder::<Index<Ipv4Addr>>::build::<Error, _>(&owner, "index", |_| Ok(HashIndex::builder(&mut records)))
+        Builder::<Index<Ipv4Addr>>::build::<Error, _, _>(&owner, "index", |_| Ok(HashIndex::builder(&mut records)))
     }));
 
     assert_matches!(result, Err(_));
@@ -391,7 +422,7 @@ fn test_hash_index_iterator_refuses_incorrect_lengths_and_returns_allocations() 
         };
 
         let refused =
-            Builder::<Index<Ipv4Addr>>::build::<Error, _>(&owner, "index", |_| Ok(HashIndex::builder(&mut records)));
+            Builder::<Index<Ipv4Addr>>::build::<Error, _, _>(&owner, "index", |_| Ok(HashIndex::builder(&mut records)));
 
         assert_matches!(
             refused,
@@ -420,10 +451,118 @@ fn test_hash_index_iterator_returns_allocations_when_end_check_panics() {
         };
 
         let result = catch_unwind(AssertUnwindSafe(|| {
-            Builder::<Index<Ipv4Addr>>::build::<Error, _>(&owner, "index", |_| Ok(HashIndex::builder(&mut records)))
+            Builder::<Index<Ipv4Addr>>::build::<Error, _, _>(&owner, "index", |_| Ok(HashIndex::builder(&mut records)))
         }));
 
         assert_matches!(result, Err(_), "{case}");
+        assert_eq!(baseline, owner.free_bytes(), "{case}");
+    }
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "Miri does not run C")]
+fn test_hash_index_owned_sources_build_inside_boxes_and_slices() {
+    let owner = ArenaOwner::new();
+    let baseline = owner.free_bytes();
+    let input = [(Ipv4Addr::LOCALHOST, 3), (Ipv4Addr::BROADCAST, 7)];
+
+    let boxed = Builder::<Container<ShmBox<HashIndex<Ipv4Addr>>>>::build::<Error, _, _>(&owner, "boxed", |scope| {
+        scope.boxed(HashIndex::builder(input.into_iter()))
+    })
+    .expect("built box");
+    let indexes = Builder::<Container<ShmSlice<HashIndex<Ipv4Addr>>>>::build::<Error, _, _>(&owner, "slice", |scope| {
+        scope.slice(2, |idx| Ok(HashIndex::builder(core::iter::once(input[idx]))))
+    })
+    .expect("built slice");
+
+    for (idx, (key, position)) in input.into_iter().enumerate() {
+        assert_eq!(Some(position), owner.body(&boxed).get(&owner).resolve(&owner).get(key));
+        assert_eq!(
+            Some(position),
+            owner.body(&indexes).as_slice(&owner)[idx].resolve(&owner).get(key)
+        );
+    }
+    // SAFETY: both configurations are owned by the test without readers.
+    unsafe {
+        boxed.destroy(&owner);
+        indexes.destroy(&owner);
+    }
+    assert_eq!(baseline, owner.free_bytes());
+}
+
+#[allow(clippy::std_instead_of_core)]
+#[test]
+#[cfg_attr(miri, ignore = "Miri does not run C")]
+fn test_hash_index_owned_source_panic_releases_the_box_and_index_blocks() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let owner = ArenaOwner::new();
+    let baseline = owner.free_bytes();
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        Builder::<Container<ShmBox<HashIndex<Ipv4Addr>>>>::build::<Error, _, _>(&owner, "boxed", |scope| {
+            scope.boxed(HashIndex::builder((0..2).map(|idx| {
+                assert_ne!(1, idx, "the second record panics");
+                (Ipv4Addr::LOCALHOST, idx)
+            })))
+        })
+    }));
+
+    assert_matches!(result, Err(_));
+    assert_eq!(baseline, owner.free_bytes());
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "Miri does not run C")]
+fn test_hash_index_drops_owned_source_on_success_and_refusal() {
+    let owner = ArenaOwner::new();
+    let baseline = owner.free_bytes();
+    for (case, duplicate) in [("distinct keys", false), ("duplicate key", true)] {
+        let drops = Cell::new(0);
+        let capture = Capture { drops: &drops, panics: false };
+        let built = Builder::<Index<Ipv4Addr>>::build::<Error, _, _>(&owner, "index", |_| {
+            Ok(HashIndex::builder((0..2).map(move |idx| {
+                let _capture = &capture;
+                (Ipv4Addr::from_bits(if duplicate { 0 } else { idx }), idx)
+            })))
+        });
+
+        assert_eq!(1, drops.get(), "{case}");
+        if duplicate {
+            assert_matches!(
+                built,
+                Err(BuildError::Refused(Refusal::DuplicateKey { first: 0, second: 1 })),
+                "{case}"
+            );
+        } else {
+            // SAFETY: this configuration is owned by the test without readers.
+            unsafe { built.expect("built").destroy(&owner) };
+        }
+        assert_eq!(baseline, owner.free_bytes(), "{case}");
+    }
+}
+
+#[allow(clippy::std_instead_of_core)]
+#[test]
+#[cfg_attr(miri, ignore = "Miri does not run C")]
+fn test_hash_index_returns_allocations_when_owned_source_drop_panics() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let owner = ArenaOwner::new();
+    let baseline = owner.free_bytes();
+    for (case, len) in [("empty input", 0), ("one record", 1)] {
+        let drops = Cell::new(0);
+        let capture = Capture { drops: &drops, panics: true };
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            Builder::<Index<Ipv4Addr>>::build::<Error, _, _>(&owner, "index", |_| {
+                Ok(HashIndex::builder((0..len).map(move |idx| {
+                    let _capture = &capture;
+                    (Ipv4Addr::LOCALHOST, idx)
+                })))
+            })
+        }));
+
+        assert_matches!(result, Err(_), "{case}");
+        assert_eq!(1, drops.get(), "{case}");
         assert_eq!(baseline, owner.free_bytes(), "{case}");
     }
 }

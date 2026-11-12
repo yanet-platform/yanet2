@@ -15,8 +15,8 @@ mod shm_layout;
 use proc_macro::TokenStream;
 use syn::{DeriveInput, ItemImpl, parse_macro_input};
 
-/// Derives `ShmLayout` and `Build`, with the `<Type>Parts` struct a build
-/// writes the value from, for a shared-memory struct.
+/// Derives `ShmLayout`, `Build` and `BuildFrom`, with the `<Type>Parts` struct
+/// a build writes the value from, for a shared-memory struct.
 ///
 /// Accepts only a `#[repr(C)]` struct with named fields (an alignment up to 64
 /// may be added), every field of which is `Build`, with no drop glue. Padding
@@ -28,7 +28,10 @@ use syn::{DeriveInput, ItemImpl, parse_macro_input};
 /// A struct may take type and const parameters, but no lifetime: each type
 /// parameter is bound by `Build`, and every field must be `Build` for every
 /// argument the bounds admit. `<Type>Parts` takes the build's lifetime and
-/// owner, then the struct's parameters.
+/// owner, then the struct's parameters and one source parameter per field.
+/// Sources default to each field's default source; inferred sources can
+/// carry concrete iterators without changing the stored struct. A named
+/// helper that accepts such a source must also expose it in its return type.
 ///
 /// ```
 /// use yanet_sdk::{Build, OwnedSlice, Owner, ShmLayout, ShmSlice};
@@ -294,7 +297,7 @@ mod doctests {
     /// shared-memory data.
     ///
     /// ```
-    /// use yanet_sdk::{Build, Owner, ShmBox, ShmLayout};
+    /// use yanet_sdk::{Build, BuildFrom, Owner, ShmBox, ShmLayout};
     ///
     /// #[derive(ShmLayout)]
     /// #[repr(C)]
@@ -307,14 +310,31 @@ mod doctests {
     /// is_layout::<Config<u64>>();
     /// is_layout::<Config<Config<u32>>>();
     ///
-    /// fn parts<'b, W: Owner, T: Build>(
-    ///     value: T::Parts<'b, W>,
+    /// fn parts<'b, W: Owner, T: Build + BuildFrom<S>, S>(
+    ///     value: <T as BuildFrom<S>>::Parts<'b, W>,
     ///     boxed: yanet_sdk::Owned<'b, T, W>,
-    /// ) -> ConfigParts<'b, W, T> {
+    /// ) -> ConfigParts<'b, W, T, S> {
     ///     ConfigParts { value, boxed }
     /// }
     /// ```
     struct GenericAccepted;
+
+    /// Generated source parameters do not shadow the author's type names.
+    ///
+    /// ```
+    /// use yanet_sdk::{Owner, ShmLayout};
+    /// #[derive(ShmLayout)]
+    /// #[repr(C)]
+    /// struct Config<__S0, ___S0, __S1> {
+    ///     first: __S0,
+    ///     second: ___S0,
+    ///     third: __S1,
+    /// }
+    /// fn parts<'b, W: Owner>() -> ConfigParts<'b, W, u32, u64, u8> {
+    ///     ConfigParts { first: 1, second: 2, third: 3 }
+    /// }
+    /// ```
+    struct SourceParameterNamesAccepted;
 
     /// A generic struct instantiated with a type that is not shared-memory
     /// data is refused.

@@ -133,8 +133,8 @@ impl Fixture {
         spec: &FixtureSpec,
         ranges: &[Range4],
     ) -> Result<Built<yanet_sdk_fixture::Fixture, Agent>, Error> {
-        Builder::<yanet_sdk_fixture::Fixture>::build::<Error, _>(agent, name, |scope| {
-            let weights = scope.slice::<u64>(3, |idx| Ok(idx as u64 + 1))?;
+        Builder::<yanet_sdk_fixture::Fixture>::build::<Error, _, _>(agent, name, |scope| {
+            let weights = scope.slice::<u64, _>(3, |idx| Ok(idx as u64 + 1))?;
             match spec.fault {
                 FIXTURE_FAULT_NONE => {}
                 FIXTURE_FAULT_ERROR => return Err(Error::from(Refusal::BlockTooLarge)),
@@ -170,7 +170,7 @@ impl Tally {
     /// are those a registrar registers last in the registry `lanes` as
     /// `wide`, `narrow` and `wide` again: two counters, ids 0 and 1.
     pub fn build(agent: &Agent, name: &str, word: u64) -> Result<Built<yanet_sdk_fixture::Tally, Agent>, Error> {
-        Builder::<yanet_sdk_fixture::Tally>::build::<Error, _>(agent, name, |scope| {
+        Builder::<yanet_sdk_fixture::Tally>::build::<Error, _, _>(agent, name, |scope| {
             let tagged_held = scope.counter_in("routes", "even")?;
             let held = scope.counter("held")?;
             let v2 = scope.counter("v2")?;
@@ -218,7 +218,7 @@ impl Fib {
         v6: &[Range6],
         v4: &[Range4],
     ) -> Result<Built<yanet_sdk_fixture::Fib, Agent>, Error> {
-        Builder::<yanet_sdk_fixture::Fib>::build::<Error, _>(agent, name, |scope| {
+        Builder::<yanet_sdk_fixture::Fib>::build::<Error, _, _>(agent, name, |scope| {
             let devices = devices
                 .iter()
                 .map(|device| scope.device(text(&device.name)?))
@@ -259,7 +259,7 @@ impl Stash {
     /// `state`, which a generation must hold when it is installed, and counts
     /// in `seen` and `filled`.
     pub fn build(agent: &Agent, name: &str, state: &str) -> Result<Built<yanet_sdk_fixture::Stash, Agent>, Error> {
-        Builder::<yanet_sdk_fixture::Stash>::build::<Error, _>(agent, name, |scope| {
+        Builder::<yanet_sdk_fixture::Stash>::build::<Error, _, _>(agent, name, |scope| {
             Ok(StashConfigParts {
                 state: scope.object(state)?,
                 seen: scope.counter("seen")?,
@@ -339,7 +339,7 @@ impl State {
         fault: u64,
     ) -> Result<BuiltObject<yanet_sdk_fixture::State, Agent>, Error> {
         let count = usize::try_from(count).map_err(|_| Error::from(Refusal::TooManyItems))?;
-        ObjectBuilder::<yanet_sdk_fixture::State>::build::<Error, _>(agent, name, |scope| {
+        ObjectBuilder::<yanet_sdk_fixture::State>::build::<Error, _, _>(agent, name, |scope| {
             let slots = scope.slice(count, |idx| Ok(AtomicU64::new(seed.wrapping_add(idx as u64))))?;
             let workers = scope.per_worker(seed)?;
             let regions = scope.per_worker_slice(STATE_REGION_LEN, seed)?;

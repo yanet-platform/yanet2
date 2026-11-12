@@ -73,7 +73,7 @@ impl Assign {
             .iter()
             .map(|rule| RuleViews::new(rule, nets4, nets6, lines, ports))
             .collect::<Result<Vec<_>, _>>()?;
-        Builder::<yanet_sdk_fixture::assign::Assign>::build::<Error, _>(agent, name, |scope| {
+        Builder::<yanet_sdk_fixture::assign::Assign>::build::<Error, _, _>(agent, name, |scope| {
             let v4 = views.iter().map(|view| view.v4.as_ref()).collect::<Vec<_>>();
             let v6 = views.iter().map(|view| view.v6.as_ref()).collect::<Vec<_>>();
             let v4 = family(scope, &views, &v4, NAMES4)?;
