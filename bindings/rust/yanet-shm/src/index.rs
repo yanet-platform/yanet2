@@ -126,6 +126,8 @@ pub enum Unplaced {
     },
     /// A record names the position that marks a free slot.
     InvalidPosition,
+    /// The iterator yields fewer or more records than its declared length.
+    LengthMismatch,
 }
 
 /// Places the key of every record in a slot, in the order of the records.
@@ -135,8 +137,22 @@ pub enum Unplaced {
 /// refusal the slots hold the keys placed before it.
 #[doc(hidden)]
 pub fn place<K: HashIndexKey>(slots: &mut [Slot<K>], records: &[(K, u32)]) -> Result<(), Unplaced> {
-    debug_assert!(slots.len() > records.len(), "a free slot is left for every key");
-    for &(key, position) in records {
+    place_iter(slots, records.len(), records.iter().copied())
+}
+
+/// Places records in iterator order and checks their declared count.
+///
+/// The slots number at least twice the declared count. An empty input may
+/// have no slots. A refusal leaves the records placed before it in the slots.
+#[doc(hidden)]
+pub fn place_iter<K: HashIndexKey>(
+    slots: &mut [Slot<K>],
+    len: usize,
+    mut records: impl Iterator<Item = (K, u32)>,
+) -> Result<(), Unplaced> {
+    debug_assert!(len == 0 || slots.len() > len, "a free slot is left for every key");
+    for _ in 0..len {
+        let (key, position) = records.next().ok_or(Unplaced::LengthMismatch)?;
         if position == FREE {
             return Err(Unplaced::InvalidPosition);
         }
@@ -155,6 +171,9 @@ pub fn place<K: HashIndexKey>(slots: &mut [Slot<K>], records: &[(K, u32)]) -> Re
                 });
             }
         }
+    }
+    if records.next().is_some() {
+        return Err(Unplaced::LengthMismatch);
     }
     Ok(())
 }

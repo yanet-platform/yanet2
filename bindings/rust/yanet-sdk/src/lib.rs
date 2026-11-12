@@ -49,7 +49,9 @@
 //! ```
 //! use core::net::Ipv4Addr;
 //!
-//! use yanet_sdk::{Cx, HashIndex, Module, ShmLayout, ShmSlice};
+//! use yanet_sdk::{
+//!     BuildError, Builder, Built, Cx, HashIndex, Module, Owner, ShmLayout, ShmSlice,
+//! };
 //!
 //! #[derive(ShmLayout)]
 //! #[repr(C)]
@@ -63,8 +65,24 @@
 //!     hosts: &'b [(Ipv4Addr, u32)],
 //! ) -> Result<ConfigParts<'b, W>, E> {
 //!     Ok(ConfigParts {
-//!         hosts,
+//!         hosts: hosts.into(),
 //!         weights: scope.slice(hosts.len(), |i| Ok(10 * i as u64))?,
+//!     })
+//! }
+//!
+//! fn projected_config<W: Owner, M: Module<Config = Config>>(
+//!     owner: &W,
+//!     addresses: &[[u8; 4]],
+//! ) -> Result<Built<M, W>, BuildError<W::Error>> {
+//!     let mut records = addresses
+//!         .iter()
+//!         .enumerate()
+//!         .map(|(i, address)| (Ipv4Addr::from(*address), i as u32));
+//!     Builder::build(owner, "hosts", |scope| {
+//!         Ok(ConfigParts {
+//!             hosts: HashIndex::builder(&mut records),
+//!             weights: scope.slice(addresses.len(), |i| Ok(10 * i as u64))?,
+//!         })
 //!     })
 //! }
 //!
@@ -167,8 +185,8 @@ pub use yanet_sys::{
     },
     cp::{
         BlockAddr, Branch, Build, BuildError, Builder, Built, BuiltObject, Context, CounterRegistrar, FfiRecord,
-        Header, Kind, ModuleKind, ObjectBuilder, ObjectKind, Owned, OwnedRegions, OwnedSlice, OwnedSlots, Owner,
-        Refusal, Registered, Scope,
+        HashIndexParts, Header, Kind, ModuleKind, ObjectBuilder, ObjectKind, Owned, OwnedRegions, OwnedSlice,
+        OwnedSlots, Owner, Refusal, Registered, Scope,
     },
     dp::{
         Batch, BoundCounter, CommitCx, Counter, CounterLayout, CounterRef, Cx, Device, DeviceRef, DscpMark, Gauge,

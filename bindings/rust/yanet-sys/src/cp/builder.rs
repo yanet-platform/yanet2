@@ -27,7 +27,7 @@ use core::{
 };
 
 use yanet_shm::{
-    index::{HashIndexKey, Slot, Unplaced, place, slots_for},
+    index::{HashIndexKey, Slot, Unplaced, place, place_iter, slots_for},
     mutex::Mutex,
     rel::{ShmBox, ShmSlice},
     root::ShmRoot,
@@ -641,6 +641,80 @@ unsafe impl<const K: usize> Build for Lpm<K> {
     }
 }
 
+/// Input records for constructing an exact-match index.
+///
+/// A borrowed slice converts to these parts directly; an iterator is supplied
+/// through [`HashIndex::builder`]. The parts own no storage and allocate
+/// nothing. An iterator is consumed only while the index is written.
+pub struct HashIndexParts<'a, K> {
+    records: IndexRecords<'a, K>,
+}
+
+enum IndexRecords<'a, K> {
+    Slice(&'a [(K, u32)]),
+    Iterator(&'a mut dyn ExactSizeIterator<Item = (K, u32)>),
+}
+
+impl<K: HashIndexKey> HashIndex<K> {
+    /// Consumes borrowed records without an intermediate array.
+    ///
+    /// A write reads the declared count once, then checks that exactly that
+    /// many records precede the first end of input, including for an empty
+    /// index. A refusal stops consumption. The iterator must outlive the
+    /// build closure, because the parts are written after it returns.
+    pub fn builder(records: &mut dyn ExactSizeIterator<Item = (K, u32)>) -> HashIndexParts<'_, K> {
+        HashIndexParts {
+            records: IndexRecords::Iterator(records),
+        }
+    }
+}
+
+impl<K> HashIndexParts<'_, K> {
+    fn len(&self) -> usize {
+        match &self.records {
+            IndexRecords::Slice(records) => records.len(),
+            IndexRecords::Iterator(records) => records.len(),
+        }
+    }
+
+    fn place(self, slots: &mut [Slot<K>], len: usize) -> Result<(), Refusal>
+    where
+        K: HashIndexKey,
+    {
+        let placed = match self.records {
+            IndexRecords::Slice(records) => place(slots, records),
+            IndexRecords::Iterator(records) => place_iter(slots, len, records),
+        };
+        placed.map_err(|unplaced| match unplaced {
+            Unplaced::DuplicateKey { first, second } => Refusal::DuplicateKey { first, second },
+            Unplaced::InvalidPosition => Refusal::InvalidPosition,
+            Unplaced::LengthMismatch => Refusal::IndexLengthMismatch,
+        })
+    }
+}
+
+impl<K> fmt::Debug for HashIndexParts<'_, K> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.debug_struct("HashIndexParts")
+            .field("len", &self.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl<'a, K> From<&'a [(K, u32)]> for HashIndexParts<'a, K> {
+    fn from(records: &'a [(K, u32)]) -> Self {
+        Self {
+            records: IndexRecords::Slice(records),
+        }
+    }
+}
+
+impl<'a, K, const N: usize> From<&'a [(K, u32); N]> for HashIndexParts<'a, K> {
+    fn from(records: &'a [(K, u32); N]) -> Self {
+        Self::from(records.as_slice())
+    }
+}
+
 // SAFETY: the index is its memory context and the offset and count words of
 // its slice of slots, and an index of no records is all zeroes: no context
 // opened and a NULL slice, as an empty LPM. The write opens the context under
@@ -651,7 +725,7 @@ unsafe impl<const K: usize> Build for Lpm<K> {
 unsafe impl<K: HashIndexKey> Build for HashIndex<K> {
     /// The records, each a key and the position it names, every key at most
     /// once. No records leave the index empty, allocating nothing.
-    type Parts<'b, W: Owner> = &'b [(K, u32)];
+    type Parts<'b, W: Owner> = HashIndexParts<'b, K>;
 
     unsafe fn write<W: Owner>(
         parts: Self::Parts<'_, W>,
@@ -659,14 +733,16 @@ unsafe impl<K: HashIndexKey> Build for HashIndex<K> {
         addr: usize,
     ) -> Result<(), Refusal> {
         let root = memory.root();
-        if parts.is_empty() {
+        let records = parts.len();
+        if records == 0 {
+            parts.place(&mut [], 0)?;
             // SAFETY: the index's bytes lie in a block of the build,
             // exclusive (caller contract), and a zeroed index is the empty
             // one: no context to close and a NULL slice.
             unsafe { root.ptr::<u8>(addr).write_bytes(0, size_of::<Self>()) };
             return Ok(());
         }
-        let len = slots_for(parts.len()).ok_or(Refusal::BlockTooLarge)?;
+        let len = slots_for(records).ok_or(Refusal::BlockTooLarge)?;
         let size = len
             .checked_mul(size_of::<Slot<K>>())
             .filter(|&size| size <= bindings::MEMORY_BLOCK_ALLOCATOR_MAX_SIZE as usize)
@@ -699,10 +775,7 @@ unsafe impl<K: HashIndexKey> Build for HashIndex<K> {
             }
             core::slice::from_raw_parts_mut(first, len)
         };
-        place(slots, parts).map_err(|unplaced| match unplaced {
-            Unplaced::DuplicateKey { first, second } => Refusal::DuplicateKey { first, second },
-            Unplaced::InvalidPosition => Refusal::InvalidPosition,
-        })?;
+        parts.place(slots, records)?;
         let slice = addr + HashIndex::<K>::SLOTS_OFFSET;
         // SAFETY: the offset and count words are aligned and exclusive
         // (caller contract).
