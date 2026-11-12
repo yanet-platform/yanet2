@@ -93,21 +93,23 @@ func (m *configReader) Read(path string, depth int) (any, []byte, bool, error) {
 		}
 		return value, data, false, nil
 	}
-	include, included := config["include"]
+	includeKey := configKey{Tag: "!!str", Value: "include"}
+	include, included := config[includeKey]
 	if !included {
 		return config, data, false, nil
 	}
-	delete(config, "include")
+	delete(config, includeKey)
 	entries, ok := include.([]any)
 	if include != nil && !ok {
 		return nil, nil, false, fmt.Errorf("%s: include must be a list of paths", path)
 	}
 	var merged any = config
 	for _, entry := range entries {
-		name, ok := entry.(string)
-		if !ok || strings.TrimSpace(name) == "" {
+		scalar, ok := entry.(*yaml.Node)
+		if !ok || scalar.Tag != "!!str" || strings.TrimSpace(scalar.Value) == "" {
 			return nil, nil, false, fmt.Errorf("%s: include entries must be non-empty strings", path)
 		}
+		name := scalar.Value
 		if !filepath.IsAbs(name) {
 			name = filepath.Join(filepath.Dir(path), name)
 		}
@@ -116,7 +118,7 @@ func (m *configReader) Read(path string, depth int) (any, []byte, bool, error) {
 			continue
 		}
 		if err != nil {
-			return nil, nil, false, fmt.Errorf("%s: include %q: %w", path, entry, err)
+			return nil, nil, false, fmt.Errorf("%s: include %q: %w", path, name, err)
 		}
 		if fragment != nil {
 			merged = mergeConfig(merged, fragment)
@@ -149,7 +151,7 @@ func (m *configReader) ReadDirectory(path string, depth int) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	var merged any = map[any]any{}
+	var merged any = map[configKey]any{}
 	for _, entry := range entries {
 		if strings.HasPrefix(entry.Name(), ".") {
 			continue
@@ -183,7 +185,7 @@ func parseConfigValue(data []byte) (any, error) {
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	var config any
 	for {
-		var document any
+		var document yaml.Node
 		err := decoder.Decode(&document)
 		if errors.Is(err, io.EOF) {
 			return config, nil
@@ -191,28 +193,117 @@ func parseConfigValue(data []byte) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		if document != nil {
+		// Validate the complete alias graph before recursive node-preserving
+		// decoding, including cycles and excessive alias expansion.
+		var validated any
+		if err := document.Decode(&validated); err != nil {
+			return nil, err
+		}
+		if validated != nil {
 			if config != nil {
 				return nil, fmt.Errorf("configuration must contain a single YAML document")
 			}
-			config = document
+			var value configValue
+			if err := document.Decode(&value); err != nil {
+				return nil, err
+			}
+			config = value.Value
 		}
 	}
 }
 
-func configMapping(value any) (map[any]any, bool) {
-	switch value := value.(type) {
-	case map[string]any:
-		mapping := map[any]any{}
-		for key, entry := range value {
-			mapping[key] = entry
-		}
-		return mapping, true
-	case map[any]any:
-		return value, true
-	default:
-		return nil, false
+// configKey retains scalar key spelling while providing comparable merge keys.
+type configKey struct {
+	Tag   string
+	Value string
+}
+
+func (m *configKey) UnmarshalYAML(node *yaml.Node) error {
+	for node.Kind == yaml.AliasNode {
+		node = node.Alias
 	}
+	if node.Kind != yaml.ScalarNode {
+		return fmt.Errorf("configuration mapping keys must be scalars")
+	}
+	m.Tag, m.Value = node.Tag, node.Value
+	return nil
+}
+
+func (m configKey) MarshalYAML() (any, error) {
+	return &yaml.Node{Kind: yaml.ScalarNode, Tag: m.Tag, Value: m.Value}, nil
+}
+
+// configValue keeps scalar nodes intact until the destination schema decodes
+// them; the YAML decoder still validates mappings, aliases and merge keys.
+type configValue struct {
+	Value any
+}
+
+func (m *configValue) UnmarshalYAML(node *yaml.Node) error {
+	switch node.Kind {
+	case yaml.MappingNode:
+		mapping := map[configKey]any{}
+		var inherited []any
+		for idx := 0; idx < len(node.Content); idx += 2 {
+			var value configValue
+			if err := value.UnmarshalYAML(node.Content[idx+1]); err != nil {
+				return err
+			}
+			if node.Content[idx].Tag == "!!merge" {
+				inherited = append(inherited, value.Value)
+				continue
+			}
+			var key configKey
+			if err := key.UnmarshalYAML(node.Content[idx]); err != nil {
+				return err
+			}
+			mapping[key] = value.Value
+		}
+		// Explicit keys win; earlier YAML merge sources supply defaults first.
+		var inherit func(any)
+		inherit = func(value any) {
+			switch value := value.(type) {
+			case map[configKey]any:
+				for key, entry := range value {
+					if _, exists := mapping[key]; !exists {
+						mapping[key] = entry
+					}
+				}
+			case []any:
+				for _, entry := range value {
+					inherit(entry)
+				}
+			}
+		}
+		for _, value := range inherited {
+			inherit(value)
+		}
+		m.Value = mapping
+	case yaml.SequenceNode:
+		values := make([]any, len(node.Content))
+		for idx, entry := range node.Content {
+			var value configValue
+			if err := value.UnmarshalYAML(entry); err != nil {
+				return err
+			}
+			values[idx] = value.Value
+		}
+		m.Value = values
+	case yaml.ScalarNode:
+		if node.Tag != "!!null" {
+			m.Value = node
+		}
+	case yaml.AliasNode:
+		return m.UnmarshalYAML(node.Alias)
+	default:
+		return fmt.Errorf("unsupported configuration node kind %d", node.Kind)
+	}
+	return nil
+}
+
+func configMapping(value any) (map[configKey]any, bool) {
+	mapping, ok := value.(map[configKey]any)
+	return mapping, ok
 }
 
 func mergeConfig(base, overlay any) any {

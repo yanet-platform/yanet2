@@ -57,6 +57,92 @@ items: [main]
 	require.Equal(t, []string{"replacement"}, config.Items)
 }
 
+// Test_ReadFile_ScalarSpelling verifies that include composition preserves
+// the string representation accepted by the typed destination.
+func Test_ReadFile_ScalarSpelling(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		scalar string
+		value  string
+	}{
+		{name: "leading zero integer", scalar: "00123", value: "00123"},
+		{name: "hexadecimal integer", scalar: "0xFF", value: "0xFF"},
+		{name: "scientific notation", scalar: "1e+03", value: "1e+03"},
+		{name: "fraction precision", scalar: "1.2300", value: "1.2300"},
+		{name: "uppercase boolean", scalar: "TRUE", value: "TRUE"},
+		{name: "explicit binary", scalar: "!!binary aGVsbG8=", value: "hello"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			type config struct {
+				Main     string            `yaml:"main"`
+				Included string            `yaml:"included"`
+				Items    []string          `yaml:"items"`
+				Labels   map[string]string `yaml:"labels"`
+			}
+			directory := t.TempDir()
+			writeConfig(t, directory, "fragment.yaml", "included: "+tc.scalar+"\n")
+			path := writeConfig(t, directory, "main.yaml",
+				"include: [fragment.yaml]\nmain: "+tc.scalar+
+					"\nitems: ["+tc.scalar+"]\nlabels: {value: "+tc.scalar+"}\n",
+			)
+			loaded, err := xcfg.LoadConfig[config](path)
+			require.NoError(t, err)
+			require.Equal(t, &config{
+				Main: tc.value, Included: tc.value,
+				Items: []string{tc.value}, Labels: map[string]string{"value": tc.value},
+			}, loaded)
+		})
+	}
+}
+
+// Test_ReadFile_OptionalIncludesKeepStringKeys verifies that optional sources
+// retain names used for exact account and permission lookups.
+func Test_ReadFile_OptionalIncludesKeepStringKeys(t *testing.T) {
+	for _, include := range []string{"[]", "[missing.yaml]", "[empty.yaml]", "[fragment.yaml]"} {
+		t.Run(include, func(t *testing.T) {
+			directory := t.TempDir()
+			writeConfig(t, directory, "empty.yaml", "")
+			writeConfig(t, directory, "fragment.yaml", "retained: true\n")
+			path := writeConfig(t, directory, "main.yaml",
+				"include: "+include+"\nidentities: [{username: 00123}]\npermissions: {00123: read}\n",
+			)
+			var config struct {
+				Identities []struct {
+					Username string `yaml:"username"`
+				} `yaml:"identities"`
+				Permissions map[string]string `yaml:"permissions"`
+			}
+			data, err := xcfg.ReadFile(path)
+			require.NoError(t, err)
+			require.NoError(t, yaml.Unmarshal(data, &config))
+			require.Len(t, config.Identities, 1)
+			require.Equal(t, "00123", config.Identities[0].Username)
+			require.Equal(t, map[string]string{"00123": "read"}, config.Permissions)
+		})
+	}
+}
+
+// Test_ReadFile_AliasesMergeKeysAndNulls verifies that composition keeps YAML
+// merge precedence and explicit nulls while resolving file-local aliases.
+func Test_ReadFile_AliasesMergeKeysAndNulls(t *testing.T) {
+	directory := t.TempDir()
+	writeConfig(t, directory, "fragment.yaml", `
+defaults: &defaults {name: 00123, enabled: true}
+settings: {<<: *defaults, enabled: false}
+items: [null, 00123, null]
+reset: null
+`)
+	path := writeConfig(t, directory, "main.yaml", "include: [fragment.yaml]\nreset: previous\n")
+	data, err := xcfg.ReadFile(path)
+	require.NoError(t, err)
+	require.YAMLEq(t, `
+defaults: {name: 00123, enabled: true}
+settings: {name: 00123, enabled: false}
+items: [null, 00123, null]
+reset: null
+`, string(data))
+}
+
 // Test_ReadFile_IncludeOrder verifies that optional overlays replace main-file
 // defaults in list order regardless of the directive's position.
 func Test_ReadFile_IncludeOrder(t *testing.T) {
@@ -138,6 +224,7 @@ func Test_ReadFile_InvalidInclude(t *testing.T) {
 		{"rejects second document", "include: [fragment.yaml]\n", "key: 1\n---\nkey: 2\n", "single YAML document"},
 		{"rejects non-mapping root", "include: [fragment.yaml]\n", "[one, two]\n", "must be a mapping"},
 		{"detects file cycle", "include: [fragment.yaml]\n", "include: [main.yaml]\n", "include cycle"},
+		{"rejects cyclic alias", "include: [fragment.yaml]\n", "key: &cycle [*cycle]\n", "anchor 'cycle' value contains itself"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
