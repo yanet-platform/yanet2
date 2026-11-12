@@ -29,6 +29,14 @@ fwstate_fwmap_registry_ensure(void) {
 	fwmap_func_registry_set(
 		FWMAP_PROMOTE_VALUE_FWSTATE, (void *)fwmap_promote_value_fwstate
 	);
+	fwmap_func_registry_set(
+		FWMAP_UPDATE_VALUE_NAT64STATE,
+		(void *)fwmap_update_value_nat64state
+	);
+	fwmap_func_registry_set(
+		FWMAP_PROMOTE_VALUE_NAT64STATE,
+		(void *)fwmap_promote_value_nat64state
+	);
 }
 
 // Binaries linked through meson register at startup; processes that reach

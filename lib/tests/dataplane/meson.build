@@ -129,3 +129,14 @@ backing_test = executable(
   include_directories: yanet_rootdir,
 )
 test('backing', backing_test, suite: 'lib_dataplane')
+
+nat64state_test = executable(
+  'nat64state_test',
+  'nat64state_test.c',
+  dependencies: [
+    lib_fwstate_registry_dep,
+    libdpdk_inc_dep,
+  ],
+  include_directories: yanet_rootdir,
+)
+test('nat64state', nat64state_test, suite: 'lib_fwstate')
