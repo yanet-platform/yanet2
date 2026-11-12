@@ -80,7 +80,7 @@ struct fast_lpm {
 	// The memory blocks of the trie, an offset pointer.
 	struct fast_lpm_chunk *chunks;
 	// Inserts waiting for the build, offset pointers into the LPM's
-	// memory: start and end keys as 16-byte integers, and values.
+	// memory: start and end keys as stored by the caller, and values.
 	uint8_t *staged_from;
 	uint8_t *staged_to;
 	uint32_t *staged_value;
@@ -112,17 +112,14 @@ fast_lpm_free_chunks(
 // Releases the staged inserts.
 static inline void
 fast_lpm_free_staged(struct fast_lpm *lpm) {
-	uint64_t capacity = lpm->staged_capacity;
+	struct memory_context *context = &lpm->memory_context;
+	size_t keys = lpm->staged_capacity * lpm->key_size;
+	memory_bfree(context, ADDR_OF(&lpm->staged_from), keys);
+	memory_bfree(context, ADDR_OF(&lpm->staged_to), keys);
 	memory_bfree(
-		&lpm->memory_context, ADDR_OF(&lpm->staged_from), capacity * 16
-	);
-	memory_bfree(
-		&lpm->memory_context, ADDR_OF(&lpm->staged_to), capacity * 16
-	);
-	memory_bfree(
-		&lpm->memory_context,
+		context,
 		ADDR_OF(&lpm->staged_value),
-		capacity * sizeof(uint32_t)
+		lpm->staged_capacity * sizeof(uint32_t)
 	);
 	SET_OFFSET_OF(&lpm->staged_from, NULL);
 	SET_OFFSET_OF(&lpm->staged_to, NULL);
@@ -257,7 +254,8 @@ fast_lpm_lookup(
 		uint32_t kind = entry & FAST_LPM_ENTRY_KIND_MASK;
 		if (kind != FAST_LPM_KIND_FULL) {
 			node = fast_lpm_link(node, entry);
-			if (kind == FAST_LPM_KIND_NARROW) {
+			// Keys of up to 8 bytes have narrow buckets only.
+			if (kind == FAST_LPM_KIND_NARROW || key_size <= 8) {
 				return fast_lpm_narrow_lookup(
 					node, key_size, key
 				);

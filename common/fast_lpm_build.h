@@ -29,11 +29,18 @@ struct fast_lpm_inserts {
 
 static inline fast_lpm_u128
 fast_lpm_key_to_u128(uint8_t key_size, const uint8_t *key) {
-	fast_lpm_u128 result = 0;
-	for (uint8_t idx = 0; idx < key_size; ++idx) {
-		result = result << 8 | key[idx];
+	switch (key_size) {
+	case 4:
+		return fast_lpm_key_be32(key);
+	case 8:
+		return fast_lpm_key_be64(key);
+	case 12:
+		return (fast_lpm_u128)fast_lpm_key_be32(key) << 64 |
+		       fast_lpm_key_be64(key + 4);
+	default:
+		return (fast_lpm_u128)fast_lpm_key_be64(key) << 64 |
+		       fast_lpm_key_be64(key + 8);
 	}
-	return result;
 }
 
 static inline void
@@ -171,10 +178,12 @@ fast_lpm_radix_pass(
 	}
 }
 
-// An open prefix of the sweep: its last key and the latest insert over it.
+// An open prefix of the sweep: its last key, the latest insert over it and
+// that insert's leaf.
 struct fast_lpm_open {
 	fast_lpm_u128 end;
 	uint32_t seq;
+	uint32_t leaf;
 };
 
 /*
@@ -196,11 +205,7 @@ static inline void
 fast_lpm_sweep_close_before(struct fast_lpm_sweep *sweep, fast_lpm_u128 at) {
 	while (sweep->depth && sweep->stack[sweep->depth - 1].end < at) {
 		struct fast_lpm_open *top = &sweep->stack[sweep->depth - 1];
-		fast_lpm_ranges_emit(
-			sweep->ranges,
-			top->end,
-			fast_lpm_leaf(sweep->inserts->value[top->seq])
-		);
+		fast_lpm_ranges_emit(sweep->ranges, top->end, top->leaf);
 		sweep->depth--;
 	}
 }
@@ -210,53 +215,90 @@ fast_lpm_sweep_open(
 	struct fast_lpm_sweep *sweep,
 	fast_lpm_u128 start,
 	fast_lpm_u128 end,
-	uint32_t seq
+	uint32_t seq,
+	uint32_t leaf
 ) {
 	fast_lpm_sweep_close_before(sweep, start);
+	struct fast_lpm_open *top =
+		sweep->depth ? &sweep->stack[sweep->depth - 1] : NULL;
 	if (start > 0) {
-		uint32_t leaf = FAST_LPM_LEAF_INVALID;
-		if (sweep->depth) {
-			leaf = fast_lpm_leaf(
-				sweep->inserts->value
-					[sweep->stack[sweep->depth - 1].seq]
-			);
-		}
-		fast_lpm_ranges_emit(sweep->ranges, start - 1, leaf);
+		fast_lpm_ranges_emit(
+			sweep->ranges,
+			start - 1,
+			top ? top->leaf : FAST_LPM_LEAF_INVALID
+		);
 	}
-	if (sweep->depth && sweep->stack[sweep->depth - 1].seq > seq) {
-		seq = sweep->stack[sweep->depth - 1].seq;
+	if (top && top->seq > seq) {
+		seq = top->seq;
+		leaf = top->leaf;
 	}
-	sweep->stack[sweep->depth++] = (struct fast_lpm_open){end, seq};
+	sweep->stack[sweep->depth++] = (struct fast_lpm_open){end, seq, leaf};
 }
 
 static inline void
 fast_lpm_sweep_finish(struct fast_lpm_sweep *sweep, fast_lpm_u128 max) {
 	while (sweep->depth) {
 		struct fast_lpm_open *top = &sweep->stack[sweep->depth - 1];
-		fast_lpm_ranges_emit(
-			sweep->ranges,
-			top->end,
-			fast_lpm_leaf(sweep->inserts->value[top->seq])
-		);
+		fast_lpm_ranges_emit(sweep->ranges, top->end, top->leaf);
 		sweep->depth--;
 	}
 	fast_lpm_ranges_emit(sweep->ranges, max, FAST_LPM_LEAF_INVALID);
 }
 
 /*
- * Paints 4-byte prefixes: one word per insert, start << 30 | length << 24
- * | insert order, sorted on the start and length bits; the order bits are
- * already ascending and the passes are stable.
+ * Appends [next, upto] of 4-byte keys with the leaf, merging an equal
+ * neighbour; nothing when upto is below next.
+ */
+static inline void
+fast_lpm_ranges_emit4(
+	struct fast_lpm_ranges *ranges,
+	uint64_t *next,
+	uint64_t upto,
+	uint32_t leaf
+) {
+	if (upto < *next) {
+		return;
+	}
+	if (ranges->count == 0 ||
+	    ranges->items[ranges->count - 1].leaf != leaf) {
+		ranges->items[ranges->count++] =
+			(struct fast_lpm_range){*next, leaf};
+	}
+	*next = upto + 1;
+}
+
+// An open 4-byte prefix of the sweep: its last key, the latest insert over
+// it and that insert's leaf.
+struct fast_lpm_open4 {
+	uint64_t end;
+	uint32_t seq;
+	uint32_t leaf;
+};
+
+// Inserts read ahead of the sweep: it visits them in key order, at random
+// in insert order.
+#define FAST_LPM_SWEEP_PREFETCH 16
+
+/*
+ * Paints staged 4-byte prefixes with 64-bit arithmetic.
+ *
+ * One word per insert, start << 30 | length << 24 | insert order, sorted
+ * on the start and length bits; the order bits are already ascending and
+ * the passes are stable. Then the sweep of the general prefix path.
+ * Returns 1 without painting when an insert is not a prefix.
  */
 static inline int
 fast_lpm_paint_prefixes4(
-	const struct fast_lpm_inserts *inserts, struct fast_lpm_ranges *ranges
+	const uint8_t *from,
+	const uint8_t *to,
+	const uint32_t *value,
+	size_t count,
+	struct fast_lpm_ranges *ranges
 ) {
-	size_t count = inserts->count;
 	uint64_t *words = malloc(count * sizeof(*words));
 	uint64_t *scratch = malloc(count * sizeof(*scratch));
 	uint32_t *counts = malloc(sizeof(*counts) << FAST_LPM_RADIX_BITS);
-	struct fast_lpm_open *stack = malloc((count + 1) * sizeof(*stack));
+	struct fast_lpm_open4 *stack = malloc((count + 1) * sizeof(*stack));
 	int rc = -1;
 	if (words == NULL || scratch == NULL || counts == NULL ||
 	    stack == NULL) {
@@ -264,11 +306,14 @@ fast_lpm_paint_prefixes4(
 		goto out;
 	}
 	for (size_t idx = 0; idx < count; ++idx) {
-		int host_bits = fast_lpm_prefix_host_bits(
-			inserts->from[idx], inserts->to[idx]
-		);
-		words[idx] = (uint64_t)inserts->from[idx] << 30 |
-			     (uint64_t)(32 - host_bits) << 24 | idx;
+		uint32_t start = fast_lpm_key_be32(from + 4 * idx);
+		uint32_t span = fast_lpm_key_be32(to + 4 * idx) - start;
+		if ((span & (span + 1)) != 0 || (start & span) != 0) {
+			rc = 1;
+			goto out;
+		}
+		uint64_t len = 32 - (uint64_t)__builtin_popcount(span);
+		words[idx] = (uint64_t)start << 30 | len << 24 | idx;
 	}
 	for (unsigned shift = 24; shift < 62; shift += FAST_LPM_RADIX_BITS) {
 		fast_lpm_radix_pass(words, scratch, count, shift, counts);
@@ -276,17 +321,54 @@ fast_lpm_paint_prefixes4(
 		words = scratch;
 		scratch = swap;
 	}
-	struct fast_lpm_sweep sweep = {inserts, ranges, stack, 0};
+	uint64_t next = 0;
+	size_t depth = 0;
 	for (size_t idx = 0; idx < count; ++idx) {
 		uint64_t word = words[idx];
-		fast_lpm_u128 start = word >> 30;
-		uint32_t len = (word >> 24) & 0x3f;
-		fast_lpm_u128 end = start | ((1ull << (32 - len)) - 1);
-		fast_lpm_sweep_open(
-			&sweep, start, end, (uint32_t)(word & 0xffffff)
+		uint64_t start = word >> 30;
+		uint64_t len = (word >> 24) & 0x3f;
+		uint32_t seq = (uint32_t)(word & 0xffffff);
+		if (idx + FAST_LPM_SWEEP_PREFETCH < count) {
+			__builtin_prefetch(
+				&value[words[idx + FAST_LPM_SWEEP_PREFETCH] &
+				       0xffffff]
+			);
+		}
+		while (depth && stack[depth - 1].end < start) {
+			depth--;
+			fast_lpm_ranges_emit4(
+				ranges,
+				&next,
+				stack[depth].end,
+				stack[depth].leaf
+			);
+		}
+		struct fast_lpm_open4 *top = depth ? &stack[depth - 1] : NULL;
+		if (start > 0) {
+			fast_lpm_ranges_emit4(
+				ranges,
+				&next,
+				start - 1,
+				top ? top->leaf : FAST_LPM_LEAF_INVALID
+			);
+		}
+		uint32_t leaf;
+		if (top && top->seq > seq) {
+			seq = top->seq;
+			leaf = top->leaf;
+		} else {
+			leaf = fast_lpm_leaf(value[seq]);
+		}
+		uint64_t end = start | ((1ull << (32 - len)) - 1);
+		stack[depth++] = (struct fast_lpm_open4){end, seq, leaf};
+	}
+	while (depth) {
+		depth--;
+		fast_lpm_ranges_emit4(
+			ranges, &next, stack[depth].end, stack[depth].leaf
 		);
 	}
-	fast_lpm_sweep_finish(&sweep, fast_lpm_key_max(4));
+	fast_lpm_ranges_emit4(ranges, &next, UINT32_MAX, FAST_LPM_LEAF_INVALID);
 	rc = 0;
 out:
 	free(words);
@@ -362,8 +444,21 @@ fast_lpm_paint_prefixes(
 	struct fast_lpm_sweep sweep = {inserts, ranges, stack, 0};
 	for (size_t idx = 0; idx < count; ++idx) {
 		uint32_t pos = (uint32_t)(order[idx] >> 32);
+		if (idx + FAST_LPM_SWEEP_PREFETCH < count) {
+			uint32_t ahead =
+				(uint32_t)(order[idx +
+						 FAST_LPM_SWEEP_PREFETCH] >>
+					   32);
+			__builtin_prefetch(&inserts->from[ahead]);
+			__builtin_prefetch(&inserts->to[ahead]);
+			__builtin_prefetch(&inserts->value[ahead]);
+		}
 		fast_lpm_sweep_open(
-			&sweep, inserts->from[pos], inserts->to[pos], pos
+			&sweep,
+			inserts->from[pos],
+			inserts->to[pos],
+			pos,
+			fast_lpm_leaf(inserts->value[pos])
 		);
 	}
 	fast_lpm_sweep_finish(&sweep, fast_lpm_key_max(key_size));
@@ -504,19 +599,12 @@ out:
 /*
  * The disjoint ranges of the inserts, covering the whole key space.
  *
- * The caller frees the items.
+ * The ranges have room for the worst case of two per insert.
  */
 static inline int
 fast_lpm_inserts_ranges(
 	const struct fast_lpm_inserts *inserts, struct fast_lpm_ranges *ranges
 ) {
-	memset(ranges, 0, sizeof(*ranges));
-	ranges->items =
-		malloc((2 * inserts->count + 2) * sizeof(*ranges->items));
-	if (ranges->items == NULL) {
-		errno = ENOMEM;
-		return -1;
-	}
 	int rc = 0;
 	if (fast_lpm_inserts_sorted(inserts)) {
 		fast_lpm_paint_sorted(inserts, ranges);
@@ -532,19 +620,69 @@ fast_lpm_inserts_ranges(
 					   inserts->from[idx], inserts->to[idx]
 				   ) >= 0;
 		}
-		if (prefixes && inserts->key_size == 4) {
-			rc = fast_lpm_paint_prefixes4(inserts, ranges);
-		} else if (prefixes) {
+		if (prefixes) {
 			rc = fast_lpm_paint_prefixes(inserts, ranges);
 		} else {
 			rc = fast_lpm_paint_general(inserts, ranges);
 		}
 	}
+	return rc;
+}
+
+/*
+ * The disjoint ranges of the staged inserts, covering the whole key space.
+ *
+ * Staged 4-byte prefixes are painted in place; any other input as 16-byte
+ * integers. The caller frees the items.
+ */
+static inline int
+fast_lpm_staged_ranges(
+	const struct fast_lpm *lpm, struct fast_lpm_ranges *ranges
+) {
+	size_t count = lpm->staged_count;
+	uint8_t key_size = lpm->key_size;
+	const uint8_t *from = ADDR_OF(&lpm->staged_from);
+	const uint8_t *to = ADDR_OF(&lpm->staged_to);
+	const uint32_t *value = ADDR_OF(&lpm->staged_value);
+	memset(ranges, 0, sizeof(*ranges));
+	ranges->items = malloc((2 * count + 2) * sizeof(*ranges->items));
+	if (ranges->items == NULL) {
+		errno = ENOMEM;
+		return -1;
+	}
+	int rc = 1;
+	if (key_size == 4 && count > 0 && count < (1u << 24)) {
+		rc = fast_lpm_paint_prefixes4(from, to, value, count, ranges);
+	}
+	if (rc == 1) {
+		fast_lpm_u128 *wide_from = malloc(count * sizeof(*wide_from));
+		fast_lpm_u128 *wide_to = malloc(count * sizeof(*wide_to));
+		if (count && (wide_from == NULL || wide_to == NULL)) {
+			errno = ENOMEM;
+			rc = -1;
+		} else {
+			for (size_t idx = 0; idx < count; ++idx) {
+				wide_from[idx] = fast_lpm_key_to_u128(
+					key_size, from + key_size * idx
+				);
+				wide_to[idx] = fast_lpm_key_to_u128(
+					key_size, to + key_size * idx
+				);
+			}
+			struct fast_lpm_inserts inserts = {
+				wide_from, wide_to, value, count, key_size
+			};
+			rc = fast_lpm_inserts_ranges(&inserts, ranges);
+		}
+		free(wide_from);
+		free(wide_to);
+	}
 	if (rc) {
 		free(ranges->items);
 		ranges->items = NULL;
+		return -1;
 	}
-	return rc;
+	return 0;
 }
 
 /*
@@ -905,20 +1043,22 @@ fast_lpm_init(
 static inline int
 fast_lpm_grow_staged(struct fast_lpm *lpm, uint64_t capacity) {
 	struct memory_context *context = &lpm->memory_context;
-	uint8_t *from = memory_balloc(context, capacity * 16);
-	uint8_t *to = memory_balloc(context, capacity * 16);
+	size_t keys = capacity * lpm->key_size;
+	uint8_t *from = memory_balloc(context, keys);
+	uint8_t *to = memory_balloc(context, keys);
 	uint32_t *value = memory_balloc(context, capacity * sizeof(uint32_t));
 	if (from == NULL || to == NULL || value == NULL) {
-		memory_bfree(context, from, capacity * 16);
-		memory_bfree(context, to, capacity * 16);
+		memory_bfree(context, from, keys);
+		memory_bfree(context, to, keys);
 		memory_bfree(context, value, capacity * sizeof(uint32_t));
 		errno = ENOMEM;
 		return -1;
 	}
 	uint64_t count = lpm->staged_count;
 	if (count) {
-		memcpy(from, ADDR_OF(&lpm->staged_from), count * 16);
-		memcpy(to, ADDR_OF(&lpm->staged_to), count * 16);
+		size_t used = count * lpm->key_size;
+		memcpy(from, ADDR_OF(&lpm->staged_from), used);
+		memcpy(to, ADDR_OF(&lpm->staged_to), used);
 		memcpy(value,
 		       ADDR_OF(&lpm->staged_value),
 		       count * sizeof(uint32_t));
@@ -955,9 +1095,9 @@ fast_lpm_insert(
 		errno = EINVAL;
 		return -1;
 	}
-	fast_lpm_u128 lo = fast_lpm_key_to_u128(lpm->key_size, from);
-	fast_lpm_u128 hi = fast_lpm_key_to_u128(lpm->key_size, to);
-	if (lo > hi) {
+	uint8_t key_size = lpm->key_size;
+	if (fast_lpm_key_to_u128(key_size, from) >
+	    fast_lpm_key_to_u128(key_size, to)) {
 		return 0;
 	}
 	if (lpm->staged_count == lpm->staged_capacity &&
@@ -967,8 +1107,8 @@ fast_lpm_insert(
 		return -1;
 	}
 	uint64_t idx = lpm->staged_count++;
-	memcpy(ADDR_OF(&lpm->staged_from) + 16 * idx, &lo, 16);
-	memcpy(ADDR_OF(&lpm->staged_to) + 16 * idx, &hi, 16);
+	memcpy(ADDR_OF(&lpm->staged_from) + key_size * idx, from, key_size);
+	memcpy(ADDR_OF(&lpm->staged_to) + key_size * idx, to, key_size);
 	ADDR_OF(&lpm->staged_value)[idx] = value;
 	return 0;
 }
@@ -986,15 +1126,8 @@ fast_lpm_build(struct fast_lpm *lpm) {
 		errno = EBUSY;
 		return -1;
 	}
-	struct fast_lpm_inserts inserts = {
-		.from = (const fast_lpm_u128 *)ADDR_OF(&lpm->staged_from),
-		.to = (const fast_lpm_u128 *)ADDR_OF(&lpm->staged_to),
-		.value = ADDR_OF(&lpm->staged_value),
-		.count = lpm->staged_count,
-		.key_size = lpm->key_size,
-	};
 	struct fast_lpm_ranges ranges;
-	if (fast_lpm_inserts_ranges(&inserts, &ranges)) {
+	if (fast_lpm_staged_ranges(lpm, &ranges)) {
 		return -1;
 	}
 	int rc = fast_lpm_emit_trie(lpm, ranges.items, ranges.count);
