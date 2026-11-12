@@ -23,6 +23,10 @@ lib_fwstate_objects_dep = declare_dependency(
     '-Wl,--export-dynamic-symbol=new_object_fwstate_map_v4',
     '-Wl,--require-defined=new_object_fwstate_map_v6',
     '-Wl,--export-dynamic-symbol=new_object_fwstate_map_v6',
+    '-Wl,--require-defined=new_object_nat64state_lan_map',
+    '-Wl,--export-dynamic-symbol=new_object_nat64state_lan_map',
+    '-Wl,--require-defined=new_object_nat64state_wan_map',
+    '-Wl,--export-dynamic-symbol=new_object_nat64state_wan_map',
   ],
   dependencies: cp_dependencies,
 )

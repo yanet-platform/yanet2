@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "fwstate_map_nat64_lan_object.h"
+#include "fwstate_map_nat64_wan_object.h"
 #include "fwstate_map_v4_object.h"
 #include "fwstate_map_v6_object.h"
 
@@ -11,6 +13,7 @@
 #include "lib/controlplane/config/cp_object.h"
 #include "lib/controlplane/config/zone.h"
 #include "lib/dataplane/object/object.h"
+#include "lib/fwstate/nat64state.h"
 #include "lib/fwstate/ops.h"
 #include "lib/fwstate/stash.h"
 #include "lib/fwstate/types.h"
@@ -68,10 +71,6 @@ map_init_common_config(
 		extra_bucket_count = 1024;
 	}
 
-	config->value_size = sizeof(struct fw_state_value);
-	config->update_value_fn_id = FWMAP_UPDATE_VALUE_FWSTATE;
-	config->promote_value_fn_id = FWMAP_PROMOTE_VALUE_FWSTATE;
-
 	config->hash_seed = 0;
 	config->hash_fn_id = FWMAP_HASH_FNV1A;
 
@@ -83,6 +82,10 @@ map_init_common_config(
 
 static void
 map_v4_init_keys(fwmap_config_t *config) {
+	config->value_size = sizeof(struct fw_state_value);
+	config->update_value_fn_id = FWMAP_UPDATE_VALUE_FWSTATE;
+	config->promote_value_fn_id = FWMAP_PROMOTE_VALUE_FWSTATE;
+
 	config->key_size = sizeof(struct fw4_state_key);
 	config->key_equal_fn_id = FWMAP_KEY_EQUAL_FW4;
 	config->copy_key_fn_id = FWMAP_COPY_KEY_FW4;
@@ -90,9 +93,37 @@ map_v4_init_keys(fwmap_config_t *config) {
 
 static void
 map_v6_init_keys(fwmap_config_t *config) {
+	config->value_size = sizeof(struct fw_state_value);
+	config->update_value_fn_id = FWMAP_UPDATE_VALUE_FWSTATE;
+	config->promote_value_fn_id = FWMAP_PROMOTE_VALUE_FWSTATE;
+
 	config->key_size = sizeof(struct fw6_state_key);
 	config->key_equal_fn_id = FWMAP_KEY_EQUAL_FW6;
 	config->copy_key_fn_id = FWMAP_COPY_KEY_FW6;
+}
+
+// The nat64state families key their tables with plain POD structs, so the
+// default memcmp key callbacks apply; only the value shape differs.
+static void
+map_nat64_lan_init_keys(fwmap_config_t *config) {
+	config->value_size = sizeof(struct nat64state_value);
+	config->update_value_fn_id = FWMAP_UPDATE_VALUE_NAT64STATE;
+	config->promote_value_fn_id = FWMAP_PROMOTE_VALUE_NAT64STATE;
+
+	config->key_size = sizeof(struct nat64state_lan_key);
+	config->key_equal_fn_id = FWMAP_KEY_EQUAL_DEFAULT;
+	config->copy_key_fn_id = FWMAP_COPY_KEY_DEFAULT;
+}
+
+static void
+map_nat64_wan_init_keys(fwmap_config_t *config) {
+	config->value_size = sizeof(struct nat64state_value);
+	config->update_value_fn_id = FWMAP_UPDATE_VALUE_NAT64STATE;
+	config->promote_value_fn_id = FWMAP_PROMOTE_VALUE_NAT64STATE;
+
+	config->key_size = sizeof(struct nat64state_wan_key);
+	config->key_equal_fn_id = FWMAP_KEY_EQUAL_DEFAULT;
+	config->copy_key_fn_id = FWMAP_COPY_KEY_DEFAULT;
 }
 
 // Append one layer built with the given key initializer. Returns 0 on
@@ -719,6 +750,502 @@ fwstate_map_v6_object_has_reclaimable(
 	return fwtable_has_reclaimable(&self->table, now);
 }
 
+// --- NAT64 lan object
+// -------------------------------------------------------------
+
+// Typed destructor: tears the object down and returns its storage to the
+// agent arena. Runs only on a dangling object, after
+// fwstate_map_nat64_lan_object_config_free wins the try-destroy race.
+static void
+fwstate_map_nat64_lan_object_destroy(struct cp_object *cp_object) {
+	struct fwstate_map_nat64_lan_object *self = container_of(
+		cp_object, struct fwstate_map_nat64_lan_object, cp_object
+	);
+
+	struct agent *agent = ADDR_OF(&cp_object->entity.agent);
+
+	fwstate_map_nat64_lan_object_fini(self);
+	fwstate_map_nat64_lan_object_free(self, agent);
+}
+
+struct fwstate_map_nat64_lan_object *
+fwstate_map_nat64_lan_object_new(struct agent *agent) {
+	return (struct fwstate_map_nat64_lan_object *)memory_balloc(
+		&agent->memory_context,
+		sizeof(struct fwstate_map_nat64_lan_object)
+	);
+}
+
+int
+fwstate_map_nat64_lan_object_init(
+	struct fwstate_map_nat64_lan_object *self,
+	struct agent *agent,
+	const char *name,
+	yanet_error **err
+) {
+	memset(self, 0, sizeof(struct fwstate_map_nat64_lan_object));
+
+	// Creating a table is the first fwstate operation any process
+	// performs; it also installs the domain's fwmap callbacks.
+	fwstate_fwmap_registry_ensure();
+
+	return cp_object_init(
+		&self->cp_object,
+		agent,
+		FWSTATE_MAP_NAT64_LAN_OBJECT_TYPE,
+		name,
+		err
+	);
+}
+
+void
+fwstate_map_nat64_lan_object_fini(struct fwstate_map_nat64_lan_object *self) {
+	if (self == NULL) {
+		return;
+	}
+
+	struct agent *agent = ADDR_OF(&self->cp_object.entity.agent);
+	if (agent != NULL) {
+		// Runs before the common teardown zeroes the object's memory
+		// context, which the table free must still charge.
+		map_free_table(
+			&self->table, &self->cp_object.entity.memory_context
+		);
+		map_stash_free(
+			&self->stash, &self->cp_object.entity.memory_context
+		);
+	}
+	cp_object_fini(&self->cp_object);
+}
+
+void
+fwstate_map_nat64_lan_object_free(
+	struct fwstate_map_nat64_lan_object *self, struct agent *agent
+) {
+	if (self == NULL) {
+		return;
+	}
+	memory_bfree(
+		&agent->memory_context,
+		self,
+		sizeof(struct fwstate_map_nat64_lan_object)
+	);
+}
+
+struct cp_object *
+fwstate_map_nat64_lan_object_config_new(
+	struct agent *agent, const char *name, yanet_error **err
+) {
+	struct fwstate_map_nat64_lan_object *self =
+		fwstate_map_nat64_lan_object_new(agent);
+	if (self == NULL) {
+		yanet_error_add(
+			err, "failed to allocate fwstate-map v4 object"
+		);
+		return NULL;
+	}
+
+	if (fwstate_map_nat64_lan_object_init(self, agent, name, err)) {
+		yanet_error_add(err, "failed to init fwstate-map v4 object");
+		fwstate_map_nat64_lan_object_free(self, agent);
+		return NULL;
+	}
+
+	return &self->cp_object;
+}
+
+int
+fwstate_map_nat64_lan_object_config_free(
+	struct cp_object *cp_object, yanet_error **err
+) {
+	if (cp_object_try_destroy(cp_object, err)) {
+		return -1;
+	}
+
+	struct agent *owner = ADDR_OF(&cp_object->entity.agent);
+
+	fwstate_map_nat64_lan_object_destroy(cp_object);
+	agent_destroy_released(owner);
+	return 0;
+}
+
+fwtable_t *
+fwstate_map_nat64_lan_object_table(const struct cp_object *cp_object) {
+	struct fwstate_map_nat64_lan_object *self = container_of(
+		cp_object, struct fwstate_map_nat64_lan_object, cp_object
+	);
+
+	return &self->table;
+}
+
+uint64_t
+fwstate_map_nat64_lan_object_generation(const struct cp_object *cp_object) {
+	struct fwstate_map_nat64_lan_object *self = container_of(
+		cp_object, struct fwstate_map_nat64_lan_object, cp_object
+	);
+
+	return self->generation;
+}
+
+int
+fwstate_map_nat64_lan_object_create(
+	struct fwstate_map_nat64_lan_object *self,
+	const struct fwstate_map_create_config *config
+) {
+	int rc = map_create(
+		&self->table,
+		&self->stash,
+		&self->cp_object.entity.memory_context,
+		map_nat64_lan_init_keys,
+		config
+	);
+	if (rc == 0) {
+		self->generation += 1;
+	}
+	return rc;
+}
+
+struct fwstate_stash_slot *
+fwstate_map_nat64_lan_object_stash(
+	const struct cp_object *cp_object, uint16_t worker_idx
+) {
+	struct fwstate_map_nat64_lan_object *self = container_of(
+		cp_object, struct fwstate_map_nat64_lan_object, cp_object
+	);
+
+	return map_stash_slot(&self->stash, worker_idx);
+}
+
+uint64_t
+fwstate_map_nat64_lan_object_stash_size(const struct cp_object *cp_object) {
+	struct fwstate_map_nat64_lan_object *self = container_of(
+		cp_object, struct fwstate_map_nat64_lan_object, cp_object
+	);
+
+	return self->stash.size;
+}
+
+void
+fwstate_map_nat64_lan_object_link(
+	const struct cp_object *cp_object,
+	uint64_t worker_idx,
+	struct fwstate_map_link *link
+) {
+	if (cp_object == NULL) {
+		link->table = NULL;
+		fwstate_stash_link_set(&link->stash, NULL, 0);
+		return;
+	}
+	struct fwstate_map_nat64_lan_object *self = container_of(
+		cp_object, struct fwstate_map_nat64_lan_object, cp_object
+	);
+	link->table = &self->table;
+	map_stash_link(&self->stash, worker_idx, &link->stash);
+}
+
+int
+fwstate_map_nat64_lan_object_insert_layer(
+	struct fwstate_map_nat64_lan_object *self,
+	uint32_t index_size,
+	uint32_t extra_bucket_count,
+	uint16_t worker_count
+) {
+	int rc = map_insert_layer(
+		&self->table,
+		&self->cp_object.entity.memory_context,
+		map_nat64_lan_init_keys,
+		index_size,
+		extra_bucket_count,
+		worker_count
+	);
+	if (rc == 0) {
+		self->generation += 1;
+	}
+	return rc;
+}
+
+int
+fwstate_map_nat64_lan_object_unlink_stale_layers(
+	struct fwstate_map_nat64_lan_object *self, uint64_t now
+) {
+	int rc = fwtable_unlink_stale_cp(&self->table, now);
+	if (rc == 0) {
+		self->generation += 1;
+	}
+	return rc;
+}
+
+void
+fwstate_map_nat64_lan_object_free_stale_layers(
+	struct fwstate_map_nat64_lan_object *self
+) {
+	fwtable_free_stale(
+		&self->table, &self->cp_object.entity.memory_context
+	);
+}
+
+uint32_t
+fwstate_map_nat64_lan_object_stale_layer_count(
+	const struct fwstate_map_nat64_lan_object *self
+) {
+	return fwtable_stale_count(&self->table);
+}
+
+bool
+fwstate_map_nat64_lan_object_has_reclaimable(
+	const struct fwstate_map_nat64_lan_object *self, uint64_t now
+) {
+	return fwtable_has_reclaimable(&self->table, now);
+}
+
+// --- NAT64 wan object
+// -------------------------------------------------------------
+
+// Typed destructor: tears the object down and returns its storage to the
+// agent arena. Runs only on a dangling object, after
+// fwstate_map_nat64_wan_object_config_free wins the try-destroy race.
+static void
+fwstate_map_nat64_wan_object_destroy(struct cp_object *cp_object) {
+	struct fwstate_map_nat64_wan_object *self = container_of(
+		cp_object, struct fwstate_map_nat64_wan_object, cp_object
+	);
+
+	struct agent *agent = ADDR_OF(&cp_object->entity.agent);
+
+	fwstate_map_nat64_wan_object_fini(self);
+	fwstate_map_nat64_wan_object_free(self, agent);
+}
+
+struct fwstate_map_nat64_wan_object *
+fwstate_map_nat64_wan_object_new(struct agent *agent) {
+	return (struct fwstate_map_nat64_wan_object *)memory_balloc(
+		&agent->memory_context,
+		sizeof(struct fwstate_map_nat64_wan_object)
+	);
+}
+
+int
+fwstate_map_nat64_wan_object_init(
+	struct fwstate_map_nat64_wan_object *self,
+	struct agent *agent,
+	const char *name,
+	yanet_error **err
+) {
+	memset(self, 0, sizeof(struct fwstate_map_nat64_wan_object));
+
+	// Creating a table is the first fwstate operation any process
+	// performs; it also installs the domain's fwmap callbacks.
+	fwstate_fwmap_registry_ensure();
+
+	return cp_object_init(
+		&self->cp_object,
+		agent,
+		FWSTATE_MAP_NAT64_WAN_OBJECT_TYPE,
+		name,
+		err
+	);
+}
+
+void
+fwstate_map_nat64_wan_object_fini(struct fwstate_map_nat64_wan_object *self) {
+	if (self == NULL) {
+		return;
+	}
+
+	struct agent *agent = ADDR_OF(&self->cp_object.entity.agent);
+	if (agent != NULL) {
+		// Runs before the common teardown zeroes the object's memory
+		// context, which the table free must still charge.
+		map_free_table(
+			&self->table, &self->cp_object.entity.memory_context
+		);
+		map_stash_free(
+			&self->stash, &self->cp_object.entity.memory_context
+		);
+	}
+	cp_object_fini(&self->cp_object);
+}
+
+void
+fwstate_map_nat64_wan_object_free(
+	struct fwstate_map_nat64_wan_object *self, struct agent *agent
+) {
+	if (self == NULL) {
+		return;
+	}
+	memory_bfree(
+		&agent->memory_context,
+		self,
+		sizeof(struct fwstate_map_nat64_wan_object)
+	);
+}
+
+struct cp_object *
+fwstate_map_nat64_wan_object_config_new(
+	struct agent *agent, const char *name, yanet_error **err
+) {
+	struct fwstate_map_nat64_wan_object *self =
+		fwstate_map_nat64_wan_object_new(agent);
+	if (self == NULL) {
+		yanet_error_add(
+			err, "failed to allocate fwstate-map v4 object"
+		);
+		return NULL;
+	}
+
+	if (fwstate_map_nat64_wan_object_init(self, agent, name, err)) {
+		yanet_error_add(err, "failed to init fwstate-map v4 object");
+		fwstate_map_nat64_wan_object_free(self, agent);
+		return NULL;
+	}
+
+	return &self->cp_object;
+}
+
+int
+fwstate_map_nat64_wan_object_config_free(
+	struct cp_object *cp_object, yanet_error **err
+) {
+	if (cp_object_try_destroy(cp_object, err)) {
+		return -1;
+	}
+
+	struct agent *owner = ADDR_OF(&cp_object->entity.agent);
+
+	fwstate_map_nat64_wan_object_destroy(cp_object);
+	agent_destroy_released(owner);
+	return 0;
+}
+
+fwtable_t *
+fwstate_map_nat64_wan_object_table(const struct cp_object *cp_object) {
+	struct fwstate_map_nat64_wan_object *self = container_of(
+		cp_object, struct fwstate_map_nat64_wan_object, cp_object
+	);
+
+	return &self->table;
+}
+
+uint64_t
+fwstate_map_nat64_wan_object_generation(const struct cp_object *cp_object) {
+	struct fwstate_map_nat64_wan_object *self = container_of(
+		cp_object, struct fwstate_map_nat64_wan_object, cp_object
+	);
+
+	return self->generation;
+}
+
+int
+fwstate_map_nat64_wan_object_create(
+	struct fwstate_map_nat64_wan_object *self,
+	const struct fwstate_map_create_config *config
+) {
+	int rc = map_create(
+		&self->table,
+		&self->stash,
+		&self->cp_object.entity.memory_context,
+		map_nat64_wan_init_keys,
+		config
+	);
+	if (rc == 0) {
+		self->generation += 1;
+	}
+	return rc;
+}
+
+struct fwstate_stash_slot *
+fwstate_map_nat64_wan_object_stash(
+	const struct cp_object *cp_object, uint16_t worker_idx
+) {
+	struct fwstate_map_nat64_wan_object *self = container_of(
+		cp_object, struct fwstate_map_nat64_wan_object, cp_object
+	);
+
+	return map_stash_slot(&self->stash, worker_idx);
+}
+
+uint64_t
+fwstate_map_nat64_wan_object_stash_size(const struct cp_object *cp_object) {
+	struct fwstate_map_nat64_wan_object *self = container_of(
+		cp_object, struct fwstate_map_nat64_wan_object, cp_object
+	);
+
+	return self->stash.size;
+}
+
+void
+fwstate_map_nat64_wan_object_link(
+	const struct cp_object *cp_object,
+	uint64_t worker_idx,
+	struct fwstate_map_link *link
+) {
+	if (cp_object == NULL) {
+		link->table = NULL;
+		fwstate_stash_link_set(&link->stash, NULL, 0);
+		return;
+	}
+	struct fwstate_map_nat64_wan_object *self = container_of(
+		cp_object, struct fwstate_map_nat64_wan_object, cp_object
+	);
+	link->table = &self->table;
+	map_stash_link(&self->stash, worker_idx, &link->stash);
+}
+
+int
+fwstate_map_nat64_wan_object_insert_layer(
+	struct fwstate_map_nat64_wan_object *self,
+	uint32_t index_size,
+	uint32_t extra_bucket_count,
+	uint16_t worker_count
+) {
+	int rc = map_insert_layer(
+		&self->table,
+		&self->cp_object.entity.memory_context,
+		map_nat64_wan_init_keys,
+		index_size,
+		extra_bucket_count,
+		worker_count
+	);
+	if (rc == 0) {
+		self->generation += 1;
+	}
+	return rc;
+}
+
+int
+fwstate_map_nat64_wan_object_unlink_stale_layers(
+	struct fwstate_map_nat64_wan_object *self, uint64_t now
+) {
+	int rc = fwtable_unlink_stale_cp(&self->table, now);
+	if (rc == 0) {
+		self->generation += 1;
+	}
+	return rc;
+}
+
+void
+fwstate_map_nat64_wan_object_free_stale_layers(
+	struct fwstate_map_nat64_wan_object *self
+) {
+	fwtable_free_stale(
+		&self->table, &self->cp_object.entity.memory_context
+	);
+}
+
+uint32_t
+fwstate_map_nat64_wan_object_stale_layer_count(
+	const struct fwstate_map_nat64_wan_object *self
+) {
+	return fwtable_stale_count(&self->table);
+}
+
+bool
+fwstate_map_nat64_wan_object_has_reclaimable(
+	const struct fwstate_map_nat64_wan_object *self, uint64_t now
+) {
+	return fwtable_has_reclaimable(&self->table, now);
+}
+
 // --- object factories --------------------------------------------------------
 
 struct object *
@@ -729,6 +1256,32 @@ new_object_fwstate_map_v4() {
 		return NULL;
 	}
 	strtcpy(object->name, FWSTATE_MAP_V4_OBJECT_TYPE, sizeof(object->name));
+	return object;
+}
+
+struct object *
+new_object_nat64state_lan_map() {
+	struct object *object =
+		(struct object *)calloc(1, sizeof(struct object));
+	if (object == NULL) {
+		return NULL;
+	}
+	strtcpy(object->name,
+		FWSTATE_MAP_NAT64_LAN_OBJECT_TYPE,
+		sizeof(object->name));
+	return object;
+}
+
+struct object *
+new_object_nat64state_wan_map() {
+	struct object *object =
+		(struct object *)calloc(1, sizeof(struct object));
+	if (object == NULL) {
+		return NULL;
+	}
+	strtcpy(object->name,
+		FWSTATE_MAP_NAT64_WAN_OBJECT_TYPE,
+		sizeof(object->name));
 	return object;
 }
 
