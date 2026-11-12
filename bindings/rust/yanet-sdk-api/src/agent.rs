@@ -16,7 +16,7 @@ use yanet_sys::{
         CP_OBJECT_NAME_LEN, CP_OBJECT_TYPE_LEN,
     },
     counters::COUNTER_INVALID,
-    cp::{BlockAddr, Built, BuiltObject, Context, Header, Owner},
+    cp::{BlockAddr, Built, BuiltObject, Context, Header, Owner, names},
     dp::{Module, ModuleConfig, Object, ObjectConfig, ObjectLink},
 };
 
@@ -680,12 +680,7 @@ pub unsafe fn release_at<B: Releasable>(raw: NonNull<B::Raw>) -> Result<(), Reta
 
 /// A name as the NUL terminated bytes of a C field of `N` bytes.
 fn c_name<const N: usize>(name: &str) -> Result<[u8; N], Error> {
-    if name.len() >= N || name.bytes().any(|byte| byte == 0) {
-        return Err(Error::new(
-            ErrorKind::InvalidArgument,
-            "a name holds a NUL or does not fit its C field whole",
-        ));
-    }
+    names::validate_c_field(name, N).map_err(|err| Error::new(ErrorKind::InvalidArgument, &err.to_string()))?;
     let mut bytes = [0; N];
     bytes[..name.len()].copy_from_slice(name.as_bytes());
     Ok(bytes)

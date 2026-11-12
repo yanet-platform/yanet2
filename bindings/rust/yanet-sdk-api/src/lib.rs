@@ -20,6 +20,7 @@
 mod agent;
 mod error;
 mod ffi;
+pub mod names;
 
 pub use agent::{Agent, ObjectCx, ObjectKey, PublishedCx, Retained};
 pub use error::{Error, ErrorKind};
