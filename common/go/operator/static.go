@@ -11,6 +11,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
+	"google.golang.org/protobuf/types/dynamicpb"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/readiness"
@@ -30,6 +31,9 @@ type StaticTarget struct {
 	//
 	// Empty when the target only publishes a function.
 	Method string
+	// Descriptors resolves the method, its request and its reply, nil
+	// resolving them among the descriptors linked into this binary.
+	Descriptors *protoregistry.Files
 	// Request is the message the method receives, sent as is.
 	Request proto.Message
 	// Function is published after the configs, nil when the target owns
@@ -147,8 +151,8 @@ func NewStaticModuleOperator(
 	), nil
 }
 
-// staticTargets checks every target against the linked descriptors and
-// returns the copy the operator keeps, messages detached from the caller.
+// staticTargets checks every target against its descriptors and returns
+// the copy the operator keeps, messages detached from the caller.
 func staticTargets(targets []StaticTarget) ([]StaticTarget, error) {
 	if len(targets) == 0 {
 		return nil, errors.New("at least one target must be configured")
@@ -161,7 +165,7 @@ func staticTargets(targets []StaticTarget) ([]StaticTarget, error) {
 			if target.Function == nil {
 				return nil, fmt.Errorf("target %d: neither a method nor a function", idx)
 			}
-		} else if _, err := resolveMethod(target.Method, target.Request); err != nil {
+		} else if _, err := resolveMethod(target.Method, target.Request, target.Descriptors); err != nil {
 			return nil, fmt.Errorf("target %d: %w", idx, err)
 		}
 		if target.Name == "" {
@@ -214,16 +218,21 @@ type resolvedMethod struct {
 	Reply protoreflect.MessageType
 }
 
-// methodDescriptor finds the spelled method among the descriptors linked
-// into this binary, refusing a streaming one.
-func methodDescriptor(method string) (protoreflect.MethodDescriptor, error) {
+// methodDescriptor finds the spelled method in the descriptor set, or among
+// the descriptors linked into this binary when files is nil, refusing a
+// streaming one.
+func methodDescriptor(method string, files *protoregistry.Files) (protoreflect.MethodDescriptor, error) {
 	service, name, ok := strings.Cut(strings.TrimPrefix(method, "/"), "/")
 	if !ok || service == "" || name == "" {
 		return nil, fmt.Errorf("method %q must be spelled as package.Service/Method", method)
 	}
-	descriptor, err := protoregistry.GlobalFiles.FindDescriptorByName(protoreflect.FullName(service))
+	resolver, where := protoregistry.GlobalFiles, "linked into this binary"
+	if files != nil {
+		resolver, where = files, "in the descriptor set"
+	}
+	descriptor, err := resolver.FindDescriptorByName(protoreflect.FullName(service))
 	if err != nil {
-		return nil, fmt.Errorf("service %q is not linked into this binary", service)
+		return nil, fmt.Errorf("service %q is not %s", service, where)
 	}
 	serviceDescriptor, ok := descriptor.(protoreflect.ServiceDescriptor)
 	if !ok {
@@ -242,11 +251,18 @@ func methodDescriptor(method string) (protoreflect.MethodDescriptor, error) {
 }
 
 // NewMethodRequest builds an empty request for the spelled unary method,
-// resolved against the descriptors linked into this binary.
-func NewMethodRequest(method string) (proto.Message, error) {
-	descriptor, err := methodDescriptor(method)
+// resolved in the descriptor set, or among the descriptors linked into this
+// binary when files is nil.
+//
+// A method resolved in a set takes a dynamic message of the set's request
+// type, even when this binary links that type.
+func NewMethodRequest(method string, files *protoregistry.Files) (proto.Message, error) {
+	descriptor, err := methodDescriptor(method, files)
 	if err != nil {
 		return nil, err
+	}
+	if files != nil {
+		return dynamicpb.NewMessage(descriptor.Input()), nil
 	}
 	request, err := protoregistry.GlobalTypes.FindMessageByName(descriptor.Input().FullName())
 	if err != nil {
@@ -258,10 +274,17 @@ func NewMethodRequest(method string) (proto.Message, error) {
 	return request.New().Interface(), nil
 }
 
-// resolveMethod turns the spelled method into a call, refusing one the binary
-// does not know, a streaming one, or a request of another type.
-func resolveMethod(method string, request proto.Message) (resolvedMethod, error) {
-	descriptor, err := methodDescriptor(method)
+// resolveMethod turns the spelled method into a call, refusing one the
+// descriptors do not hold, a streaming one, or a request of another type.
+//
+// A method resolved in a set replies with a dynamic message of the set's
+// reply type.
+func resolveMethod(
+	method string,
+	request proto.Message,
+	files *protoregistry.Files,
+) (resolvedMethod, error) {
+	descriptor, err := methodDescriptor(method, files)
 	if err != nil {
 		return resolvedMethod{}, err
 	}
@@ -272,6 +295,10 @@ func resolveMethod(method string, request proto.Message) (resolvedMethod, error)
 	if got := request.ProtoReflect().Descriptor().FullName(); got != want {
 		return resolvedMethod{}, fmt.Errorf("method %q takes %s, not %s", method, want, got)
 	}
+	full := "/" + string(descriptor.Parent().FullName()) + "/" + string(descriptor.Name())
+	if files != nil {
+		return resolvedMethod{Full: full, Reply: dynamicpb.NewMessageType(descriptor.Output())}, nil
+	}
 	reply, err := protoregistry.GlobalTypes.FindMessageByName(descriptor.Output().FullName())
 	if err != nil {
 		return resolvedMethod{}, fmt.Errorf(
@@ -279,7 +306,6 @@ func resolveMethod(method string, request proto.Message) (resolvedMethod, error)
 			descriptor.Output().FullName(), method,
 		)
 	}
-	full := "/" + string(descriptor.Parent().FullName()) + "/" + string(descriptor.Name())
 	return resolvedMethod{Full: full, Reply: reply}, nil
 }
 
@@ -300,7 +326,7 @@ func (m *staticGatewayActuator) Apply(ctx context.Context, targets []StaticTarge
 		if target.Method == "" && target.Request == nil {
 			continue
 		}
-		method, e := resolveMethod(target.Method, target.Request)
+		method, e := resolveMethod(target.Method, target.Request, target.Descriptors)
 		if e != nil {
 			err = errors.Join(err, e)
 			continue

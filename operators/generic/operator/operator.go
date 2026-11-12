@@ -7,12 +7,14 @@ import (
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/reflect/protoregistry"
 
 	"github.com/yanet-platform/yanet2/common/go/operator"
 )
 
 // NewOperator builds one generic operator instance: every module config is
-// loaded once from its file, and the functions are published after them.
+// loaded once from its file, through the descriptor set the entry names,
+// and the functions are published after them.
 func NewOperator(cfg *Config, options ...Option) (operator.Runnable, error) {
 	opts := newOptions()
 	for _, o := range options {
@@ -21,7 +23,15 @@ func NewOperator(cfg *Config, options ...Option) (operator.Runnable, error) {
 
 	targets := make([]operator.StaticTarget, 0, len(cfg.Configs)+len(cfg.Functions))
 	for idx, config := range cfg.Configs {
-		request, err := LoadRequest(config.Method.Unwrap(), config.File.Unwrap())
+		var files *protoregistry.Files
+		if config.Descriptors != "" {
+			loaded, err := operator.LoadDescriptorSet(config.Descriptors)
+			if err != nil {
+				return nil, fmt.Errorf("configs[%d]: %w", idx, err)
+			}
+			files = loaded
+		}
+		request, err := LoadRequest(config.Method.Unwrap(), config.File.Unwrap(), files)
 		if err != nil {
 			return nil, fmt.Errorf("configs[%d]: %w", idx, err)
 		}
@@ -29,9 +39,10 @@ func NewOperator(cfg *Config, options ...Option) (operator.Runnable, error) {
 			return nil, fmt.Errorf("configs[%d]: %w", idx, err)
 		}
 		targets = append(targets, operator.StaticTarget{
-			Name:    config.Name.Unwrap(),
-			Method:  config.Method.Unwrap(),
-			Request: request,
+			Name:        config.Name.Unwrap(),
+			Method:      config.Method.Unwrap(),
+			Descriptors: files,
+			Request:     request,
 		})
 	}
 

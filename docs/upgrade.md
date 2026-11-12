@@ -3,6 +3,22 @@
 Manual steps required when upgrading an existing deployment. The packaging
 does not perform these automatically.
 
+## The generic operator configures modules it does not link
+
+A config entry of a generic operator instance may name the module's descriptor set in `descriptors`: a FileDescriptorSet as protoc writes it with `--descriptor_set_out`, installed by the module's package. The operator then resolves the method, its request and its reply from the set, so the stock binary configures a module built outside this tree. A file of the set resolves its imports in the set first, then among the files linked into the binary, so a set written without `--include_imports` serves too. An entry without `descriptors` works as before.
+
+```yaml
+configs:
+  - name: example0
+    method: modules.example.controlplane.examplepb.v1.ExampleService/UpdateConfig
+    file: /etc/yanet2/example.d/default.yaml
+    descriptors: /usr/share/yanet2/example.protoset
+```
+
+The module config file is written as for a linked module. A field whose linked type has a JSON form of its own, such as an address or a prefix, keeps that form, a key the descriptor lacks is ignored, and an enum takes its declared name or a number. A named set decides even for a module the binary links. Such an entry reads one thing the linked types do not: a oneof member, which the generated types ignore, is read by its field name.
+
+Go callers of the framework pass the set as a new last argument of `operator.NewMethodRequest` and of the generic operator's `LoadRequest`, nil meaning the descriptors linked into the binary, and `operator.StaticTarget.Descriptors` names the set a target is resolved in.
+
 ## DSCP supports optional source prefixes
 
 DSCP configs may add `source_prefixes4` and `source_prefixes6`. Destinations are

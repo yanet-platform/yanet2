@@ -392,7 +392,7 @@ func Test_NewStaticModuleOperator_AcceptsFunctionOnlyTarget(t *testing.T) {
 // Test_NewMethodRequest_BuildsTypedRequest verifies that the spelled
 // method yields an empty request of the method's own input type.
 func Test_NewMethodRequest_BuildsTypedRequest(t *testing.T) {
-	request, err := operator.NewMethodRequest(ynpb.PipelineService_Update_FullMethodName)
+	request, err := operator.NewMethodRequest(ynpb.PipelineService_Update_FullMethodName, nil)
 	require.NoError(t, err)
 
 	typed, ok := request.(*ynpb.UpdatePipelineRequest)
@@ -403,7 +403,7 @@ func Test_NewMethodRequest_BuildsTypedRequest(t *testing.T) {
 // Test_NewMethodRequest_RejectsUnlinkedService verifies that a method of a
 // service this binary does not link is refused.
 func Test_NewMethodRequest_RejectsUnlinkedService(t *testing.T) {
-	_, err := operator.NewMethodRequest("modules.lldp.controlplane.lldppb.v1.LLDPService/UpdateConfig")
+	_, err := operator.NewMethodRequest("modules.lldp.controlplane.lldppb.v1.LLDPService/UpdateConfig", nil)
 
 	require.ErrorContains(t, err, "not linked into this binary")
 }

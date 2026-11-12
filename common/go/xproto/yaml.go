@@ -9,6 +9,7 @@ import (
 	"io"
 
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/dynamicpb"
 	"gopkg.in/yaml.v3"
 )
 
@@ -17,6 +18,12 @@ import (
 //
 // Known keys use the exact field name, including letter case. Unknown keys
 // are ignored, and invalid known values report their JSON pointer.
+//
+// A dynamic message, such as one built from a module's descriptor set, is
+// read by its descriptor with the same rules. A part of it whose linked Go
+// type has a JSON form of its own, such as an IP address, is read by that
+// form, an enum by its declared name or a number, and a oneof member by its
+// field name.
 func Unmarshal(data []byte, msg proto.Message) error {
 	if msg == nil || !msg.ProtoReflect().IsValid() {
 		return errors.New("the target message is nil")
@@ -57,6 +64,9 @@ func Unmarshal(data []byte, msg proto.Message) error {
 	}
 
 	proto.Reset(msg)
+	if dynamic, ok := msg.(*dynamicpb.Message); ok {
+		return unmarshalDynamic(encoded, dynamic)
+	}
 	return json.Unmarshal(
 		encoded, msg,
 		json.WithUnmarshalers(json.UnmarshalFromFunc(unmarshalFieldless)),

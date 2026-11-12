@@ -3,7 +3,8 @@ package main
 // The blank imports link every gateway-facing proto package into the
 // binary, so a target may spell any public module or device method.
 //
-// The private tree builds its own binary with its own bundle. The aclpb,
+// A module built outside this tree is configured through the descriptor
+// set its instance entry names, with no bundle of its own. The aclpb,
 // fwstatepb, and fwstatemappb packages are absent on purpose: their
 // handwritten helpers import CGO bindings, which this pure-Go binary
 // does not link.

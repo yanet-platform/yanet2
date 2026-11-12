@@ -2,6 +2,7 @@ package operator_test
 
 import (
 	"fmt"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -132,4 +133,58 @@ configs:
 			require.NoError(t, err)
 		})
 	}
+}
+
+// unlinkedInstance spells a one-gateway instance pushing one config of the
+// unlinked module through the descriptor set it names.
+func unlinkedInstance(path string, descriptors string) string {
+	return fmt.Sprintf(`
+name: unlinked
+gateways:
+  - name: gw0
+    endpoint: "[::1]:0"
+configs:
+  - name: tunnel0
+    method: %s
+    file: %s
+    descriptors: %s
+`, unlinkedUpdateMethod, path, descriptors)
+}
+
+// Test_NewOperator_ConstructsForUnlinkedModule verifies that an entry
+// naming a descriptor set constructs for a module this binary does not
+// link.
+func Test_NewOperator_ConstructsForUnlinkedModule(t *testing.T) {
+	path := writeModuleConfig(t, "source: 2001:db8::1\nhop_limit: 64\n")
+	cfg := decodeConfig(t, unlinkedInstance(path, writeDescriptorSet(t, unlinkedModule())))
+
+	runnable, err := operator.NewOperator(cfg)
+	require.NoError(t, err)
+	require.NoError(t, runnable.Close())
+}
+
+// Test_NewOperator_RejectsSetWithoutMethod verifies that a descriptor set
+// without the entry's service is refused with the service named, although
+// this binary links it.
+func Test_NewOperator_RejectsSetWithoutMethod(t *testing.T) {
+	cfg := decodeConfig(t, decapInstance(writeModuleConfig(t, "prefixes6: [2001:db8::/32]\n")))
+	cfg.Configs[0].Descriptors = writeDescriptorSet(t, unlinkedModule())
+
+	_, err := operator.NewOperator(cfg)
+
+	require.ErrorContains(t, err,
+		`configs[0]: service "modules.decap.controlplane.decappb.v1.DecapService" is not in the descriptor set`)
+}
+
+// Test_NewOperator_RejectsUnreadableDescriptorSet verifies that a missing
+// descriptor set is refused with its path.
+func Test_NewOperator_RejectsUnreadableDescriptorSet(t *testing.T) {
+	path := writeModuleConfig(t, "source: 2001:db8::1\n")
+	missing := filepath.Join(t.TempDir(), "missing.protoset")
+	cfg := decodeConfig(t, unlinkedInstance(path, missing))
+
+	_, err := operator.NewOperator(cfg)
+
+	require.ErrorContains(t, err, "configs[0]: failed to read descriptor set")
+	require.ErrorContains(t, err, missing)
 }
