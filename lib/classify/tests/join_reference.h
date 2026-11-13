@@ -1,0 +1,304 @@
+#pragma once
+
+// The cell-enumerating join the exact join replaced, kept only as the
+// test reference the exact join is compared against.
+//
+// It enumerates every cell of every distinct pair through a remap table,
+// so the class ids follow the remap key allocation; the comparison
+// renumbers them canonically before checking.
+#include "common/hash_index.h"
+#include "common/registry.h"
+#include "common/value.h"
+#include "lib/classify/compiler/declare.h"
+
+struct touch_ctx {
+	struct value_table *value_table;
+	struct remap_table *remap_table;
+};
+
+static int
+value_table_touch_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
+	(void)idx;
+	struct touch_ctx *touch_ctx = (struct touch_ctx *)data;
+
+	uint32_t *value = value_table_get_ptr(touch_ctx->value_table, v1, v2);
+	if (remap_table_touch(touch_ctx->remap_table, *value, value) < 0) {
+		return -1;
+	}
+	return 0;
+}
+
+static inline uint32_t
+merge_group_pair_hash(uint32_t left, uint32_t right) {
+	uint32_t hash = left * 2654435761u;
+	hash ^= right * 2246822519u;
+	return hash * 3266489917u;
+}
+
+struct merge_pair_ctx {
+	const uint32_t *pair_group1;
+	const uint32_t *pair_group2;
+	uint32_t group1;
+	uint32_t group2;
+};
+
+static int
+merge_pair_eq(uint32_t value, const void *data) {
+	const struct merge_pair_ctx *pair_ctx =
+		(const struct merge_pair_ctx *)data;
+	return pair_ctx->pair_group1[value] != pair_ctx->group1 ||
+	       pair_ctx->pair_group2[value] != pair_ctx->group2;
+}
+
+struct value_collect_ctx {
+	struct value_table *table;
+	struct value_registry *registry;
+};
+
+static int
+value_table_collect_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
+	(void)idx;
+	struct value_collect_ctx *collect_ctx =
+		(struct value_collect_ctx *)data;
+	return value_registry_collect(
+		collect_ctx->registry,
+		value_table_get(collect_ctx->table, v1, v2)
+	);
+}
+
+/*
+ * Joins two group registries into a joint stage of the classification.
+ *
+ * The name scopes the memory contexts of the join - the value table and
+ * the stage registry - each titled with the name and its own artifact
+ * leaf, so every context of one join of one classifier composition is
+ * identified in the memory tree.
+ *
+ * Rules referencing the same group pair on both sides produce the same
+ * touched cell joins, so the stage operates on distinct pairs instead of
+ * all rules. On success the routine initializes the value table holding
+ * the join results, the registry with one range per pair holding the
+ * pair matching class identifiers, and fills the rule to pair mapping;
+ * a rule without a value on either side keeps the invalid group mark.
+ */
+static int
+classify_join_reference(
+	struct memory_context *memory_context,
+	const char *name,
+	const struct classifier *left,
+	const struct classifier *right,
+	uint32_t rule_count,
+	struct value_table *table,
+	struct classifier *out
+) {
+	const struct value_registry *registry1 = &left->registry;
+	const uint32_t *rule_to_group1 = left->rule_groups;
+	const struct value_registry *registry2 = &right->registry;
+	const uint32_t *rule_to_group2 = right->rule_groups;
+	struct value_registry *registry = &out->registry;
+	uint32_t *rule_to_group;
+
+	if (classifier_init(out, memory_context, rule_count)) {
+		return -1;
+	}
+	rule_to_group = out->rule_groups;
+
+	// Pair collection scratch, emptied here so a failure of the table
+	// below unwinds through the common exit.
+	uint32_t pair_alloc_count = rule_count ? rule_count : 1;
+	uint32_t *pair_group1 = NULL;
+	uint32_t *pair_group2 = NULL;
+	struct hash_index pair_index = {0};
+	bool pair_index_live = false;
+
+	char table_name[MEMORY_CONTEXT_NAME_SIZE];
+	classify_leaf_name(table_name, sizeof(table_name), name, "table");
+	if (value_table_init(
+		    table,
+		    memory_context,
+		    table_name,
+		    value_registry_capacity(registry1),
+		    value_registry_capacity(registry2)
+	    )) {
+		goto error_free_pairs;
+	}
+
+	/*
+	 * Collect the distinct group pairs into a hash index: the group of
+	 * the first registry and the group of the second one each rule
+	 * references.
+	 */
+	pair_group1 = (uint32_t *)memory_balloc(
+		memory_context, sizeof(uint32_t) * pair_alloc_count
+	);
+	if (pair_group1 == NULL) {
+		goto error_free_pairs;
+	}
+
+	pair_group2 = (uint32_t *)memory_balloc(
+		memory_context, sizeof(uint32_t) * pair_alloc_count
+	);
+	if (pair_group2 == NULL) {
+		goto error_free_pairs;
+	}
+
+	if (hash_index_init(&pair_index, memory_context, rule_count)) {
+		goto error_free_pairs;
+	}
+	pair_index_live = true;
+
+	uint32_t pair_count = 0;
+	for (uint32_t rule_idx = 0; rule_idx < rule_count; ++rule_idx) {
+		uint32_t group1 = rule_to_group1[rule_idx];
+		uint32_t group2 = rule_to_group2[rule_idx];
+		rule_to_group[rule_idx] = FILTER_GROUP_INVALID;
+
+		if (group1 == FILTER_GROUP_INVALID ||
+		    group2 == FILTER_GROUP_INVALID) {
+			continue;
+		}
+
+		uint32_t hash = merge_group_pair_hash(group1, group2);
+		struct merge_pair_ctx pair_ctx = {
+			pair_group1,
+			pair_group2,
+			group1,
+			group2,
+		};
+
+		uint32_t pair = hash_index_lookup(
+			&pair_index, hash, merge_pair_eq, &pair_ctx
+		);
+		if (pair == HASH_INDEX_INVALID) {
+			pair = pair_count;
+			if (hash_index_insert(&pair_index, hash, pair)) {
+				goto error_free_pairs;
+			}
+			pair_group1[pair] = group1;
+			pair_group2[pair] = group2;
+			++pair_count;
+		}
+
+		rule_to_group[rule_idx] = pair;
+	}
+
+	/*
+	 * The remap table is used to enumerate the cell joins - each pair
+	 * touches its value joins so each cell gains a value specific to
+	 * the matching set of pairs.
+	 */
+	struct remap_table remap_table;
+	if (remap_table_init(
+		    &remap_table,
+		    memory_context,
+		    value_registry_capacity(registry1) *
+			    value_registry_capacity(registry2)
+	    )) {
+		goto error_free_pairs;
+	}
+
+	struct touch_ctx touch_ctx;
+	touch_ctx.value_table = table;
+	touch_ctx.remap_table = &remap_table;
+
+	for (uint32_t pair_idx = 0; pair_idx < pair_count; ++pair_idx) {
+		remap_table_new_gen(&remap_table);
+
+		// Touch the pair matching value joins
+		if (value_registry_join_ranges(
+			    registry1,
+			    pair_group1[pair_idx],
+			    registry2,
+			    pair_group2[pair_idx],
+			    value_table_touch_action,
+			    &touch_ctx
+		    )) {
+			remap_table_free(&remap_table);
+			goto error_free_pairs;
+		}
+	}
+
+	/*
+	 * Remap table compaction removes gaps of unused values and makes
+	 * the resulting set of values smaller
+	 */
+
+	remap_table_compact(&remap_table);
+	value_table_compact(table, &remap_table);
+	remap_table_free(&remap_table);
+
+	char registry_name[MEMORY_CONTEXT_NAME_SIZE];
+	classify_leaf_name(
+		registry_name, sizeof(registry_name), name, "registry"
+	);
+	if (value_registry_init(registry, memory_context, registry_name)) {
+		goto error_free_pairs;
+	}
+
+	/*
+	 * Collect the pair matching class identifiers into the registry,
+	 * one range per pair.
+	 */
+	struct value_collect_ctx collect_ctx;
+	collect_ctx.table = table;
+	collect_ctx.registry = registry;
+
+	for (uint32_t pair_idx = 0; pair_idx < pair_count; ++pair_idx) {
+		if (value_registry_start(registry)) {
+			goto error_free_pairs;
+		}
+
+		if (value_registry_join_ranges(
+			    registry1,
+			    pair_group1[pair_idx],
+			    registry2,
+			    pair_group2[pair_idx],
+			    value_table_collect_action,
+			    &collect_ctx
+		    )) {
+			goto error_free_pairs;
+		}
+	}
+
+	hash_index_fini(&pair_index);
+	memory_bfree(
+		memory_context, pair_group2, sizeof(uint32_t) * pair_alloc_count
+	);
+	memory_bfree(
+		memory_context, pair_group1, sizeof(uint32_t) * pair_alloc_count
+	);
+
+	return 0;
+
+error_free_pairs:
+	// One unwind in reverse allocation order, every release guarded:
+	// a failed join leaves no state behind, whatever the stage.
+	value_table_free(table);
+	value_registry_fini(registry);
+	memset(registry, 0, sizeof(*registry));
+	memory_bfree(
+		memory_context,
+		out->rule_groups,
+		sizeof(uint32_t) * (rule_count ? rule_count : 1)
+	);
+	out->rule_groups = NULL;
+	if (pair_index_live) {
+		hash_index_fini(&pair_index);
+	}
+	if (pair_group2 != NULL) {
+		memory_bfree(
+			memory_context,
+			pair_group2,
+			sizeof(uint32_t) * pair_alloc_count
+		);
+	}
+	if (pair_group1 != NULL) {
+		memory_bfree(
+			memory_context,
+			pair_group1,
+			sizeof(uint32_t) * pair_alloc_count
+		);
+	}
+
+	return -1;
+}

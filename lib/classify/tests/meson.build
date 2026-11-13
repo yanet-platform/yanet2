@@ -56,6 +56,27 @@ classify_join_test = executable(
 )
 test('classify_join_test', classify_join_test, suite: ['filter'])
 
+# Class hashes cut to eight bits or to zero make stored hashes collide, so
+# the exact key compare alone must keep the classes apart. Both builds also
+# check that only cells unlike both neighbours are interned.
+classify_join_collision_test = executable(
+  'classify_join_collision_test',
+  ['join.c', '../compiler/helper.c'],
+  c_args: yanet_test_c_args + ['-DJOIN_HASH_MASK=255U', '-DJOIN_TEST_STATS'],
+  dependencies: [lib_common_dep, libdpdk_inc_dep],
+  include_directories: yanet_rootdir,
+)
+test('classify_join_collision_test', classify_join_collision_test, suite: ['filter'])
+
+classify_join_zero_hash_test = executable(
+  'classify_join_zero_hash_test',
+  ['join.c', '../compiler/helper.c'],
+  c_args: yanet_test_c_args + ['-DJOIN_HASH_MASK=0U', '-DJOIN_TEST_STATS'],
+  dependencies: [lib_common_dep, libdpdk_inc_dep],
+  include_directories: yanet_rootdir,
+)
+test('classify_join_zero_hash_test', classify_join_zero_hash_test, suite: ['filter'])
+
 classify_net_hash = executable(
   'classify_net_hash',
   ['net_hash.c'],
