@@ -145,29 +145,33 @@ names_rule_get_dst_port_ranges(
 }
 
 CLASSIFY_DEVICE_COMPILE(names_device, names_rule_get_devices)
-CLASSIFY_NET4_COMPILE(names_net4_src, names_rule_get_net4_srcs)
-CLASSIFY_NET4_COMPILE(names_net4_dst, names_rule_get_net4_dsts)
-CLASSIFY_NET6_COMPILE(names_net6_src, names_rule_get_net6_srcs)
-CLASSIFY_NET6_COMPILE(names_net6_dst, names_rule_get_net6_dsts)
+CLASSIFY_NET4_COMPILE(names_net4_src, names_rule_get_net4_srcs, CLASSIFY_EMPTY_IS_ANY)
+CLASSIFY_NET4_COMPILE(names_net4_dst, names_rule_get_net4_dsts, CLASSIFY_EMPTY_IS_ANY)
+CLASSIFY_NET6_COMPILE(names_net6_src, names_rule_get_net6_srcs, CLASSIFY_EMPTY_IS_ANY)
+CLASSIFY_NET6_COMPILE(names_net6_dst, names_rule_get_net6_dsts, CLASSIFY_EMPTY_IS_ANY)
 CLASSIFY_LINE_COMPILE(
-	names_vlan, struct classify_attr_line, 4096, names_rule_get_vlan_ranges
+	names_vlan, struct classify_attr_line, 4096, names_rule_get_vlan_ranges,
+	CLASSIFY_EMPTY_IS_ANY
 )
 CLASSIFY_LINE_COMPILE(
 	names_ipproto,
 	struct classify_attr_line,
 	0x100,
-	names_rule_get_ipproto_ranges
+	names_rule_get_ipproto_ranges,
+	CLASSIFY_EMPTY_IS_ANY
 )
 CLASSIFY_IPFRAG_COMPILE(names_ipfrag, names_rule_get_fragment)
 CLASSIFY_U16_RANGES_COMPILE(
 	names_src_port,
 	struct classify_attr_port,
-	names_rule_get_src_port_ranges
+	names_rule_get_src_port_ranges,
+	CLASSIFY_EMPTY_IS_ANY
 )
 CLASSIFY_U16_RANGES_COMPILE(
 	names_dst_port,
 	struct classify_attr_port,
-	names_rule_get_dst_port_ranges
+	names_rule_get_dst_port_ranges,
+	CLASSIFY_EMPTY_IS_ANY
 )
 
 // One fixed net6 helper: a masked address built from a prefix length.

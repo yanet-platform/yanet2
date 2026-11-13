@@ -44,7 +44,9 @@ typedef void (*classify_line_get_ranges_func)(
 	const struct classifier_rule *rule, struct classify_line_ranges *ranges
 );
 
-#define CLASSIFY_LINE_COMPILE(tag, attr_type, domain_size, get_ranges)         \
+#define CLASSIFY_LINE_COMPILE(                                                 \
+	tag, attr_type, domain_size, get_ranges, empty_policy                  \
+)                                                                              \
 	struct classify_compile_##tag {                                        \
 		classify_line_get_ranges_func get_ranges;                      \
 		struct vline line;                                             \
@@ -129,9 +131,11 @@ typedef void (*classify_line_get_ranges_func)(
 		memset(&ranges, 0, sizeof(ranges));                            \
 		tag_compile->get_ranges(rule, &ranges);                        \
                                                                                \
-		return ranges.count == 0 ||                                    \
-		       (ranges.items[0].from == 0 &&                           \
-			ranges.items[0].to >= domain_size - 1);                \
+		if (ranges.count == 0) {                                       \
+			return empty_policy == CLASSIFY_EMPTY_IS_ANY;          \
+		}                                                              \
+		return ranges.items[0].from == 0 &&                            \
+		       ranges.items[0].to >= domain_size - 1;                  \
 	}                                                                      \
                                                                                \
 	static inline int classify_compile_##tag##_rule_iter(                  \

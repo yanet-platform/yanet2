@@ -28,6 +28,15 @@ func TestSplitProtoRanges(t *testing.T) {
 		{From: 58<<8 | 0x80, To: 58<<8 | 0xff},
 	})
 
+	// A rule without ranges splits into empty intervals that match
+	// nothing: the any protocol condition is the whole range authored
+	// explicitly, not the empty list.
+	empty := cacl.SplitProtoRanges(nil)
+	assert.Empty(t, empty.IpProto)
+	assert.Empty(t, empty.TCPFlags)
+	assert.Empty(t, empty.ICMPTypes)
+	assert.False(t, empty.WholeL4)
+
 	assert.Equal(t, []cacl.LineRange{
 		{From: 1, To: 3},
 		{From: 6, To: 6},
@@ -73,14 +82,16 @@ func TestRulePathMembership(t *testing.T) {
 			want:     cacl.PathFlags{TCP: true},
 		},
 		{
-			name:   "udp_zero_subtype_partial_span_is_udp",
-			protos: filter.ProtoRanges{{From: 17 << 8, To: 17<<8 | 0x7f}},
-			want:   cacl.PathFlags{UDP: true},
+			name:     "udp_zero_subtype_partial_span_is_udp",
+			protos:   filter.ProtoRanges{{From: 17 << 8, To: 17<<8 | 0x7f}},
+			srcPorts: wholePorts,
+			want:     cacl.PathFlags{UDP: true},
 		},
 		{
-			name:   "udp_subtype_without_zero_matches_nothing",
-			protos: filter.ProtoRanges{{From: 17<<8 | 0x40, To: 17<<8 | 0x7f}},
-			want:   cacl.PathFlags{},
+			name:     "udp_subtype_without_zero_matches_nothing",
+			protos:   filter.ProtoRanges{{From: 17<<8 | 0x40, To: 17<<8 | 0x7f}},
+			srcPorts: wholePorts,
+			want:     cacl.PathFlags{},
 		},
 		{
 			name: "mixed_udp_zero_and_tcp_whole_is_udp_and_tcp",
@@ -88,7 +99,8 @@ func TestRulePathMembership(t *testing.T) {
 				{From: 17 << 8, To: 17 << 8},
 				filter.NewProtoRange(6, filter.AnySubtype()),
 			},
-			want: cacl.PathFlags{TCP: true, UDP: true},
+			srcPorts: wholePorts,
+			want:     cacl.PathFlags{TCP: true, UDP: true},
 		},
 		{
 			name:     "icmp_partial_ports_stays_out",
@@ -97,14 +109,16 @@ func TestRulePathMembership(t *testing.T) {
 			want:     cacl.PathFlags{},
 		},
 		{
-			name:   "icmp_whole_span_whole_byte_is_plain",
-			protos: filter.ProtoRanges{{From: 1 << 8, To: 58<<8 | 0xff}},
-			want:   cacl.PathFlags{Plain: true},
+			name:     "icmp_whole_span_whole_byte_is_plain",
+			protos:   filter.ProtoRanges{{From: 1 << 8, To: 58<<8 | 0xff}},
+			srcPorts: wholePorts,
+			want:     cacl.PathFlags{Plain: true},
 		},
 		{
-			name:   "icmp_partial_type_span_is_icmp",
-			protos: filter.ProtoRanges{{From: 1 << 8, To: 1<<8 | 0x7f}},
-			want:   cacl.PathFlags{ICMP: true},
+			name:     "icmp_partial_type_span_is_icmp",
+			protos:   filter.ProtoRanges{{From: 1 << 8, To: 1<<8 | 0x7f}},
+			srcPorts: wholePorts,
+			want:     cacl.PathFlags{ICMP: true},
 		},
 		{
 			name: "mixed_whole_icmp_and_partial_udp_is_icmp_and_udp",
@@ -112,13 +126,34 @@ func TestRulePathMembership(t *testing.T) {
 				{From: 1 << 8, To: 1<<8 | 0xff},
 				{From: 17 << 8, To: 17<<8 | 0x7f},
 			},
-			want: cacl.PathFlags{UDP: true, ICMP: true},
+			srcPorts: wholePorts,
+			want:     cacl.PathFlags{UDP: true, ICMP: true},
 		},
 		{
 			name:     "fragment_constrained_whole_byte_is_plain",
 			protos:   filter.ProtoRanges{filter.NewProtoRange(6, filter.AnySubtype())},
 			fragment: filter.FragmentFrag,
 			want:     cacl.PathFlags{Plain: true},
+		},
+		{
+			// A rule without protocol ranges matches no packet, so
+			// it takes no path at all - the any protocol condition
+			// is the whole range authored explicitly.
+			name:   "empty_protos_takes_no_path",
+			protos: filter.ProtoRanges{},
+			want:   cacl.PathFlags{},
+		},
+		{
+			name:     "empty_protos_fragment_takes_no_path",
+			protos:   filter.ProtoRanges{},
+			fragment: filter.FragmentFrag,
+			want:     cacl.PathFlags{},
+		},
+		{
+			name:     "empty_protos_partial_ports_takes_no_path",
+			protos:   filter.ProtoRanges{},
+			srcPorts: filter.PortRanges{{From: 100, To: 200}},
+			want:     cacl.PathFlags{},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

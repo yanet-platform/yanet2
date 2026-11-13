@@ -123,6 +123,11 @@ classify_compile_device_rule_is_any(
 ) {
 	const struct classify_compile_device *device_compile = compile;
 
+	/*
+	 * The device attribute keeps the empty list as its any condition:
+	 * the identifier domain is machine local, so no explicit spelling
+	 * of the whole device set exists.
+	 */
 	struct filter_devices devices;
 	device_compile->get_devices(rule, &devices);
 	return devices.count == 0;

@@ -30,6 +30,8 @@
 // The test rule: the network pair with the authored protocol ranges.
 struct fragment_rule {
 	struct classifier_rule rule;
+	struct filter_devices devices;
+	struct filter_device device_items[1];
 	struct filter_net4s srcs;
 	struct filter_net4s dsts;
 	struct classify_line_range proto_items[1];
@@ -53,6 +55,13 @@ make_rule(
 	frag_rule.dsts.count = 1;
 	frag_rule.dsts.items = (struct net4 *)&any;
 
+	// The explicit device set of the zero id: an empty device set
+	// matches nothing, and the lookups below resolve through the module
+	// device id zero.
+	frag_rule.device_items[0].id = 0;
+	frag_rule.devices.count = 1;
+	frag_rule.devices.items = frag_rule.device_items;
+
 	// The control plane derives the protocol interval out of the
 	// authored range: the high byte span of the protocol number. The
 	// items pointer stays unset here - the rule travels by value, so
@@ -71,9 +80,7 @@ fragment_rule_get_devices(
 ) {
 	const struct fragment_rule *fragment_rule =
 		container_of(rule, struct fragment_rule, rule);
-	(void)fragment_rule;
-	devices->count = 0;
-	devices->items = NULL;
+	*devices = fragment_rule->devices;
 }
 
 static inline void
@@ -111,13 +118,14 @@ fragment_rule_get_fragment(const struct classifier_rule *rule) {
 }
 
 CLASSIFY_DEVICE_COMPILE(fragment_device, fragment_rule_get_devices)
-CLASSIFY_NET4_COMPILE(fragment_net4_src, fragment_rule_get_net4_srcs)
-CLASSIFY_NET4_COMPILE(fragment_net4_dst, fragment_rule_get_net4_dsts)
+CLASSIFY_NET4_COMPILE(fragment_net4_src, fragment_rule_get_net4_srcs, CLASSIFY_EMPTY_IS_ANY)
+CLASSIFY_NET4_COMPILE(fragment_net4_dst, fragment_rule_get_net4_dsts, CLASSIFY_EMPTY_IS_ANY)
 CLASSIFY_LINE_COMPILE(
 	fragment_ipproto,
 	struct classify_attr_line,
 	0x100,
-	fragment_rule_get_ipproto_ranges
+	fragment_rule_get_ipproto_ranges,
+	CLASSIFY_EMPTY_IS_ANY
 )
 CLASSIFY_IPFRAG_COMPILE(fragment_ipfrag, fragment_rule_get_fragment)
 

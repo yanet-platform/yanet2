@@ -87,9 +87,10 @@ func intersects(ranges filter.ProtoRanges, proto uint8) bool {
 }
 
 // SplitProtoRanges splits the authored protocol ranges of one rule
-// into the derived line intervals.
+// into the derived line intervals. An empty range set matches nothing:
+// no derived interval is whole, so the rule resolves through no path.
 func SplitProtoRanges(ranges filter.ProtoRanges) ProtoSplit {
-	split := ProtoSplit{WholeL4: true}
+	split := ProtoSplit{WholeL4: len(ranges) > 0}
 	for _, r := range ranges {
 		split.IpProto = append(split.IpProto, LineRange{
 			From: uint32(r.From >> 8),
@@ -114,10 +115,11 @@ func SplitProtoRanges(ranges filter.ProtoRanges) ProtoSplit {
 }
 
 // hasFullPorts reports whether the port range set leaves the side
-// unconstrained: an empty set, or a single whole range.
+// unconstrained: a single whole range, spelled explicitly. An empty
+// set matches nothing.
 func hasFullPorts(ranges filter.PortRanges) bool {
-	return len(ranges) == 0 ||
-		(len(ranges) > 0 && ranges[0].From == 0 && ranges[0].To == 65535)
+	return len(ranges) > 0 &&
+		ranges[0].From == 0 && ranges[0].To == 65535
 }
 
 // PathFlags is the family path membership of one ACL rule: the paths

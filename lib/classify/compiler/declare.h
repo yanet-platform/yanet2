@@ -38,6 +38,20 @@
  */
 
 /*
+ * The policy an attribute variant declares for the rule sets that hold
+ * no value: an any policy reads the empty list as the any condition -
+ * the wildcard spelling of the consumers whose authoring api carries
+ * no explicit whole range form - while a nothing policy reads it as a
+ * condition no packet satisfies, so the whole range must be authored
+ * explicitly. Every variant instantiation states its policy; no
+ * compile driver decides the empty set semantics on its own.
+ */
+enum classify_empty_policy {
+	CLASSIFY_EMPTY_IS_NOTHING = 0,
+	CLASSIFY_EMPTY_IS_ANY = 1,
+};
+
+/*
  * A ruleset: an array of module defined rules, where a NULL entry is
  * absent from the projection the array spells.
  */

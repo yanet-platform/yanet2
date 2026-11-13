@@ -382,6 +382,47 @@ func TestACL_NoMatch_Drop(t *testing.T) {
 	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_no_match", 1)
 }
 
+// TestACL_EmptyProtoRanges_MatchNothing verifies that a rule without
+// protocol ranges matches no packet: the any protocol condition is the
+// whole encoded range set explicitly, never the empty list.
+func TestACL_EmptyProtoRanges_MatchNothing(t *testing.T) {
+	eth := layers.Ethernet{
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	ip4 := layers.IPv4{
+		Version:  4,
+		TTL:      64,
+		Protocol: layers.IPProtocolUDP,
+		SrcIP:    net.ParseIP("192.0.2.1"),
+		DstIP:    net.ParseIP("10.0.0.1"),
+	}
+	udp := layers.UDP{SrcPort: 12345, DstPort: 80}
+	udp.SetNetworkLayerForChecksum(&ip4)
+
+	// Every condition except the protocol one would match the packet.
+	rules := []cacl.ACLRule{
+		allow4Rule(
+			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			nil,
+		),
+	}
+	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &udp)
+
+	h, agent, backend := setupACLHarness(t, []string{"port0"})
+	applyACLRules(t, backend, "test", rules)
+	wireACLPipeline(t, agent, "port0", "test")
+
+	result, err := h.HandlePackets(pkt)
+	require.NoError(t, err)
+	require.Empty(t, result.Output, "packet must not match the empty protocol rule")
+	require.Len(t, result.Drop, 1, "packet must be dropped as a no-match")
+
+	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_no_match", 1)
+}
+
 // Test_ACLService_UpdateConfig_ConcurrentCompiles verifies that two configs
 // compiled at the same time on one agent each publish their own verdict.
 func Test_ACLService_UpdateConfig_ConcurrentCompiles(t *testing.T) {

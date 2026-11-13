@@ -395,17 +395,34 @@ acl_rule_get_ipproto_ranges(
 	*ranges = acl_rule->ipproto_ranges;
 }
 
+/*
+ * Every value condition of the acl declares the nothing policy for the
+ * empty set: a rule that leaves a condition out matches no packet of
+ * it, and the any condition is the whole range authored explicitly.
+ * The device attribute keeps the empty list as its any condition: the
+ * device identifier domain is machine local, so no explicit spelling
+ * of the whole device set exists.
+ */
 CLASSIFY_DEVICE_COMPILE(acl_device, acl_rule_get_devices)
-CLASSIFY_NET4_COMPILE(acl_net4_src, acl_rule_get_net4_srcs)
-CLASSIFY_NET4_COMPILE(acl_net4_dst, acl_rule_get_net4_dsts)
-CLASSIFY_NET6_COMPILE(acl_net6_src, acl_rule_get_net6_srcs)
-CLASSIFY_NET6_COMPILE(acl_net6_dst, acl_rule_get_net6_dsts)
+CLASSIFY_NET4_COMPILE(
+	acl_net4_src, acl_rule_get_net4_srcs, CLASSIFY_EMPTY_IS_NOTHING
+)
+CLASSIFY_NET4_COMPILE(
+	acl_net4_dst, acl_rule_get_net4_dsts, CLASSIFY_EMPTY_IS_NOTHING
+)
+CLASSIFY_NET6_COMPILE(
+	acl_net6_src, acl_rule_get_net6_srcs, CLASSIFY_EMPTY_IS_NOTHING
+)
+CLASSIFY_NET6_COMPILE(
+	acl_net6_dst, acl_rule_get_net6_dsts, CLASSIFY_EMPTY_IS_NOTHING
+)
 CLASSIFY_IPFRAG_COMPILE(acl_ipfrag, acl_rule_get_fragment)
 CLASSIFY_LINE_COMPILE(
 	acl_ipproto,
 	struct classify_attr_line,
 	0x100,
-	acl_rule_get_ipproto_ranges
+	acl_rule_get_ipproto_ranges,
+	CLASSIFY_EMPTY_IS_NOTHING
 )
 static inline void
 acl_rule_get_tcp_flags_ranges(
@@ -429,13 +446,15 @@ CLASSIFY_LINE_COMPILE(
 	acl_tcp_flags,
 	struct classify_attr_line,
 	0x100,
-	acl_rule_get_tcp_flags_ranges
+	acl_rule_get_tcp_flags_ranges,
+	CLASSIFY_EMPTY_IS_NOTHING
 )
 CLASSIFY_LINE_COMPILE(
 	acl_icmp_type,
 	struct classify_attr_line,
 	0x100,
-	acl_rule_get_icmp_type_ranges
+	acl_rule_get_icmp_type_ranges,
+	CLASSIFY_EMPTY_IS_NOTHING
 )
 static inline void
 acl_rule_get_src_port_ranges(
@@ -460,10 +479,16 @@ acl_rule_get_dst_port_ranges(
 }
 
 CLASSIFY_U16_RANGES_COMPILE(
-	acl_src_port, struct classify_attr_port, acl_rule_get_src_port_ranges
+	acl_src_port,
+	struct classify_attr_port,
+	acl_rule_get_src_port_ranges,
+	CLASSIFY_EMPTY_IS_NOTHING
 )
 CLASSIFY_U16_RANGES_COMPILE(
-	acl_dst_port, struct classify_attr_port, acl_rule_get_dst_port_ranges
+	acl_dst_port,
+	struct classify_attr_port,
+	acl_rule_get_dst_port_ranges,
+	CLASSIFY_EMPTY_IS_NOTHING
 )
 
 // Spells a projection of the ruleset: every rule the check rejects
@@ -510,20 +535,56 @@ acl_rule_ptrs_project(
 	return rule_ptrs;
 }
 
+// Reports whether a network side is spelled as the explicit whole
+// domain coverage - the only form matching every address. An empty
+// list matches nothing.
+static bool
+acl_rule_net4s_any(const struct filter_net4s *nets) {
+	for (uint32_t idx = 0; idx < nets->count; ++idx) {
+		const struct net4 *net = nets->items + idx;
+		if (net->mask[0] == 0 && net->mask[1] == 0 && net->mask[2] == 0 &&
+		    net->mask[3] == 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static bool
+acl_rule_net6s_any(const struct filter_net6s *nets) {
+	for (uint32_t idx = 0; idx < nets->count; ++idx) {
+		if (net6_is_any(nets->items + idx)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/*
+ * The l2 projection takes the rules matching packets of every protocol
+ * family, the non-IP ones included: each network side must spell the
+ * explicit whole domain coverage. The l2 classes are the base the
+ * family results merge into, so a whole-domain rule resolves here
+ * alone and never joins the family cores.
+ */
 static int
 check_acl_rule_l2(const struct acl_rule *acl_rule) {
-	return !acl_rule->src_net6s.count && !acl_rule->dst_net6s.count &&
-	       !acl_rule->src_net4s.count && !acl_rule->dst_net4s.count;
+	return acl_rule_net4s_any(&acl_rule->src_net4s) &&
+	       acl_rule_net4s_any(&acl_rule->dst_net4s) &&
+	       acl_rule_net6s_any(&acl_rule->src_net6s) &&
+	       acl_rule_net6s_any(&acl_rule->dst_net6s);
 }
 
 static int
 check_has_ip4(const struct acl_rule *acl_rule) {
-	return acl_rule->src_net4s.count && acl_rule->dst_net4s.count;
+	return acl_rule->src_net4s.count && acl_rule->dst_net4s.count &&
+	       !check_acl_rule_l2(acl_rule);
 }
 
 static int
 check_has_ip6(const struct acl_rule *acl_rule) {
-	return acl_rule->src_net6s.count && acl_rule->dst_net6s.count;
+	return acl_rule->src_net6s.count && acl_rule->dst_net6s.count &&
+	       !check_acl_rule_l2(acl_rule);
 }
 
 /*
@@ -549,12 +610,13 @@ check_acl_rule_udp(const struct acl_rule *acl_rule) {
 	return acl_rule->path_udp;
 }
 
-// A port side is vacuous when it carries no ranges at all or its
-// first range spans the whole u16 domain, matching the notion of any
-// the u16 compiler applies when it builds the groups.
+// A port side is vacuous when its first range spans the whole u16
+// domain, matching the notion of any the u16 compiler applies when it
+// builds the groups. An empty side matches nothing, so it always
+// counts as restricted.
 static bool
 acl_rule_port_side_any(const struct filter_port_ranges *ranges) {
-	return ranges->count == 0 ||
+	return ranges->count > 0 &&
 	       ranges->items[0].to - ranges->items[0].from == 65535;
 }
 
