@@ -535,31 +535,6 @@ acl_rule_ptrs_project(
 	return rule_ptrs;
 }
 
-// Reports whether a network side is spelled as the explicit whole
-// domain coverage - the only form matching every address. An empty
-// list matches nothing.
-static bool
-acl_rule_net4s_any(const struct filter_net4s *nets) {
-	for (uint32_t idx = 0; idx < nets->count; ++idx) {
-		const struct net4 *net = nets->items + idx;
-		if (net->mask[0] == 0 && net->mask[1] == 0 && net->mask[2] == 0 &&
-		    net->mask[3] == 0) {
-			return true;
-		}
-	}
-	return false;
-}
-
-static bool
-acl_rule_net6s_any(const struct filter_net6s *nets) {
-	for (uint32_t idx = 0; idx < nets->count; ++idx) {
-		if (net6_is_any(nets->items + idx)) {
-			return true;
-		}
-	}
-	return false;
-}
-
 /*
  * The projection checks of the family paths: the control plane that
  * authors the rules decides the membership alongside the derived
@@ -594,39 +569,29 @@ acl_rule_port_side_any(const struct filter_port_ranges *ranges) {
 }
 
 /*
- * The l2 projection takes the rules matching packets of every protocol
- * family, the non-IP ones included: every condition of the rule must
- * spell the explicit whole domain coverage - all four network sides and
- * both port sides - with the whole transport byte protocol and no
- * fragment constraint, the shape a plain path with full ports and the
- * any fragment marks. The l2 classifier evaluates the device condition
- * alone, so a rule with any remaining restriction must resolve through
- * the family filters instead. The l2 classes are the base the family
- * results merge into, so a whole-domain rule resolves here alone and
- * never joins the family cores.
+ * The l2 projection takes the rules without network conditions: the
+ * networks, the ports and the protocols are not defined for a non-IP
+ * packet, so the l2 rule carries them absent and matches every packet
+ * of its devices regardless of the protocol family. The l2 classifier
+ * evaluates the device condition alone. A rule with authored network
+ * conditions - the explicit whole domain coverage included - resolves
+ * through the family filters instead, where an absent side keeps
+ * matching nothing.
  */
 static int
 check_acl_rule_l2(const struct acl_rule *acl_rule) {
-	return acl_rule_net4s_any(&acl_rule->src_net4s) &&
-	       acl_rule_net4s_any(&acl_rule->dst_net4s) &&
-	       acl_rule_net6s_any(&acl_rule->src_net6s) &&
-	       acl_rule_net6s_any(&acl_rule->dst_net6s) &&
-	       acl_rule_port_side_any(&acl_rule->src_port_ranges) &&
-	       acl_rule_port_side_any(&acl_rule->dst_port_ranges) &&
-	       acl_rule->path_plain &&
-	       acl_rule->fragment == FILTER_IP_FRAG_ANY;
+	return !acl_rule->src_net4s.count && !acl_rule->dst_net4s.count &&
+	       !acl_rule->src_net6s.count && !acl_rule->dst_net6s.count;
 }
 
 static int
 check_has_ip4(const struct acl_rule *acl_rule) {
-	return acl_rule->src_net4s.count && acl_rule->dst_net4s.count &&
-	       !check_acl_rule_l2(acl_rule);
+	return acl_rule->src_net4s.count && acl_rule->dst_net4s.count;
 }
 
 static int
 check_has_ip6(const struct acl_rule *acl_rule) {
-	return acl_rule->src_net6s.count && acl_rule->dst_net6s.count &&
-	       !check_acl_rule_l2(acl_rule);
+	return acl_rule->src_net6s.count && acl_rule->dst_net6s.count;
 }
 
 // The ports pair compiles only over the rules that actually restrict

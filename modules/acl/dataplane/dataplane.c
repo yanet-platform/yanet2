@@ -239,11 +239,11 @@ acl_handle_packets(
 			}
 		}
 
-		// The l2 filter sees the whole batch: a rule with every
-		// condition spelled as the explicit whole domain coverage
-		// matches every packet of its devices regardless of the
-		// protocol family, so its result is the base the family
-		// results merge into.
+		// The l2 filter sees the whole batch: a rule without network
+		// conditions - the networks, the ports and the protocols are
+		// not defined for a non-IP packet - matches every packet of its
+		// devices regardless of the protocol family, so its result is
+		// the base the family results merge into.
 		acl_classify_l2(
 			&acl_config->classifier_l2,
 			module_ectx->module_device_id,

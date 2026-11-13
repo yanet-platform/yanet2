@@ -423,6 +423,9 @@ func TestACL_EmptyProtoRanges_MatchNothing(t *testing.T) {
 	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_no_match", 1)
 }
 
+// wholeRangeProto spans every protocol with every transport byte.
+var wholeRangeProto = filter.ProtoRanges{{From: 0, To: 0xffff}}
+
 // arpPacket builds an ARP packet: a non-IP packet only the l2 filter
 // can match.
 func arpPacket(t *testing.T) gopacket.Packet {
@@ -446,34 +449,29 @@ func arpPacket(t *testing.T) gopacket.Packet {
 	return xpacket.LayersToPacket(t, &eth, &arp)
 }
 
-// whole16BitProto spans every protocol with every transport byte.
-var whole16BitProto = filter.ProtoRanges{{From: 0, To: 0xffff}}
-
-// catchAllRule spells the explicit whole domain coverage of every
-// condition: the only shape a rule matching packets of every protocol
-// family may take.
-func catchAllRule() cacl.ACLRule {
+// l2Rule leaves every packet field condition absent: the networks,
+// the ports and the protocols are not defined for a non-IP packet, so
+// their absence is the spelling of the l2 rule matching every packet
+// of its devices regardless of the protocol family.
+func l2Rule() cacl.ACLRule {
 	return cacl.ACLRule{
-		Actions: []cacl.ACLAction{{Kind: cacl.ActionAllow}},
-		Devices: filter.Devices{{Name: "port0"}},
-		Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
-		Dst4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
-		Src6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
-		Dst6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
-		SrcPortRanges:   allPorts,
-		DstPortRanges:   allPorts,
-		ProtoRanges:     whole16BitProto,
-		Fragment:        filter.FragmentAny,
+		Actions:  []cacl.ACLAction{{Kind: cacl.ActionAllow}},
+		Devices:  filter.Devices{{Name: "port0"}},
+		Fragment: filter.FragmentAny,
 	}
 }
 
-// TestACL_ExplicitAnyNetworks_StillConstrainedByPorts verifies that a
-// rule spelling the whole domain coverage of every network side alone
-// does not become the l2 catch-all: the remaining port restriction
-// keeps it out of the l2 projection, so a non-IP packet matches nothing.
-func TestACL_ExplicitAnyNetworks_StillConstrainedByPorts(t *testing.T) {
-	restricted := catchAllRule()
-	restricted.DstPortRanges = filter.PortRanges{{From: 80, To: 80}}
+// TestACL_AuthoredNetworks_StayOutOfL2 verifies that a rule with
+// authored network conditions - the explicit whole domain coverage
+// included - never lands in the l2 projection: an authored condition
+// is a defined one, so a non-IP packet matches nothing of the rule.
+func TestACL_AuthoredNetworks_StayOutOfL2(t *testing.T) {
+	restricted := l2Rule()
+	restricted.Src4s = []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4}
+	restricted.Dst4s = []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4}
+	restricted.SrcPortRanges = allPorts
+	restricted.DstPortRanges = allPorts
+	restricted.ProtoRanges = wholeRangeProto
 
 	h, agent, backend := setupACLHarness(t, []string{"port0"})
 	applyACLRules(t, backend, "test", []cacl.ACLRule{restricted})
@@ -481,23 +479,66 @@ func TestACL_ExplicitAnyNetworks_StillConstrainedByPorts(t *testing.T) {
 
 	result, err := h.HandlePackets(arpPacket(t))
 	require.NoError(t, err)
-	require.Empty(t, result.Output, "the port restricted rule must not match the ARP packet")
+	require.Empty(t, result.Output, "the network conditioned rule must not match the ARP packet")
 	require.Len(t, result.Drop, 1)
 
 	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_no_match", 1)
 }
 
-// TestACL_ExplicitCatchAllMatchesNonIP verifies that a rule spelling
-// the whole domain coverage of every condition matches the non-IP
-// packets through the l2 filter.
-func TestACL_ExplicitCatchAllMatchesNonIP(t *testing.T) {
+// TestACL_L2RuleMatchesNonIP verifies that a rule carrying every field
+// condition absent matches the non-IP packets through the l2 filter.
+func TestACL_L2RuleMatchesNonIP(t *testing.T) {
 	h, agent, backend := setupACLHarness(t, []string{"port0"})
-	applyACLRules(t, backend, "test", []cacl.ACLRule{catchAllRule()})
+	applyACLRules(t, backend, "test", []cacl.ACLRule{l2Rule()})
 	wireACLPipeline(t, agent, "port0", "test")
 
 	result, err := h.HandlePackets(arpPacket(t))
 	require.NoError(t, err)
-	require.Len(t, result.Output, 1, "the explicit catch-all rule must match the ARP packet")
+	require.Len(t, result.Output, 1, "the l2 rule must match the ARP packet")
+	require.Empty(t, result.Drop)
+
+	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_action_allow", 1)
+}
+
+// TestACL_FragmentRuleIgnoresAbsentPorts verifies that a fragment
+// constrained rule matches a non-initial fragment even with the port
+// conditions absent: the ports and the transport specific byte are not
+// defined for a fragment, so their absence is ignored.
+func TestACL_FragmentRuleIgnoresAbsentPorts(t *testing.T) {
+	eth := layers.Ethernet{
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	ip4 := layers.IPv4{
+		Version:  4,
+		TTL:      64,
+		Protocol: layers.IPProtocolUDP,
+		SrcIP:    net.ParseIP("192.0.2.1"),
+		DstIP:    net.ParseIP("10.0.0.1"),
+	}
+	// A non-initial fragment: FragOffset=8, MF=0 - no transport
+	// header, just raw payload.
+	ip4.FragOffset = 8
+	payload := gopacket.Payload([]byte{0x00, 0x00, 0x00, 0x50, 0xAA, 0xBB, 0xCC, 0xDD})
+	pkt := serializeFragPacket(t, &eth, &ip4, payload)
+
+	rule := allow4Rule(
+		[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		nil,
+	)
+	rule.SrcPortRanges = nil
+	rule.DstPortRanges = nil
+	rule.Fragment = filter.FragmentFrag
+
+	h, agent, backend := setupACLHarness(t, []string{"port0"})
+	applyACLRules(t, backend, "test", []cacl.ACLRule{rule})
+	wireACLPipeline(t, agent, "port0", "test")
+
+	result, err := h.HandlePackets(pkt)
+	require.NoError(t, err)
+	require.Len(t, result.Output, 1, "the fragment rule must match the non-initial fragment")
 	require.Empty(t, result.Drop)
 
 	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_action_allow", 1)

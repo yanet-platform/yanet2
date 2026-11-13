@@ -144,6 +144,12 @@ func (m *ACLRule) cBuild(pinner *runtime.Pinner) C.struct_acl_rule {
 	filter.CBuildNet6s(&cRule.src_net6s, m.Src6s, pinner)
 	filter.CBuildNet6s(&cRule.dst_net6s, m.Dst6s, pinner)
 	split := SplitProtoRanges(m.ProtoRanges)
+	if m.Fragment == filter.FragmentFrag && len(split.IpProto) == 0 {
+		// The protocol condition of a fragment constrained rule is not
+		// defined against the transport byte the non-initial fragments
+		// lack, so the absent condition is the whole protocol byte.
+		split.IpProto = []LineRange{{From: 0, To: 0xff}}
+	}
 	cBuildLineRanges(&cRule.ipproto_ranges, split.IpProto, pinner)
 	cBuildLineRanges(&cRule.tcp_flags_ranges, split.TCPFlags, pinner)
 	cBuildLineRanges(&cRule.icmp_type_ranges, split.ICMPTypes, pinner)

@@ -143,9 +143,10 @@ type PathFlags struct {
 // and fragment constraint.
 //
 // The plain path takes the rules matching the packets without a
-// transport header: the rules whose every range leaves the transport
-// byte whole match any byte, absent included, and the fragment
-// constrained rules resolve through the fragment suffix. The protocol
+// transport header: the fragment constrained rules - the ports and the
+// transport specific byte are not defined for a non-initial fragment,
+// so their conditions are ignored - and the rules whose every range
+// leaves the transport byte whole, matching any byte, absent included. The protocol
 // paths take every remaining rule that can match a packet of their
 // protocol: the tcp and the icmp paths discriminate through their
 // byte leaves, any covering span resolves; the udp path has no leaf,
@@ -164,16 +165,12 @@ func RulePathMembership(
 	fragOnly := fragment == filter.FragmentFrag
 	plainOwned := split.WholeL4 && fullPorts
 
-	// An empty port set matches no packet under the explicit any
-	// contract, and the plain path skips the port attributes entirely,
-	// so such a rule must resolve through no path at all - the fragment
-	// constrained ones included.
-	if len(srcPorts) == 0 || len(dstPorts) == 0 {
-		return PathFlags{}
-	}
-
 	return PathFlags{
-		Plain: split.WholeL4 && (fragOnly || fullPorts),
+		// The plain path takes the fragment constrained rules outright:
+		// the ports and the transport specific byte are not defined for
+		// a non-initial fragment, so the rule's conditions on them are
+		// ignored rather than required.
+		Plain: fragOnly || (split.WholeL4 && fullPorts),
 		TCP:   !fragOnly && intersects(protos, ipProtoTCP) && !plainOwned,
 		UDP: !fragOnly && intersects(protos, ipProtoUDP) &&
 			coversZero(protos, ipProtoUDP) && !plainOwned,
