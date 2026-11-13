@@ -139,23 +139,22 @@ pub struct TunnelError;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ParseError;
 
-/// How an encapsulation takes the inner DSCP, the C `DSCP_MARK_*` values
-/// (lib/dataplane/packet/dscp.h).
+/// The DSCP that an IP encapsulation writes into the outer header.
 ///
-/// The inner ECN bits reach the outer header whichever is chosen.
+/// The inner ECN bits reach the outer header whichever is chosen. The values
+/// are the C `DSCP_MARK_*` flags (lib/dataplane/packet/dscp.h) that
+/// `packet_ip4_encap` and `packet_ip6_encap` take, named after the marking
+/// modes of the `dscp` module. `DSCP_MARK_DEFAULT` writes a zero there too
+/// and has no variant of its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
-pub enum DscpMark {
+pub enum OuterDscp {
     /// The outer DSCP is zero.
     #[doc(alias = "DSCP_MARK_NEVER")]
-    Never = 0,
-    /// The outer DSCP is zero, as for `Never`; the value of a module
-    /// configuration that names no marking.
-    #[doc(alias = "DSCP_MARK_DEFAULT")]
-    Default = 1,
+    Zero = 0,
     /// The outer DSCP is the inner one.
     #[doc(alias = "DSCP_MARK_ALWAYS")]
-    Always = 2,
+    Inner = 2,
 }
 
 /// Routing target of a device for the running generation.
@@ -1097,15 +1096,16 @@ impl<'id> Packet<'id> {
     /// Prepends an outer IPv4 header to an IPv4 or IPv6 packet, as the C
     /// `packet_ip4_encap` does.
     ///
-    /// The outer TTL, protocol (IP-in-IP or IPv6-in-IP) and length come from
-    /// the inner header, and the outer checksum is computed. The network
+    /// The outer TTL, protocol (IP-in-IP or IPv6-in-IP), ECN bits and length
+    /// come from the inner header, the DSCP is the one `dscp` names, and the
+    /// outer checksum is computed. The network
     /// header offset stays, now at the outer header, and a parsed transport
     /// header offset moves with the inner packet. The refusal of an
     /// unsupported inner type (an unparsed packet's included) or of a spent
     /// headroom leaves the packet unchanged.
     #[doc(alias = "packet_ip4_encap")]
     #[inline]
-    pub fn encap_ipv4(&mut self, dst: [u8; 4], src: [u8; 4], dscp: DscpMark) -> Result<(), TunnelError> {
+    pub fn encap_ipv4(&mut self, dst: [u8; 4], src: [u8; 4], dscp: OuterDscp) -> Result<(), TunnelError> {
         // SAFETY: the packet is exclusively ours for the call (attach:
         // packet), handed over by `prepend_at_network` with its network
         // offset in bounds; the address arrays outlive the call.
@@ -1118,7 +1118,7 @@ impl<'id> Packet<'id> {
     /// [`Packet::encap_ipv4`] does with IPv4, through `packet_ip6_encap`.
     #[doc(alias = "packet_ip6_encap")]
     #[inline]
-    pub fn encap_ipv6(&mut self, dst: [u8; 16], src: [u8; 16], dscp: DscpMark) -> Result<(), TunnelError> {
+    pub fn encap_ipv6(&mut self, dst: [u8; 16], src: [u8; 16], dscp: OuterDscp) -> Result<(), TunnelError> {
         // SAFETY: as for `encap_ipv4`.
         self.prepend_at_network(|raw| unsafe {
             bindings::yanet_sys_dp_ip6_encap(raw, dst.as_ptr(), src.as_ptr(), dscp as u8)

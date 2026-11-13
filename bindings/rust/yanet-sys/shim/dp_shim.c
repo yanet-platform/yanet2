@@ -72,9 +72,9 @@ yanet_sys_dp_parse(struct packet *packet) {
 	return parse_packet(packet);
 }
 
-// The Rust `DscpMark` carries these values.
+// The Rust `OuterDscp` carries these values.
 _Static_assert(
-	DSCP_MARK_NEVER == 0 && DSCP_MARK_DEFAULT == 1 && DSCP_MARK_ALWAYS == 2,
+	DSCP_MARK_NEVER == 0 && DSCP_MARK_ALWAYS == 2,
 	"DSCP_MARK_* values changed"
 );
 

@@ -189,8 +189,8 @@ pub use yanet_sys::{
         OwnedSlots, Owner, Refusal, Registered, Scope,
     },
     dp::{
-        Batch, BoundCounter, CommitCx, Counter, CounterLayout, CounterRef, Cx, Device, DeviceRef, DscpMark, Gauge,
-        Module, ModuleCx, Object, ObjectCommitCx, ObjectConfig, ObjectCounter, ObjectLink, Packet, PacketMeta,
+        Batch, BoundCounter, CommitCx, Counter, CounterLayout, CounterRef, Cx, Device, DeviceRef, Gauge, Module,
+        ModuleCx, Object, ObjectCommitCx, ObjectConfig, ObjectCounter, ObjectLink, OuterDscp, Packet, PacketMeta,
         PacketView, ParseError, PerWorker, PerWorkerSlice, PrepareCx, ResizeError, TaggedCounter, TaggedCounters,
         TaggedCountersRef, Traffic, TunnelError, Verdict, WorkerSlice, WorkerSlot,
     },
