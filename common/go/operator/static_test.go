@@ -274,6 +274,62 @@ func Test_NewStaticModuleOperator_DetachesMessages(t *testing.T) {
 	require.Equal(t, "main", pipelines[0].GetPipeline().GetId().GetName())
 }
 
+// Test_NewStaticModuleOperator_RejectsInvalidReload verifies that a polling
+// worker cannot be started without a loader and a positive interval.
+func Test_NewStaticModuleOperator_RejectsInvalidReload(t *testing.T) {
+	load := func() ([]operator.StaticTarget, error) { return nil, nil }
+	cases := []struct {
+		name     string
+		interval time.Duration
+		load     func() ([]operator.StaticTarget, error)
+	}{
+		{name: "zero interval", load: load},
+		{name: "negative interval", interval: -time.Second, load: load},
+		{name: "missing loader", interval: time.Second},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := operator.NewStaticModuleOperator(
+				"test", staticConfig("127.0.0.1:1", "127.0.0.1:0"), []operator.StaticTarget{pipelineTarget("fn:one")},
+				operator.WithStaticReload(tc.interval, tc.load),
+			)
+			require.ErrorContains(t, err, "reload requires a positive interval and a loader")
+		})
+	}
+}
+
+// Test_StaticModuleOperator_ReloadRecoversAfterInvalidSnapshots verifies that
+// source errors and invalid targets do not stop the worker or replace its state.
+func Test_StaticModuleOperator_ReloadRecoversAfterInvalidSnapshots(t *testing.T) {
+	gateway, endpoint := startFakeGateway(t)
+	cfg := staticConfig(endpoint, freeEndpoint(t))
+	cfg.Reconcile.Interval = xcfg.MustNonZero(time.Hour)
+	updated := pipelineTarget("fn:one")
+	updated.Request.(*ynpb.UpdatePipelineRequest).Pipeline.Id.Name = "updated"
+	attempts := 0
+	op, err := operator.NewStaticModuleOperator(
+		"test", cfg, []operator.StaticTarget{pipelineTarget("fn:one")},
+		operator.WithStaticReload(20*time.Millisecond, func() ([]operator.StaticTarget, error) {
+			attempts++
+			switch attempts {
+			case 1:
+				return nil, errors.New("source unavailable")
+			case 2:
+				return []operator.StaticTarget{{Name: "invalid"}}, nil
+			case 3:
+				return []operator.StaticTarget{updated}, nil
+			default:
+				return nil, nil
+			}
+		}),
+	)
+	require.NoError(t, err)
+
+	pipelines, _ := runUntilPushed(t, op, gateway)
+	require.Equal(t, "main", pipelines[0].GetPipeline().GetId().GetName())
+	require.Equal(t, "updated", pipelines[len(pipelines)-1].GetPipeline().GetId().GetName())
+}
+
 // runUntilPushed runs the operator until the fake gateway holds the module
 // config and the function, then stops it and returns what was pushed.
 func runUntilPushed(

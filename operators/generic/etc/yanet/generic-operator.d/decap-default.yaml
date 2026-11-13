@@ -46,6 +46,13 @@ reconcile:
   initial_backoff: 500ms
   max_backoff: 30s
 
+# Module config file polling is disabled at 0s; set e.g. 2s to enable it.
+#
+# Replace each file atomically by rename. A read or decode error preserves
+# the previous snapshot and is retried. Functions, descriptors and this
+# instance configuration are loaded only at startup.
+poll_interval: 0s
+
 configs:
   - name: decap0
     method: modules.decap.controlplane.decappb.v1.DecapService/UpdateConfig

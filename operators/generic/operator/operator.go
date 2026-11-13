@@ -7,51 +7,33 @@ import (
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
-	"google.golang.org/protobuf/reflect/protoregistry"
 
 	"github.com/yanet-platform/yanet2/common/go/operator"
 )
 
-// NewOperator builds one generic operator instance: every module config is
-// loaded once from its file, through the descriptor set the entry names,
-// and the functions are published after them.
+// NewOperator builds an instance publishing module configs before functions.
+//
+// Files are loaded at construction and polled when an interval is configured.
 func NewOperator(cfg *Config, options ...Option) (operator.Runnable, error) {
 	opts := newOptions()
 	for _, o := range options {
 		o(opts)
 	}
 
-	targets := make([]operator.StaticTarget, 0, len(cfg.Configs)+len(cfg.Functions))
-	for idx, config := range cfg.Configs {
-		var files *protoregistry.Files
-		if config.Descriptors != "" {
-			loaded, err := operator.LoadDescriptorSet(config.Descriptors)
-			if err != nil {
-				return nil, fmt.Errorf("configs[%d]: %w", idx, err)
-			}
-			files = loaded
-		}
-		request, err := LoadRequest(config.Method.Unwrap(), config.File.Unwrap(), files)
-		if err != nil {
-			return nil, fmt.Errorf("configs[%d]: %w", idx, err)
-		}
-		if err := bindRequestName(request, config); err != nil {
-			return nil, fmt.Errorf("configs[%d]: %w", idx, err)
-		}
-		targets = append(targets, operator.StaticTarget{
-			Name:        config.Name.Unwrap(),
-			Method:      config.Method.Unwrap(),
-			Descriptors: files,
-			Request:     request,
-		})
+	if err := cfg.Validate(); err != nil {
+		return nil, err
 	}
-
-	for _, function := range cfg.Functions {
-		targets = append(targets, operator.StaticTarget{
-			Name:        function.Name.Unwrap(),
-			Function:    function.AsFunction(),
-			IgnorePdump: function.IgnorePdump,
-		})
+	source, err := newFileSource(cfg)
+	if err != nil {
+		return nil, err
+	}
+	targets, err := source.Reload()
+	if err != nil {
+		return nil, err
+	}
+	staticOptions := []operator.StaticOption{operator.WithStaticLog(opts.Log)}
+	if cfg.PollInterval > 0 {
+		staticOptions = append(staticOptions, operator.WithStaticReload(cfg.PollInterval, source.Reload))
 	}
 
 	return operator.NewStaticModuleOperator(
@@ -63,7 +45,7 @@ func NewOperator(cfg *Config, options ...Option) (operator.Runnable, error) {
 			Reconcile: cfg.Reconcile,
 		},
 		targets,
-		operator.WithStaticLog(opts.Log),
+		staticOptions...,
 	)
 }
 
