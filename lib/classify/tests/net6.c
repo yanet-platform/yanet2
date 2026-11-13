@@ -1300,6 +1300,66 @@ run_regions_match_enumeration_test(struct memory_context *mctx, void *memory) {
 	}
 }
 
+// Verifies that a compile refused an allocation releases all it took:
+// over arenas growing by a page until the compile fits, every failed
+// compile leaves the arena as it found it.
+static void
+run_failed_create_releases_arena_test(
+	struct memory_context *mctx, void *memory
+) {
+	(void)mctx;
+	(void)memory;
+
+	static const uint8_t lens[] = {0, 1, 2, 3, 4, 40, 64};
+	struct net6 nets[12];
+	struct test_rule rules[12];
+	const struct classifier_rule *rule_ptrs[12];
+	uint64_t state = 3;
+	for (uint32_t idx = 0; idx < 12; ++idx) {
+		uint8_t addr[NET6_LEN];
+		for (uint32_t byte = 0; byte < NET6_LEN; ++byte) {
+			addr[byte] = test_rand(&state);
+		}
+		nets[idx] = net6_bits(
+			addr,
+			lens[test_rand(&state) % sizeof(lens)],
+			lens[test_rand(&state) % sizeof(lens)]
+		);
+		rules[idx] = rule_dst(nets + idx, 1);
+		rule_ptrs[idx] = &rules[idx].rule;
+	}
+
+	void *arena;
+	assert(posix_memalign(&arena, 1 << 21, 1 << 21) == 0);
+	for (size_t size = 4096;; size += 4096) {
+		assert(size <= 1 << 21);
+		struct block_allocator allocator;
+		block_allocator_init(&allocator);
+		block_allocator_put_arena(&allocator, arena, size);
+		size_t initial = block_allocator_free_size(&allocator);
+		struct memory_context ctx;
+		assert(memory_context_init(&ctx, "growing", &allocator) == 0);
+
+		struct classify_compile_net6 *compile =
+			classify_compile_net6_create(
+				&ctx,
+				rule_ptrs,
+				12,
+				test_rule_get_dsts,
+				"growing"
+			);
+		if (compile != NULL) {
+			classify_compile_net6_free(&ctx, compile);
+		}
+		assert(block_allocator_free_size(&allocator) == initial);
+		memory_context_fini(&ctx);
+		if (compile != NULL) {
+			break;
+		}
+	}
+	free(arena);
+}
+
 int
 main(void) {
 	void *memory = malloc(1 << 24);
@@ -1315,6 +1375,7 @@ main(void) {
 	run_scenario(run_sibling_high_intervals_test, memory);
 	run_scenario(run_sparse_row_trailing_uniform_test, memory);
 	run_scenario(run_regions_match_enumeration_test, memory);
+	run_scenario(run_failed_create_releases_arena_test, memory);
 
 	free(memory);
 	return 0;
