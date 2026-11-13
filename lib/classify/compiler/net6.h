@@ -305,7 +305,10 @@ filter_net6_net_bounds(
 }
 
 #define FILTER_NET6_NONE 0xffffffffu
+// Narrowed by the test build that grows the class store.
+#ifndef FILTER_NET6_CLASS_CHUNK_BITS
 #define FILTER_NET6_CLASS_CHUNK_BITS 14
+#endif
 #define FILTER_NET6_CLASS_CHUNK (1u << FILTER_NET6_CLASS_CHUNK_BITS)
 
 /*

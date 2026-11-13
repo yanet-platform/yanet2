@@ -17,6 +17,17 @@ classify_net6 = executable(
 
 test('classify_net6', classify_net6, suite: ['filter'])
 
+# The net6 tests again with classes stored four to a chunk, so the class
+# store grows through many chunks.
+classify_net6_small_chunks = executable(
+  'classify_net6_small_chunks',
+  ['net6.c'],
+  c_args: yanet_test_c_args + ['-DFILTER_NET6_CLASS_CHUNK_BITS=2'],
+  dependencies: [lib_common_dep, lib_classify_compiler_dep, lib_lib_utils_dep, libdpdk_inc_dep],
+  include_directories: yanet_rootdir,
+)
+test('classify_net6_small_chunks', classify_net6_small_chunks, suite: ['filter'])
+
 classify_core = executable(
   'classify_core',
   ['core.c'],
