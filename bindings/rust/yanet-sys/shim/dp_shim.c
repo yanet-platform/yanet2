@@ -14,6 +14,56 @@
 #include "lib/dataplane/pipeline/econtext.h"
 #include "lib/dataplane/pipeline/schedule.h"
 
+#include <stdlib.h>
+#include <string.h>
+
+// Copies the name into a zeroed field, one byte short of the field at most,
+// so the field keeps its terminator and the zeros after it.
+static void
+yanet_sys_dp_type_name(char *field, size_t size, const char *name, size_t len) {
+	memcpy(field, name, len < size - 1 ? len : size - 1);
+}
+
+struct module *
+yanet_sys_dp_module_new(
+	const char *name,
+	size_t name_len,
+	module_handler handler,
+	module_commit_ectx_handler commit_ectx_handler,
+	uint64_t prepared_size
+) {
+	struct module *module = calloc(1, sizeof(*module));
+	if (module == NULL) {
+		return NULL;
+	}
+	yanet_sys_dp_type_name(
+		module->name, sizeof(module->name), name, name_len
+	);
+	module->handler = handler;
+	module->commit_ectx_handler = commit_ectx_handler;
+	module->prepared_size = prepared_size;
+	return module;
+}
+
+struct object *
+yanet_sys_dp_object_new(
+	const char *name,
+	size_t name_len,
+	object_commit_ectx_handler commit_ectx_handler,
+	uint64_t prepared_size
+) {
+	struct object *object = calloc(1, sizeof(*object));
+	if (object == NULL) {
+		return NULL;
+	}
+	yanet_sys_dp_type_name(
+		object->name, sizeof(object->name), name, name_len
+	);
+	object->commit_ectx_handler = commit_ectx_handler;
+	object->prepared_size = prepared_size;
+	return object;
+}
+
 uint64_t
 yanet_sys_dp_module_worker_idx(struct module_ectx *module_ectx) {
 	struct config_gen_ectx *own = module_ectx->abs_config_gen_ectx;
