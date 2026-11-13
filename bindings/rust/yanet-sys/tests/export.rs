@@ -97,7 +97,7 @@ fn test_new_module_terminates_the_name_and_zeroes_the_rest_of_the_field() {
         // SAFETY: the descriptor was just allocated with C calloc; it is read
         // here and released with C free as the loader does.
         let field = unsafe {
-            let field = (*module).name.map(|byte| byte as u8);
+            let field = (&raw const (*module).name).cast::<[u8; LEN]>().read();
             free(module.cast());
             field
         };

@@ -129,7 +129,7 @@ fn test_new_object_terminates_the_name_and_zeroes_the_rest_of_the_field() {
         // SAFETY: the descriptor was just allocated with C calloc; it is read
         // here and released with C free as the loader does.
         let field = unsafe {
-            let field = (*object).name.map(|byte| byte as u8);
+            let field = (&raw const (*object).name).cast::<[u8; LEN]>().read();
             free(object.cast());
             field
         };
