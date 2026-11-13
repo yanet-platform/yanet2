@@ -12,9 +12,12 @@ option go_package = "github.com/yanet-platform/yanet2/objects/ring/controlplane/
 // A ring has no dataplane module of its own. A module config can link a
 // ring by name.
 service RingService {
-  // CreateRing creates a new named ring with a fixed per-worker capacity.
+  // CreateRing creates a named ring with a fixed per-worker capacity.
   //
-  // It fails if a ring with the requested name already exists.
+  // By default an existing name returns AlreadyExists. When existing rings
+  // are allowed, a matching managed ring succeeds without publication or
+  // changes to records, readers or leases. Parameter conflicts return
+  // AlreadyExists; a published but unmanaged name returns FailedPrecondition.
   rpc CreateRing(CreateRingRequest) returns (CreateRingResponse);
   // ListRings returns every registered ring, sorted by name.
   //
@@ -51,9 +54,7 @@ message RingInfo {
 // CreateRingRequest gives the name, per-worker capacity and publish batch
 // of the ring to create.
 message CreateRingRequest {
-  // name identifies the new ring.
-  //
-  // The create fails if a ring with this name already exists.
+  // name identifies the ring to create or match.
   string name = 1;
   // capacity is the per-worker buffer size in bytes.
   //
@@ -65,11 +66,17 @@ message CreateRingRequest {
   //
   // The range is 1 to 1024. A value of 0 selects the default of 8.
   uint32 publish_batch = 3;
+  // allow_existing permits a matching locally managed ring to succeed.
+  //
+  // Capacity and effective publish batch must match exactly. A match keeps
+  // the existing handle and state without publication. The default false
+  // rejects every existing name; external publications are never adopted.
+  bool allow_existing = 4;
 }
 
 // CreateRingResponse is empty.
 //
-// A successful call publishes the new ring.
+// A successful call publishes a new ring or preserves a matching managed ring.
 message CreateRingResponse {}
 
 // ListRingsRequest has no fields.

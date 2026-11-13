@@ -213,6 +213,7 @@ func Test_RingService_CreateRing_RejectedCreateMutatesNothing(t *testing.T) {
 		// any build.
 		{name: "above allocator maximum", ringName: "too-big", capacity: 1 << 27, code: codes.InvalidArgument},
 		{name: "registered name", ringName: "dup", capacity: 128, code: codes.AlreadyExists},
+		{name: "registered name with matching parameters", ringName: "dup", capacity: 64, code: codes.AlreadyExists},
 		{name: "externally published name", ringName: "taken", capacity: 128, code: codes.AlreadyExists},
 	}
 
@@ -457,4 +458,221 @@ func Test_Lease_Object_ReachesTheRing(t *testing.T) {
 	readers, err := object.OpenReaders()
 	require.NoError(t, err)
 	require.NotEmpty(t, readers)
+}
+
+// Test_RingService_CreateRing_AllowExistingCreatesAbsent verifies that an
+// absent name publishes a usable ring with the requested immutable parameters.
+func Test_RingService_CreateRing_AllowExistingCreatesAbsent(t *testing.T) {
+	fixture := newRingFixture(t)
+	_, err := fixture.client.CreateRing(t.Context(), &ringpb.CreateRingRequest{
+		Name: "ensured", Capacity: 128, PublishBatch: 16, AllowExisting: true,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"ensured/128/16"}, fixture.list(t))
+	requireRingUsable(t, fixture.agent, "ensured", 128)
+}
+
+// Test_RingService_CreateRing_AllowExistingMatchPreservesState verifies that
+// matching creates preserve a leased ring, pending records and reader progress.
+func Test_RingService_CreateRing_AllowExistingMatchPreservesState(t *testing.T) {
+	for _, batch := range []uint32{0, 16} {
+		t.Run(fmt.Sprintf("initial batch %d", batch), func(t *testing.T) {
+			fixture := newRingFixture(t)
+			fixture.createBatch(t, "stable", 128, batch)
+			handle, ok := fixture.service.LookupHandle("stable")
+			require.True(t, ok)
+			lease, err := fixture.service.Acquire("stable", handle)
+			require.NoError(t, err)
+			defer lease.Release()
+			writer, err := ringtest.NewPublishedWriter(fixture.agent, "stable", 0)
+			require.NoError(t, err)
+			readers, err := lease.Object().OpenReaders()
+			require.NoError(t, err)
+			_, err = writer.WriteRecord([]byte("consumed"))
+			require.NoError(t, err)
+			require.Len(t, readers[0].Read(1024), 1)
+			sequence, err := writer.WriteRecord([]byte("pending"))
+			require.NoError(t, err)
+			source, err := writer.Source()
+			require.NoError(t, err)
+			write, readable := source.Indices()
+			baseline := fixture.agent.BlockAllocatorFreeSize()
+
+			batches := []uint32{batch, batch}
+			if batch == 0 {
+				batches = []uint32{0, ringpb.DefaultPublishBatch, 0}
+			}
+			for _, requestedBatch := range batches {
+				_, err := fixture.client.CreateRing(t.Context(), &ringpb.CreateRingRequest{
+					Name: "stable", Capacity: 128, PublishBatch: requestedBatch, AllowExisting: true,
+				})
+				require.NoError(t, err)
+			}
+
+			currentHandle, ok := fixture.service.LookupHandle("stable")
+			require.True(t, ok)
+			require.Equal(t, handle, currentHandle)
+			require.Equal(t, baseline, fixture.agent.BlockAllocatorFreeSize())
+			published, err := ringtest.NewPublishedWriter(fixture.agent, "stable", 0)
+			require.NoError(t, err)
+			require.Equal(t, lease.Object().AsRawPtr(), published.Object())
+			currentWrite, currentReadable := source.Indices()
+			require.Equal(t, write, currentWrite)
+			require.Equal(t, readable, currentReadable)
+			records := readers[0].Read(1024)
+			require.Len(t, records, 1)
+			require.Equal(t, sequence, records[0].Seqno)
+			require.Equal(t, []byte("pending"), records[0].Bytes)
+			require.Equal(t, codes.FailedPrecondition, status.Code(fixture.delete(t, "stable")))
+			lease.Release()
+			require.NoError(t, fixture.delete(t, "stable"))
+		})
+	}
+}
+
+// Test_RingService_CreateRing_AllowExistingConflictPreservesRing verifies that
+// immutable conflicts leave the original handle and buffered records intact.
+func Test_RingService_CreateRing_AllowExistingConflictPreservesRing(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		capacity uint64
+		batch    uint32
+	}{
+		{name: "capacity differs", capacity: 256, batch: 8},
+		{name: "batch differs", capacity: 128, batch: 16},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := newRingFixture(t)
+			fixture.create(t, "conflict", 128)
+			handle, ok := fixture.service.LookupHandle("conflict")
+			require.True(t, ok)
+			lease, err := fixture.service.Acquire("conflict", handle)
+			require.NoError(t, err)
+			defer lease.Release()
+			writer, err := ringtest.NewPublishedWriter(fixture.agent, "conflict", 0)
+			require.NoError(t, err)
+			_, err = writer.WriteRecord([]byte("preserved"))
+			require.NoError(t, err)
+			baseline := fixture.agent.BlockAllocatorFreeSize()
+
+			_, err = fixture.client.CreateRing(t.Context(), &ringpb.CreateRingRequest{
+				Name: "conflict", Capacity: tc.capacity, PublishBatch: tc.batch, AllowExisting: true,
+			})
+			require.Equal(t, codes.AlreadyExists, status.Code(err))
+			require.ErrorContains(t, err, "capacity 128 and publish_batch 8")
+			require.ErrorContains(t, err, fmt.Sprintf("requested capacity %d and publish_batch %d", tc.capacity, tc.batch))
+			currentHandle, ok := fixture.service.LookupHandle("conflict")
+			require.True(t, ok)
+			require.Equal(t, handle, currentHandle)
+			require.Equal(t, baseline, fixture.agent.BlockAllocatorFreeSize())
+			published, err := ringtest.NewPublishedWriter(fixture.agent, "conflict", 0)
+			require.NoError(t, err)
+			require.Equal(t, lease.Object().AsRawPtr(), published.Object())
+			readers, err := lease.Object().OpenReaders()
+			require.NoError(t, err)
+			records := readers[0].Read(1024)
+			require.Len(t, records, 1)
+			require.Equal(t, []byte("preserved"), records[0].Bytes)
+		})
+	}
+}
+
+// Test_RingService_CreateRing_AllowExistingUnmanagedRingRefused verifies that
+// even a compatible external publication cannot be adopted or replaced.
+func Test_RingService_CreateRing_AllowExistingUnmanagedRingRefused(t *testing.T) {
+	fixture := newRingFixture(t)
+	external, err := cring.NewObject(fixture.agent, "external", 128, cring.DefaultPublishBatch)
+	require.NoError(t, err)
+	require.NoError(t, external.Publish())
+	t.Cleanup(func() {
+		_ = cring.DeleteObject(fixture.agent, "external")
+		_ = external.Free()
+	})
+	baseline := fixture.agent.BlockAllocatorFreeSize()
+	_, err = fixture.client.CreateRing(t.Context(), &ringpb.CreateRingRequest{Name: "external", Capacity: 128, AllowExisting: true})
+	require.Equal(t, codes.FailedPrecondition, status.Code(err))
+	require.ErrorContains(t, err, "not managed by this service")
+	require.Empty(t, fixture.list(t))
+	require.Equal(t, baseline, fixture.agent.BlockAllocatorFreeSize())
+	writer, err := ringtest.NewPublishedWriter(fixture.agent, "external", 0)
+	require.NoError(t, err)
+	require.Equal(t, external.AsRawPtr(), writer.Object())
+	requireRingUsable(t, fixture.agent, "external", 128)
+}
+
+// Test_RingService_CreateRing_AllowExistingConcurrentShareHandle verifies that
+// concurrent creates all acquire the same single usable ring.
+func Test_RingService_CreateRing_AllowExistingConcurrentShareHandle(t *testing.T) {
+	fixture := newRingFixture(t)
+	handles := make([]ring.Handle, 32)
+	var group errgroup.Group
+	for idx := range handles {
+		group.Go(func() error {
+			_, err := fixture.client.CreateRing(t.Context(), &ringpb.CreateRingRequest{Name: "concurrent", Capacity: 128, AllowExisting: true})
+			if err != nil {
+				return err
+			}
+			handle, ok := fixture.service.LookupHandle("concurrent")
+			if !ok {
+				return fmt.Errorf("ensured ring has no handle")
+			}
+			lease, err := fixture.service.Acquire("concurrent", handle)
+			if err != nil {
+				return err
+			}
+			defer lease.Release()
+			handles[idx] = lease.Handle()
+			return nil
+		})
+	}
+	require.NoError(t, group.Wait())
+	for _, handle := range handles {
+		require.Equal(t, handles[0], handle)
+	}
+	require.Equal(t, []string{"concurrent/128/8"}, fixture.list(t))
+	requireRingUsable(t, fixture.agent, "concurrent", 128)
+}
+
+// Test_RingService_CreateRing_AllowExistingMatchNeedsNoPublication verifies that
+// a matching ring succeeds even with no memory left for a new generation.
+func Test_RingService_CreateRing_AllowExistingMatchNeedsNoPublication(t *testing.T) {
+	fixture := newRingFixture(t)
+	fixture.create(t, "stable", 128)
+	filler, err := fixture.shm.AgentAttach("ensure-cp-filler", 0, datasize.B)
+	require.NoError(t, err)
+	for size := 64 * datasize.MB; size > 0; {
+		if filler.Extend(size) != nil {
+			size /= 2
+		}
+	}
+	baseline := fixture.agent.BlockAllocatorFreeSize()
+
+	_, err = fixture.client.CreateRing(t.Context(), &ringpb.CreateRingRequest{Name: "stable", Capacity: 128, AllowExisting: true})
+	require.NoError(t, err)
+	require.Equal(t, baseline, fixture.agent.BlockAllocatorFreeSize())
+
+	_, err = fixture.client.CreateRing(t.Context(), &ringpb.CreateRingRequest{Name: "absent", Capacity: 128, AllowExisting: true})
+	require.Equal(t, codes.Internal, status.Code(err))
+	require.ErrorContains(t, err, "failed to publish ring")
+}
+
+// Test_RingService_CreateRing_AllowExistingRecreatesDeletedName verifies that
+// a fresh create after deletion gets a new handle with the new parameters.
+func Test_RingService_CreateRing_AllowExistingRecreatesDeletedName(t *testing.T) {
+	fixture := newRingFixture(t)
+	_, err := fixture.client.CreateRing(t.Context(), &ringpb.CreateRingRequest{Name: "recreated", Capacity: 128, AllowExisting: true})
+	require.NoError(t, err)
+	oldHandle, ok := fixture.service.LookupHandle("recreated")
+	require.True(t, ok)
+	require.NoError(t, fixture.delete(t, "recreated"))
+
+	_, err = fixture.client.CreateRing(t.Context(), &ringpb.CreateRingRequest{Name: "recreated", Capacity: 256, PublishBatch: 16, AllowExisting: true})
+	require.NoError(t, err)
+	newHandle, ok := fixture.service.LookupHandle("recreated")
+	require.True(t, ok)
+	require.NotEqual(t, oldHandle, newHandle)
+	_, err = fixture.service.Acquire("recreated", oldHandle)
+	require.ErrorIs(t, err, ring.ErrHandleGone)
+	require.Equal(t, []string{"recreated/256/16"}, fixture.list(t))
+	requireRingUsable(t, fixture.agent, "recreated", 256)
 }

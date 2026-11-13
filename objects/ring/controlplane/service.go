@@ -148,29 +148,56 @@ func NewRingService(agent *ffi.Agent, opts ...Option) *RingService {
 	}
 }
 
-// CreateRing creates a new named ring and publishes it to the dataplane.
+// CreateRing creates a named ring or, when allowed, preserves a matching one.
+//
+// A matching managed ring keeps its records, readers, handle and leases
+// without publication. Conflicts return AlreadyExists; an unmanaged
+// publication returns FailedPrecondition only when existing rings are allowed.
 func (m *RingService) CreateRing(
 	ctx context.Context,
 	req *ringpb.CreateRingRequest,
 ) (*ringpb.CreateRingResponse, error) {
 	name := req.GetName()
-	capacity := uint32(req.GetCapacity())
 	publishBatch := req.PublishBatchOrDefault()
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Releasing the drained deferred rings first leaves their memory to the
-	// new ring, and a failing create cannot keep them.
-	m.reclaimDeferred()
+	if !req.GetAllowExisting() {
+		// Strict creates reclaim drained rings even when the name is taken.
+		m.reclaimDeferred()
+	}
 
-	if _, exists := m.rings[name]; exists {
-		return nil, status.Errorf(codes.AlreadyExists, "ring %q already exists", name)
+	if entry, exists := m.rings[name]; exists {
+		if !req.GetAllowExisting() {
+			return nil, status.Errorf(codes.AlreadyExists, "ring %q already exists", name)
+		}
+		actualCapacity := entry.Object.Capacity()
+		actualBatch := entry.Object.PublishBatch()
+		if uint64(actualCapacity) != req.GetCapacity() || actualBatch != publishBatch {
+			return nil, status.Errorf(
+				codes.AlreadyExists,
+				"ring %q already exists with capacity %d and publish_batch %d; requested capacity %d and publish_batch %d",
+				name, actualCapacity, actualBatch, req.GetCapacity(), publishBatch,
+			)
+		}
+		return &ringpb.CreateRingResponse{}, nil
 	}
 	if cring.Exists(m.agent, name) {
-		return nil, status.Errorf(codes.AlreadyExists, "ring %q already exists", name)
+		if !req.GetAllowExisting() {
+			return nil, status.Errorf(codes.AlreadyExists, "ring %q already exists", name)
+		}
+		return nil, status.Errorf(
+			codes.FailedPrecondition,
+			"ring %q is published but not managed by this service", name,
+		)
 	}
 
+	if req.GetAllowExisting() {
+		m.reclaimDeferred()
+	}
+
+	capacity := uint32(req.GetCapacity())
 	object, err := cring.NewObject(m.agent, name, capacity, publishBatch)
 	if err != nil {
 		if errors.Is(err, cerrors.InvalidArgument) {
