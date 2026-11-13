@@ -23,6 +23,7 @@ import (
 	cpdump "github.com/yanet-platform/yanet2/modules/pdump/bindings/go/cpdump"
 	pdump "github.com/yanet-platform/yanet2/modules/pdump/controlplane"
 	"github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb/v1"
+	"github.com/yanet-platform/yanet2/modules/pdump/internal/testutils"
 	"github.com/yanet-platform/yanet2/objects/ring/bindings/go/cring"
 	ring "github.com/yanet-platform/yanet2/objects/ring/controlplane"
 )
@@ -235,6 +236,13 @@ func (m *fakeRingOwner) register(name string, capacity uint32, workerCount int) 
 }
 
 func (m *fakeRingOwner) ReclaimDeferred() {}
+
+// unregister removes a ring from lookup without invalidating existing leases.
+func (m *fakeRingOwner) unregister(name string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.rings, name)
+}
 
 func (m *fakeRingOwner) LookupHandle(name string) (pdump.RingHandle, bool) {
 	m.mu.Lock()
@@ -576,6 +584,138 @@ func Test_PdumpService_RateLimit_PreservesAbsentAndAcceptsExplicitZero(t *testin
 	}
 }
 
+// Test_PdumpService_SetConfig_UnchangedKeepsPublication verifies that equivalent
+// full, partial and defaulted updates preserve the module and its ring lease.
+func Test_PdumpService_SetConfig_UnchangedKeepsPublication(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		initial *pdumppb.Config
+		update  *pdumppb.Config
+	}{
+		{
+			name:    "identical full request",
+			initial: &pdumppb.Config{Filter: new("tcp"), Mode: new(uint32(2)), Snaplen: new(uint32(128)), RingName: new("A"), RatePps: new(uint64(1000))},
+			update:  &pdumppb.Config{Filter: new("tcp"), Mode: new(uint32(2)), Snaplen: new(uint32(128)), RingName: new("A"), RatePps: new(uint64(1000))},
+		},
+		{
+			name:    "partial request keeps omitted fields",
+			initial: &pdumppb.Config{Filter: new("udp"), RingName: new("A"), RatePps: new(uint64(1000))},
+			update:  &pdumppb.Config{Filter: new("udp")},
+		},
+		{
+			name:    "empty update keeps all fields",
+			initial: &pdumppb.Config{Filter: new("udp"), RingName: new("A"), RatePps: new(uint64(1000))},
+			update:  &pdumppb.Config{},
+		},
+		{
+			name:    "explicit defaults equal initial defaults",
+			initial: &pdumppb.Config{RingName: new("A")},
+			update:  &pdumppb.Config{Filter: new(""), Mode: new(uint32(0)), Snaplen: new(uint32(cpdump.DefaultSnaplen)), RingName: new("A"), RatePps: new(uint64(0))},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service, backend, owner, _ := newTestService(t)
+			_, err := service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{Name: "capture", Config: tc.initial})
+			require.NoError(t, err)
+			module := backend.Last()
+			lease := owner.lastLease(t, "A")
+			for range 3 {
+				_, err := service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{Name: "capture", Config: tc.update})
+				require.NoError(t, err)
+			}
+			require.Equal(t, 1, backend.UpdateCalls())
+			require.False(t, module.freed.Load())
+			require.Same(t, lease, owner.lastLease(t, "A"))
+			require.Equal(t, 1, owner.leaseCount("A"))
+
+			_, err = service.DeleteConfig(t.Context(), &pdumppb.DeleteConfigRequest{Name: "capture"})
+			require.NoError(t, err)
+			require.Zero(t, owner.leaseCount("A"))
+		})
+	}
+}
+
+// Test_PdumpService_SetConfig_ChangedSettingsPublish verifies that changing any
+// effective capture setting replaces the published module.
+func Test_PdumpService_SetConfig_ChangedSettingsPublish(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		update *pdumppb.Config
+	}{
+		{name: "filter clears", update: &pdumppb.Config{Filter: new("")}},
+		{name: "mode changes", update: &pdumppb.Config{Mode: new(uint32(2))}},
+		{name: "snaplen changes", update: &pdumppb.Config{Snaplen: new(uint32(256))}},
+		{name: "ring changes", update: &pdumppb.Config{RingName: new("B")}},
+		{name: "rate changes", update: &pdumppb.Config{RatePps: new(uint64(2000))}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service, backend, owner, _ := newTestService(t)
+			owner.register("B", testRingCapacity, 1)
+			_, err := service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
+				Name:   "capture",
+				Config: &pdumppb.Config{Filter: new("tcp"), RingName: new("A"), RatePps: new(uint64(1000))},
+			})
+			require.NoError(t, err)
+			module := backend.Last()
+			_, err = service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{Name: "capture", Config: tc.update})
+			require.NoError(t, err)
+			require.Equal(t, 2, backend.UpdateCalls())
+			require.NotSame(t, module, backend.Last())
+			require.True(t, module.freed.Load())
+		})
+	}
+}
+
+// Test_PdumpService_SetConfig_UnchangedMissingRingIsRejected verifies that an
+// identical request still requires its bound ring to exist in the registry.
+func Test_PdumpService_SetConfig_UnchangedMissingRingIsRejected(t *testing.T) {
+	service, backend, owner, _ := newTestService(t)
+	setRing(t, service, "capture", "A")
+	module := backend.Last()
+	owner.unregister("A")
+
+	_, err := service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
+		Name: "capture", Config: &pdumppb.Config{RingName: new("A")},
+	})
+	require.Equal(t, codes.NotFound, status.Code(err))
+	require.Equal(t, 1, backend.UpdateCalls())
+	require.False(t, module.freed.Load())
+}
+
+// Test_PdumpService_SetConfig_UnchangedPreservesRateBucket verifies that
+// repeating a positive-rate config preserves native credit and allocation,
+// even after worker time advances or becomes unavailable.
+func Test_PdumpService_SetConfig_UnchangedPreservesRateBucket(t *testing.T) {
+	backend, agent, owner := newTestBackend(t)
+	service := pdump.NewPdumpService(backend, owner)
+	t.Cleanup(func() {
+		_, err := service.DeleteConfig(t.Context(), &pdumppb.DeleteConfigRequest{Name: "capture"})
+		require.NoError(t, err)
+	})
+	request := &pdumppb.SetConfigRequest{
+		Name:   "capture",
+		Config: &pdumppb.Config{RingName: new("capture-ring"), RatePps: new(uint64(32001))},
+	}
+	testutils.SetWorkerTime(agent, 123_456_789)
+	_, err := service.SetConfig(t.Context(), request)
+	require.NoError(t, err)
+	published, err := testutils.ReadRate(agent, "capture")
+	require.NoError(t, err)
+	require.True(t, published.HasBucket)
+	require.Equal(t, uint64(123_456_789), published.EDT)
+	allocated := agent.BlockAllocatorFreeSize()
+
+	for _, timestamp := range []uint64{987_654_321, 0} {
+		testutils.SetWorkerTime(agent, timestamp)
+		_, err := service.SetConfig(t.Context(), request)
+		require.NoError(t, err)
+		snapshot, err := testutils.ReadRate(agent, "capture")
+		require.NoError(t, err)
+		require.Equal(t, published, snapshot)
+		require.Equal(t, allocated, agent.BlockAllocatorFreeSize())
+	}
+}
+
 // Test_PdumpService_ShowConfig_UnknownName verifies that showing a name
 // that was never configured reports NotFound.
 func Test_PdumpService_ShowConfig_UnknownName(t *testing.T) {
@@ -768,9 +908,9 @@ func Test_PdumpService_SharedRing_EachStreamSeesBothConfigsRecords(t *testing.T)
 // an update which keeps the bound ring retains the current binding
 // instead of taking a second lease, and that a stream already running
 // keeps reading with no reset: records written before and after the
-// update arrive in order with nothing lost or repeated.
+// update and an identical repeat arrive in order with nothing lost or repeated.
 func Test_PdumpService_Bind_SameObjectUpdateKeepsStreamRunning(t *testing.T) {
-	service, _, owner, sources := newTestService(t)
+	service, backend, owner, sources := newTestService(t)
 
 	setRing(t, service, "p1", "A")
 	lease := owner.lastLease(t, "A")
@@ -791,6 +931,15 @@ func Test_PdumpService_Bind_SameObjectUpdateKeepsStreamRunning(t *testing.T) {
 
 	sources[0].writePdumpRecord(t, 0, []byte("after"))
 	require.Equal(t, []byte("after"), recvRecord(t, records).GetData())
+
+	_, err = service.SetConfig(t.Context(), &pdumppb.SetConfigRequest{
+		Name: "p1", Config: &pdumppb.Config{Filter: new("tcp")},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 2, backend.UpdateCalls())
+	require.Same(t, lease, owner.lastLease(t, "A"))
+	sources[0].writePdumpRecord(t, 0, []byte("after-repeat"))
+	require.Equal(t, []byte("after-repeat"), recvRecord(t, records).GetData())
 
 	require.False(t, stream.ended(), "a same-object update must not end the stream")
 }
@@ -844,7 +993,7 @@ func Test_PdumpService_RingRebind_EndsOnlyThatConfigsStream(t *testing.T) {
 // reports as a new handle, is treated as a rebind: the old stream ends
 // and a fresh one reads the new ring, never the deleted one.
 func Test_PdumpService_RingRebind_SameNameNewHandleEndsOldStream(t *testing.T) {
-	service, _, owner, _ := newTestService(t)
+	service, backend, owner, _ := newTestService(t)
 
 	setRing(t, service, "p1", "A")
 	oldLease := owner.lastLease(t, "A")
@@ -863,6 +1012,7 @@ func Test_PdumpService_RingRebind_SameNameNewHandleEndsOldStream(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	require.Equal(t, 2, backend.UpdateCalls(), "equal settings must still publish a new ring identity")
 	err = stream.wait(t, "a new handle under the same name did not end the old stream")
 	require.NoError(t, err)
 	require.Equal(t, 1, owner.leaseCount("A"), "the config must hold exactly one lease, on the new ring")

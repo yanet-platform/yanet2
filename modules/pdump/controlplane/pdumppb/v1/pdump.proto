@@ -12,7 +12,10 @@ service PdumpService {
   // ShowConfig returns the current configuration for the pdump module.
   rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
 
-  // SetConfig sets a new config for the pdump module
+  // SetConfig creates or updates a pdump module configuration.
+  //
+  // Unchanged effective settings bound to the same ring object preserve the
+  // published configuration and capture budget.
   rpc SetConfig(SetConfigRequest) returns (SetConfigResponse);
 
   // DeleteConfig deletes a pdump module configuration.
@@ -90,7 +93,8 @@ message Config {
   // All workers share one continuously replenished budget per config, with
   // burst max(32, ceil(rate/1000)). Unused credit never exceeds that burst.
   // Absent on an update preserves the rate; explicit zero disables it.
-  // Every new config, including a filter-only update, starts fresh credit.
+  // Every newly published config, including a filter-only change, starts fresh
+  // credit; an unchanged update bound to the same ring object keeps it.
   // Contention may undercapture; worker clock offsets affect the effective
   // rate, so this is not a strict wall-clock guarantee or a fairness policy.
   optional uint64 rate_pps = 6;

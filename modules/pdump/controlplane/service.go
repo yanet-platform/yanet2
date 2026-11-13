@@ -162,6 +162,8 @@ func (m *PdumpService) ShowConfig(
 // a same-object update keeps its binding without a new check. On any
 // failure the published config, its binding and its streams are left
 // exactly as they were.
+// An update with unchanged effective settings and the same ring object
+// preserves the published config and capture budget.
 func (m *PdumpService) SetConfig(
 	ctx context.Context,
 	request *pdumppb.SetConfigRequest,
@@ -192,6 +194,10 @@ func (m *PdumpService) SetConfig(
 		handle, found := m.ringOwner.LookupHandle(settings.RingName)
 		if !found {
 			return nil, status.Errorf(codes.NotFound, "ring %q not found", settings.RingName)
+		}
+
+		if ok && current.Settings() == settings && current.Binding().Handle() == handle {
+			return nil, crud.ErrUnchanged
 		}
 
 		// Comparing handles, not names, tells a same-object update from
