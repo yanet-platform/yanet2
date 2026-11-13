@@ -3,19 +3,19 @@ use core::{
     fmt::{self, Display, Formatter},
 };
 
-/// Why a packet header does not parse.
+/// Why a packet header does not parse, or is not written.
 ///
-/// Lengths count bytes from the first byte of the input handed to `parse`;
-/// `available` is the length of that input.
+/// Lengths count bytes from the first byte of the buffer a header is parsed
+/// from or written to, and the bytes available are that buffer's length.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ParseError {
-    /// The input ends inside the header: before the fixed part, or before the
-    /// end of the options that the header length field counts.
+    /// The buffer ends inside the header: before the fixed part, or before
+    /// the end of the options that the header length field counts.
     Truncated {
         /// Bytes the header needs.
         needed: usize,
-        /// Bytes of the input.
+        /// Bytes of the buffer.
         available: usize,
     },
     /// The IP version field does not match the header type.
@@ -43,6 +43,13 @@ pub enum ParseError {
         /// Bytes of the input.
         available: usize,
     },
+    /// A header to write counts more bytes than its length field holds.
+    LengthBeyondField {
+        /// Bytes the length field would count.
+        length: usize,
+        /// The most the field holds.
+        max: usize,
+    },
     /// A TCP option's length cannot be trusted.
     ///
     /// It is below its two header bytes, past the options area, other than
@@ -66,6 +73,9 @@ impl Display for ParseError {
             }
             Self::LengthBeyondInput { length, available } => {
                 write!(f, "length {length} is beyond the {available} bytes available")
+            }
+            Self::LengthBeyondField { length, max } => {
+                write!(f, "length {length} is beyond the {max} its field holds")
             }
             Self::OptionLength { offset } => write!(f, "TCP option at offset {offset} has an unusable length"),
         }

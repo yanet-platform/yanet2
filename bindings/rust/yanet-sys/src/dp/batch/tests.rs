@@ -1758,3 +1758,219 @@ fn test_rewrite_tcp_options_refusal_leaves_the_packet_unchanged() {
         assert_eq!((bytes.as_slice(), offsets), (frame.frame(), frame.offsets()), "{case}");
     }
 }
+
+/// A frame as the dataplane parses it, behind room for a grown header.
+fn parsed_frame(bytes: &[u8]) -> Frame {
+    parsed_frame_in(64, bytes, 0)
+}
+
+/// A frame as the dataplane parses it, between the given rooms.
+fn parsed_frame_in(headroom: u16, bytes: &[u8], tailroom: u16) -> Frame {
+    let mut frame = Frame::new(bindings::packet::default(), headroom, bytes, tailroom);
+    frame.packet().parse().expect("a frame the parser takes");
+    frame
+}
+
+/// The IPv4 header of a TCP segment the tests build, of the flags-and-offset
+/// word, from the test addresses.
+fn ipv4_repr(frag: u16) -> IpRepr {
+    let [s0, s1, s2, s3, d0, d1, d2, d3] = IPV4_ADDRESSES;
+    IpRepr::V4(Ipv4Repr {
+        dscp: 0,
+        ecn: 0,
+        id: 0,
+        frag,
+        ttl: 64,
+        protocol: 6,
+        src: Ipv4Addr::new(s0, s1, s2, s3),
+        dst: Ipv4Addr::new(d0, d1, d2, d3),
+    })
+}
+
+/// The IPv6 headers of a TCP segment the tests build, from the test
+/// addresses.
+fn ipv6_repr(fragment: Option<Ipv6Fragment>) -> IpRepr {
+    let (src, dst) = IPV6_ADDRESSES.split_at(16);
+    IpRepr::V6(Ipv6Repr {
+        traffic_class: 0,
+        flow_label: 0,
+        hop_limit: 64,
+        protocol: 6,
+        src: Ipv6Addr::from(<[u8; 16]>::try_from(src).expect("an address")),
+        dst: Ipv6Addr::from(<[u8; 16]>::try_from(dst).expect("an address")),
+        fragment,
+    })
+}
+
+/// verifies that replaced headers leave the descriptor as the parser does
+/// for the new frame, the flow hash and other flags kept
+#[cfg(not(miri))]
+#[test]
+fn test_replace_network_header_describes_the_frame_as_the_parser() {
+    let segment = [tcp(1000, 443), b"data".to_vec()].concat();
+    let hop_by_hop = [[6, 0, 1, 4, 0, 0, 0, 0].as_slice(), &segment].concat();
+    let fragment = |offset, more| Some(Ipv6Fragment { offset, more, ident: 1 });
+    let IpRepr::V6(v6_fields) = ipv6_repr(None) else {
+        unreachable!("an IPv6 header")
+    };
+    let v4 = |frag| {
+        let mut frame = ether(0x0800, &ipv4(6, frag, &segment));
+        seal_ipv4(&mut frame, 14);
+        frame[14..34].to_vec()
+    };
+    let v6 = |datagram: Vec<u8>, len: usize| datagram[..len].to_vec();
+    let mut tagged = ether(0x8100, &[0, 7, 0x08, 0x00]);
+    tagged.extend(ipv4(6, 0, &segment));
+    let cases = [
+        (
+            "ipv4 to ipv6",
+            ether(0x0800, &ipv4(6, 0, &segment)),
+            ipv6_repr(None),
+            v6(ipv6(6, &segment), 40),
+        ),
+        (
+            "vlan-tagged ipv4 to ipv6",
+            tagged,
+            ipv6_repr(None),
+            v6(ipv6(6, &segment), 40),
+        ),
+        ("ipv6 to ipv4", ether(0x86dd, &ipv6(6, &segment)), ipv4_repr(0), v4(0)),
+        (
+            "ipv4 behind trailer padding to ipv6",
+            [ether(0x0800, &ipv4(6, 0, &segment)), vec![0; 6]].concat(),
+            ipv6_repr(None),
+            v6(ipv6(6, &segment), 40),
+        ),
+        (
+            "ipv4 with options to ipv6",
+            sealed_ipv4(&[1, 1, 1, 0], 6, 0, &segment, 0),
+            ipv6_repr(None),
+            v6(ipv6(6, &segment), 40),
+        ),
+        (
+            "ipv6 behind hop-by-hop to ipv4",
+            ether(0x86dd, &ipv6(0, &hop_by_hop)),
+            ipv4_repr(0),
+            v4(0),
+        ),
+        (
+            "first ipv4 fragment to ipv6",
+            ether(0x0800, &ipv4(6, 0x2000, &segment)),
+            ipv6_repr(fragment(0, true)),
+            v6(ipv6(44, &ipv6_fragment(6, 0, true, &segment)), 48),
+        ),
+        (
+            "later ipv4 fragment to ipv6",
+            ether(0x0800, &ipv4(6, 2, &segment)),
+            ipv6_repr(fragment(2, false)),
+            v6(ipv6(44, &ipv6_fragment(6, 2, false, &segment)), 48),
+        ),
+        (
+            "ipv4 to an atomic ipv6 fragment",
+            ether(0x0800, &ipv4(6, 0, &segment)),
+            ipv6_repr(fragment(0, false)),
+            v6(ipv6(44, &ipv6_fragment(6, 0, false, &segment)), 48),
+        ),
+        (
+            "later ipv6 fragment to ipv4",
+            ether(0x86dd, &ipv6(44, &ipv6_fragment(6, 2, false, &segment))),
+            ipv4_repr(2),
+            v4(2),
+        ),
+        (
+            "later ipv4 fragment of options to ipv6",
+            ether(0x0800, &ipv4(60, 2, &segment)),
+            IpRepr::V6(Ipv6Repr {
+                protocol: 60,
+                fragment: fragment(2, false),
+                ..v6_fields
+            }),
+            v6(ipv6(44, &ipv6_fragment(60, 2, false, &segment)), 48),
+        ),
+    ];
+    // Whichever side the room lets move, the frame and the descriptor come
+    // out as the parser reads them.
+    for ((case, old, header, new), (headroom, tailroom)) in cases
+        .iter()
+        .flat_map(|case| [(64, 0), (0, 64)].map(|rooms| (case.clone(), rooms)))
+    {
+        let mut frame = parsed_frame_in(headroom, &old, tailroom);
+        let sync = 1 << bindings::packet_flag_PACKET_FLAG_FWSTATE_SYNC_INTERNAL;
+        frame.link().flags |= sync;
+        let packet = frame.packet();
+        let (hash, network, transport) = (
+            packet.hash(),
+            usize::from(packet.network_offset()),
+            usize::from(packet.transport_offset()),
+        );
+
+        let replaced = frame.packet().replace_network_header(&header);
+
+        assert_eq!(Ok(()), replaced, "{case}");
+        let ether_type = header.network_type().to_be_bytes();
+        let expected = [&old[..network - 2], &ether_type, &new, &old[transport..]].concat();
+        assert_eq!(expected, frame.frame(), "{case}");
+        let reparsed = Parsed::of(&mut parsed_frame(frame.frame()));
+        assert_eq!(Parsed { hash, ..reparsed }, Parsed::of(&mut frame), "{case}");
+        assert_eq!(sync, frame.descriptor().flags & sync, "{case}");
+    }
+}
+
+/// verifies that a replacement the headers, lengths or room rule out is
+/// refused, leaving the packet unchanged
+#[cfg(not(miri))]
+#[test]
+fn test_replace_network_header_refuses_leaving_the_packet_unchanged() {
+    let v4 = ether(0x0800, &ipv4(6, 0, &tcp(1000, 443)));
+    let with_total = |total: u16| {
+        let mut frame = parsed_frame(&v4);
+        frame.packet().data_mut()[16..18].copy_from_slice(&total.to_be_bytes());
+        frame
+    };
+    let IpRepr::V6(v6) = ipv6_repr(None) else {
+        unreachable!("an IPv6 header")
+    };
+    let hop_by_hop = IpRepr::V6(Ipv6Repr { protocol: 0, ..v6 });
+    let encapsulated = |ipv6: bool| {
+        let mut frame = parsed_frame(&v4);
+        let encap = if ipv6 {
+            frame.packet().encap_ipv6([1; 16], [2; 16], OuterDscp::Zero)
+        } else {
+            frame.packet().encap_ipv4([10, 0, 0, 1], [10, 0, 0, 2], OuterDscp::Zero)
+        };
+        encap.expect("an encapsulation");
+        frame
+    };
+    for (case, mut frame, header) in [
+        ("an ipv4 encapsulation", encapsulated(false), ipv6_repr(None)),
+        ("an ipv6 encapsulation", encapsulated(true), ipv4_repr(0)),
+        (
+            "an unparsed packet",
+            Frame::new(bindings::packet::default(), 64, &v4, 0),
+            ipv6_repr(None),
+        ),
+        ("an ip length past the frame", with_total(200), ipv6_repr(None)),
+        (
+            "a tcp header the ip length holds short",
+            with_total(30),
+            ipv6_repr(None),
+        ),
+        (
+            "a growth neither room takes",
+            parsed_frame_in(0, &v4, 0),
+            ipv6_repr(None),
+        ),
+        (
+            "an ipv6 protocol the parser walks as a header",
+            parsed_frame(&v4),
+            hop_by_hop,
+        ),
+    ] {
+        let before = (frame.frame().to_vec(), Parsed::of(&mut frame));
+
+        let refused = frame.packet().replace_network_header(&header);
+
+        assert_eq!(Err(ResizeError), refused, "{case}");
+        assert_eq!(before, (frame.frame().to_vec(), Parsed::of(&mut frame)), "{case}");
+    }
+}

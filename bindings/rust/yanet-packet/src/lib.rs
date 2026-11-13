@@ -17,6 +17,7 @@ pub mod checksum;
 mod error;
 mod ethernet;
 mod icmp;
+mod ip;
 mod ipv4;
 mod ipv6;
 mod mutation;
@@ -28,8 +29,9 @@ mod udp;
 pub use error::ParseError;
 pub use ethernet::{ETHERTYPE_IPV4, ETHERTYPE_IPV6, ETHERTYPE_QINQ, ETHERTYPE_VLAN, EthernetHeader, VlanTag};
 pub use icmp::{Icmpv4Header, Icmpv4Mutation, Icmpv6Header, Icmpv6Mutation};
-pub use ipv4::{Ipv4Header, Ipv4Mutation, Ipv4Packet, Ipv4PacketMut};
-pub use ipv6::Ipv6Header;
+pub use ip::IpRepr;
+pub use ipv4::{Ipv4Header, Ipv4Mutation, Ipv4Packet, Ipv4PacketMut, Ipv4Repr};
+pub use ipv6::{Ipv6Fragment, Ipv6Header, Ipv6Repr};
 /// The header bookkeeping of the SDK's packet insert and remove.
 #[doc(hidden)]
 pub use mutation::resize;
@@ -84,10 +86,17 @@ fn no_zero(sum: u16) -> u16 {
     if sum == 0xffff { sum } else { !sum }
 }
 
+pub const IPPROTO_HOPOPTS: u8 = 0;
 pub const IPPROTO_ICMP: u8 = 1;
+pub const IPPROTO_IPIP: u8 = 4;
 pub const IPPROTO_TCP: u8 = 6;
 pub const IPPROTO_UDP: u8 = 17;
+pub const IPPROTO_IPV6: u8 = 41;
+pub const IPPROTO_ROUTING: u8 = 43;
+pub const IPPROTO_FRAGMENT: u8 = 44;
+pub const IPPROTO_AH: u8 = 51;
 pub const IPPROTO_ICMPV6: u8 = 58;
+pub const IPPROTO_DSTOPTS: u8 = 60;
 
 #[cfg(test)]
 mod tests {

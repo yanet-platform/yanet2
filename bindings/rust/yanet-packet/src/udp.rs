@@ -391,7 +391,7 @@ mod tests {
                 assert!(length > available);
             }
             ParseError::Version { .. } | ParseError::HeaderLen { .. } => panic!("unexpected {error:?}"),
-            ParseError::OptionLength { .. } => panic!("unexpected {error:?}"),
+            ParseError::OptionLength { .. } | ParseError::LengthBeyondField { .. } => panic!("unexpected {error:?}"),
         }
     }
 
