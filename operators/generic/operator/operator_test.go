@@ -1,13 +1,33 @@
 package operator_test
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"net"
+	"os"
 	"path/filepath"
+	"slices"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
+	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/reflect/protoregistry"
+	"google.golang.org/protobuf/types/known/emptypb"
 
+	commonoperator "github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
+	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
+	decappb "github.com/yanet-platform/yanet2/modules/decap/controlplane/decappb/v1"
 	"github.com/yanet-platform/yanet2/operators/generic/operator"
 
 	_ "github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1"
@@ -187,4 +207,293 @@ func Test_NewOperator_RejectsUnreadableDescriptorSet(t *testing.T) {
 
 	require.ErrorContains(t, err, "configs[0]: failed to read descriptor set")
 	require.ErrorContains(t, err, missing)
+}
+
+// pollingGateway records module requests and holds published functions.
+type pollingGateway struct {
+	ynpb.UnimplementedGatewayServer
+	ynpb.UnimplementedFunctionServiceServer
+	decappb.UnimplementedDecapServiceServer
+
+	mu        sync.Mutex
+	requests  []proto.Message
+	functions map[string]*ynpb.Function
+	failure   error
+}
+
+func (m *pollingGateway) Register(ctx context.Context, req *ynpb.RegisterRequest) (*ynpb.RegisterResponse, error) {
+	return &ynpb.RegisterResponse{}, nil
+}
+
+func (m *pollingGateway) UpdateConfig(ctx context.Context, req *decappb.UpdateConfigRequest) (*decappb.UpdateConfigResponse, error) {
+	return &decappb.UpdateConfigResponse{}, m.Record(req)
+}
+
+func (m *pollingGateway) Get(ctx context.Context, req *ynpb.GetFunctionRequest) (*ynpb.GetFunctionResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	function, ok := m.functions[req.GetId().GetName()]
+	if !ok {
+		return nil, status.Error(codes.NotFound, "function absent")
+	}
+	return &ynpb.GetFunctionResponse{Function: function}, nil
+}
+
+func (m *pollingGateway) Update(ctx context.Context, req *ynpb.UpdateFunctionRequest) (*ynpb.UpdateFunctionResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	function := proto.Clone(req.GetFunction()).(*ynpb.Function)
+	m.functions[function.GetId().GetName()] = function
+	return &ynpb.UpdateFunctionResponse{}, nil
+}
+
+// Record keeps an immutable request even when the gateway refuses the apply.
+func (m *pollingGateway) Record(request proto.Message) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.requests = append(m.requests, proto.Clone(request))
+	return m.failure
+}
+
+// Requests returns the immutable history of attempted module updates.
+func (m *pollingGateway) Requests() []proto.Message {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return slices.Clone(m.requests)
+}
+
+// SetFailure changes whether subsequent module updates fail.
+func (m *pollingGateway) SetFailure(err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.failure = err
+}
+
+// startPollingGateway serves linked modules and an optional unlinked schema.
+func startPollingGateway(t *testing.T, files *protoregistry.Files) (*pollingGateway, string) {
+	t.Helper()
+	gateway := &pollingGateway{functions: map[string]*ynpb.Function{}}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	server := grpc.NewServer(grpc.UnknownServiceHandler(func(service any, stream grpc.ServerStream) error {
+		method, ok := grpc.MethodFromServerStream(stream)
+		if !ok {
+			return status.Error(codes.Internal, "missing method")
+		}
+		request, err := commonoperator.NewMethodRequest(method, files)
+		if err != nil {
+			return err
+		}
+		if err := stream.RecvMsg(request); err != nil {
+			return err
+		}
+		if err := gateway.Record(request); err != nil {
+			return err
+		}
+		return stream.SendMsg(&emptypb.Empty{})
+	}))
+	ynpb.RegisterGatewayServer(server, gateway)
+	ynpb.RegisterFunctionServiceServer(server, gateway)
+	decappb.RegisterDecapServiceServer(server, gateway)
+	go func() { _ = server.Serve(listener) }()
+	t.Cleanup(server.Stop)
+	return gateway, listener.Addr().String()
+}
+
+// pollConfig separates a short file-check interval from a long apply interval.
+func pollConfig(cfg *operator.Config, endpoint string) *operator.Config {
+	cfg.Gateways[0].Endpoint = xcfg.MustNonEmptyString(endpoint)
+	cfg.PollInterval = 20 * time.Millisecond
+	cfg.Reconcile.Interval = xcfg.MustNonZero(time.Hour)
+	cfg.Reconcile.InitialBackoff = xcfg.MustNonZero(time.Hour)
+	cfg.Reconcile.MaxBackoff = xcfg.MustNonZero(time.Hour)
+	return cfg
+}
+
+// runPollingOperator starts the instance and joins its workers at cleanup.
+func runPollingOperator(t *testing.T, runnable commonoperator.Runnable) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
+	var group errgroup.Group
+	group.Go(func() error { return runnable.Run(ctx) })
+	t.Cleanup(func() {
+		cancel()
+		err := group.Wait()
+		require.True(t, err == nil || errors.Is(err, context.Canceled), "got %v", err)
+		require.NoError(t, runnable.Close())
+	})
+}
+
+// replaceConfig atomically replaces a file while preserving its timestamps.
+func replaceConfig(t *testing.T, path, data string) {
+	t.Helper()
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	temporary := path + ".next"
+	require.NoError(t, os.WriteFile(temporary, []byte(data), 0o644))
+	require.NoError(t, os.Chtimes(temporary, info.ModTime(), info.ModTime()))
+	require.NoError(t, os.Rename(temporary, path))
+}
+
+// waitForRequests waits until the gateway observes the requested apply count.
+func waitForRequests(t *testing.T, gateway *pollingGateway, count int) []proto.Message {
+	t.Helper()
+	require.Eventually(t, func() bool { return len(gateway.Requests()) >= count }, 5*time.Second, 5*time.Millisecond)
+	return gateway.Requests()
+}
+
+// Test_NewOperator_PollsAtomicReplacement verifies that changing file contents
+// with the same size and timestamp wakes reconciliation for both schema sources.
+func Test_NewOperator_PollsAtomicReplacement(t *testing.T) {
+	for _, described := range []bool{false, true} {
+		name := "linked module"
+		if described {
+			name = "module loaded from descriptors"
+		}
+		t.Run(name, func(t *testing.T) {
+			path := writeModuleConfig(t, "prefixes6: [2001:db8:1::/48]\n")
+			cfg := decodeConfig(t, decapInstance(path))
+			replacement := "prefixes6: [2001:db8:2::/48]\n"
+			var files *protoregistry.Files
+			if described {
+				require.NoError(t, os.WriteFile(path, []byte("hop_limit: 64\n"), 0o644))
+				cfg = decodeConfig(t, unlinkedInstance(path, writeDescriptorSet(t, unlinkedModule())))
+				var err error
+				files, err = commonoperator.LoadDescriptorSet(cfg.Configs[0].Descriptors)
+				require.NoError(t, err)
+				replacement = "hop_limit: 63\n"
+			}
+			gateway, endpoint := startPollingGateway(t, files)
+			runnable, err := operator.NewOperator(pollConfig(cfg, endpoint))
+			require.NoError(t, err)
+			runPollingOperator(t, runnable)
+			initial := waitForRequests(t, gateway, 1)[0]
+			if described {
+				require.NoError(t, os.Remove(cfg.Configs[0].Descriptors))
+			}
+
+			replaceConfig(t, path, replacement)
+			requests := waitForRequests(t, gateway, 2)
+			want, err := operator.LoadRequest(cfg.Configs[0].Method.Unwrap(), path, files)
+			require.NoError(t, err)
+			message := want.ProtoReflect()
+			message.Set(message.Descriptor().Fields().ByName("name"), protoreflect.ValueOfString(cfg.Configs[0].Name.Unwrap()))
+			require.False(t, proto.Equal(initial, want))
+			require.True(t, proto.Equal(want, requests[1]), "got %v", requests[1])
+		})
+	}
+}
+
+// Test_NewOperator_PollingSkipsEquivalentFiles verifies that unchanged bytes
+// and formatting-only changes do not trigger extra gateway applies.
+func Test_NewOperator_PollingSkipsEquivalentFiles(t *testing.T) {
+	path := writeModuleConfig(t, "prefixes6: [2001:db8::/32]\n")
+	gateway, endpoint := startPollingGateway(t, nil)
+	cfg := pollConfig(decodeConfig(t, decapInstance(path)), endpoint)
+	runnable, err := operator.NewOperator(cfg)
+	require.NoError(t, err)
+	runPollingOperator(t, runnable)
+	waitForRequests(t, gateway, 1)
+
+	for _, data := range []string{
+		"prefixes6: [2001:db8::/32]\n",
+		"# Formatting only.\nprefixes6:\n  - 2001:db8::/32\n",
+	} {
+		replaceConfig(t, path, data)
+		require.Never(t, func() bool { return len(gateway.Requests()) > 1 }, 5*cfg.PollInterval, 5*time.Millisecond)
+	}
+}
+
+// Test_NewOperator_PollingDisabled verifies that the default keeps applying
+// the startup request after the file changes.
+func Test_NewOperator_PollingDisabled(t *testing.T) {
+	path := writeModuleConfig(t, "prefixes6: [2001:db8:1::/48]\n")
+	gateway, endpoint := startPollingGateway(t, nil)
+	cfg := decodeConfig(t, decapInstance(path))
+	cfg.Gateways[0].Endpoint = xcfg.MustNonEmptyString(endpoint)
+	cfg.Reconcile.Interval = xcfg.MustNonZero(20 * time.Millisecond)
+	runnable, err := operator.NewOperator(cfg)
+	require.NoError(t, err)
+	replaceConfig(t, path, "prefixes6: [2001:db8:2::/48]\n")
+	runPollingOperator(t, runnable)
+
+	for _, request := range waitForRequests(t, gateway, 4) {
+		decap := request.(*decappb.UpdateConfigRequest)
+		require.Equal(t, "2001:db8:1::/48", decap.GetPrefixes6()[0].AsLogValue())
+	}
+}
+
+// Test_NewOperator_PollingPreservesSnapshotOnFailure verifies that a bad file
+// preserves all prior requests, and fixing it admits the whole new snapshot.
+func Test_NewOperator_PollingPreservesSnapshotOnFailure(t *testing.T) {
+	cases := []struct {
+		name string
+		data string
+	}{
+		{name: "malformed YAML", data: "prefixes6: ["},
+		{name: "invalid address", data: "prefixes6: [not-a-prefix]"},
+		{name: "different config name", data: "name: another\n"},
+		{name: "file absent"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			first := writeModuleConfig(t, "prefixes6: [2001:db8:1::/48]\n")
+			second := writeModuleConfig(t, "prefixes6: [2001:db8:1::/48]\n")
+			gateway, endpoint := startPollingGateway(t, nil)
+			cfg := pollConfig(decodeConfig(t, decapInstance(first)), endpoint)
+			cfg.Reconcile.Interval = xcfg.MustNonZero(20 * time.Millisecond)
+			cfg.Configs = append(cfg.Configs, operator.ModuleConfig{
+				Name: xcfg.MustNonEmptyString("decap1"), Method: cfg.Configs[0].Method, File: xcfg.MustNonEmptyString(second),
+			})
+			core, observed := observer.New(zap.WarnLevel)
+			runnable, err := operator.NewOperator(cfg, operator.WithLog(zap.New(core)))
+			require.NoError(t, err)
+			replaceConfig(t, first, "prefixes6: [2001:db8:2::/48]\n")
+			if tc.data == "" {
+				require.NoError(t, os.Remove(second))
+			} else {
+				replaceConfig(t, second, tc.data)
+			}
+			runPollingOperator(t, runnable)
+			require.Eventually(t, func() bool { return observed.Len() > 0 }, 5*time.Second, 5*time.Millisecond)
+			for _, request := range waitForRequests(t, gateway, 4) {
+				decap := request.(*decappb.UpdateConfigRequest)
+				require.Equal(t, "2001:db8:1::/48", decap.GetPrefixes6()[0].AsLogValue())
+			}
+
+			require.NoError(t, os.WriteFile(second+".next", []byte("prefixes6: [2001:db8:2::/48]\n"), 0o644))
+			require.NoError(t, os.Rename(second+".next", second))
+			require.Eventually(t, func() bool {
+				changed := map[string]bool{}
+				for _, request := range gateway.Requests() {
+					decap := request.(*decappb.UpdateConfigRequest)
+					if decap.GetPrefixes6()[0].AsLogValue() == "2001:db8:2::/48" {
+						changed[decap.GetName()] = true
+					}
+				}
+				return changed["decap0"] && changed["decap1"]
+			}, 5*time.Second, 5*time.Millisecond)
+		})
+	}
+}
+
+// Test_NewOperator_PollingPreemptsGatewayBackoff verifies that a file update
+// reaches a recovered gateway without waiting for its scheduled retry.
+func Test_NewOperator_PollingPreemptsGatewayBackoff(t *testing.T) {
+	path := writeModuleConfig(t, "prefixes6: [2001:db8:1::/48]\n")
+	gateway, endpoint := startPollingGateway(t, nil)
+	gateway.SetFailure(status.Error(codes.Unavailable, "gateway unavailable"))
+	cfg := pollConfig(decodeConfig(t, decapInstance(path)), endpoint)
+	core, observed := observer.New(zap.WarnLevel)
+	runnable, err := operator.NewOperator(cfg, operator.WithLog(zap.New(core)))
+	require.NoError(t, err)
+	runPollingOperator(t, runnable)
+	waitForRequests(t, gateway, 1)
+	require.Eventually(t, func() bool { return observed.Len() > 0 }, 5*time.Second, 5*time.Millisecond)
+
+	gateway.SetFailure(nil)
+	replaceConfig(t, path, "prefixes6: [2001:db8:2::/48]\n")
+	requests := waitForRequests(t, gateway, 2)
+	decap := requests[1].(*decappb.UpdateConfigRequest)
+	require.Equal(t, "2001:db8:2::/48", decap.GetPrefixes6()[0].AsLogValue())
 }

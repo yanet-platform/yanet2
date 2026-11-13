@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
@@ -20,6 +21,35 @@ import (
 var shippedInstanceConfigs = []string{
 	"../etc/yanet/generic-operator.d/forward-default.yaml",
 	"../etc/yanet/generic-operator.d/decap-default.yaml",
+}
+
+// Test_Config_PollInterval verifies that polling is opt-in and that an invalid
+// interval is refused before the operator starts.
+func Test_Config_PollInterval(t *testing.T) {
+	cases := []struct {
+		name    string
+		setting string
+		want    time.Duration
+		wantErr string
+	}{
+		{name: "omitted interval disables polling"},
+		{name: "explicit zero disables polling", setting: "poll_interval: 0s\n"},
+		{name: "positive interval enables polling", setting: "poll_interval: 2s\n", want: 2 * time.Second},
+		{name: "negative interval is rejected", setting: "poll_interval: -1s\n", wantErr: "poll_interval must not be negative"},
+		{name: "malformed interval is rejected", setting: "poll_interval: soon\n", wantErr: "cannot unmarshal"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := operator.DefaultConfig()
+			err := xcfg.Decode([]byte(tc.setting+decapInstance("unused.yaml")), cfg, xcfg.WithKnownFields())
+			if tc.wantErr != "" {
+				require.ErrorContains(t, err, tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.want, cfg.PollInterval)
+		})
+	}
 }
 
 // Test_ShippedInstanceConfigs_NoUnknownKeys guards the shipped instance

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -58,8 +59,14 @@ type StaticConfig struct {
 }
 
 type staticOptions struct {
+	Reload *staticReloadOptions
 	// Log is the logger the operator and its parts share.
 	Log *zap.Logger
+}
+
+type staticReloadOptions struct {
+	Interval time.Duration
+	Load     func() ([]StaticTarget, error)
 }
 
 func newStaticOptions() *staticOptions {
@@ -75,6 +82,16 @@ type StaticOption func(*staticOptions)
 func WithStaticLog(log *zap.Logger) StaticOption {
 	return func(o *staticOptions) {
 		o.Log = log
+	}
+}
+
+// WithStaticReload polls a source independently of gateway reconciliation.
+//
+// A nil snapshot means no change. Failed loads or invalid targets preserve
+// the previous desired state and are retried at the next positive interval.
+func WithStaticReload(interval time.Duration, load func() ([]StaticTarget, error)) StaticOption {
+	return func(o *staticOptions) {
+		o.Reload = &staticReloadOptions{Interval: interval, Load: load}
 	}
 }
 
@@ -97,6 +114,9 @@ func NewStaticModuleOperator(
 	}
 	if len(cfg.Gateways) == 0 {
 		return nil, errors.New("at least one gateway must be configured")
+	}
+	if opts.Reload != nil && (opts.Reload.Interval <= 0 || opts.Reload.Load == nil) {
+		return nil, errors.New("reload requires a positive interval and a loader")
 	}
 	state, err := staticTargets(targets)
 	if err != nil {
@@ -130,10 +150,34 @@ func NewStaticModuleOperator(
 		})
 	}
 
-	// The targets never change, so they are published once and the interval
-	// alone paces the pushes.
 	desired := NewLatest[[]StaticTarget]()
 	desired.Publish(state)
+	var workers []Runner
+	if opts.Reload != nil {
+		workers = append(workers, func(ctx context.Context) error {
+			ticker := time.NewTicker(opts.Reload.Interval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-ticker.C:
+				}
+				targets, err := opts.Reload.Load()
+				if err == nil && targets != nil {
+					targets, err = staticTargets(targets)
+				}
+				if err != nil {
+					log.Warn("failed to reload module configs", zap.Error(err))
+					continue
+				}
+				if targets != nil {
+					desired.Publish(targets)
+					log.Info("reloaded module configs")
+				}
+			}
+		})
+	}
 
 	return NewOperator(
 		gateways,
@@ -148,6 +192,7 @@ func NewStaticModuleOperator(
 		WithGateways(cfg.Register, cfg.Gateways...),
 		WithLog(log),
 		WithReconcile(cfg.Reconcile),
+		WithWorkers(workers...),
 	), nil
 }
 

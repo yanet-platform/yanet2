@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/yaml.v3"
@@ -31,6 +32,11 @@ type Config struct {
 	Gateways  []operator.GatewayConfig  `yaml:"gateways"`
 	Register  operator.RegisterConfig   `yaml:"register"`
 	Reconcile operator.ReconcileConfig  `yaml:"reconcile"`
+	// PollInterval paces module config file checks; zero disables polling.
+	//
+	// Descriptors, functions and the instance configuration stay fixed
+	// until restart. A failed file reload preserves the previous snapshot.
+	PollInterval time.Duration `yaml:"poll_interval"`
 	// Configs are the module configs this instance pushes.
 	Configs []ModuleConfig `yaml:"configs"`
 	// Functions are the gateway functions published after the configs.
@@ -56,6 +62,9 @@ func (m *Config) DebugConfig() *debugserver.Config {
 
 // Validate checks that the config is structurally sound.
 func (m *Config) Validate() error {
+	if m.PollInterval < 0 {
+		return errors.New("poll_interval must not be negative")
+	}
 	if len(m.Gateways) == 0 {
 		return errors.New("at least one gateway must be configured")
 	}
