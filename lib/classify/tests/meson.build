@@ -56,13 +56,13 @@ classify_join_test = executable(
 )
 test('classify_join_test', classify_join_test, suite: ['filter'])
 
-# The join tests again over fingerprints narrowed to 20 bits: pair sets
-# merge under these fixed seeds, and the join must catch them and still
-# match the reference.
+# The join tests again with the first attempt of every join merging all
+# its pair sets: the join must catch the merge and match the reference
+# from its next attempt.
 classify_join_collision_test = executable(
   'classify_join_collision_test',
   ['join.c', '../compiler/helper.c'],
-  c_args: yanet_test_c_args + ['-DJOIN_FINGERPRINT_MASK=0x3ffULL'],
+  c_args: yanet_test_c_args + ['-DJOIN_FIRST_ATTEMPT_MASK=0ULL'],
   dependencies: [lib_common_dep, libdpdk_inc_dep],
   include_directories: yanet_rootdir,
 )

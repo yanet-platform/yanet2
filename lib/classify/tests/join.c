@@ -770,7 +770,8 @@ run_join_random_equivalence_test(void) {
 	join_arena_close(&arena);
 }
 
-// The default of the join, narrowed by the builds forcing merges.
+// The default of the join, narrowed by the build that zeroes every
+// fingerprint.
 #ifndef JOIN_FINGERPRINT_MASK
 #define JOIN_FINGERPRINT_MASK UINT64_MAX
 #endif

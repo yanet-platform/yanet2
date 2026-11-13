@@ -442,15 +442,23 @@ join_pair_eq(uint32_t pair, const void *data) {
  * 2^-128, and a join of N classes merges two of them with probability
  * below N^2 / 2^129. Distinct pairs never share a fingerprint and none
  * is zero, so a merge needs sets differing in at least three pairs.
+ * The seeds are fixed so that every build of a ruleset reproduces; the
+ * bound holds for rulesets not constructed against them, as an
+ * operator's are, and a ruleset built against them could force a failure
+ * or a merge the counts miss.
  */
 struct join_fingerprint {
 	uint64_t lo;
 	uint64_t hi;
 };
 
-// Narrowed only by the tests that force merges of pair sets.
+// Narrowed only by the tests that force merges of pair sets: in every
+// attempt, or in the first one only.
 #ifndef JOIN_FINGERPRINT_MASK
 #define JOIN_FINGERPRINT_MASK UINT64_MAX
+#endif
+#ifndef JOIN_FIRST_ATTEMPT_MASK
+#define JOIN_FIRST_ATTEMPT_MASK UINT64_MAX
 #endif
 
 // Two consecutive splitmix64 outputs of a seed and a pair, so a retry
@@ -466,8 +474,10 @@ join_pair_fingerprint(uint32_t pair, uint32_t seed) {
 		x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
 		words[i] = x ^ (x >> 31);
 	}
-	return (struct join_fingerprint){words[0] & JOIN_FINGERPRINT_MASK,
-					 words[1] & JOIN_FINGERPRINT_MASK};
+	uint64_t mask =
+		seed == 0 ? JOIN_FINGERPRINT_MASK & JOIN_FIRST_ATTEMPT_MASK
+			  : JOIN_FINGERPRINT_MASK;
+	return (struct join_fingerprint){words[0] & mask, words[1] & mask};
 }
 
 static inline void
