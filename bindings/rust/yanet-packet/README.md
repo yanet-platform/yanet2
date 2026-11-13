@@ -16,6 +16,8 @@ header handling of the C packet library and grows on demand.
   parser: an IPv4 view also refuses a version other than 4, and `has_vlan`
   also reports the 802.1ad tag 0x88a8, which the C parser treats as an
   unknown L3 type.
+- IPv4 and IPv6 headers as values written whole (`IpRepr`), their lengths
+  and the IPv4 checksum filled, for a header built anew or translated.
 - Setters keep checksums consistent incrementally where the C code does (TTL,
   DSCP, addresses, ports). Rewriting an address also requires a call to the
   L4 header to fix the pseudo-header checksum.

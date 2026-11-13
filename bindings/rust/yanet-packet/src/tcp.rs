@@ -773,7 +773,7 @@ mod tests {
             | ParseError::LengthBeyondInput { .. } => {
                 panic!("unexpected {error:?}")
             }
-            ParseError::OptionLength { .. } => panic!("unexpected {error:?}"),
+            ParseError::OptionLength { .. } | ParseError::LengthBeyondField { .. } => panic!("unexpected {error:?}"),
         }
     }
 

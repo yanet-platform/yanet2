@@ -8,7 +8,12 @@
 
 use core::{marker::PhantomData, mem::size_of, ops::Deref, ptr::NonNull};
 
-use yanet_packet::resize::{Insertion, Layout, Parsed};
+use yanet_packet::{
+    ETHERTYPE_IPV4, ETHERTYPE_IPV6, IPPROTO_AH, IPPROTO_DSTOPTS, IPPROTO_FRAGMENT, IPPROTO_HOPOPTS, IPPROTO_IPIP,
+    IPPROTO_IPV6, IPPROTO_ROUTING, IPPROTO_TCP, IPPROTO_UDP, IpRepr, Ipv4Header, Ipv4Repr, Ipv6Fragment, Ipv6Header,
+    Ipv6Repr, TcpHeader, UdpHeader,
+    resize::{Insertion, Layout, Parsed},
+};
 
 use crate::bindings;
 
@@ -1091,6 +1096,130 @@ impl<'id> Packet<'id> {
             let written = options.write(area);
             debug_assert!(written.is_ok());
         })
+    }
+
+    /// Replaces the IP headers, from the network to the transport header, by
+    /// the headers given, as when translating between IPv4 and IPv6.
+    ///
+    /// The shorter side moves as for [`Packet::insert`], the ether type before
+    /// the headers becomes theirs, their lengths count what the old IP length
+    /// counted, and an IPv4 checksum is filled. The descriptor takes the
+    /// fields the parser would read; network offset, VLAN id, hash and other
+    /// flags stay. The transport checksum is the caller's, a zero UDP checksum
+    /// IPv6 forbids included. An encapsulation behind outer IPv6 extension
+    /// headers goes unseen, so such a packet is parsed again first.
+    ///
+    /// # Errors
+    ///
+    /// Refused, leaving the packet unchanged: a chained packet, one without a
+    /// parsed IPv4 or IPv6 header behind the Ethernet header, IP headers not
+    /// ending at the transport header, as after an encapsulation, an IP length
+    /// short of its headers or past the frame, an IPv6 protocol the parser
+    /// takes for an extension header, a TCP or UDP header the new
+    /// headers make available but the datagram does not hold whole, a datagram
+    /// no length field holds, and a length neither room takes.
+    #[inline]
+    pub fn replace_network_header(&mut self, header: &IpRepr) -> Result<(), ResizeError> {
+        let PacketMeta(packet) = &**self;
+        let (network, transport) = (packet.network_header, packet.transport_header);
+        let (start, end) = (usize::from(network.offset), usize::from(transport.offset));
+        if self.chained() || start < ETHERNET_HEADER_LEN || !parsed(transport.type_, transport.offset) || end < start {
+            return Err(ResizeError);
+        }
+        let frame = self.data();
+        let (old, protocol) = (end - start, self.transport_protocol());
+        // An encapsulation leaves the transport header the inner one, so the
+        // old headers must end at it.
+        //
+        // That is checked whole for IPv4 and for IPv6 without extension
+        // headers, and by an IP-in-IP next header for IPv6 with them.
+        let datagram = match self.network_type() {
+            ETHERTYPE_IPV4 => frame
+                .get(start..)
+                .and_then(<[u8]>::first_chunk::<20>)
+                .filter(|header| usize::from(header[0] & 0x0f) * 4 == old && header[9] == protocol)
+                .map(|header| usize::from(u16::from_be_bytes([header[2], header[3]]))),
+            ETHERTYPE_IPV6 => frame
+                .get(start..)
+                .and_then(<[u8]>::first_chunk::<40>)
+                .filter(|header| match header[6] {
+                    IPPROTO_IPIP | IPPROTO_IPV6 => false,
+                    next => old != Ipv6Header::LEN || next == protocol,
+                })
+                .map(|header| Ipv6Header::LEN + usize::from(u16::from_be_bytes([header[4], header[5]]))),
+            _ => None,
+        };
+        // The parser marks a fragment by either flag or offset, as the masks
+        // keep them, and holds no transport header in one after the first.
+        let (network_type, len, protocol, word, flag_mask, offset_mask) = match header {
+            IpRepr::V4(Ipv4Repr { protocol, frag, .. }) => {
+                (ETHERTYPE_IPV4, Ipv4Header::MIN_LEN, *protocol, *frag, 0x3fff, 0x1fff)
+            }
+            IpRepr::V6(repr @ Ipv6Repr { protocol, fragment, .. }) => {
+                let word = fragment.map_or(0, |Ipv6Fragment { offset, more, .. }| (offset << 3) | u16::from(more));
+                // The parser walks these as extension headers past where the
+                // transport header would be, unless a later fragment stops it.
+                if word & 0xfff8 == 0
+                    && matches!(
+                        *protocol,
+                        IPPROTO_HOPOPTS | IPPROTO_ROUTING | IPPROTO_DSTOPTS | IPPROTO_AH | IPPROTO_FRAGMENT
+                    )
+                {
+                    return Err(ResizeError);
+                }
+                (ETHERTYPE_IPV6, repr.header_len(), *protocol, word, 0xfff9, 0xfff8)
+            }
+        };
+        let (fragment, offset) = (word & flag_mask != 0, word & offset_mask);
+        let available = offset == 0;
+        let transport_len = match (available, protocol) {
+            (true, IPPROTO_TCP) => TcpHeader::MIN_LEN,
+            (true, IPPROTO_UDP) => UdpHeader::LEN,
+            _ => 0,
+        };
+        let Some(upper) = datagram
+            .and_then(|datagram| (start + datagram).checked_sub(end))
+            .filter(|&upper| {
+                end + upper <= frame.len() && upper >= transport_len && len + upper <= usize::from(u16::MAX)
+            })
+        else {
+            return Err(ResizeError);
+        };
+        if len > old {
+            self.move_for_insert(start, (len - old) as u16)?;
+        } else if old > len {
+            self.move_for_remove(start, (old - len) as u16);
+        }
+        let frame = self.data_mut();
+        if let Some(ether_type) = frame.get_mut(start - 2..).and_then(<[u8]>::first_chunk_mut) {
+            *ether_type = network_type.to_be_bytes();
+        }
+        let written = header.write(frame.get_mut(start..).unwrap_or_default(), upper);
+        debug_assert!(written.is_ok());
+        let raw = self.raw.as_ptr();
+        // SAFETY: the packet is exclusively ours for the call (attach: packet).
+        //
+        // The transport offset follows the written headers inside the frame,
+        // and an available TCP or UDP header there is held whole.
+        unsafe {
+            let unavailable = if available {
+                0
+            } else {
+                bindings::PACKET_TRANSPORT_HEADER_UNAVAILABLE as u16
+            };
+            (*raw).network_header = bindings::network_header {
+                type_: network_type.to_be(),
+                offset: network.offset,
+            };
+            (*raw).transport_header = bindings::transport_header {
+                type_: u16::from(protocol) | unavailable,
+                offset: (start + len) as u16,
+            };
+            let fragmented = 1 << bindings::packet_flag_PACKET_FLAG_FRAGMENTED;
+            (*raw).flags = (*raw).flags & !fragmented | if fragment { fragmented } else { 0 };
+            (*raw).fragment_offset = offset;
+        }
+        Ok(())
     }
 
     /// Prepends an outer IPv4 header to an IPv4 or IPv6 packet, as the C

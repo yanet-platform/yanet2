@@ -461,6 +461,64 @@ impl<'a> Ipv4PacketMut<'a> {
     }
 }
 
+/// An IPv4 header without options, as a value written whole.
+///
+/// Writing it fills the total length and the header checksum, so what lands
+/// in the frame is a header the packet parser takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Ipv4Repr {
+    /// The DSCP, its bits above six dropped.
+    pub dscp: u8,
+    /// The ECN codepoint, its bits above two dropped.
+    pub ecn: u8,
+    pub id: u16,
+    /// The flags and fragment offset word, the offset in 8-byte units.
+    pub frag: u16,
+    pub ttl: u8,
+    pub protocol: u8,
+    pub src: Ipv4Addr,
+    pub dst: Ipv4Addr,
+}
+
+impl Ipv4Repr {
+    /// Writes the header at the start of an area, for a datagram of the given
+    /// number of bytes behind it.
+    ///
+    /// # Errors
+    ///
+    /// [`ParseError::Truncated`] when the area is shorter than the header,
+    /// and [`ParseError::LengthBeyondField`] for a datagram the total length
+    /// cannot hold; nothing is written then.
+    #[inline]
+    pub fn write(&self, area: &mut [u8], upper_len: usize) -> Result<(), ParseError> {
+        let total = Ipv4Header::MIN_LEN
+            .checked_add(upper_len)
+            .and_then(|length| u16::try_from(length).ok())
+            .ok_or(ParseError::LengthBeyondField {
+                length: Ipv4Header::MIN_LEN.saturating_add(upper_len),
+                max: usize::from(u16::MAX),
+            })?;
+        let (header, _) = split_header_mut::<Ipv4Header>(area)?;
+        let mut value = Ipv4Header {
+            version_ihl: (4 << 4) | (Ipv4Header::MIN_LEN / 4) as u8,
+            tos: ((self.dscp & 0x3f) << 2) | (self.ecn & 0x03),
+            total_len: U16::new(total),
+            id: U16::new(self.id),
+            frag: U16::new(self.frag),
+            ttl: self.ttl,
+            protocol: self.protocol,
+            checksum: U16::ZERO,
+            src: self.src.octets(),
+            dst: self.dst.octets(),
+        };
+        let (words, _) = value.as_bytes().as_chunks::<2>();
+        let sum = words.iter().map(|&word| u64::from(u16::from_be_bytes(word))).sum();
+        value.checksum = U16::new(!crate::fold(sum));
+        *header = value;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -992,7 +1050,7 @@ mod tests {
                 assert_eq!(buf.len(), available);
                 assert!(length > available);
             }
-            ParseError::OptionLength { .. } => panic!("unexpected {error:?}"),
+            ParseError::OptionLength { .. } | ParseError::LengthBeyondField { .. } => panic!("unexpected {error:?}"),
         }
     }
 

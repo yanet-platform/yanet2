@@ -5,7 +5,7 @@ use zerocopy::{
     byteorder::network_endian::{U16, U32},
 };
 
-use crate::{ParseError, split_header, split_header_mut};
+use crate::{IPPROTO_FRAGMENT, ParseError, split_header, split_header_mut};
 
 /// IPv6 fixed header. Extension headers are part of the payload.
 ///
@@ -215,6 +215,98 @@ impl Ipv6Header {
     /// Replaces the destination address and returns the previous one.
     pub fn set_dst(&mut self, addr: Ipv6Addr) -> Ipv6Addr {
         Ipv6Addr::from(core::mem::replace(&mut self.dst, addr.octets()))
+    }
+}
+
+/// An IPv6 header, behind it a Fragment header when the packet is one, as a
+/// value written whole.
+///
+/// Writing it fills the payload length; with a transport protocol behind,
+/// what lands in the frame is a header the packet parser takes as written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Ipv6Repr {
+    pub traffic_class: u8,
+    /// The flow label, its bits above twenty dropped.
+    pub flow_label: u32,
+    pub hop_limit: u8,
+    /// Next header behind these headers: the transport protocol, or an
+    /// extension header the caller writes after them.
+    pub protocol: u8,
+    pub src: Ipv6Addr,
+    pub dst: Ipv6Addr,
+    pub fragment: Option<Ipv6Fragment>,
+}
+
+/// The fields of an IPv6 Fragment header but its next header.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Ipv6Fragment {
+    /// Offset of the fragment in its datagram, in 8-byte units, its bits
+    /// above thirteen dropped.
+    pub offset: u16,
+    /// Whether more fragments follow.
+    pub more: bool,
+    pub ident: u32,
+}
+
+impl Ipv6Repr {
+    /// Bytes of a Fragment header.
+    pub const FRAGMENT_LEN: usize = 8;
+
+    /// Bytes the headers take written.
+    #[inline]
+    pub fn header_len(&self) -> usize {
+        Ipv6Header::LEN + self.fragment.map_or(0, |_| Self::FRAGMENT_LEN)
+    }
+
+    /// Writes the headers at the start of an area, for a datagram of the given
+    /// number of bytes behind them.
+    ///
+    /// # Errors
+    ///
+    /// [`ParseError::Truncated`] when the area is shorter than the headers,
+    /// and [`ParseError::LengthBeyondField`] for a payload the payload length
+    /// cannot hold; nothing is written then.
+    #[inline]
+    pub fn write(&self, area: &mut [u8], upper_len: usize) -> Result<(), ParseError> {
+        let extensions = self.header_len() - Ipv6Header::LEN;
+        let payload = extensions
+            .checked_add(upper_len)
+            .and_then(|length| u16::try_from(length).ok())
+            .ok_or(ParseError::LengthBeyondField {
+                length: extensions.saturating_add(upper_len),
+                max: usize::from(u16::MAX),
+            })?;
+        let available = area.len();
+        let (header, rest) = split_header_mut::<Ipv6Header>(area)?;
+        let fragment = match self.fragment {
+            Some(Ipv6Fragment { offset, more, ident }) => {
+                let chunk = rest
+                    .first_chunk_mut::<8>()
+                    .ok_or(ParseError::Truncated { needed: self.header_len(), available })?;
+                Some((chunk, offset, more, ident))
+            }
+            None => None,
+        };
+        *header = Ipv6Header {
+            version_tc_flow: U32::new(
+                (6 << 28) | (u32::from(self.traffic_class) << 20) | (self.flow_label & 0x000f_ffff),
+            ),
+            payload_len: U16::new(payload),
+            next_header: if fragment.is_some() {
+                IPPROTO_FRAGMENT
+            } else {
+                self.protocol
+            },
+            hop_limit: self.hop_limit,
+            src: self.src.octets(),
+            dst: self.dst.octets(),
+        };
+        if let Some((chunk, offset, more, ident)) = fragment {
+            let [high, low] = ((offset << 3) | u16::from(more)).to_be_bytes();
+            let [i0, i1, i2, i3] = ident.to_be_bytes();
+            *chunk = [self.protocol, 0, high, low, i0, i1, i2, i3];
+        }
+        Ok(())
     }
 }
 
@@ -516,7 +608,7 @@ mod tests {
                 assert!(length > available);
             }
             ParseError::HeaderLen { .. } | ParseError::LengthBelowHeader { .. } => panic!("unexpected {error:?}"),
-            ParseError::OptionLength { .. } => panic!("unexpected {error:?}"),
+            ParseError::OptionLength { .. } | ParseError::LengthBeyondField { .. } => panic!("unexpected {error:?}"),
         }
     }
 
