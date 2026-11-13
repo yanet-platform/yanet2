@@ -162,6 +162,13 @@ it with `CARGO_TARGET_DIR` pointing at the checkout's `target/` so the
 binary lands next to the in-tree CLIs; private module CLIs are not part
 of the public deb.
 
+A CLI that calls an in-tree module's or operator's service instead of
+defining its own proto depends on the prebuilt `yanet-servicepb` crate
+(`common/rust/servicepb`): every module and operator service proto
+compiled once, with the shared common/filter/readiness types mapped onto
+their own crates, exposing the messages and clients under
+`pb::modules::…` and `pb::operators::…`.
+
 ## Testing
 
 The in-process dataplane harness loads plugins too:
