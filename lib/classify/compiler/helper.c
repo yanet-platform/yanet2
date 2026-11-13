@@ -1,6 +1,5 @@
 #include "lib/classify/compiler/helper.h"
 
-#include "common/hash_index.h"
 #include "common/registry.h"
 #include "lib/classify/classify.h"
 #include "lib/classify/compiler/declare.h"
@@ -331,23 +330,6 @@ error_free_compact:
 
 //////////////////////////////////////////////////////////////////////////////
 
-struct touch_ctx {
-	struct value_table *value_table;
-	struct remap_table *remap_table;
-};
-
-static int
-value_table_touch_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
-	(void)idx;
-	struct touch_ctx *touch_ctx = (struct touch_ctx *)data;
-
-	uint32_t *value = value_table_get_ptr(touch_ctx->value_table, v1, v2);
-	if (remap_table_touch(touch_ctx->remap_table, *value, value) < 0) {
-		return -1;
-	}
-	return 0;
-}
-
 static inline uint32_t
 merge_group_pair_hash(uint32_t left, uint32_t right) {
 	uint32_t hash = left * 2654435761u;
@@ -361,267 +343,6 @@ struct merge_pair_ctx {
 	uint32_t group1;
 	uint32_t group2;
 };
-
-static int
-merge_pair_eq(uint32_t value, const void *data) {
-	const struct merge_pair_ctx *pair_ctx =
-		(const struct merge_pair_ctx *)data;
-	return pair_ctx->pair_group1[value] != pair_ctx->group1 ||
-	       pair_ctx->pair_group2[value] != pair_ctx->group2;
-}
-
-struct value_collect_ctx {
-	struct value_table *table;
-	struct value_registry *registry;
-};
-
-static int
-value_table_collect_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
-	(void)idx;
-	struct value_collect_ctx *collect_ctx =
-		(struct value_collect_ctx *)data;
-	return value_registry_collect(
-		collect_ctx->registry,
-		value_table_get(collect_ctx->table, v1, v2)
-	);
-}
-
-/*
- * Joins two group registries into a joint stage of the classification.
- *
- * The name scopes the memory contexts of the join - the value table and
- * the stage registry - each titled with the name and its own artifact
- * leaf, so every context of one join of one classifier composition is
- * identified in the memory tree.
- *
- * Rules referencing the same group pair on both sides produce the same
- * touched cell joins, so the stage operates on distinct pairs instead of
- * all rules. On success the routine initializes the value table holding
- * the join results, the registry with one range per pair holding the
- * pair matching class identifiers, and fills the rule to pair mapping;
- * a rule without a value on either side keeps the invalid group mark.
- */
-int
-classify_join(
-	struct memory_context *memory_context,
-	const char *name,
-	const struct classifier *left,
-	const struct classifier *right,
-	uint32_t rule_count,
-	struct value_table *table,
-	struct classifier *out
-) {
-	const struct value_registry *registry1 = &left->registry;
-	const uint32_t *rule_to_group1 = left->rule_groups;
-	const struct value_registry *registry2 = &right->registry;
-	const uint32_t *rule_to_group2 = right->rule_groups;
-	struct value_registry *registry = &out->registry;
-	uint32_t *rule_to_group;
-
-	if (classifier_init(out, memory_context, rule_count)) {
-		return -1;
-	}
-	rule_to_group = out->rule_groups;
-
-	// Pair collection scratch, emptied here so a failure of the table
-	// below unwinds through the common exit.
-	uint32_t pair_alloc_count = rule_count ? rule_count : 1;
-	uint32_t *pair_group1 = NULL;
-	uint32_t *pair_group2 = NULL;
-	struct hash_index pair_index = {0};
-	bool pair_index_live = false;
-
-	char table_name[MEMORY_CONTEXT_NAME_SIZE];
-	classify_leaf_name(table_name, sizeof(table_name), name, "table");
-	if (value_table_init(
-		    table,
-		    memory_context,
-		    table_name,
-		    value_registry_capacity(registry1),
-		    value_registry_capacity(registry2)
-	    )) {
-		goto error_free_pairs;
-	}
-
-	/*
-	 * Collect the distinct group pairs into a hash index: the group of
-	 * the first registry and the group of the second one each rule
-	 * references.
-	 */
-	pair_group1 = (uint32_t *)memory_balloc(
-		memory_context, sizeof(uint32_t) * pair_alloc_count
-	);
-	if (pair_group1 == NULL) {
-		goto error_free_pairs;
-	}
-
-	pair_group2 = (uint32_t *)memory_balloc(
-		memory_context, sizeof(uint32_t) * pair_alloc_count
-	);
-	if (pair_group2 == NULL) {
-		goto error_free_pairs;
-	}
-
-	if (hash_index_init(&pair_index, memory_context, rule_count)) {
-		goto error_free_pairs;
-	}
-	pair_index_live = true;
-
-	uint32_t pair_count = 0;
-	for (uint32_t rule_idx = 0; rule_idx < rule_count; ++rule_idx) {
-		uint32_t group1 = rule_to_group1[rule_idx];
-		uint32_t group2 = rule_to_group2[rule_idx];
-		rule_to_group[rule_idx] = FILTER_GROUP_INVALID;
-
-		if (group1 == FILTER_GROUP_INVALID ||
-		    group2 == FILTER_GROUP_INVALID) {
-			continue;
-		}
-
-		uint32_t hash = merge_group_pair_hash(group1, group2);
-		struct merge_pair_ctx pair_ctx = {
-			pair_group1,
-			pair_group2,
-			group1,
-			group2,
-		};
-
-		uint32_t pair = hash_index_lookup(
-			&pair_index, hash, merge_pair_eq, &pair_ctx
-		);
-		if (pair == HASH_INDEX_INVALID) {
-			pair = pair_count;
-			if (hash_index_insert(&pair_index, hash, pair)) {
-				goto error_free_pairs;
-			}
-			pair_group1[pair] = group1;
-			pair_group2[pair] = group2;
-			++pair_count;
-		}
-
-		rule_to_group[rule_idx] = pair;
-	}
-
-	/*
-	 * The remap table is used to enumerate the cell joins - each pair
-	 * touches its value joins so each cell gains a value specific to
-	 * the matching set of pairs.
-	 */
-	struct remap_table remap_table;
-	if (remap_table_init(
-		    &remap_table,
-		    memory_context,
-		    value_registry_capacity(registry1) *
-			    value_registry_capacity(registry2)
-	    )) {
-		goto error_free_pairs;
-	}
-
-	struct touch_ctx touch_ctx;
-	touch_ctx.value_table = table;
-	touch_ctx.remap_table = &remap_table;
-
-	for (uint32_t pair_idx = 0; pair_idx < pair_count; ++pair_idx) {
-		remap_table_new_gen(&remap_table);
-
-		// Touch the pair matching value joins
-		if (value_registry_join_ranges(
-			    registry1,
-			    pair_group1[pair_idx],
-			    registry2,
-			    pair_group2[pair_idx],
-			    value_table_touch_action,
-			    &touch_ctx
-		    )) {
-			remap_table_free(&remap_table);
-			goto error_free_pairs;
-		}
-	}
-
-	/*
-	 * Remap table compaction removes gaps of unused values and makes
-	 * the resulting set of values smaller
-	 */
-
-	remap_table_compact(&remap_table);
-	value_table_compact(table, &remap_table);
-	remap_table_free(&remap_table);
-
-	char registry_name[MEMORY_CONTEXT_NAME_SIZE];
-	classify_leaf_name(
-		registry_name, sizeof(registry_name), name, "registry"
-	);
-	if (value_registry_init(registry, memory_context, registry_name)) {
-		goto error_free_pairs;
-	}
-
-	/*
-	 * Collect the pair matching class identifiers into the registry,
-	 * one range per pair.
-	 */
-	struct value_collect_ctx collect_ctx;
-	collect_ctx.table = table;
-	collect_ctx.registry = registry;
-
-	for (uint32_t pair_idx = 0; pair_idx < pair_count; ++pair_idx) {
-		if (value_registry_start(registry)) {
-			goto error_free_pairs;
-		}
-
-		if (value_registry_join_ranges(
-			    registry1,
-			    pair_group1[pair_idx],
-			    registry2,
-			    pair_group2[pair_idx],
-			    value_table_collect_action,
-			    &collect_ctx
-		    )) {
-			goto error_free_pairs;
-		}
-	}
-
-	hash_index_fini(&pair_index);
-	memory_bfree(
-		memory_context, pair_group2, sizeof(uint32_t) * pair_alloc_count
-	);
-	memory_bfree(
-		memory_context, pair_group1, sizeof(uint32_t) * pair_alloc_count
-	);
-
-	return 0;
-
-error_free_pairs:
-	// One unwind in reverse allocation order, every release guarded:
-	// a failed join leaves no state behind, whatever the stage.
-	value_table_free(table);
-	value_registry_fini(registry);
-	memset(registry, 0, sizeof(*registry));
-	memory_bfree(
-		memory_context,
-		out->rule_groups,
-		sizeof(uint32_t) * (rule_count ? rule_count : 1)
-	);
-	out->rule_groups = NULL;
-	if (pair_index_live) {
-		hash_index_fini(&pair_index);
-	}
-	if (pair_group2 != NULL) {
-		memory_bfree(
-			memory_context,
-			pair_group2,
-			sizeof(uint32_t) * pair_alloc_count
-		);
-	}
-	if (pair_group1 != NULL) {
-		memory_bfree(
-			memory_context,
-			pair_group1,
-			sizeof(uint32_t) * pair_alloc_count
-		);
-	}
-
-	return -1;
-}
 
 struct final_row_ctx {
 	const uint32_t *const *distinct;
@@ -709,6 +430,759 @@ join_pair_eq(uint32_t pair, const void *data) {
 	const struct merge_pair_ctx *ctx = data;
 	return ctx->pair_group1[pair] == ctx->group1 &&
 	       ctx->pair_group2[pair] == ctx->group2;
+}
+
+/*
+ * The fingerprint of a set of distinct pairs of a join.
+ *
+ * Every pair carries a pseudo-random 128-bit fingerprint of a seed and
+ * its index, and a set is the XOR of its members, so the empty set is
+ * zero. The fingerprints are a fixed function of the input; modelled as
+ * independent uniform values, two distinct sets collide with probability
+ * 2^-128, and a join of N classes merges two of them with probability
+ * below N^2 / 2^129. Distinct pairs never share a fingerprint and none
+ * is zero, so a merge needs sets differing in at least three pairs.
+ */
+struct join_fingerprint {
+	uint64_t lo;
+	uint64_t hi;
+};
+
+// Narrowed only by the tests that force merges of pair sets.
+#ifndef JOIN_FINGERPRINT_MASK
+#define JOIN_FINGERPRINT_MASK UINT64_MAX
+#endif
+
+// Two consecutive splitmix64 outputs of a seed and a pair, so a retry
+// or a give-up repeats on the same input.
+static inline struct join_fingerprint
+join_pair_fingerprint(uint32_t pair, uint32_t seed) {
+	uint64_t words[2];
+	for (uint64_t i = 0; i < 2; ++i) {
+		uint64_t x =
+			((uint64_t)seed << 33 | (2 * (uint64_t)pair + i + 1)) *
+			0x9e3779b97f4a7c15ULL;
+		x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
+		x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
+		words[i] = x ^ (x >> 31);
+	}
+	return (struct join_fingerprint){words[0] & JOIN_FINGERPRINT_MASK,
+					 words[1] & JOIN_FINGERPRINT_MASK};
+}
+
+static inline void
+join_fingerprint_xor(struct join_fingerprint *to, struct join_fingerprint z) {
+	to->lo ^= z.lo;
+	to->hi ^= z.hi;
+}
+
+static inline bool
+join_fingerprint_eq(struct join_fingerprint a, struct join_fingerprint b) {
+	return a.lo == b.lo && a.hi == b.hi;
+}
+
+/*
+ * Per group scratch of one join side, filled on the first use by a pair.
+ *
+ * The painted side of a group is the smaller of its values and their
+ * complement over the dimension. A range holds distinct values below the
+ * registry capacity, as its collector keeps.
+ */
+struct join_group {
+	const uint32_t *small;
+	uint32_t *complement;
+	uint32_t small_count;
+	bool flipped;
+	bool ready;
+};
+
+static int
+join_group_prepare(
+	struct join_group *group,
+	const struct value_range *range,
+	uint32_t dim,
+	uint8_t *marks
+) {
+	if (group->ready) {
+		return 0;
+	}
+	const uint32_t *values = ADDR_OF(&range->values);
+	uint32_t count = (uint32_t)range->count;
+	group->small = values;
+	group->small_count = count;
+	if ((uint64_t)count * 2 > dim) {
+		uint32_t size = dim - count;
+		group->complement =
+			malloc((size ? size : 1) * sizeof(uint32_t));
+		if (group->complement == NULL) {
+			return -1;
+		}
+		for (uint32_t idx = 0; idx < count; ++idx) {
+			marks[values[idx]] = 1;
+		}
+		uint32_t unmarked = 0;
+		for (uint32_t value = 0; value < dim; ++value) {
+			if (!marks[value] && unmarked < size) {
+				group->complement[unmarked++] = value;
+			}
+			marks[value] = 0;
+		}
+		group->small = group->complement;
+		group->small_count = unmarked;
+		group->flipped = true;
+	}
+	group->ready = true;
+	return 0;
+}
+
+static int
+join_value_cmp(const void *a, const void *b) {
+	uint32_t x = *(const uint32_t *)a;
+	uint32_t y = *(const uint32_t *)b;
+	return (x > y) - (x < y);
+}
+
+// The values of one item on one side of a join: a pair's painted rows,
+// or a class's first column.
+struct join_span {
+	const uint32_t *values;
+	uint32_t count;
+};
+
+// The items, pairs or classes, holding each value of a dimension,
+// ascending per value.
+struct join_csr {
+	size_t *offsets;
+	uint32_t *items;
+};
+
+static int
+join_csr_build(
+	struct join_csr *csr,
+	uint32_t dim,
+	const struct join_span *spans,
+	uint32_t pair_count
+) {
+	csr->offsets = calloc((size_t)dim + 1, sizeof(size_t));
+	if (csr->offsets == NULL) {
+		return -1;
+	}
+	for (uint32_t pair = 0; pair < pair_count; ++pair) {
+		for (uint32_t idx = 0; idx < spans[pair].count; ++idx) {
+			++csr->offsets[spans[pair].values[idx] + 1];
+		}
+	}
+	for (uint32_t value = 0; value < dim; ++value) {
+		csr->offsets[value + 1] += csr->offsets[value];
+	}
+	size_t total = csr->offsets[dim];
+	csr->items = malloc((total ? total : 1) * sizeof(uint32_t));
+	if (csr->items == NULL) {
+		return -1;
+	}
+	// Filling advances every start to the next one, shifted back after.
+	for (uint32_t pair = 0; pair < pair_count; ++pair) {
+		for (uint32_t idx = 0; idx < spans[pair].count; ++idx) {
+			csr->items[csr->offsets[spans[pair].values[idx]]++] =
+				pair;
+		}
+	}
+	for (uint32_t value = dim; value > 0; --value) {
+		csr->offsets[value] = csr->offsets[value - 1];
+	}
+	csr->offsets[0] = 0;
+	return 0;
+}
+
+static void
+join_csr_free(struct join_csr *csr) {
+	free(csr->items);
+	free(csr->offsets);
+	*csr = (struct join_csr){0};
+}
+
+// The seeds a join tries before it gives up on a merge of pair sets.
+#define JOIN_SEED_ATTEMPTS 4
+
+// A class of a join: its fingerprint, the first cell holding it and the
+// count of its cells.
+struct join_class {
+	struct join_fingerprint fingerprint;
+	uint32_t v;
+	uint32_t h;
+	uint64_t cells;
+};
+
+struct join_classes {
+	struct join_class *items;
+	struct join_index index;
+	uint32_t count;
+	uint32_t capacity;
+};
+
+struct join_class_ctx {
+	const struct join_class *items;
+	struct join_fingerprint fingerprint;
+};
+
+static int
+join_class_eq(uint32_t id, const void *data) {
+	const struct join_class_ctx *ctx = data;
+	return join_fingerprint_eq(
+		ctx->items[id].fingerprint, ctx->fingerprint
+	);
+}
+
+// Doubles the class capacity and rebuilds the index over it, so the
+// index never holds more than half its slots.
+static int
+join_classes_grow(struct join_classes *classes) {
+	uint32_t capacity = classes->capacity ? classes->capacity * 2 : 1024;
+	if (capacity > UINT32_MAX / 4) {
+		return -1;
+	}
+	struct join_class *items =
+		realloc(classes->items, (size_t)capacity * sizeof(*items));
+	if (items == NULL) {
+		return -1;
+	}
+	classes->items = items;
+	free(classes->index.hashes);
+	free(classes->index.slots);
+	if (join_index_init(&classes->index, capacity)) {
+		return -1;
+	}
+	classes->capacity = capacity;
+	for (uint32_t id = 0; id < classes->count; ++id) {
+		join_index_put(
+			&classes->index, (uint32_t)items[id].fingerprint.lo, id
+		);
+	}
+	return 0;
+}
+
+static void
+join_classes_free_index(struct join_classes *classes) {
+	free(classes->index.hashes);
+	free(classes->index.slots);
+	classes->index = (struct join_index){0};
+}
+
+// The class id of a fingerprint, a new one numbered next when unseen;
+// UINT32_MAX when the classes cannot grow.
+static uint32_t
+join_classes_intern(
+	struct join_classes *classes,
+	struct join_fingerprint fingerprint,
+	uint32_t v,
+	uint32_t h
+) {
+	struct join_class_ctx ctx = {classes->items, fingerprint};
+	uint32_t id = join_index_find(
+		&classes->index, (uint32_t)fingerprint.lo, join_class_eq, &ctx
+	);
+	if (id != UINT32_MAX) {
+		return id;
+	}
+	if (classes->count == classes->capacity && join_classes_grow(classes)) {
+		return UINT32_MAX;
+	}
+	id = classes->count++;
+	classes->items[id] = (struct join_class){fingerprint, v, h, 0};
+	join_index_put(&classes->index, (uint32_t)fingerprint.lo, id);
+	return id;
+}
+
+/*
+ * The part of a join every seed shares: the distinct pairs, their
+ * prepared groups and the rows each pair paints.
+ *
+ * A pair with both sides whole covers every cell, so such a join has no
+ * uncovered cell to number zero.
+ */
+struct join_input {
+	const struct value_range *ranges1;
+	const struct value_range *ranges2;
+	uint32_t v_dim;
+	uint32_t h_dim;
+	const uint32_t *pair_group1;
+	const uint32_t *pair_group2;
+	uint32_t pair_count;
+	const struct join_group *groups1;
+	const struct join_group *groups2;
+	struct join_csr painted;
+	bool covered;
+};
+
+/*
+ * Paints the classes of a join under one seed into its table.
+ *
+ * A pair's coverage of a cell is a product a * b over GF(2); a side over
+ * half its dimension is rewritten as a = 1 + a', adding row, column and
+ * constant terms, so only products of small sides are painted. A cell
+ * equal to its left or upper neighbour takes that neighbour's id, others
+ * are interned. Unless a pair covers every cell the empty set takes id
+ * zero, and with no uncovered cell the shift renumbers classes from zero.
+ */
+static int
+join_paint(
+	const struct join_input *in,
+	uint32_t seed,
+	struct value_table *table,
+	struct join_classes *classes,
+	uint32_t *shift
+) {
+	uint32_t v_dim = in->v_dim;
+	uint32_t h_dim = in->h_dim;
+	struct join_fingerprint *pair_terms =
+		malloc((in->pair_count ? in->pair_count : 1) *
+		       sizeof(*pair_terms));
+	struct join_fingerprint *row_terms = calloc(v_dim, sizeof(*row_terms));
+	struct join_fingerprint *col_terms = calloc(h_dim, sizeof(*col_terms));
+	struct join_fingerprint *row = malloc(h_dim * sizeof(*row));
+	struct join_fingerprint *above = malloc(h_dim * sizeof(*above));
+	int rc = -1;
+	if (pair_terms == NULL || row_terms == NULL || col_terms == NULL ||
+	    row == NULL || above == NULL || join_classes_grow(classes)) {
+		goto done;
+	}
+
+	struct join_fingerprint all_term = {0, 0};
+	for (uint32_t pair = 0; pair < in->pair_count; ++pair) {
+		const struct join_group *rows =
+			in->groups1 + in->pair_group1[pair];
+		const struct join_group *cols =
+			in->groups2 + in->pair_group2[pair];
+		struct join_fingerprint z = join_pair_fingerprint(pair, seed);
+		pair_terms[pair] = z;
+		for (uint32_t idx = 0; rows->flipped && idx < cols->small_count;
+		     ++idx) {
+			join_fingerprint_xor(col_terms + cols->small[idx], z);
+		}
+		for (uint32_t idx = 0; cols->flipped && idx < rows->small_count;
+		     ++idx) {
+			join_fingerprint_xor(row_terms + rows->small[idx], z);
+		}
+		if (rows->flipped && cols->flipped) {
+			join_fingerprint_xor(&all_term, z);
+		}
+	}
+
+	if (!in->covered) {
+		join_classes_intern(
+			classes, (struct join_fingerprint){0, 0}, 0, 0
+		);
+	}
+	bool uncovered = false;
+	for (uint32_t v = 0; v < v_dim; ++v) {
+		struct join_fingerprint base = all_term;
+		join_fingerprint_xor(&base, row_terms[v]);
+		for (uint32_t h = 0; h < h_dim; ++h) {
+			row[h] = base;
+			join_fingerprint_xor(row + h, col_terms[h]);
+		}
+		for (size_t e = in->painted.offsets[v];
+		     e < in->painted.offsets[v + 1];
+		     ++e) {
+			uint32_t pair = in->painted.items[e];
+			const struct join_group *cols =
+				in->groups2 + in->pair_group2[pair];
+			for (uint32_t idx = 0; idx < cols->small_count; ++idx) {
+				join_fingerprint_xor(
+					row + cols->small[idx], pair_terms[pair]
+				);
+			}
+		}
+		uint32_t *cells = value_table_get_ptr(table, v, 0);
+		const uint32_t *up =
+			v > 0 ? value_table_get_ptr(table, v - 1, 0) : NULL;
+		uint32_t run_id = UINT32_MAX;
+		uint64_t run = 0;
+		for (uint32_t h = 0; h < h_dim; ++h) {
+			uint32_t id;
+			if (h > 0 && join_fingerprint_eq(row[h], row[h - 1])) {
+				id = cells[h - 1];
+			} else if (v > 0 &&
+				   join_fingerprint_eq(row[h], above[h])) {
+				id = up[h];
+			} else {
+				id = join_classes_intern(classes, row[h], v, h);
+				if (id == UINT32_MAX) {
+					goto done;
+				}
+			}
+			cells[h] = id;
+			if (id != run_id) {
+				if (run) {
+					classes->items[run_id].cells += run;
+				}
+				run_id = id;
+				run = 0;
+			}
+			++run;
+			uncovered |= id == 0;
+		}
+		if (run) {
+			classes->items[run_id].cells += run;
+		}
+		struct join_fingerprint *swap = above;
+		above = row;
+		row = swap;
+	}
+
+	*shift = !in->covered && !uncovered ? 1 : 0;
+	for (uint32_t v = 0; *shift && v < v_dim; ++v) {
+		uint32_t *cells = value_table_get_ptr(table, v, 0);
+		for (uint32_t h = 0; h < h_dim; ++h) {
+			--cells[h];
+		}
+	}
+	rc = 0;
+
+done:
+	free(above);
+	free(row);
+	free(col_terms);
+	free(row_terms);
+	free(pair_terms);
+	return rc;
+}
+
+/*
+ * Collects each pair's classes into the registry, ascending; returns 1
+ * on a detected merge of pair sets and -1 on a failure.
+ *
+ * A pair reads the fewest of its rectangle's cells or the first cells
+ * of the classes in its rows or columns, never more than its rectangle
+ * holds, plus marks over a side. The classes in a rectangle lie wholly
+ * inside it and tile it, so their cells add up to it; a single merge
+ * breaks that sum for some pair, while merges from one dependency among
+ * the fingerprints may cancel.
+ */
+static int
+join_collect(
+	const struct join_input *in,
+	struct value_table *table,
+	const struct join_classes *classes,
+	uint32_t shift,
+	uint8_t *marks,
+	struct value_registry *registry
+) {
+	// The classes as the table numbers them.
+	const struct join_class *items = classes->items + shift;
+	uint32_t count = classes->count - shift;
+	uint32_t first = !in->covered && !shift ? 1 : 0;
+	uint32_t *row_starts =
+		malloc(((size_t)in->v_dim + 1) * sizeof(uint32_t));
+	struct join_span *spans = calloc(count + 1, sizeof(struct join_span));
+	uint32_t *found = malloc((count + 1) * sizeof(uint32_t));
+	uint32_t *stamps = calloc(count + 1, sizeof(uint32_t));
+	struct join_csr columns = {0};
+	int rc = -1;
+	if (row_starts == NULL || spans == NULL || found == NULL ||
+	    stamps == NULL) {
+		goto done;
+	}
+	for (uint32_t v = 0, id = first; v <= in->v_dim; ++v) {
+		while (id < count && items[id].v < v) {
+			++id;
+		}
+		row_starts[v] = id;
+	}
+	for (uint32_t id = first; id < count; ++id) {
+		spans[id] = (struct join_span){&items[id].h, 1};
+	}
+	int built = join_csr_build(&columns, in->h_dim, spans, count);
+	free(spans);
+	spans = NULL;
+	if (built) {
+		goto done;
+	}
+
+	for (uint32_t pair = 0; pair < in->pair_count; ++pair) {
+		const struct value_range *range1 =
+			in->ranges1 + in->pair_group1[pair];
+		const struct value_range *range2 =
+			in->ranges2 + in->pair_group2[pair];
+		const uint32_t *rows = ADDR_OF(&range1->values);
+		const uint32_t *cols = ADDR_OF(&range2->values);
+		uint64_t by_cells = range1->count * range2->count;
+		uint64_t by_rows = 0;
+		uint64_t by_cols = 0;
+		for (uint64_t idx = 0; idx < range1->count; ++idx) {
+			by_rows += row_starts[rows[idx] + 1] -
+				   row_starts[rows[idx]];
+		}
+		for (uint64_t idx = 0; idx < range2->count; ++idx) {
+			by_cols += columns.offsets[cols[idx] + 1] -
+				   columns.offsets[cols[idx]];
+		}
+		uint32_t found_count = 0;
+		if (by_cells <= by_rows && by_cells <= by_cols) {
+			for (uint64_t i = 0; i < range1->count; ++i) {
+				const uint32_t *cells =
+					value_table_get_ptr(table, rows[i], 0);
+				for (uint64_t j = 0; j < range2->count; ++j) {
+					uint32_t id = cells[cols[j]];
+					if (stamps[id] != pair + 1) {
+						stamps[id] = pair + 1;
+						found[found_count++] = id;
+					}
+				}
+			}
+		} else if (by_rows <= by_cols) {
+			for (uint64_t j = 0; j < range2->count; ++j) {
+				marks[cols[j]] = 1;
+			}
+			for (uint64_t i = 0; i < range1->count; ++i) {
+				for (uint32_t id = row_starts[rows[i]];
+				     id < row_starts[rows[i] + 1];
+				     ++id) {
+					if (marks[items[id].h]) {
+						found[found_count++] = id;
+					}
+				}
+			}
+			for (uint64_t j = 0; j < range2->count; ++j) {
+				marks[cols[j]] = 0;
+			}
+		} else {
+			for (uint64_t i = 0; i < range1->count; ++i) {
+				marks[rows[i]] = 1;
+			}
+			for (uint64_t j = 0; j < range2->count; ++j) {
+				for (size_t e = columns.offsets[cols[j]];
+				     e < columns.offsets[cols[j] + 1];
+				     ++e) {
+					uint32_t id = columns.items[e];
+					if (marks[items[id].v]) {
+						found[found_count++] = id;
+					}
+				}
+			}
+			for (uint64_t i = 0; i < range1->count; ++i) {
+				marks[rows[i]] = 0;
+			}
+		}
+		uint32_t ascending = 1;
+		while (ascending < found_count &&
+		       found[ascending - 1] < found[ascending]) {
+			++ascending;
+		}
+		if (ascending < found_count) {
+			qsort(found,
+			      found_count,
+			      sizeof(uint32_t),
+			      join_value_cmp);
+		}
+		uint64_t cells = 0;
+		for (uint32_t idx = 0; idx < found_count; ++idx) {
+			cells += items[found[idx]].cells;
+		}
+		if (cells != by_cells) {
+			rc = 1;
+			goto done;
+		}
+		if (value_registry_start(registry)) {
+			goto done;
+		}
+		for (uint32_t idx = 0; idx < found_count; ++idx) {
+			if (value_registry_collect(registry, found[idx])) {
+				goto done;
+			}
+		}
+	}
+	rc = 0;
+
+done:
+	join_csr_free(&columns);
+	free(stamps);
+	free(found);
+	free(spans);
+	free(row_starts);
+	return rc;
+}
+
+/*
+ * Joins two group registries into a joint stage of the classification.
+ *
+ * The name scopes the memory contexts of the join - the value table and
+ * the stage registry - each titled with the name and its own artifact
+ * leaf, so every context of one join of one classifier composition is
+ * identified in the memory tree.
+ *
+ * Rules referencing the same group pair on both sides cover the same
+ * cells, so the stage operates on distinct pairs instead of all rules.
+ * A cell's class is the set of pairs covering it: the uncovered class
+ * takes zero when some cell is uncovered, the rest are numbered by
+ * first appearance in row-major order. On success the routine
+ * initializes the value table holding the join results, the registry
+ * with one range per pair holding the pair matching class identifiers
+ * in ascending order, and fills the rule to pair mapping; a rule
+ * without a value on either side keeps the invalid group mark. A
+ * detected merge of pair sets repeats the classes under the next seed,
+ * and the join fails once every seed merged.
+ */
+int
+classify_join(
+	struct memory_context *memory_context,
+	const char *name,
+	const struct classifier *left,
+	const struct classifier *right,
+	uint32_t rule_count,
+	struct value_table *table,
+	struct classifier *out
+) {
+	const struct value_registry *registry1 = &left->registry;
+	const struct value_registry *registry2 = &right->registry;
+	uint32_t v_dim = value_registry_capacity(registry1);
+	uint32_t h_dim = value_registry_capacity(registry2);
+	struct value_registry *registry = &out->registry;
+
+	if (classifier_init(out, memory_context, rule_count)) {
+		return -1;
+	}
+	uint32_t *rule_to_group = out->rule_groups;
+
+	// The table is releasable from here on and the scratch lives on the
+	// heap, so every failure below unwinds through the common exit.
+	memset(table, 0, sizeof(*table));
+	uint32_t pair_alloc_count = rule_count ? rule_count : 1;
+	uint32_t *pair_group1 = malloc(sizeof(uint32_t) * pair_alloc_count);
+	uint32_t *pair_group2 = malloc(sizeof(uint32_t) * pair_alloc_count);
+	struct join_span *spans =
+		malloc(sizeof(struct join_span) * pair_alloc_count);
+	struct join_group *groups1 =
+		calloc(registry1->range_count + 1, sizeof(struct join_group));
+	struct join_group *groups2 =
+		calloc(registry2->range_count + 1, sizeof(struct join_group));
+	struct join_input in = {
+		.ranges1 = ADDR_OF(&registry1->ranges),
+		.ranges2 = ADDR_OF(&registry2->ranges),
+		.v_dim = v_dim,
+		.h_dim = h_dim,
+		.pair_group1 = pair_group1,
+		.pair_group2 = pair_group2,
+		.groups1 = groups1,
+		.groups2 = groups2,
+	};
+	// Zeroed scratch over the larger dimension, left zeroed after use.
+	uint8_t *marks = calloc(v_dim > h_dim ? v_dim : h_dim, 1);
+	struct join_index pairs = {0};
+	int rc = -1;
+
+	char table_name[MEMORY_CONTEXT_NAME_SIZE];
+	classify_leaf_name(table_name, sizeof(table_name), name, "table");
+	if (pair_group1 == NULL || pair_group2 == NULL || spans == NULL ||
+	    groups1 == NULL || groups2 == NULL || marks == NULL ||
+	    join_index_init(&pairs, pair_alloc_count) ||
+	    value_table_init(table, memory_context, table_name, v_dim, h_dim)) {
+		goto done;
+	}
+
+	uint32_t pair_count = 0;
+	for (uint32_t rule_idx = 0; rule_idx < rule_count; ++rule_idx) {
+		uint32_t group1 = left->rule_groups[rule_idx];
+		uint32_t group2 = right->rule_groups[rule_idx];
+		rule_to_group[rule_idx] = FILTER_GROUP_INVALID;
+		if (group1 == FILTER_GROUP_INVALID ||
+		    group2 == FILTER_GROUP_INVALID) {
+			continue;
+		}
+		struct merge_pair_ctx ctx = {
+			pair_group1, pair_group2, group1, group2
+		};
+		uint32_t hash = merge_group_pair_hash(group1, group2);
+		uint32_t pair =
+			join_index_find(&pairs, hash, join_pair_eq, &ctx);
+		if (pair == UINT32_MAX) {
+			pair = pair_count++;
+			join_index_put(&pairs, hash, pair);
+			pair_group1[pair] = group1;
+			pair_group2[pair] = group2;
+		}
+		rule_to_group[rule_idx] = pair;
+	}
+	in.pair_count = pair_count;
+
+	for (uint32_t pair = 0; pair < pair_count; ++pair) {
+		struct join_group *rows = groups1 + pair_group1[pair];
+		struct join_group *cols = groups2 + pair_group2[pair];
+		if (join_group_prepare(
+			    rows, in.ranges1 + pair_group1[pair], v_dim, marks
+		    ) ||
+		    join_group_prepare(
+			    cols, in.ranges2 + pair_group2[pair], h_dim, marks
+		    )) {
+			goto done;
+		}
+		spans[pair] = (struct join_span
+		){rows->small, cols->small_count ? rows->small_count : 0};
+		in.covered |= rows->flipped && !rows->small_count &&
+			      cols->flipped && !cols->small_count;
+	}
+	if (join_csr_build(&in.painted, v_dim, spans, pair_count)) {
+		goto done;
+	}
+
+	char registry_name[MEMORY_CONTEXT_NAME_SIZE];
+	classify_leaf_name(
+		registry_name, sizeof(registry_name), name, "registry"
+	);
+	rc = 1;
+	for (uint32_t seed = 0; rc == 1 && seed < JOIN_SEED_ATTEMPTS; ++seed) {
+		struct join_classes classes = {0};
+		uint32_t shift = 0;
+		rc = join_paint(&in, seed, table, &classes, &shift);
+		join_classes_free_index(&classes);
+		if (rc == 0 && value_registry_init(
+				       registry, memory_context, registry_name
+			       )) {
+			rc = -1;
+		}
+		if (rc == 0) {
+			rc = join_collect(
+				&in, table, &classes, shift, marks, registry
+			);
+		}
+		free(classes.items);
+		if (rc != 0) {
+			value_registry_fini(registry);
+			memset(registry, 0, sizeof(*registry));
+		}
+	}
+
+done:
+	for (uint64_t idx = 0; groups1 != NULL && idx < registry1->range_count;
+	     ++idx) {
+		free(groups1[idx].complement);
+	}
+	for (uint64_t idx = 0; groups2 != NULL && idx < registry2->range_count;
+	     ++idx) {
+		free(groups2[idx].complement);
+	}
+	join_csr_free(&in.painted);
+	free(pairs.slots);
+	free(pairs.hashes);
+	free(marks);
+	free(groups2);
+	free(groups1);
+	free(spans);
+	free(pair_group2);
+	free(pair_group1);
+	if (rc != 0) {
+		// A failed join leaves no state behind, whatever the stage.
+		value_table_free(table);
+		value_registry_fini(registry);
+		memset(registry, 0, sizeof(*registry));
+		memory_bfree(
+			memory_context,
+			out->rule_groups,
+			sizeof(uint32_t) * pair_alloc_count
+		);
+		out->rule_groups = NULL;
+	}
+	return rc == 0 ? 0 : -1;
 }
 
 // Builds immutable first-match rows without enumerating final classes.

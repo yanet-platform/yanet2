@@ -56,6 +56,29 @@ classify_join_test = executable(
 )
 test('classify_join_test', classify_join_test, suite: ['filter'])
 
+# The join tests again over fingerprints narrowed to 20 bits: pair sets
+# merge under these fixed seeds, and the join must catch them and still
+# match the reference.
+classify_join_collision_test = executable(
+  'classify_join_collision_test',
+  ['join.c', '../compiler/helper.c'],
+  c_args: yanet_test_c_args + ['-DJOIN_FINGERPRINT_MASK=0x3ffULL'],
+  dependencies: [lib_common_dep, libdpdk_inc_dep],
+  include_directories: yanet_rootdir,
+)
+test('classify_join_collision_test', classify_join_collision_test, suite: ['filter'])
+
+# With every fingerprint zero every seed merges, and the join must give up
+# cleanly.
+classify_join_exhausted_test = executable(
+  'classify_join_exhausted_test',
+  ['join.c', '../compiler/helper.c'],
+  c_args: yanet_test_c_args + ['-DJOIN_FINGERPRINT_MASK=0ULL'],
+  dependencies: [lib_common_dep, libdpdk_inc_dep],
+  include_directories: yanet_rootdir,
+)
+test('classify_join_exhausted_test', classify_join_exhausted_test, suite: ['filter'])
+
 classify_net_hash = executable(
   'classify_net_hash',
   ['net_hash.c'],
