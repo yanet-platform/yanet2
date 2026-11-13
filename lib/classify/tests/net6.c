@@ -11,7 +11,9 @@
 // alone, or the source and destination pair with their joint - decodes
 // its ruleset and classifies synthetic packets through the packet getters
 // and the library lookup core. One more scenario pins the unwind of a
-// failed attribute commit.
+// failed attribute commit, and the region scenarios pin the combined
+// regions to the enumeration of every network cross, kept here as the
+// reference.
 
 #include "lib/classify/compiler/net6.h"
 #include "lib/classify/classify.h"
@@ -890,6 +892,474 @@ run_hi_single_build_test(struct memory_context *mctx, void *memory) {
 	test_filter_net6_dst_free(mctx, &flt);
 }
 
+/*
+ * Combined regions of one compile assigned by the enumeration the
+ * builder replaces: every network touches every cell of its cross in
+ * network order, then walks the cross again to collect its range.
+ */
+struct test_regions_reference {
+	uint8_t *row_split;
+	struct value_table comb;
+	struct vline uniform;
+	struct value_registry registry;
+	uint32_t region_count;
+};
+
+// Iterates the cells of a network cross, a uniform row as its line value.
+static void
+test_reference_iter(
+	struct classify_compile_net6 *compile,
+	struct test_regions_reference *ref,
+	const struct net6 *net,
+	int (*iter_cb_func)(uint32_t *value, void *data),
+	void *cb_func_data
+) {
+	uint32_t bounds[4];
+	filter_net6_net_bounds(compile, net, bounds);
+
+	const uint32_t *values_hi = ADDR_OF(&compile->ri_hi.values);
+	const uint32_t *values_lo = ADDR_OF(&compile->ri_lo.values);
+	const int full_lo = bounds[2] == 0 && bounds[3] == compile->ri_lo.count;
+
+	for (uint32_t idx_hi = bounds[0]; idx_hi < bounds[1]; ++idx_hi) {
+		const uint32_t row = values_hi[idx_hi];
+		if (full_lo && !ref->row_split[row]) {
+			assert(iter_cb_func(
+				       vline_get_ptr(&ref->uniform, row),
+				       cb_func_data
+			       ) >= 0);
+			continue;
+		}
+		for (uint32_t idx_lo = bounds[2]; idx_lo < bounds[3];
+		     ++idx_lo) {
+			assert(iter_cb_func(
+				       value_table_get_ptr(
+					       &ref->comb,
+					       row,
+					       values_lo[idx_lo]
+				       ),
+				       cb_func_data
+			       ) >= 0);
+		}
+	}
+}
+
+// Collects a region value into the registry range being filled.
+static int
+test_reference_collect(uint32_t *value, void *data) {
+	struct test_regions_reference *ref = data;
+	assert(value_registry_collect(&ref->registry, *value) == 0);
+	if (*value + 1 > ref->region_count) {
+		ref->region_count = *value + 1;
+	}
+	return 0;
+}
+
+// Builds the reference over the partitions of a compile.
+static void
+test_regions_reference_build(
+	struct memory_context *mctx,
+	struct classify_compile_net6 *compile,
+	struct test_regions_reference *ref
+) {
+	memset(ref, 0, sizeof(*ref));
+	ref->row_split = calloc(compile->row_count, 1);
+	assert(ref->row_split != NULL);
+	assert(value_table_init(
+		       &ref->comb,
+		       mctx,
+		       "ref_comb",
+		       compile->row_count,
+		       compile->ri_lo.max_value + 1
+	       ) == 0);
+	assert(vline_init(
+		       &ref->uniform, mctx, "ref_rows", compile->row_count
+	       ) == 0);
+
+	const uint32_t *values_hi = ADDR_OF(&compile->ri_hi.values);
+	for (uint32_t net_idx = 0; net_idx < compile->net_count; ++net_idx) {
+		const struct net6 *net = compile->nets + net_idx;
+		if (net6_is_any(net)) {
+			continue;
+		}
+		uint32_t bounds[4];
+		filter_net6_net_bounds(compile, net, bounds);
+		if (bounds[2] == 0 && bounds[3] == compile->ri_lo.count) {
+			continue;
+		}
+		for (uint32_t idx_hi = bounds[0]; idx_hi < bounds[1];
+		     ++idx_hi) {
+			ref->row_split[values_hi[idx_hi]] = 1;
+		}
+	}
+
+	struct remap_table remap_table;
+	assert(remap_table_init(
+		       &remap_table,
+		       mctx,
+		       compile->row_count * (compile->ri_lo.max_value + 1) +
+			       compile->row_count
+	       ) == 0);
+	for (uint32_t net_idx = 0; net_idx < compile->net_count; ++net_idx) {
+		const struct net6 *net = compile->nets + net_idx;
+		if (net6_is_any(net)) {
+			continue;
+		}
+		remap_table_new_gen(&remap_table);
+		test_reference_iter(
+			compile, ref, net, classify_attr_touch, &remap_table
+		);
+	}
+	remap_table_compact(&remap_table);
+	value_table_compact(&ref->comb, &remap_table);
+	for (uint32_t row = 0; row < compile->row_count; ++row) {
+		uint32_t *value = vline_get_ptr(&ref->uniform, row);
+		*value = remap_table_compacted(&remap_table, *value);
+	}
+	remap_table_free(&remap_table);
+
+	assert(value_registry_init(&ref->registry, mctx, "ref_nets") == 0);
+	ref->region_count = 1;
+	for (uint32_t net_idx = 0; net_idx < compile->net_count; ++net_idx) {
+		assert(value_registry_start(&ref->registry) == 0);
+		const struct net6 *net = compile->nets + net_idx;
+		if (net6_is_any(net)) {
+			continue;
+		}
+		test_reference_iter(
+			compile, ref, net, test_reference_collect, ref
+		);
+	}
+}
+
+static void
+test_regions_reference_free(struct test_regions_reference *ref) {
+	value_registry_fini(&ref->registry);
+	vline_free(&ref->uniform);
+	value_table_free(&ref->comb);
+	free(ref->row_split);
+}
+
+/*
+ * Asserts that the compile of a ruleset of one destination network per
+ * rule holds the reference regions: the row split map, the join table
+ * cells, the uniform line, the region count and the registry range of
+ * every masked network, value by value.
+ */
+static void
+assert_regions_match_reference(
+	struct memory_context *mctx, struct net6 *nets, uint32_t count
+) {
+	struct test_rule *rules = calloc(count, sizeof(*rules));
+	const struct classifier_rule **rule_ptrs =
+		calloc(count, sizeof(*rule_ptrs));
+	assert(rules != NULL && rule_ptrs != NULL);
+	for (uint32_t idx = 0; idx < count; ++idx) {
+		rules[idx] = rule_dst(nets + idx, 1);
+		rule_ptrs[idx] = &rules[idx].rule;
+	}
+
+	struct classify_compile_net6 *compile = classify_compile_net6_create(
+		mctx, rule_ptrs, count, test_rule_get_dsts, "test_net6_dst"
+	);
+	assert(compile != NULL);
+	struct test_regions_reference ref;
+	test_regions_reference_build(mctx, compile, &ref);
+
+	assert(memcmp(ref.row_split, compile->row_split, compile->row_count) ==
+	       0);
+	// The compile packs the split rows in the order of their first high
+	// ordinal; the reference keeps every row.
+	uint32_t *packed = malloc(compile->row_count * sizeof(uint32_t));
+	assert(packed != NULL);
+	memset(packed, 0xff, compile->row_count * sizeof(uint32_t));
+	uint32_t packed_count = 0;
+	const uint32_t *values_hi = ADDR_OF(&compile->ri_hi.values);
+	for (uint32_t idx = 0; idx < compile->ri_hi.count; ++idx) {
+		uint32_t row = values_hi[idx];
+		if (compile->row_split[row] && packed[row] == UINT32_MAX) {
+			packed[row] = packed_count++;
+		}
+	}
+	assert(packed_count == compile->comb.v_dim);
+	for (uint32_t row = 0; row < compile->row_count; ++row) {
+		if (compile->row_split[row]) {
+			assert(memcmp(value_table_get_ptr(&ref.comb, row, 0),
+				      value_table_get_ptr(
+					      &compile->comb, packed[row], 0
+				      ),
+				      ref.comb.h_dim * sizeof(uint32_t)) == 0);
+		}
+		assert(vline_get(&ref.uniform, row) ==
+		       vline_get(&compile->uniform, row));
+	}
+	free(packed);
+	assert(ref.region_count == compile->region_count);
+
+	const struct value_range *ref_ranges = ADDR_OF(&ref.registry.ranges);
+	const struct value_range *ranges =
+		ADDR_OF(&compile->net_registry.ranges);
+	for (uint32_t net_idx = 0; net_idx < compile->net_count; ++net_idx) {
+		if (net6_is_any(compile->nets + net_idx)) {
+			continue;
+		}
+		assert(ref_ranges[net_idx].count == ranges[net_idx].count);
+		assert(memcmp(ADDR_OF(&ref_ranges[net_idx].values),
+			      ADDR_OF(&ranges[net_idx].values),
+			      ranges[net_idx].count * sizeof(uint32_t)) == 0);
+	}
+
+	test_regions_reference_free(&ref);
+	classify_compile_net6_free(mctx, compile);
+	free(rule_ptrs);
+	free(rules);
+}
+
+// Asserts that every probe resolves to the first rule network covering
+// it, one destination network per rule.
+static void
+assert_first_match_probes(
+	struct memory_context *mctx,
+	struct net6 *nets,
+	uint32_t count,
+	const uint8_t (*probes)[NET6_LEN],
+	uint32_t probe_count
+) {
+	struct test_rule rules[8];
+	const struct classifier_rule *rule_ptrs[8];
+	assert(count <= 8);
+	for (uint32_t idx = 0; idx < count; ++idx) {
+		rules[idx] = rule_dst(nets + idx, 1);
+		rule_ptrs[idx] = &rules[idx].rule;
+	}
+
+	struct test_filter_net6_dst flt;
+	test_filter_net6_dst_compile(mctx, rule_ptrs, count, &flt);
+	uint8_t src[NET6_LEN] = {0};
+	for (uint32_t idx = 0; idx < probe_count; ++idx) {
+		assert(classify_dst(&flt, src, probes[idx]) ==
+		       test_first_match(nets, count, probes[idx]));
+	}
+	test_filter_net6_dst_free(mctx, &flt);
+}
+
+// Builds an address of the given leading bytes of each half.
+static void
+test_addr(
+	uint8_t addr[NET6_LEN],
+	uint16_t hi_head,
+	uint8_t hi_next,
+	uint8_t lo_head,
+	uint8_t lo_next
+) {
+	memset(addr, 0, NET6_LEN);
+	addr[0] = hi_head >> 8;
+	addr[1] = hi_head & 0xff;
+	addr[6] = hi_next;
+	addr[8] = lo_head;
+	addr[9] = lo_next;
+}
+
+// Verifies that a network nested in the low interval of a network with
+// the same high interval keeps the enclosing network in its region.
+static void
+run_nested_low_intervals_test(struct memory_context *mctx, void *memory) {
+	(void)memory;
+
+	uint8_t outer[NET6_LEN], inner[NET6_LEN];
+	test_addr(outer, 0x2001, 0, 0x0a, 0);
+	test_addr(inner, 0x2001, 0, 0x0a, 0x0b);
+	struct net6 nets[2] = {
+		net6_bits(outer, 32, 8),
+		net6_bits(inner, 32, 16),
+	};
+
+	uint8_t probes[3][NET6_LEN];
+	memcpy(probes[0], inner, NET6_LEN);
+	test_addr(probes[1], 0x2001, 0, 0x0a, 0x0c);
+	test_addr(probes[2], 0x2001, 0, 0x0b, 0);
+
+	assert_first_match_probes(mctx, nets, 2, probes, 3);
+	assert_regions_match_reference(mctx, nets, 2);
+}
+
+// Verifies that rows under a wildcard low half network keep it once a
+// nested high interval splits them over the low half.
+static void
+run_wildcard_low_over_split_rows_test(
+	struct memory_context *mctx, void *memory
+) {
+	(void)memory;
+
+	uint8_t child[NET6_LEN], parent[NET6_LEN];
+	test_addr(child, 0x2001, 0x80, 0x0a, 0);
+	test_addr(parent, 0x2001, 0, 0, 0);
+	struct net6 nets[2] = {
+		net6_bits(child, 56, 8),
+		net6_bits(parent, 32, 0),
+	};
+
+	uint8_t probes[3][NET6_LEN];
+	memcpy(probes[0], child, NET6_LEN);
+	test_addr(probes[1], 0x2001, 0x80, 0x0b, 0);
+	test_addr(probes[2], 0x2001, 0x40, 0x0a, 0);
+
+	assert_first_match_probes(mctx, nets, 2, probes, 3);
+	assert_regions_match_reference(mctx, nets, 2);
+}
+
+// Verifies that the low half networks of a high interval do not reach a
+// sibling high interval swept after it under a parent split over the
+// low half.
+static void
+run_sibling_high_intervals_test(struct memory_context *mctx, void *memory) {
+	(void)memory;
+
+	uint8_t first[NET6_LEN], second[NET6_LEN], parent[NET6_LEN];
+	test_addr(first, 0x2001, 0x10, 0x0a, 0);
+	test_addr(second, 0x2001, 0x20, 0x0b, 0);
+	test_addr(parent, 0x2001, 0, 0x0c, 0);
+	struct net6 nets[3] = {
+		net6_bits(first, 56, 8),
+		net6_bits(second, 56, 8),
+		net6_bits(parent, 32, 8),
+	};
+
+	uint8_t probes[4][NET6_LEN];
+	test_addr(probes[0], 0x2001, 0x20, 0x0a, 0);
+	memcpy(probes[1], second, NET6_LEN);
+	memcpy(probes[2], first, NET6_LEN);
+	test_addr(probes[3], 0x2001, 0x20, 0x0c, 0);
+
+	assert_first_match_probes(mctx, nets, 3, probes, 4);
+	assert_regions_match_reference(mctx, nets, 3);
+}
+
+// Verifies that a row changed only at its first low regions ranks the
+// uniform class of the regions after them in the enumeration order.
+static void
+run_sparse_row_trailing_uniform_test(
+	struct memory_context *mctx, void *memory
+) {
+	(void)memory;
+
+	struct net6 nets[18];
+	uint8_t addr[NET6_LEN];
+	test_addr(addr, 0x2001, 0, 0, 0);
+	nets[0] = net6_bits(addr, 16, 0);
+	nets[1] = net6_bits(addr, 32, 8);
+	nets[2] = net6_bits(addr, 56, 8);
+	for (uint8_t idx = 1; idx < 16; ++idx) {
+		test_addr(addr, 0x3001, 0, idx << 4, 0);
+		nets[2 + idx] = net6_bits(addr, 16, 8);
+	}
+
+	assert_regions_match_reference(mctx, nets, 18);
+}
+
+#define TEST_REGIONS_SEEDS 1000
+#define TEST_REGIONS_MAX_NETS 48
+
+/*
+ * Verifies that the builder assigns the regions of the reference
+ * enumeration, value for value, on seeded rulesets nesting densely in
+ * both halves.
+ *
+ * The prefixes are 0 to 6 bits long, plus a few long ones, so the high
+ * intervals nest in deep trees with several low intervals per node;
+ * wildcard and repeated networks are mixed in.
+ */
+static void
+run_regions_match_enumeration_test(struct memory_context *mctx, void *memory) {
+	(void)memory;
+
+	static const uint8_t lens[] = {0, 1, 2, 3, 3, 4, 5, 6, 40, 64};
+	struct net6 nets[TEST_REGIONS_MAX_NETS];
+	for (uint64_t seed = 1; seed <= TEST_REGIONS_SEEDS; ++seed) {
+		uint64_t state = seed;
+		uint32_t count = 1 + seed % TEST_REGIONS_MAX_NETS;
+		for (uint32_t idx = 0; idx < count; ++idx) {
+			uint8_t addr[NET6_LEN];
+			for (uint32_t byte = 0; byte < NET6_LEN; ++byte) {
+				addr[byte] = test_rand(&state);
+			}
+			uint8_t hi_bits =
+				lens[test_rand(&state) % sizeof(lens)];
+			uint8_t lo_bits =
+				lens[test_rand(&state) % sizeof(lens)];
+			if (test_rand(&state) % 16 == 0) {
+				hi_bits = 0;
+				lo_bits = 0;
+			}
+			nets[idx] = net6_bits(addr, hi_bits, lo_bits);
+			if (idx && test_rand(&state) % 8 == 0) {
+				nets[idx] = nets[test_rand(&state) % idx];
+			}
+		}
+		assert_regions_match_reference(mctx, nets, count);
+	}
+}
+
+// Verifies that a compile refused an allocation releases all it took:
+// over arenas growing by a page until the compile fits, every failed
+// compile leaves the arena as it found it.
+static void
+run_failed_create_releases_arena_test(
+	struct memory_context *mctx, void *memory
+) {
+	(void)mctx;
+	(void)memory;
+
+	static const uint8_t lens[] = {0, 1, 2, 3, 4, 40, 64};
+	struct net6 nets[12];
+	struct test_rule rules[12];
+	const struct classifier_rule *rule_ptrs[12];
+	uint64_t state = 3;
+	for (uint32_t idx = 0; idx < 12; ++idx) {
+		uint8_t addr[NET6_LEN];
+		for (uint32_t byte = 0; byte < NET6_LEN; ++byte) {
+			addr[byte] = test_rand(&state);
+		}
+		nets[idx] = net6_bits(
+			addr,
+			lens[test_rand(&state) % sizeof(lens)],
+			lens[test_rand(&state) % sizeof(lens)]
+		);
+		rules[idx] = rule_dst(nets + idx, 1);
+		rule_ptrs[idx] = &rules[idx].rule;
+	}
+
+	void *arena;
+	assert(posix_memalign(&arena, 1 << 21, 1 << 21) == 0);
+	for (size_t size = 4096;; size += 4096) {
+		assert(size <= 1 << 21);
+		struct block_allocator allocator;
+		block_allocator_init(&allocator);
+		block_allocator_put_arena(&allocator, arena, size);
+		size_t initial = block_allocator_free_size(&allocator);
+		struct memory_context ctx;
+		assert(memory_context_init(&ctx, "growing", &allocator) == 0);
+
+		struct classify_compile_net6 *compile =
+			classify_compile_net6_create(
+				&ctx,
+				rule_ptrs,
+				12,
+				test_rule_get_dsts,
+				"growing"
+			);
+		if (compile != NULL) {
+			classify_compile_net6_free(&ctx, compile);
+		}
+		assert(block_allocator_free_size(&allocator) == initial);
+		memory_context_fini(&ctx);
+		if (compile != NULL) {
+			break;
+		}
+	}
+	free(arena);
+}
+
 int
 main(void) {
 	void *memory = malloc(1 << 24);
@@ -900,6 +1370,12 @@ main(void) {
 	run_scenario(run_src_dst_test, memory);
 	run_scenario(run_failed_commit_zeroes_attr_test, memory);
 	run_scenario(run_hi_single_build_test, memory);
+	run_scenario(run_nested_low_intervals_test, memory);
+	run_scenario(run_wildcard_low_over_split_rows_test, memory);
+	run_scenario(run_sibling_high_intervals_test, memory);
+	run_scenario(run_sparse_row_trailing_uniform_test, memory);
+	run_scenario(run_regions_match_enumeration_test, memory);
+	run_scenario(run_failed_create_releases_arena_test, memory);
 
 	free(memory);
 	return 0;
