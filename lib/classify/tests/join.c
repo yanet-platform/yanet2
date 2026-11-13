@@ -270,7 +270,7 @@ join_arena_close(struct join_arena *arena) {
 }
 
 // A stage with an empty registry and the given rule to group mapping;
-// the groups are appended with add_group.
+// the test appends its groups afterwards.
 static void
 stage_init(
 	struct classifier *cls,
@@ -659,9 +659,10 @@ run_join_failure_cleanup_test(void) {
 	join_arena_close(&regs);
 }
 
-// Verifies that a join merging its pair sets under every seed gives up,
-// leaving the stage zeroed, the table released and the arena as it found
-// it; runs in the build that zeroes every fingerprint.
+// Verifies that a join merging its pair sets under every seed gives up
+// and leaves the stage zeroed, the table released and the arena intact.
+//
+// Runs in the build that zeroes every fingerprint.
 static void
 run_join_seeds_exhausted_test(void) {
 	struct join_arena arena;
@@ -685,9 +686,10 @@ run_join_seeds_exhausted_test(void) {
 	join_arena_close(&arena);
 }
 
-// A seeded random group of one of the shapes rulesets produce: a single
-// class, an interval, a sparse or a dense scatter, the whole dimension
-// or nothing.
+// A seeded random group of one of the shapes rulesets produce.
+//
+// The shapes are a single class, an interval, a sparse or a dense
+// scatter, the whole dimension and nothing.
 static uint32_t
 random_group(uint64_t *state, uint32_t dim, uint32_t *values) {
 	*state ^= *state << 13;

@@ -57,8 +57,10 @@ classify_join_test = executable(
 test('classify_join_test', classify_join_test, suite: ['filter'])
 
 # The join tests again with the first attempt of every join merging all
-# its pair sets: the join must catch the merge and match the reference
-# from its next attempt.
+# its pair sets.
+#
+# The join must catch the merge and match the reference from its next
+# attempt.
 classify_join_collision_test = executable(
   'classify_join_collision_test',
   ['join.c', '../compiler/helper.c'],

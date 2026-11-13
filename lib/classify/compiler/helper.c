@@ -679,7 +679,7 @@ join_classes_free_index(struct join_classes *classes) {
 }
 
 // The class id of a fingerprint, a new one numbered next when unseen;
-// UINT32_MAX when the classes cannot grow.
+// an all-ones id when the classes cannot grow.
 static uint32_t
 join_classes_intern(
 	struct join_classes *classes,
