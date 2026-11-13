@@ -17,8 +17,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Copies at most size - 1 bytes of the name into the zeroed field, which
-// keeps the terminator and the zeros after it.
+// Copies the name into a zeroed field, one byte short of the field at most,
+// so the field keeps its terminator and the zeros after it.
 static void
 yanet_sys_dp_type_name(char *field, size_t size, const char *name, size_t len) {
 	memcpy(field, name, len < size - 1 ? len : size - 1);

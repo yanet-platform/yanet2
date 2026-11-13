@@ -40,8 +40,8 @@ impl Object for Prepared {
     }
 }
 
-/// An object type whose name is `OBJECT_TYPE_LEN - 1` bytes long, the
-/// longest that fits the C field with its terminator.
+/// An object type with the longest name the C type field holds with its
+/// terminator.
 struct Longest;
 
 impl Object for Longest {
@@ -66,8 +66,7 @@ unsafe extern "C" {
 #[cfg_attr(miri, ignore = "Miri does not run C")]
 fn test_new_object_describes_the_object_type() {
     // SAFETY: the constructor takes no arguments and returns a descriptor
-    // allocated with C calloc, read here and released with C free as the
-    // loader does.
+    // from the C allocator, read here and freed as the loader does.
     let (name, commit, prepared_size) = unsafe {
         let object = new_object_exported_state();
         assert!(!object.is_null());
@@ -100,8 +99,8 @@ fn test_object_plugin_exports_the_abi_version() {
 fn test_new_object_with_a_prepared_value_registers_its_hook_and_size() {
     let object = new_object::<Prepared>();
     assert!(!object.is_null());
-    // SAFETY: the descriptor was just allocated with C calloc. It is read
-    // here and released with C free as the loader does.
+    // SAFETY: the descriptor just came from the C allocator. It is read
+    // here and freed as the loader does.
     let (commit, prepared_size) = unsafe {
         let described = ((*object).commit_ectx_handler.is_some(), (*object).prepared_size);
         free(object.cast());
@@ -111,9 +110,8 @@ fn test_new_object_with_a_prepared_value_registers_its_hook_and_size() {
     assert_eq!((true, 16), (commit, prepared_size));
 }
 
-/// verifies that the descriptor stores a name of `OBJECT_TYPE_LEN - 1` bytes
-/// whole and NUL-terminated, and pads a shorter one with zeros to the end of
-/// the field.
+/// verifies that the longest name the field holds is stored whole and
+/// terminated, and that a shorter one is padded with zeros.
 #[test]
 #[cfg_attr(miri, ignore = "Miri does not run C")]
 fn test_new_object_terminates_the_name_and_zeroes_the_rest_of_the_field() {
@@ -126,8 +124,8 @@ fn test_new_object_terminates_the_name_and_zeroes_the_rest_of_the_field() {
 
     for (object, want) in names {
         assert!(!object.is_null());
-        // SAFETY: the descriptor was just allocated with C calloc. It is read
-        // here and released with C free as the loader does.
+        // SAFETY: the descriptor just came from the C allocator. It is read
+        // here and freed as the loader does.
         let field = unsafe {
             let field = (&raw const (*object).name).cast::<[u8; LEN]>().read();
             free(object.cast());

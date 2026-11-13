@@ -32,8 +32,8 @@ impl Module for Exported {
 
 yanet_sys::export_module!(name = exported, module = Exported);
 
-/// A module whose name is `MODULE_TYPE_LEN - 1` bytes long, the longest that
-/// fits the C field with its terminator.
+/// A module with the longest name the C type field holds with its
+/// terminator.
 struct Longest;
 
 impl Module for Longest {
@@ -59,8 +59,7 @@ unsafe extern "C" {
 #[cfg_attr(miri, ignore = "Miri does not run C")]
 fn test_new_module_describes_the_module() {
     // SAFETY: the constructor takes no arguments and returns a descriptor
-    // allocated with C calloc, read here and released with C free as the
-    // loader does.
+    // from the C allocator, read here and freed as the loader does.
     let (name, handler, commit, prepared_size) = unsafe {
         let module = new_module_exported();
         assert!(!module.is_null());
@@ -79,9 +78,8 @@ fn test_new_module_describes_the_module() {
     assert_eq!(size_of::<u64>() as u64, prepared_size);
 }
 
-/// verifies that the descriptor stores a name of `MODULE_TYPE_LEN - 1` bytes
-/// whole and NUL-terminated, and pads a shorter one with zeros to the end of
-/// the field.
+/// verifies that the longest name the field holds is stored whole and
+/// terminated, and that a shorter one is padded with zeros.
 #[test]
 #[cfg_attr(miri, ignore = "Miri does not run C")]
 fn test_new_module_terminates_the_name_and_zeroes_the_rest_of_the_field() {
@@ -94,8 +92,8 @@ fn test_new_module_terminates_the_name_and_zeroes_the_rest_of_the_field() {
 
     for (module, want) in names {
         assert!(!module.is_null());
-        // SAFETY: the descriptor was just allocated with C calloc. It is read
-        // here and released with C free as the loader does.
+        // SAFETY: the descriptor just came from the C allocator. It is read
+        // here and freed as the loader does.
         let field = unsafe {
             let field = (&raw const (*module).name).cast::<[u8; LEN]>().read();
             free(module.cast());

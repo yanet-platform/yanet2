@@ -30,15 +30,14 @@ struct rte_mbuf;
 // Worker index of a module execution context whose worker is not known.
 #define YANET_SYS_DP_WORKER_IDX_NONE 0xFFFFFFFFFFFFFFFFULL
 
-// Allocates the module descriptor a plugin's new_module_<name> returns.
+// Allocates the zeroed descriptor a module plugin's constructor returns, or
+// NULL when out of memory.
 //
-// The descriptor is zeroed by C calloc, which matches the free the module
-// loader releases it with. Returns NULL when the allocation fails.
-//
-// The descriptor takes at most MODULE_TYPE_LEN - 1 bytes of the name, which
-// need no terminator, and leaves the rest of the field zero, so the name is
-// always terminated. It stores the handler, the context commit hook and the
-// prepared size as given and leaves the generation commit_handler NULL.
+// The C allocator owns it, so the module loader can free it. The name, which
+// needs no terminator, is copied up to one byte short of the type field, so
+// it stays terminated with zeros after it. The handler, the per-context
+// commit hook and the prepared size are stored as given, and the module
+// registers no per-generation commit hook.
 YANET_SYS_HIDDEN struct module *
 yanet_sys_dp_module_new(
 	const char *name,
@@ -48,11 +47,11 @@ yanet_sys_dp_module_new(
 	uint64_t prepared_size
 );
 
-// As yanet_sys_dp_module_new, for the object type descriptor a plugin's
-// new_object_<name> returns, which the object loader frees.
+// As the module descriptor constructor, for an object type: zeroed, or NULL
+// when out of memory.
 //
-// The name takes at most OBJECT_TYPE_LEN - 1 bytes, and a NULL commit
-// handler registers no hook.
+// The object loader frees it. The name is bounded and terminated as for a
+// module, and an absent per-context commit hook registers none.
 YANET_SYS_HIDDEN struct object *
 yanet_sys_dp_object_new(
 	const char *name,

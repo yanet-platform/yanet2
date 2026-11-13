@@ -70,8 +70,7 @@ unsafe extern "C" {
 #[cfg_attr(miri, ignore = "Miri does not run C")]
 fn test_new_module_with_objects_describes_the_module() {
     // SAFETY: the constructor takes no arguments and returns a descriptor
-    // allocated with C calloc, read here and released with C free as the
-    // loader does.
+    // from the C allocator, read here and freed as the loader does.
     let (name, handler, commit, prepared_size) = unsafe {
         let module = new_module_carrier();
         assert!(!module.is_null());
@@ -104,8 +103,7 @@ fn test_new_object_with_a_module_describes_each_type() {
 
     for (constructor, want_name, want_commit, want_size) in constructors {
         // SAFETY: the constructor takes no arguments and returns a descriptor
-        // allocated with C calloc, read here and released with C free as the
-        // loader does.
+        // from the C allocator, read here and freed as the loader does.
         let (name, commit, prepared_size) = unsafe {
             let object = constructor();
             assert!(!object.is_null());
