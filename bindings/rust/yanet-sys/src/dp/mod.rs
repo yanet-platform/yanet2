@@ -93,7 +93,7 @@ pub mod object;
 mod rt;
 
 pub use batch::{
-    Batch, DeviceRef, DscpMark, Packet, PacketMeta, PacketView, ParseError, ResizeError, TunnelError, Verdict,
+    Batch, DeviceRef, OuterDscp, Packet, PacketMeta, PacketView, ParseError, ResizeError, TunnelError, Verdict,
 };
 pub use cx::{
     BoundCounter, BoundTaggedCounters, CommitCx, CounterRef, Cx, ModuleCx, ObjectCommitCx, PrepareCx, TaggedCountersRef,

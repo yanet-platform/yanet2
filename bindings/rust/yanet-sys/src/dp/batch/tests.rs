@@ -1613,11 +1613,38 @@ fn test_encap_refuses_packet_without_network_header() {
 
     assert_eq!(
         Err(TunnelError),
-        frame.packet().encap_ipv4([0; 4], [0; 4], DscpMark::Never)
+        frame.packet().encap_ipv4([0; 4], [0; 4], OuterDscp::Zero)
     );
     assert_eq!(Err(TunnelError), frame.packet().encap_mpls(0, 0, true, 9));
 
     assert_eq!(&[0; 42], frame.frame());
+}
+
+/// verifies that both IP encapsulations write the outer DSCP asked, a zero
+/// or the inner one, beside the inner ECN bits.
+#[cfg(not(miri))]
+#[test]
+fn test_encap_ip_writes_the_outer_dscp_asked_and_the_inner_ecn() {
+    // DSCP 46 (expedited forwarding) and ECT(1).
+    let tos = 46 << 2 | 1;
+    let mut datagram = ipv4(17, 0, &udp(1, 2));
+    datagram[1] = tos;
+    let bytes = ether(0x0800, &datagram);
+    // Each case: the DSCP asked, and the outer TOS or traffic class expected.
+    for (case, dscp, expected) in [("zero", OuterDscp::Zero, 1), ("inner", OuterDscp::Inner, tos)] {
+        let mut frame = Frame::new(described(&bytes), 64, &bytes, 0);
+        assert_eq!(
+            Ok(()),
+            frame.packet().encap_ipv4([10, 0, 0, 1], [10, 0, 0, 2], dscp),
+            "{case}"
+        );
+        assert_eq!(expected, frame.frame()[15], "outer ipv4, {case}");
+
+        let mut frame = Frame::new(described(&bytes), 64, &bytes, 0);
+        assert_eq!(Ok(()), frame.packet().encap_ipv6([1; 16], [2; 16], dscp), "{case}");
+        let class = (frame.frame()[14] & 0x0f) << 4 | frame.frame()[15] >> 4;
+        assert_eq!(expected, class, "outer ipv6, {case}");
+    }
 }
 
 /// verifies that an MPLS encapsulation bounds the traffic class to its three
