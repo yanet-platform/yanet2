@@ -123,6 +123,14 @@ func Decode(buf []byte, dst any, options ...Option) error {
 	for _, o := range options {
 		o(opts)
 	}
+	var env map[string]string
+	if opts.Env {
+		env = environ(opts.EnvPrefix)
+	}
+	return decode(buf, dst, opts, env)
+}
+
+func decode(buf []byte, dst any, opts *options, env map[string]string) error {
 	dstType := reflect.TypeOf(dst)
 	if dstType == nil {
 		return fmt.Errorf("destination must not be nil")
@@ -135,7 +143,7 @@ func Decode(buf []byte, dst any, options ...Option) error {
 			buf,
 			dst,
 			opts.EnvPrefix,
-			environ(opts.EnvPrefix),
+			env,
 		)
 		if err != nil {
 			return err
@@ -186,7 +194,9 @@ func Decode(buf []byte, dst any, options ...Option) error {
 			return err
 		}
 	}
-	return validate(reflect.ValueOf(dst), "")
+	value := reflect.ValueOf(dst)
+	prepareNodes(value, opts, opts.EnvPrefix, env)
+	return validate(value, "")
 }
 
 func decodeYAML(buf []byte, dst any, knownFields bool) error {

@@ -192,10 +192,9 @@ func envApplyNode(
 	if value.IsValid() && value.Type() != t {
 		value = reflect.Value{}
 	}
-	// yaml.Node holds an arbitrary raw YAML value. Its exported implementation
-	// fields are not part of the destination schema, so environment overrides
-	// cannot address them.
-	if t == yamlNodeType {
+	// Raw YAML has no destination schema. A deferred Node applies overrides
+	// when Decode supplies that schema; yaml.Node stays file-only.
+	if t == yamlNodeType || t == deferredNodeType {
 		return nil
 	}
 
@@ -654,7 +653,7 @@ func envWrites(t reflect.Type, envName string, env map[string]string, depth int)
 	}
 
 	t = envUnwrap(t)
-	if t == yamlNodeType {
+	if t == yamlNodeType || t == deferredNodeType {
 		return false
 	}
 	if envDecodesYAML(t) {
