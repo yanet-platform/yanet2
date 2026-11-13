@@ -94,7 +94,7 @@ fn test_new_module_terminates_the_name_and_zeroes_the_rest_of_the_field() {
 
     for (module, want) in names {
         assert!(!module.is_null());
-        // SAFETY: the descriptor was just allocated with C calloc; it is read
+        // SAFETY: the descriptor was just allocated with C calloc. It is read
         // here and released with C free as the loader does.
         let field = unsafe {
             let field = (&raw const (*module).name).cast::<[u8; LEN]>().read();

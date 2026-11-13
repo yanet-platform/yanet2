@@ -6,7 +6,7 @@
 //!
 //! The descriptors a plugin's loader entries return carry the runtime's
 //! handler and commit hooks, monomorphised for the exported type in the
-//! plugin crate; nothing outside this module names a hook, and only
+//! plugin crate. Nothing outside this module names a hook, and only
 //! `module_hooks` and `object_hook` hand one out, after the export checks.
 
 use core::{mem::size_of, ptr::NonNull};
@@ -111,16 +111,16 @@ unsafe extern "C" fn commit_ectx<M: Module>(ectx: *mut bindings::module_ectx, cp
     // context's counter storage was derived before the pass (attach: call).
     let cx = unsafe { CommitCx::<M>::new(root, ectx, config) };
     // SAFETY: the buffer holds the prepared value's size, aligned by the
-    // allocator (attach: align; only `module_hooks` hands out this hook, and
-    // its `check_module` bounds the alignment by `MAX_ALIGN` and refuses a
-    // value that needs a drop) and exclusively owned by this pass; a value
-    // needing no drop leaks nothing if the buffer is overwritten.
+    // allocator (attach: align), and is exclusively owned by this pass. Only
+    // `module_hooks` hands out this hook, and its `check_module` bounds the
+    // alignment by `MAX_ALIGN` and refuses a value that needs a drop, so the
+    // value leaks nothing if the buffer is overwritten.
     unsafe { out.write(M::prepare(&cx)) };
 }
 
 /// Allocates the module descriptor the loader copies and frees, with the
-/// runtime's handler and commit hook for the type parameter; null when C
-/// calloc fails.
+/// runtime's handler and commit hook for the type parameter. Returns null
+/// when C calloc fails.
 ///
 /// A module that `check_module` refuses fails the build where the function
 /// is instantiated, as one whose name does not fit the C module type field:
@@ -161,7 +161,7 @@ pub fn new_module<M: Module>() -> *mut bindings::module {
     let (handler, commit_ectx) = module_hooks::<M>();
     // SAFETY: the shim reads the name's bytes, live for the call, and stores
     // the hooks and the size in a descriptor it allocates with C calloc,
-    // which the loader releases with C free; `check_module`, run by
+    // which the loader releases with C free. `check_module`, run by
     // `module_hooks`, proved the name fits the field with its terminator.
     unsafe {
         bindings::yanet_sys_dp_module_new(
@@ -231,14 +231,14 @@ unsafe extern "C" fn commit_object_ectx<O: Object>(
     // SAFETY: root, context and configuration as stated above.
     let cx = unsafe { ObjectCommitCx::<O>::new(root, NonNull::new_unchecked(ectx), config) };
     // SAFETY: the buffer holds the prepared value's size, aligned by the
-    // allocator, and is owned by this pass, as for a module (attach: align;
-    // only `object_hook` hands out this hook, after its `check_object`).
+    // allocator, and is owned by this pass, as for a module (attach: align).
+    // Only `object_hook` hands out this hook, after its `check_object`.
     unsafe { out.write(O::prepare(&cx)) };
 }
 
 /// Allocates the object type descriptor the loader copies and frees, with
-/// the runtime's commit hook for the type parameter; null when C calloc
-/// fails.
+/// the runtime's commit hook for the type parameter. Returns null when C
+/// calloc fails.
 ///
 /// A type with a zero-sized prepared value registers no commit hook and no
 /// prepared buffer, so C runs no hook for it.
@@ -274,8 +274,8 @@ unsafe extern "C" fn commit_object_ectx<O: Object>(
 /// ```
 pub fn new_object<O: Object>() -> *mut bindings::object {
     let commit_ectx = object_hook::<O>();
-    // SAFETY: as for `new_module`: the shim reads the name's bytes and fills
-    // a descriptor it allocates for the object loader's C free;
+    // SAFETY: as for `new_module`, the shim reads the name's bytes and fills
+    // a descriptor it allocates for the object loader's C free.
     // `check_object`, run by `object_hook`, proved the name fits the field.
     unsafe {
         bindings::yanet_sys_dp_object_new(

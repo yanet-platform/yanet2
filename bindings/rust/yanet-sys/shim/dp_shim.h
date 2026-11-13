@@ -30,13 +30,14 @@ struct rte_mbuf;
 // Worker index of a module execution context whose worker is not known.
 #define YANET_SYS_DP_WORKER_IDX_NONE 0xFFFFFFFFFFFFFFFFULL
 
-// Allocates the module descriptor a plugin's new_module_<name> returns,
-// zeroed, with C calloc, which matches the free the module loader releases
-// it with; NULL when the allocation fails.
+// Allocates the module descriptor a plugin's new_module_<name> returns.
+//
+// The descriptor is zeroed by C calloc, which matches the free the module
+// loader releases it with. Returns NULL when the allocation fails.
 //
 // The descriptor takes at most MODULE_TYPE_LEN - 1 bytes of the name, which
 // need no terminator, and leaves the rest of the field zero, so the name is
-// always terminated; it stores the handler, the context commit hook and the
+// always terminated. It stores the handler, the context commit hook and the
 // prepared size as given and leaves the generation commit_handler NULL.
 YANET_SYS_HIDDEN struct module *
 yanet_sys_dp_module_new(
@@ -48,9 +49,10 @@ yanet_sys_dp_module_new(
 );
 
 // As yanet_sys_dp_module_new, for the object type descriptor a plugin's
-// new_object_<name> returns, which the object loader frees; the name takes
-// at most OBJECT_TYPE_LEN - 1 bytes, and a NULL commit handler registers no
-// hook.
+// new_object_<name> returns, which the object loader frees.
+//
+// The name takes at most OBJECT_TYPE_LEN - 1 bytes, and a NULL commit
+// handler registers no hook.
 YANET_SYS_HIDDEN struct object *
 yanet_sys_dp_object_new(
 	const char *name,

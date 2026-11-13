@@ -100,7 +100,7 @@ fn test_object_plugin_exports_the_abi_version() {
 fn test_new_object_with_a_prepared_value_registers_its_hook_and_size() {
     let object = new_object::<Prepared>();
     assert!(!object.is_null());
-    // SAFETY: the descriptor was just allocated with C calloc; it is read
+    // SAFETY: the descriptor was just allocated with C calloc. It is read
     // here and released with C free as the loader does.
     let (commit, prepared_size) = unsafe {
         let described = ((*object).commit_ectx_handler.is_some(), (*object).prepared_size);
@@ -126,7 +126,7 @@ fn test_new_object_terminates_the_name_and_zeroes_the_rest_of_the_field() {
 
     for (object, want) in names {
         assert!(!object.is_null());
-        // SAFETY: the descriptor was just allocated with C calloc; it is read
+        // SAFETY: the descriptor was just allocated with C calloc. It is read
         // here and released with C free as the loader does.
         let field = unsafe {
             let field = (&raw const (*object).name).cast::<[u8; LEN]>().read();
