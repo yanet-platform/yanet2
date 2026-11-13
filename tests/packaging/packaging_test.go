@@ -37,9 +37,14 @@ var shippedConfigPaths = []string{
 	"operators/route/etc/yanet/yanet-route-operator-default.yaml",
 	"operators/generic/etc/yanet/generic-operator.d/forward-default.yaml",
 	"operators/generic/etc/yanet/generic-operator.d/decap-default.yaml",
+	"operators/generic/etc/yanet/generic-operator.d/pdump-default.yaml",
 	"operators/generic/etc/yanet/forward.d/vlan-phy-default.yaml",
 	"operators/generic/etc/yanet/forward.d/phy-vlan-default.yaml",
 	"operators/generic/etc/yanet/decap.d/default.yaml",
+	"operators/generic/etc/yanet/pdump.d/ring-in-default.yaml",
+	"operators/generic/etc/yanet/pdump.d/ring-out-default.yaml",
+	"operators/generic/etc/yanet/pdump.d/capture-in-default.yaml",
+	"operators/generic/etc/yanet/pdump.d/capture-out-default.yaml",
 }
 
 // Test_GenericOperatorShippedConfigs_UseDefaultFileNames verifies that
@@ -187,7 +192,7 @@ func Test_GenericOperatorTemplateConfigsAreInstalled(t *testing.T) {
 	require.Len(t, match, 2, "no ExecStart config path in the generic operator template unit")
 
 	installed := loadInstalledPatterns(t)
-	for _, instance := range []string{"forward-default", "decap-default"} {
+	for _, instance := range []string{"forward-default", "decap-default", "pdump-default"} {
 		configPath := strings.ReplaceAll(match[1], "%i", instance)
 		require.True(t, isInstalled(installed, strings.TrimPrefix(configPath, "/")),
 			"%q is not listed in any debian/*.install manifest", configPath)
