@@ -26,7 +26,16 @@ describe('ring', () => {
         expect(JSON.parse(init.body)).toEqual({ name: 'r0', capacity: 1048576, publish_batch: 16 });
     });
 
-    it('omits publish_batch from CreateRing when not given, letting the service pick its default', async () => {
+    it.each([true, false])('serializes explicit allow_existing=%s in the CreateRing body', async (allowExisting) => {
+        const fetchMock = stubResponse({});
+        const request = { name: 'r0', capacity: 1048576, allow_existing: allowExisting };
+        await ring.createRing(request);
+
+        const [, init] = fetchMock.mock.calls[0];
+        expect(JSON.parse(init.body)).toEqual(request);
+    });
+
+    it('omits publish_batch and allow_existing when not given, keeping service defaults', async () => {
         const fetchMock = stubResponse({});
         await ring.createRing({ name: 'r0', capacity: 1048576 });
 

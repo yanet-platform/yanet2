@@ -23,6 +23,7 @@ export interface CreateRingRequest {
     name: string;
     capacity: number | string;
     publish_batch?: number;
+    allow_existing?: boolean;
 }
 
 export interface CreateRingResponse {}
@@ -53,7 +54,12 @@ export const ring = {
     createRing: (request: CreateRingRequest, options?: CallOptions): Promise<CreateRingResponse> =>
         ringService.callWithBody<CreateRingResponse>(
             'CreateRing',
-            { name: request.name, capacity: request.capacity, publish_batch: request.publish_batch },
+            {
+                name: request.name,
+                capacity: request.capacity,
+                publish_batch: request.publish_batch,
+                allow_existing: request.allow_existing,
+            },
             options,
         ),
 

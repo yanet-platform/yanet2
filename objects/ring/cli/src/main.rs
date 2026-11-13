@@ -70,6 +70,7 @@ async fn ring_create(service: &mut RingCliService, cmd: CreateCmd) -> Result<(),
         name: cmd.name.clone(),
         capacity: cmd.capacity,
         publish_batch: cmd.publish_batch.unwrap_or(0),
+        allow_existing: false,
     };
 
     service
