@@ -67,9 +67,11 @@ unsafe extern "C" {
 /// verifies that the module's constructor describes the module beside the
 /// object types it carries: the name, both handlers and no prepared buffer.
 #[test]
+#[cfg_attr(miri, ignore = "Miri does not run C")]
 fn test_new_module_with_objects_describes_the_module() {
-    // SAFETY: the constructor takes no arguments and returns a malloc'd
-    // descriptor, read here and released with C free as the loader does.
+    // SAFETY: the constructor takes no arguments and returns a descriptor
+    // allocated with C calloc, read here and released with C free as the
+    // loader does.
     let (name, handler, commit, prepared_size) = unsafe {
         let module = new_module_carrier();
         assert!(!module.is_null());
@@ -93,6 +95,7 @@ fn test_new_module_with_objects_describes_the_module() {
 /// `export_object!` exports one: a constructor under its type name, which
 /// registers the commit hook and the prepared size only for a prepared value.
 #[test]
+#[cfg_attr(miri, ignore = "Miri does not run C")]
 fn test_new_object_with_a_module_describes_each_type() {
     let constructors: [(unsafe extern "C" fn() -> *mut bindings::object, &CStr, bool, u64); 2] = [
         (new_object_carrier_table, c"carrier_table", false, 0),
@@ -100,8 +103,9 @@ fn test_new_object_with_a_module_describes_each_type() {
     ];
 
     for (constructor, want_name, want_commit, want_size) in constructors {
-        // SAFETY: the constructor takes no arguments and returns a malloc'd
-        // descriptor, read here and released with C free as the loader does.
+        // SAFETY: the constructor takes no arguments and returns a descriptor
+        // allocated with C calloc, read here and released with C free as the
+        // loader does.
         let (name, commit, prepared_size) = unsafe {
             let object = constructor();
             assert!(!object.is_null());

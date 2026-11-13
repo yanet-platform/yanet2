@@ -1,7 +1,8 @@
 // Dataplane helpers over the C the Rust handler runtime builds on.
 //
-// The shim holds the packet redirect of a module to a device entry, the
-// headroom growth of a frame, the packet parser and the packet encapsulation
+// The shim holds the construction of the plugin descriptors the loaders
+// free, the packet redirect of a module to a device entry, the headroom
+// growth of a frame, the packet parser and the packet encapsulation
 // routines, whose sources the build compiles in. It is compiled into each
 // module plugin with hidden visibility, so the routing logic (recirculation
 // budget, device entry scheduling, pending counters), the parser and the
@@ -12,7 +13,11 @@
 // stable rustc emits a non-relaxable GOT-relative reference.
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
+
+#include "lib/dataplane/module/module.h"
+#include "lib/dataplane/object/object.h"
 
 #include "shim_visibility.h"
 
@@ -24,6 +29,35 @@ struct rte_mbuf;
 
 // Worker index of a module execution context whose worker is not known.
 #define YANET_SYS_DP_WORKER_IDX_NONE 0xFFFFFFFFFFFFFFFFULL
+
+// Allocates the module descriptor a plugin's new_module_<name> returns,
+// zeroed, with C calloc, which matches the free the module loader releases
+// it with; NULL when the allocation fails.
+//
+// The descriptor takes at most MODULE_TYPE_LEN - 1 bytes of the name, which
+// need no terminator, and leaves the rest of the field zero, so the name is
+// always terminated; it stores the handler, the context commit hook and the
+// prepared size as given and leaves the generation commit_handler NULL.
+YANET_SYS_HIDDEN struct module *
+yanet_sys_dp_module_new(
+	const char *name,
+	size_t name_len,
+	module_handler handler,
+	module_commit_ectx_handler commit_ectx_handler,
+	uint64_t prepared_size
+);
+
+// As yanet_sys_dp_module_new, for the object type descriptor a plugin's
+// new_object_<name> returns, which the object loader frees; the name takes
+// at most OBJECT_TYPE_LEN - 1 bytes, and a NULL commit handler registers no
+// hook.
+YANET_SYS_HIDDEN struct object *
+yanet_sys_dp_object_new(
+	const char *name,
+	size_t name_len,
+	object_commit_ectx_handler commit_ectx_handler,
+	uint64_t prepared_size
+);
 
 // Index of the worker whose execution context holds the module context, for
 // its commit handler, which is not told its worker.

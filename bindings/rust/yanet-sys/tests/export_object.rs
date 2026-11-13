@@ -40,6 +40,18 @@ impl Object for Prepared {
     }
 }
 
+/// An object type whose name is `OBJECT_TYPE_LEN - 1` bytes long, the
+/// longest that fits the C field with its terminator.
+struct Longest;
+
+impl Object for Longest {
+    const TYPE: &'static str = "object_of_the_longest_name_that_fits_the_c_object_type_field_with_a_terminator_";
+    type Config = u64;
+    type Prepared<'p> = ();
+
+    fn prepare(_: &ObjectCommitCx<'_, Self>) {}
+}
+
 yanet_sys::export_object!(name = exported_state, object = Exported);
 
 unsafe extern "C" {
@@ -51,9 +63,11 @@ unsafe extern "C" {
 /// verifies that the exported constructor returns the object type descriptor
 /// the loader copies: the type name, no commit hook and no prepared buffer.
 #[test]
+#[cfg_attr(miri, ignore = "Miri does not run C")]
 fn test_new_object_describes_the_object_type() {
-    // SAFETY: the constructor takes no arguments and returns a malloc'd
-    // descriptor, read here and released with C free as the loader does.
+    // SAFETY: the constructor takes no arguments and returns a descriptor
+    // allocated with C calloc, read here and released with C free as the
+    // loader does.
     let (name, commit, prepared_size) = unsafe {
         let object = new_object_exported_state();
         assert!(!object.is_null());
@@ -82,11 +96,12 @@ fn test_object_plugin_exports_the_abi_version() {
 /// verifies that the descriptor of a type with a prepared value registers the
 /// commit hook and the size of the value.
 #[test]
+#[cfg_attr(miri, ignore = "Miri does not run C")]
 fn test_new_object_with_a_prepared_value_registers_its_hook_and_size() {
     let object = new_object::<Prepared>();
     assert!(!object.is_null());
-    // SAFETY: the descriptor is malloc'd, read here and released with C free
-    // as the loader does.
+    // SAFETY: the descriptor was just allocated with C calloc; it is read
+    // here and released with C free as the loader does.
     let (commit, prepared_size) = unsafe {
         let described = ((*object).commit_ectx_handler.is_some(), (*object).prepared_size);
         free(object.cast());
@@ -94,4 +109,33 @@ fn test_new_object_with_a_prepared_value_registers_its_hook_and_size() {
     };
 
     assert_eq!((true, 16), (commit, prepared_size));
+}
+
+/// verifies that the descriptor stores a name of `OBJECT_TYPE_LEN - 1` bytes
+/// whole and NUL-terminated, and pads a shorter one with zeros to the end of
+/// the field.
+#[test]
+#[cfg_attr(miri, ignore = "Miri does not run C")]
+fn test_new_object_terminates_the_name_and_zeroes_the_rest_of_the_field() {
+    const LEN: usize = bindings::OBJECT_TYPE_LEN as usize;
+    assert_eq!(LEN - 1, Longest::TYPE.len());
+    let names = [
+        (new_object::<Longest>(), Longest::TYPE),
+        (new_object::<Exported>(), Exported::TYPE),
+    ];
+
+    for (object, want) in names {
+        assert!(!object.is_null());
+        // SAFETY: the descriptor was just allocated with C calloc; it is read
+        // here and released with C free as the loader does.
+        let field = unsafe {
+            let field = (*object).name.map(|byte| byte as u8);
+            free(object.cast());
+            field
+        };
+
+        let mut padded = [0u8; LEN];
+        padded[..want.len()].copy_from_slice(want.as_bytes());
+        assert_eq!(padded, field, "{want}");
+    }
 }

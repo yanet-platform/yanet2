@@ -6,7 +6,8 @@
 //!
 //! The descriptors a plugin's loader entries return carry the runtime's
 //! handler and commit hooks, monomorphised for the exported type in the
-//! plugin crate; nothing outside this module names a hook.
+//! plugin crate; nothing outside this module names a hook, and only
+//! `module_hooks` and `object_hook` hand one out, after the export checks.
 
 use core::{mem::size_of, ptr::NonNull};
 
@@ -25,10 +26,6 @@ use crate::{
 
 /// Dataplane to module ABI version the bindings were generated against.
 pub const ABI_VERSION: u32 = bindings::YANET_MODULE_ABI_VERSION;
-
-unsafe extern "C" {
-    fn malloc(size: usize) -> *mut core::ffi::c_void;
-}
 
 /// The module handler the descriptor of `new_module` registers.
 ///
@@ -114,7 +111,7 @@ unsafe extern "C" fn commit_ectx<M: Module>(ectx: *mut bindings::module_ectx, cp
     // context's counter storage was derived before the pass (attach: call).
     let cx = unsafe { CommitCx::<M>::new(root, ectx, config) };
     // SAFETY: the buffer holds the prepared value's size, aligned by the
-    // allocator (attach: align; only `new_module` registers this hook, and
+    // allocator (attach: align; only `module_hooks` hands out this hook, and
     // its `check_module` bounds the alignment by `MAX_ALIGN` and refuses a
     // value that needs a drop) and exclusively owned by this pass; a value
     // needing no drop leaks nothing if the buffer is overwritten.
@@ -123,7 +120,7 @@ unsafe extern "C" fn commit_ectx<M: Module>(ectx: *mut bindings::module_ectx, cp
 
 /// Allocates the module descriptor the loader copies and frees, with the
 /// runtime's handler and commit hook for the type parameter; null when C
-/// malloc fails.
+/// calloc fails.
 ///
 /// A module that `check_module` refuses fails the build where the function
 /// is instantiated, as one whose name does not fit the C module type field:
@@ -161,24 +158,46 @@ unsafe extern "C" fn commit_ectx<M: Module>(ectx: *mut bindings::module_ectx, cp
 /// let _ = yanet_sys::dp::__private::new_module::<Mine>();
 /// ```
 pub fn new_module<M: Module>() -> *mut bindings::module {
-    const { check_module::<M>() };
-    let size = size_of::<bindings::module>();
-    // SAFETY: the loader releases the descriptor with C free, so it is
-    // allocated with C malloc and fully initialised before return; the name
-    // and its terminator fit the zeroed field, as `check_module` asserts.
+    let (handler, commit_ectx) = module_hooks::<M>();
+    // SAFETY: the shim reads the name's bytes, live for the call, and stores
+    // the hooks and the size in a descriptor it allocates with C calloc,
+    // which the loader releases with C free; `check_module`, run by
+    // `module_hooks`, proved the name fits the field with its terminator.
     unsafe {
-        let module = malloc(size).cast::<bindings::module>();
-        if module.is_null() {
-            return module;
-        }
-        core::ptr::write_bytes(module.cast::<u8>(), 0, size);
-        let name = &raw mut (*module).name;
-        core::ptr::copy_nonoverlapping(M::NAME.as_ptr(), name.cast::<u8>(), M::NAME.len());
-        (*module).handler = Some(handle::<M>);
-        (*module).commit_ectx_handler = Some(commit_ectx::<M>);
-        (*module).prepared_size = size_of::<M::Prepared<'static>>() as u64;
-        module
+        bindings::yanet_sys_dp_module_new(
+            M::NAME.as_ptr().cast(),
+            M::NAME.len(),
+            handler,
+            commit_ectx,
+            size_of::<M::Prepared<'static>>() as u64,
+        )
     }
+}
+
+/// The handler and commit hook the descriptor of `new_module` registers for
+/// a module, as the loader reads them from it.
+///
+/// Fails the build, as `new_module` does, for a module `check_module`
+/// refuses:
+///
+/// ```compile_fail,E0080
+/// use yanet_sys::dp::{Batch, CommitCx, Cx, Module, Verdict};
+/// struct Mine;
+/// impl Module for Mine {
+///     const NAME: &'static str =
+///         "module_of_a_name_long_enough_to_overflow_the_eighty_bytes_of_the_c_module_type_field";
+///     type Config = u64;
+///     type Prepared<'p> = ();
+///     fn handle(_: &mut Cx<Self>, batch: &mut Batch) {
+///         batch.dispatch(|_| Verdict::Pass);
+///     }
+///     fn prepare(_: &CommitCx<'_, Self>) {}
+/// }
+/// let _ = yanet_sys::dp::__private::module_hooks::<Mine>();
+/// ```
+pub fn module_hooks<M: Module>() -> (bindings::module_handler, bindings::module_commit_ectx_handler) {
+    const { check_module::<M>() };
+    (Some(handle::<M>), Some(commit_ectx::<M>))
 }
 
 /// The object execution-context commit hook the descriptor of `new_object`
@@ -213,12 +232,12 @@ unsafe extern "C" fn commit_object_ectx<O: Object>(
     let cx = unsafe { ObjectCommitCx::<O>::new(root, NonNull::new_unchecked(ectx), config) };
     // SAFETY: the buffer holds the prepared value's size, aligned by the
     // allocator, and is owned by this pass, as for a module (attach: align;
-    // only `new_object` registers this hook, after its `check_object`).
+    // only `object_hook` hands out this hook, after its `check_object`).
     unsafe { out.write(O::prepare(&cx)) };
 }
 
 /// Allocates the object type descriptor the loader copies and frees, with
-/// the runtime's commit hook for the type parameter; null when C malloc
+/// the runtime's commit hook for the type parameter; null when C calloc
 /// fails.
 ///
 /// A type with a zero-sized prepared value registers no commit hook and no
@@ -254,27 +273,44 @@ unsafe extern "C" fn commit_object_ectx<O: Object>(
 /// let _ = yanet_sys::dp::__private::new_object::<Mine>();
 /// ```
 pub fn new_object<O: Object>() -> *mut bindings::object {
-    const { check_object::<O>() };
-    let size = size_of::<bindings::object>();
-    // SAFETY: the loader releases the descriptor with C free, so it is
-    // allocated with C malloc and fully initialised before return; the name
-    // and its terminator fit the zeroed field, as `check_object` asserts.
+    let commit_ectx = object_hook::<O>();
+    // SAFETY: as for `new_module`: the shim reads the name's bytes and fills
+    // a descriptor it allocates for the object loader's C free;
+    // `check_object`, run by `object_hook`, proved the name fits the field.
     unsafe {
-        let object = malloc(size).cast::<bindings::object>();
-        if object.is_null() {
-            return object;
-        }
-        core::ptr::write_bytes(object.cast::<u8>(), 0, size);
-        let name = &raw mut (*object).name;
-        core::ptr::copy_nonoverlapping(O::TYPE.as_ptr(), name.cast::<u8>(), O::TYPE.len());
-        let prepared_size = size_of::<O::Prepared<'static>>();
-        (*object).commit_ectx_handler = if prepared_size == 0 {
-            None
-        } else {
-            Some(commit_object_ectx::<O>)
-        };
-        (*object).prepared_size = prepared_size as u64;
-        object
+        bindings::yanet_sys_dp_object_new(
+            O::TYPE.as_ptr().cast(),
+            O::TYPE.len(),
+            commit_ectx,
+            size_of::<O::Prepared<'static>>() as u64,
+        )
+    }
+}
+
+/// The commit hook the descriptor of `new_object` registers for an object
+/// type, as the loader reads it from it: none for a zero-sized prepared
+/// value.
+///
+/// Fails the build, as `new_object` does, for a type `check_object` refuses:
+///
+/// ```compile_fail,E0080
+/// use yanet_sys::dp::{Object, ObjectCommitCx};
+/// struct Mine;
+/// impl Object for Mine {
+///     const TYPE: &'static str =
+///         "state_of_a_name_long_enough_to_overflow_the_eighty_bytes_of_the_c_object_type_field";
+///     type Config = u64;
+///     type Prepared<'p> = ();
+///     fn prepare(_: &ObjectCommitCx<'_, Self>) {}
+/// }
+/// let _ = yanet_sys::dp::__private::object_hook::<Mine>();
+/// ```
+pub fn object_hook<O: Object>() -> bindings::object_commit_ectx_handler {
+    const { check_object::<O>() };
+    if size_of::<O::Prepared<'static>>() == 0 {
+        None
+    } else {
+        Some(commit_object_ectx::<O>)
     }
 }
 

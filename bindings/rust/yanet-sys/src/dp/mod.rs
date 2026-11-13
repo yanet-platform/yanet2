@@ -110,7 +110,7 @@ pub use object::{Object, ObjectConfig};
 pub mod __private {
     pub use crate::{
         bindings,
-        dp::rt::{ABI_VERSION, new_module, new_object},
+        dp::rt::{ABI_VERSION, module_hooks, new_module, new_object, object_hook},
     };
 
     /// Fails const evaluation when a module cannot be exported: its name does

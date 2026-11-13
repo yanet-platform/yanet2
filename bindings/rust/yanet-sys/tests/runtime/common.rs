@@ -6,7 +6,6 @@
 use alloc::alloc::{alloc_zeroed, dealloc, handle_alloc_error};
 use core::{
     alloc::Layout,
-    ffi::c_void,
     marker::PhantomData,
     mem::{align_of, size_of, size_of_val},
     ptr::NonNull,
@@ -16,14 +15,10 @@ use yanet_sdk_testing::BlockArena;
 use yanet_sys::{
     bindings,
     dp::{
-        __private::{new_module, new_object},
+        __private::{module_hooks, object_hook},
         Module, ModuleConfig, Object,
     },
 };
-
-unsafe extern "C" {
-    fn free(ptr: *mut c_void);
-}
 
 /// Writes `value` at `addr` of a block just allocated in `arena`.
 ///
@@ -36,21 +31,6 @@ pub unsafe fn write<T>(arena: &'static BlockArena, addr: usize, value: T) {
     unsafe { arena.root().ptr::<T>(addr).write(value) }
 }
 
-/// The handler and commit hook a module's plugin export registers, read from
-/// its descriptor as the dataplane's loader reads them.
-fn module_hooks<M: Module>() -> (bindings::module_handler, bindings::module_commit_ectx_handler) {
-    let module = new_module::<M>();
-    assert!(!module.is_null(), "C malloc returned no descriptor");
-    // SAFETY: the descriptor was just allocated with C malloc and
-    // initialised; it is read here and released with C free, as the loader
-    // does.
-    unsafe {
-        let hooks = ((*module).handler, (*module).commit_ectx_handler);
-        free(module.cast());
-        hooks
-    }
-}
-
 /// Runs the commit hook an object type's plugin export registers over the
 /// object's context, as the dataplane does before it commits a module
 /// context linking the object; a type without a prepared value registers
@@ -61,17 +41,7 @@ fn module_hooks<M: Module>() -> (bindings::module_handler, bindings::module_comm
 /// The context and the configuration must lie in `arena`, laid out for `O`,
 /// the context's prepared buffer allocated when `O` has a prepared value.
 pub unsafe fn commit_object<O: Object>(arena: &'static BlockArena, object_ectx: usize, object: usize) {
-    let descriptor = new_object::<O>();
-    assert!(!descriptor.is_null(), "C malloc returned no descriptor");
-    // SAFETY: the descriptor was just allocated with C malloc and
-    // initialised; it is read here and released with C free, as the loader
-    // does.
-    let commit = unsafe {
-        let commit = (*descriptor).commit_ectx_handler;
-        free(descriptor.cast());
-        commit
-    };
-    if let Some(commit) = commit {
+    if let Some(commit) = object_hook::<O>() {
         let root = arena.root();
         // SAFETY: the context lies in the arena, whose root it is, laid out
         // for the type with its buffer (caller contract).
