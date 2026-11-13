@@ -164,6 +164,14 @@ func RulePathMembership(
 	fragOnly := fragment == filter.FragmentFrag
 	plainOwned := split.WholeL4 && fullPorts
 
+	// An empty port set matches no packet under the explicit any
+	// contract, and the plain path skips the port attributes entirely,
+	// so such a rule must resolve through no path at all - the fragment
+	// constrained ones included.
+	if len(srcPorts) == 0 || len(dstPorts) == 0 {
+		return PathFlags{}
+	}
+
 	return PathFlags{
 		Plain: split.WholeL4 && (fragOnly || fullPorts),
 		TCP:   !fragOnly && intersects(protos, ipProtoTCP) && !plainOwned,

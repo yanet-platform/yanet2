@@ -132,8 +132,19 @@ func TestRulePathMembership(t *testing.T) {
 		{
 			name:     "fragment_constrained_whole_byte_is_plain",
 			protos:   filter.ProtoRanges{filter.NewProtoRange(6, filter.AnySubtype())},
+			srcPorts: wholePorts,
 			fragment: filter.FragmentFrag,
 			want:     cacl.PathFlags{Plain: true},
+		},
+		{
+			// The plain path skips the port attributes, so a rule with
+			// an empty port set resolves through no path - the fragment
+			// constrained ones included.
+			name:     "fragment_constrained_empty_ports_takes_no_path",
+			protos:   filter.ProtoRanges{filter.NewProtoRange(6, filter.AnySubtype())},
+			srcPorts: filter.PortRanges{},
+			fragment: filter.FragmentFrag,
+			want:     cacl.PathFlags{},
 		},
 		{
 			// A rule without protocol ranges matches no packet, so

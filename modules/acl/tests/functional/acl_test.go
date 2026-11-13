@@ -423,6 +423,86 @@ func TestACL_EmptyProtoRanges_MatchNothing(t *testing.T) {
 	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_no_match", 1)
 }
 
+// arpPacket builds an ARP packet: a non-IP packet only the l2 filter
+// can match.
+func arpPacket(t *testing.T) gopacket.Packet {
+	t.Helper()
+	eth := layers.Ethernet{
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("ff:ff:ff:ff:ff:ff")),
+		EthernetType: layers.EthernetTypeARP,
+	}
+	arp := layers.ARP{
+		AddrType:          layers.LinkTypeEthernet,
+		Protocol:          layers.EthernetTypeIPv4,
+		HwAddressSize:     6,
+		ProtAddressSize:   4,
+		Operation:         layers.ARPRequest,
+		SourceHwAddress:   xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+		SourceProtAddress: net.ParseIP("10.0.0.1").To4(),
+		DstHwAddress:      net.HardwareAddr{0, 0, 0, 0, 0, 0},
+		DstProtAddress:    net.ParseIP("10.0.0.2").To4(),
+	}
+	return xpacket.LayersToPacket(t, &eth, &arp)
+}
+
+// whole16BitProto spans every protocol with every transport byte.
+var whole16BitProto = filter.ProtoRanges{{From: 0, To: 0xffff}}
+
+// catchAllRule spells the explicit whole domain coverage of every
+// condition: the only shape a rule matching packets of every protocol
+// family may take.
+func catchAllRule() cacl.ACLRule {
+	return cacl.ACLRule{
+		Actions: []cacl.ACLAction{{Kind: cacl.ActionAllow}},
+		Devices: filter.Devices{{Name: "port0"}},
+		Src4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Dst4s:   []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Src6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+		Dst6s:   []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+		SrcPortRanges:   allPorts,
+		DstPortRanges:   allPorts,
+		ProtoRanges:     whole16BitProto,
+		Fragment:        filter.FragmentAny,
+	}
+}
+
+// TestACL_ExplicitAnyNetworks_StillConstrainedByPorts verifies that a
+// rule spelling the whole domain coverage of every network side alone
+// does not become the l2 catch-all: the remaining port restriction
+// keeps it out of the l2 projection, so a non-IP packet matches nothing.
+func TestACL_ExplicitAnyNetworks_StillConstrainedByPorts(t *testing.T) {
+	restricted := catchAllRule()
+	restricted.DstPortRanges = filter.PortRanges{{From: 80, To: 80}}
+
+	h, agent, backend := setupACLHarness(t, []string{"port0"})
+	applyACLRules(t, backend, "test", []cacl.ACLRule{restricted})
+	wireACLPipeline(t, agent, "port0", "test")
+
+	result, err := h.HandlePackets(arpPacket(t))
+	require.NoError(t, err)
+	require.Empty(t, result.Output, "the port restricted rule must not match the ARP packet")
+	require.Len(t, result.Drop, 1)
+
+	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_no_match", 1)
+}
+
+// TestACL_ExplicitCatchAllMatchesNonIP verifies that a rule spelling
+// the whole domain coverage of every condition matches the non-IP
+// packets through the l2 filter.
+func TestACL_ExplicitCatchAllMatchesNonIP(t *testing.T) {
+	h, agent, backend := setupACLHarness(t, []string{"port0"})
+	applyACLRules(t, backend, "test", []cacl.ACLRule{catchAllRule()})
+	wireACLPipeline(t, agent, "port0", "test")
+
+	result, err := h.HandlePackets(arpPacket(t))
+	require.NoError(t, err)
+	require.Len(t, result.Output, 1, "the explicit catch-all rule must match the ARP packet")
+	require.Empty(t, result.Drop)
+
+	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_action_allow", 1)
+}
+
 // Test_ACLService_UpdateConfig_ConcurrentCompiles verifies that two configs
 // compiled at the same time on one agent each publish their own verdict.
 func Test_ACLService_UpdateConfig_ConcurrentCompiles(t *testing.T) {
