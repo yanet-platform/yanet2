@@ -969,8 +969,8 @@ test_regions_reference_build(
 		       &ref->comb,
 		       mctx,
 		       "ref_comb",
-		       compile->comb.v_dim,
-		       compile->comb.h_dim
+		       compile->row_count,
+		       compile->ri_lo.max_value + 1
 	       ) == 0);
 	assert(vline_init(
 		       &ref->uniform, mctx, "ref_rows", compile->row_count
@@ -997,7 +997,7 @@ test_regions_reference_build(
 	assert(remap_table_init(
 		       &remap_table,
 		       mctx,
-		       compile->comb.v_dim * compile->comb.h_dim +
+		       compile->row_count * (compile->ri_lo.max_value + 1) +
 			       compile->row_count
 	       ) == 0);
 	for (uint32_t net_idx = 0; net_idx < compile->net_count; ++net_idx) {
@@ -1068,13 +1068,32 @@ assert_regions_match_reference(
 
 	assert(memcmp(ref.row_split, compile->row_split, compile->row_count) ==
 	       0);
+	// The compile packs the split rows in the order of their first high
+	// ordinal; the reference keeps every row.
+	uint32_t *packed = malloc(compile->row_count * sizeof(uint32_t));
+	assert(packed != NULL);
+	memset(packed, 0xff, compile->row_count * sizeof(uint32_t));
+	uint32_t packed_count = 0;
+	const uint32_t *values_hi = ADDR_OF(&compile->ri_hi.values);
+	for (uint32_t idx = 0; idx < compile->ri_hi.count; ++idx) {
+		uint32_t row = values_hi[idx];
+		if (compile->row_split[row] && packed[row] == UINT32_MAX) {
+			packed[row] = packed_count++;
+		}
+	}
+	assert(packed_count == compile->comb.v_dim);
 	for (uint32_t row = 0; row < compile->row_count; ++row) {
-		assert(memcmp(value_table_get_ptr(&ref.comb, row, 0),
-			      value_table_get_ptr(&compile->comb, row, 0),
-			      compile->comb.h_dim * sizeof(uint32_t)) == 0);
+		if (compile->row_split[row]) {
+			assert(memcmp(value_table_get_ptr(&ref.comb, row, 0),
+				      value_table_get_ptr(
+					      &compile->comb, packed[row], 0
+				      ),
+				      ref.comb.h_dim * sizeof(uint32_t)) == 0);
+		}
 		assert(vline_get(&ref.uniform, row) ==
 		       vline_get(&compile->uniform, row));
 	}
+	free(packed);
 	assert(ref.region_count == compile->region_count);
 
 	const struct value_range *ref_ranges = ADDR_OF(&ref.registry.ranges);

@@ -80,8 +80,8 @@ struct classify_compile_net6 {
 	struct range_index ri_hi;
 	struct range_index ri_lo;
 
-	// Rows of the join table with a low half distinction, set by the
-	// region assignment; the commit packs only these rows.
+	// Rows with a low half distinction, set by the first region sweep;
+	// only these rows have cells in the join table.
 	uint8_t *row_split;
 	uint32_t row_count;
 	// Whole row region of every row without a low half distinction.
@@ -98,8 +98,10 @@ struct classify_compile_net6 {
 	uint32_t *region_values;
 	uint32_t region_count;
 
-	// The dense high by low join table of the combined regions; it
-	// moves into the embedded attribute at commit.
+	// The join table of the combined regions for the split rows only,
+	// packed in the order of their first high ordinal, the order the
+	// marked high half trie values index; it moves into the embedded
+	// attribute at commit.
 	struct value_table comb;
 };
 
@@ -397,7 +399,11 @@ struct filter_net6_regions {
 
 	uint8_t *emitted;
 	uint32_t row_count;
-	// The low regions under the nodes of the kept vector, sorted.
+	// The packed table row of every split row, in the commit's order.
+	uint32_t *dense_rows;
+	uint32_t dense_count;
+	// The low regions under the nodes of the kept vector, sorted when a
+	// row is ranked.
 	uint32_t *sparse;
 	uint32_t *order;
 	uint32_t ranked;
@@ -645,10 +651,11 @@ filter_net6_u32_cmp(const void *first, const void *second) {
 }
 
 /*
- * Collects the low regions under the nodes of the kept vector, sorted.
+ * Collects the low regions under the nodes of the kept vector.
  *
  * The regions may repeat; none are collected when they are too many to
- * beat a walk over the row.
+ * beat a walk over the row, which also keeps them within the buffer of
+ * one row.
  */
 static inline uint32_t
 filter_net6_regions_sparse(struct filter_net6_regions *regions) {
@@ -676,7 +683,6 @@ filter_net6_regions_sparse(struct filter_net6_regions *regions) {
 			}
 		}
 	}
-	qsort(regions->sparse, count, sizeof(uint32_t), filter_net6_u32_cmp);
 	return count;
 }
 
@@ -689,6 +695,7 @@ filter_net6_regions_sparse(struct filter_net6_regions *regions) {
 static inline void
 filter_net6_regions_rank_row(struct filter_net6_regions *regions) {
 	uint32_t count = filter_net6_regions_sparse(regions);
+	qsort(regions->sparse, count, sizeof(uint32_t), filter_net6_u32_cmp);
 	if (count == 0) {
 		for (uint32_t col = 0; col < regions->h_dim; ++col) {
 			filter_net6_regions_rank(regions, regions->vector[col]);
@@ -803,6 +810,11 @@ filter_net6_regions_free(struct filter_net6_regions *regions) {
 		(regions->ranked + 1) * sizeof(uint32_t)
 	);
 	memory_bfree(memory_context, regions->emitted, regions->row_count);
+	memory_bfree(
+		memory_context,
+		regions->dense_rows,
+		regions->row_count * sizeof(uint32_t)
+	);
 }
 
 /*
@@ -819,7 +831,7 @@ filter_net6_regions_init(
 	regions->memory_context = memory_context;
 	regions->values_lo = ADDR_OF(&net6_compile->ri_lo.values);
 	regions->lo_count = net6_compile->ri_lo.count;
-	regions->h_dim = net6_compile->comb.h_dim;
+	regions->h_dim = net6_compile->ri_lo.max_value + 1;
 	regions->row_count = net6_compile->row_count;
 
 	uint32_t capacity = net6_compile->net_count + 1;
@@ -840,13 +852,16 @@ filter_net6_regions_init(
 		memory_context, regions->h_dim * sizeof(uint32_t)
 	);
 	regions->emitted = memory_balloc(memory_context, regions->row_count);
+	regions->dense_rows = memory_balloc(
+		memory_context, regions->row_count * sizeof(uint32_t)
+	);
 	regions->chunk_capacity = 1;
 	regions->chunks =
 		memory_balloc(memory_context, sizeof(*regions->chunks));
 	if (regions->nets == NULL || regions->nodes == NULL ||
 	    regions->frames == NULL || regions->vector == NULL ||
 	    regions->sparse == NULL || regions->emitted == NULL ||
-	    regions->chunks == NULL) {
+	    regions->dense_rows == NULL || regions->chunks == NULL) {
 		return -1;
 	}
 	memset(regions->vector, 0, regions->h_dim * sizeof(uint32_t));
@@ -924,8 +939,9 @@ filter_net6_regions_init(
  * The first sweep creates the classes and ranks them by the first cell
  * holding them in high then low ordinal order - the partition numbers
  * the regions of both halves by their first ordinal, so the low regions
- * go in index order. The second sweep enters the nodes again and writes
- * the regions of every row, or its uniform line value.
+ * go in index order, and marks and packs the split rows. The second
+ * sweep enters the nodes again and writes the regions of every row,
+ * or its uniform line value.
  */
 static inline int
 filter_net6_regions_sweep(
@@ -977,12 +993,17 @@ filter_net6_regions_sweep(
 				);
 			}
 		} else if (write) {
-			net6_compile->row_split[row] = 1;
 			filter_net6_regions_write_row(
 				regions,
-				value_table_get_ptr(&net6_compile->comb, row, 0)
+				value_table_get_ptr(
+					&net6_compile->comb,
+					regions->dense_rows[row],
+					0
+				)
 			);
 		} else {
+			net6_compile->row_split[row] = 1;
+			regions->dense_rows[row] = regions->dense_count++;
 			filter_net6_regions_rank_row(regions);
 		}
 	}
@@ -1000,7 +1021,8 @@ filter_net6_regions_sweep(
  * Every cell of a class shares its touch history, and a network
  * covering one cell of a class covers all of them, so touching one cell
  * per class - the classes of a network in their rank order - allocates
- * the same remap keys in the same order. The registry ranges collect
+ * the same remap keys in the same order, as the remap table never reuses
+ * a released key. The registry ranges collect
  * the classes of every network in rank order, the order a network
  * walking its cross meets them, and are then rewritten into regions.
  */
@@ -1135,6 +1157,19 @@ filter_net6_build_regions(
 	}
 	if (rc == 0) {
 		rc = filter_net6_regions_assign(&regions, net6_compile, name);
+	}
+	if (rc == 0 && regions.dense_count != 0) {
+		// The split rows packed in the order the commit reads them; the
+		// cells of the uniform rows are never read.
+		char comb_name[MEMORY_CONTEXT_NAME_SIZE];
+		classify_leaf_name(comb_name, sizeof(comb_name), name, "comb");
+		rc = value_table_init(
+			&net6_compile->comb,
+			memory_context,
+			comb_name,
+			regions.dense_count,
+			regions.h_dim
+		);
 	}
 	if (rc == 0) {
 		rc = filter_net6_regions_sweep(&regions, net6_compile, 1);
@@ -1279,25 +1314,13 @@ classify_compile_net6_create(
 	}
 
 	/*
-	 * The dense high by low value table carries the join of the half
-	 * region values into the combined regions. A high region row
-	 * without any low half distinction carries its value in the
-	 * uniform value line instead; the line values and the cells share
+	 * The dense table carries the join of the half region values into
+	 * the combined regions for the rows with a low half distinction,
+	 * packed; every other high region row carries its value in the
+	 * uniform value line instead. The line values and the cells share
 	 * one region space.
 	 */
-	char comb_name[MEMORY_CONTEXT_NAME_SIZE];
-	classify_leaf_name(comb_name, sizeof(comb_name), name, "comb");
-	if (value_table_init(
-		    &compile->comb,
-		    memory_context,
-		    comb_name,
-		    compile->ri_hi.max_value + 1,
-		    compile->ri_lo.max_value + 1
-	    )) {
-		goto error_free_parts;
-	}
-
-	compile->row_count = compile->comb.v_dim;
+	compile->row_count = compile->ri_hi.max_value + 1;
 	char rows_name[MEMORY_CONTEXT_NAME_SIZE];
 	classify_leaf_name(rows_name, sizeof(rows_name), name, "rows");
 	if (vline_init(
@@ -1306,7 +1329,7 @@ classify_compile_net6_create(
 		    rows_name,
 		    compile->row_count
 	    )) {
-		goto error_free_comb;
+		goto error_free_parts;
 	}
 
 	compile->row_split = memory_balloc(memory_context, compile->row_count);
@@ -1376,10 +1399,8 @@ error_free_net_registry:
 error_free_uniform:
 	vline_free(&compile->uniform);
 
-error_free_comb:
-	value_table_free(&compile->comb);
-
 error_free_parts:
+	value_table_free(&compile->comb);
 	range_index_free(&compile->ri_lo);
 
 error_free_part_hi:
@@ -1584,9 +1605,9 @@ classify_compile_net6_commit(
 	 * region identifiers. A row without any low half distinction
 	 * resolves into its final class carried by the high half trie
 	 * value itself, so the lookup finishes after the high half walk;
-	 * the rows of a low half distinction pack densely into a rebuilt
-	 * join table referenced from the marked trie values, and the cells
-	 * of the uniform rows are never read again.
+	 * the rows of a low half distinction arrive packed in the join table
+	 * referenced from the marked trie values, and their cells resolve in
+	 * place.
 	 */
 	struct value_table *comb = &net6_compile->comb;
 
@@ -1643,61 +1664,14 @@ classify_compile_net6_commit(
 		)];
 	}
 
-	if (dense_count != 0) {
-		struct value_table dense;
-		char dense_name[MEMORY_CONTEXT_NAME_SIZE];
-		classify_leaf_name(
-			dense_name,
-			sizeof(dense_name),
-			net6_compile->name,
-			"comb"
-		);
-		if (value_table_init(
-			    &dense,
-			    memory_context,
-			    dense_name,
-			    dense_count,
-			    comb->h_dim
-		    )) {
-			memory_bfree(
-				memory_context,
-				dense_of_row,
-				sizeof(uint32_t) * net6_compile->row_count
-			);
-			memory_bfree(
-				memory_context,
-				lpm_values,
-				sizeof(uint32_t) * (hi_count ? hi_count : 1)
-			);
-			goto error;
+	// The table holds the split rows packed in this same order, so its
+	// regions resolve into their classes in place.
+	for (uint32_t row = 0; row < comb->v_dim; ++row) {
+		uint32_t *cells = value_table_get_ptr(comb, row, 0);
+		for (uint32_t h_idx = 0; h_idx < comb->h_dim; ++h_idx) {
+			cells[h_idx] =
+				net6_compile->region_values[cells[h_idx]];
 		}
-
-		for (uint32_t row = 0; row < net6_compile->row_count; ++row) {
-			if (!net6_compile->row_split[row]) {
-				continue;
-			}
-
-			uint32_t dense_row = dense_of_row[row];
-			for (uint32_t h_idx = 0; h_idx < comb->h_dim; ++h_idx) {
-				*value_table_get_ptr(&dense, dense_row, h_idx) =
-					net6_compile->region_values
-						[*value_table_get_ptr(
-							comb, row, h_idx
-						)];
-			}
-		}
-
-		value_table_free(comb);
-		// Field by field: the table carries relative pointers that a
-		// struct copy would strand.
-		comb->v_dim = dense.v_dim;
-		comb->h_dim = dense.h_dim;
-		SET_OFFSET_OF(&comb->values, ADDR_OF(&dense.values));
-		SET_OFFSET_OF(
-			&comb->memory_context, ADDR_OF(&dense.memory_context)
-		);
-	} else {
-		value_table_free(comb);
 	}
 
 	int hi_rc = range_index_build_lpm_values(
