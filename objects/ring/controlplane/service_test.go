@@ -392,6 +392,51 @@ func Test_RingService_CreateRing_ReclaimsDeferredBeforeAllocating(t *testing.T) 
 	f.create(t, "next", 64)
 }
 
+// Test_RingService_CreateRing_AllowExistingReclaimsDeferred verifies that
+// existing-name outcomes free deleted rings after their references drain.
+func Test_RingService_CreateRing_AllowExistingReclaimsDeferred(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		unmanaged bool
+		capacity  uint64
+		code      codes.Code
+	}{
+		{name: "matching managed ring", capacity: 64, code: codes.OK},
+		{name: "managed parameter conflict", capacity: 128, code: codes.AlreadyExists},
+		{name: "unmanaged publication", unmanaged: true, capacity: 64, code: codes.FailedPrecondition},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := newRingFixture(t)
+			if tc.unmanaged {
+				external, err := cring.NewObject(fixture.agent, "target", 64, cring.DefaultPublishBatch)
+				require.NoError(t, err)
+				require.NoError(t, external.Publish())
+				t.Cleanup(func() {
+					_ = cring.DeleteObject(fixture.agent, "target")
+					_ = external.Free()
+				})
+			} else {
+				fixture.create(t, "target", 64)
+			}
+			baseline := fixture.agent.BlockAllocatorFreeSize()
+
+			fixture.create(t, "deferred", 64)
+			reference, err := ringtest.Hold(fixture.agent, "deferred")
+			require.NoError(t, err)
+			t.Cleanup(reference.Release)
+			require.NoError(t, fixture.delete(t, "deferred"))
+			require.Less(t, fixture.agent.BlockAllocatorFreeSize(), baseline)
+			reference.Release()
+
+			_, err = fixture.client.CreateRing(t.Context(), &ringpb.CreateRingRequest{
+				Name: "target", Capacity: tc.capacity, AllowExisting: true,
+			})
+			require.Equal(t, tc.code, status.Code(err))
+			require.Equal(t, baseline, fixture.agent.BlockAllocatorFreeSize())
+		})
+	}
+}
+
 // Test_RingService_LeaseVsDeleteRace runs deletes against concurrent
 // acquires.
 //

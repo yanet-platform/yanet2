@@ -163,10 +163,9 @@ func (m *RingService) CreateRing(
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if !req.GetAllowExisting() {
-		// Strict creates reclaim drained rings even when the name is taken.
-		m.reclaimDeferred()
-	}
+	// Releasing the drained deferred rings first leaves their memory to the
+	// new ring, and a failing create cannot keep them.
+	m.reclaimDeferred()
 
 	if entry, exists := m.rings[name]; exists {
 		if !req.GetAllowExisting() {
@@ -191,10 +190,6 @@ func (m *RingService) CreateRing(
 			codes.FailedPrecondition,
 			"ring %q is published but not managed by this service", name,
 		)
-	}
-
-	if req.GetAllowExisting() {
-		m.reclaimDeferred()
 	}
 
 	capacity := uint32(req.GetCapacity())
