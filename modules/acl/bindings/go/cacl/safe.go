@@ -35,6 +35,9 @@ type ACLAction struct {
 
 // ACLRule describes a single ACL rule composed of match criteria and actions.
 type ACLRule struct {
+	// Kind declares the network layers the rule speaks about; see
+	// ExpandRuleKind for what the kind makes of the absent conditions.
+	Kind RuleKind
 	// Actions is the ordered action list, the last one terminal.
 	Actions []ACLAction
 	// Counter is the counter name for traffic accounting.
