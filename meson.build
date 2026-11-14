@@ -562,7 +562,7 @@ endif
 subdir('dataplane')
 
 install_data(
-  'dataplane.yaml',
+  'etc/yanet2/dataplane.yaml',
   install_dir: '/etc/yanet2',
   rename: 'dataplane-default.yaml',
 )

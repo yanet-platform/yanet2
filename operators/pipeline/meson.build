@@ -1,5 +1,5 @@
 install_data(
-    'etc/yanet/yanet-pipeline-operator-default.yaml',
+    'etc/yanet2/yanet-pipeline-operator-default.yaml',
     install_dir: '/etc/yanet2',
 )
 

@@ -22,7 +22,7 @@ FROM alpine:3.23
 RUN apk add --no-cache ca-certificates
 
 COPY --from=build /yanet-neighbour-sidecar /usr/local/bin/yanet-neighbour-sidecar
-COPY operators/neighbour-sidecar/etc/yanet/yanet-neighbour-sidecar-default.yaml /etc/yanet2/yanet-neighbour-sidecar-default.yaml
+COPY operators/neighbour-sidecar/etc/yanet2/yanet-neighbour-sidecar-default.yaml /etc/yanet2/yanet-neighbour-sidecar-default.yaml
 
 EXPOSE 9903
 

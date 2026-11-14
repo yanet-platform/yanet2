@@ -15,7 +15,7 @@ import (
 // inside a module or device block whose own UnmarshalYAML re-decodes
 // through a fresh yaml.v3 decoder.
 func Test_ShippedDefaultConfig_NoUnknownKeys(t *testing.T) {
-	data, err := os.ReadFile("../etc/yanet/controlplane.d/default.yaml")
+	data, err := os.ReadFile("../etc/yanet2/controlplane.d/default.yaml")
 	require.NoError(t, err)
 	require.NoError(t, xcfg.CheckKnownKeys[yncp.Config](data))
 }
@@ -25,7 +25,7 @@ func Test_ShippedDefaultConfig_NoUnknownKeys(t *testing.T) {
 // vxlan devices, leaves trafgen disabled, and sets an explicit gateway
 // instance.
 func Test_ShippedDefaultConfig_LoadsIntendedEnabledSet(t *testing.T) {
-	cfg, err := xcfg.LoadConfig[yncp.Config]("../etc/yanet/controlplane.d/default.yaml")
+	cfg, err := xcfg.LoadConfig[yncp.Config]("../etc/yanet2/controlplane.d/default.yaml")
 	require.NoError(t, err)
 
 	require.NotNil(t, cfg.Modules.Route.Unwrap())
@@ -53,7 +53,7 @@ func Test_ShippedDefaultConfig_LoadsIntendedEnabledSet(t *testing.T) {
 // that omitted backend endpoints inherit loopback port-zero defaults.
 func Test_ShippedDefaultConfig_OmittedBackendEndpointsUseEphemeralPorts(t *testing.T) {
 	config, err := xcfg.LoadConfig[yncp.Config](
-		"../etc/yanet/controlplane.d/default.yaml",
+		"../etc/yanet2/controlplane.d/default.yaml",
 	)
 	require.NoError(t, err)
 

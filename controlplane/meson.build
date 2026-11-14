@@ -1,7 +1,7 @@
 subdir('ynpb')
 
 install_data(
-    'etc/yanet/controlplane.d/default.yaml',
+    'etc/yanet2/controlplane.d/default.yaml',
     install_dir: '/etc/yanet2/controlplane.d',
 )
 

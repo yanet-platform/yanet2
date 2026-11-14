@@ -28,7 +28,7 @@ import (
 // The shipped example is checked strictly so renamed keys cannot silently
 // stop configuring their fields. Runtime loading tolerates additional keys.
 func Test_ShippedDefaultConfig_MatchesServerConfig(t *testing.T) {
-	cfg, err := xcfg.LoadConfig[ServerConfig]("../../etc/yanet/bird-adapter-default.yaml", xcfg.WithKnownFields())
+	cfg, err := xcfg.LoadConfig[ServerConfig]("../../etc/yanet2/bird-adapter-default.yaml", xcfg.WithKnownFields())
 	require.NoError(t, err)
 
 	expected := DefaultServerConfig()

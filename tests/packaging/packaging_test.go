@@ -30,22 +30,22 @@ const etcYanet2Prefix = "/etc/yanet2/"
 // Each is installed by a meson install_data rule, not copied by hand in
 // the root Makefile.
 var shippedConfigPaths = []string{
-	"controlplane/etc/yanet/controlplane.d/default.yaml",
-	"dataplane.yaml",
-	"operators/bird-adapter/etc/yanet/bird-adapter-default.yaml",
-	"operators/pipeline/etc/yanet/yanet-pipeline-operator-default.yaml",
-	"operators/route/etc/yanet/yanet-route-operator-default.yaml",
-	"operators/generic/etc/yanet/generic-operator.d/forward-default.yaml",
-	"operators/generic/etc/yanet/generic-operator.d/decap-default.yaml",
-	"operators/generic/etc/yanet/forward.d/vlan-phy-default.yaml",
-	"operators/generic/etc/yanet/forward.d/phy-vlan-default.yaml",
-	"operators/generic/etc/yanet/decap.d/default.yaml",
+	"controlplane/etc/yanet2/controlplane.d/default.yaml",
+	"etc/yanet2/dataplane.yaml",
+	"operators/bird-adapter/etc/yanet2/bird-adapter-default.yaml",
+	"operators/pipeline/etc/yanet2/yanet-pipeline-operator-default.yaml",
+	"operators/route/etc/yanet2/yanet-route-operator-default.yaml",
+	"operators/generic/etc/yanet2/generic-operator.d/forward-default.yaml",
+	"operators/generic/etc/yanet2/generic-operator.d/decap-default.yaml",
+	"operators/generic/etc/yanet2/forward.d/vlan-phy-default.yaml",
+	"operators/generic/etc/yanet2/forward.d/phy-vlan-default.yaml",
+	"operators/generic/etc/yanet2/decap.d/default.yaml",
 }
 
 // Test_GenericOperatorShippedConfigs_UseDefaultFileNames verifies that
 // packaged examples leave unsuffixed paths available to deployment configs.
 func Test_GenericOperatorShippedConfigs_UseDefaultFileNames(t *testing.T) {
-	const genericConfigPrefix = "operators/generic/etc/yanet/"
+	const genericConfigPrefix = "operators/generic/etc/yanet2/"
 
 	for _, configPath := range shippedConfigPaths {
 		if !strings.HasPrefix(configPath, genericConfigPrefix) {
@@ -202,7 +202,7 @@ func Test_GenericOperatorTemplateConfigsAreInstalled(t *testing.T) {
 // would flag them. The node walk must not, since a commented-out path was
 // never parsed as a value.
 func Test_CommentedOutPathsAreNotFlagged(t *testing.T) {
-	data, err := os.ReadFile("../../controlplane/etc/yanet/controlplane.d/default.yaml")
+	data, err := os.ReadFile("../../controlplane/etc/yanet2/controlplane.d/default.yaml")
 	require.NoError(t, err)
 
 	var doc yaml.Node
