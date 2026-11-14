@@ -1,6 +1,11 @@
 usr/bin/yanet-generic-operator
 etc/yanet2/generic-operator.d/forward-default.yaml
 etc/yanet2/generic-operator.d/decap-default.yaml
+etc/yanet2/generic-operator.d/pdump-default.yaml
+etc/yanet2/pdump.d/ring-in-default.yaml
+etc/yanet2/pdump.d/ring-out-default.yaml
+etc/yanet2/pdump.d/capture-in-default.yaml
+etc/yanet2/pdump.d/capture-out-default.yaml
 etc/yanet2/forward.d/vlan-phy-default.yaml
 etc/yanet2/forward.d/phy-vlan-default.yaml
 etc/yanet2/decap.d/default.yaml

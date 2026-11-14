@@ -1,6 +1,7 @@
 install_data(
     'etc/yanet/generic-operator.d/forward-default.yaml',
     'etc/yanet/generic-operator.d/decap-default.yaml',
+    'etc/yanet/generic-operator.d/pdump-default.yaml',
     install_dir: '/etc/yanet2/generic-operator.d',
 )
 
@@ -13,6 +14,14 @@ install_data(
 install_data(
     'etc/yanet/decap.d/default.yaml',
     install_dir: '/etc/yanet2/decap.d',
+)
+
+install_data(
+    'etc/yanet/pdump.d/ring-in-default.yaml',
+    'etc/yanet/pdump.d/ring-out-default.yaml',
+    'etc/yanet/pdump.d/capture-in-default.yaml',
+    'etc/yanet/pdump.d/capture-out-default.yaml',
+    install_dir: '/etc/yanet2/pdump.d',
 )
 
 if yanet_go_binaries

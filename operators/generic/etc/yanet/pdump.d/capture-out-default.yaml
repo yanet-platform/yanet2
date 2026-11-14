@@ -1,0 +1,7 @@
+name: pdump-out
+config:
+  filter: tcp
+  mode: 1
+  snaplen: 256
+  rate_pps: 1000
+  ring_name: ring-pdump-out
