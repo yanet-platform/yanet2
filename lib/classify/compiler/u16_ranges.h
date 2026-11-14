@@ -109,7 +109,9 @@ filter_u16_commit_iterate(
 	return 0;
 }
 
-#define CLASSIFY_U16_RANGES_COMPILE(tag, attr_type, get_ranges)                \
+#define CLASSIFY_U16_RANGES_COMPILE(                                           \
+	tag, attr_type, get_ranges, empty_policy                               \
+)                                                                              \
 	struct classify_compile_##tag {                                        \
 		classify_u16_get_ranges_func get_ranges;                       \
 		const char *name;                                              \
@@ -223,8 +225,10 @@ filter_u16_commit_iterate(
 		struct filter_u16_ranges ranges;                               \
 		tag_compile->get_ranges(rule, &ranges);                        \
                                                                                \
-		return ranges.count == 0 ||                                    \
-		       ranges.items[0].to - ranges.items[0].from == 65535;     \
+		if (ranges.count == 0) {                                       \
+			return empty_policy == CLASSIFY_EMPTY_IS_ANY;          \
+		}                                                              \
+		return ranges.items[0].to - ranges.items[0].from == 65535;     \
 	}                                                                      \
                                                                                \
 	static inline uint32_t classify_compile_##tag##_hash(                  \

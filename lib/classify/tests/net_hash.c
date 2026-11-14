@@ -90,12 +90,13 @@ test_rule_get_port_ranges(
 	*ranges = test_rule->port_ranges;
 }
 
-CLASSIFY_NET4_COMPILE(test_net4, test_rule_get_net4s)
+CLASSIFY_NET4_COMPILE(test_net4, test_rule_get_net4s, CLASSIFY_EMPTY_IS_ANY)
 CLASSIFY_NET4_HASH_COMPILE(test_net4_hash, test_rule_get_addrs4)
-CLASSIFY_NET6_COMPILE(test_net6, test_rule_get_net6s)
+CLASSIFY_NET6_COMPILE(test_net6, test_rule_get_net6s, CLASSIFY_EMPTY_IS_ANY)
 CLASSIFY_NET6_HASH_COMPILE(test_net6_hash, test_rule_get_addrs6)
 CLASSIFY_U16_RANGES_COMPILE(
-	test_port, struct classify_attr_port, test_rule_get_port_ranges
+	test_port, struct classify_attr_port, test_rule_get_port_ranges,
+	CLASSIFY_EMPTY_IS_ANY
 )
 
 // One host route of the LPM reference: the address with the full mask.
@@ -162,6 +163,9 @@ main(void) {
 		{300, 400},
 		{0, 0},
 	};
+	// The explicit whole port range of the port unconstrained rule: an
+	// empty range set matches nothing.
+	struct filter_u16_span full_port_span = {0, 65535};
 
 	struct test_rule rules[3];
 	memset(rules, 0, sizeof(rules));
@@ -173,6 +177,8 @@ main(void) {
 	rules[0].addrs4.count = 1;
 	rules[0].addrs6.items = &addrs6[0];
 	rules[0].addrs6.count = 1;
+	rules[0].port_ranges.items = &full_port_span;
+	rules[0].port_ranges.count = 1;
 	rules[1].net4s.items = &hosts4[1];
 	rules[1].net4s.count = 1;
 	rules[1].net6s.items = &hosts6[1];

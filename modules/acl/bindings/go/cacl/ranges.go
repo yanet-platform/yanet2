@@ -87,9 +87,10 @@ func intersects(ranges filter.ProtoRanges, proto uint8) bool {
 }
 
 // SplitProtoRanges splits the authored protocol ranges of one rule
-// into the derived line intervals.
+// into the derived line intervals. An empty range set matches nothing:
+// no derived interval is whole, so the rule resolves through no path.
 func SplitProtoRanges(ranges filter.ProtoRanges) ProtoSplit {
-	split := ProtoSplit{WholeL4: true}
+	split := ProtoSplit{WholeL4: len(ranges) > 0}
 	for _, r := range ranges {
 		split.IpProto = append(split.IpProto, LineRange{
 			From: uint32(r.From >> 8),
@@ -114,10 +115,11 @@ func SplitProtoRanges(ranges filter.ProtoRanges) ProtoSplit {
 }
 
 // hasFullPorts reports whether the port range set leaves the side
-// unconstrained: an empty set, or a single whole range.
+// unconstrained: a single whole range, spelled explicitly. An empty
+// set matches nothing.
 func hasFullPorts(ranges filter.PortRanges) bool {
-	return len(ranges) == 0 ||
-		(len(ranges) > 0 && ranges[0].From == 0 && ranges[0].To == 65535)
+	return len(ranges) > 0 &&
+		ranges[0].From == 0 && ranges[0].To == 65535
 }
 
 // PathFlags is the family path membership of one ACL rule: the paths
@@ -141,9 +143,10 @@ type PathFlags struct {
 // and fragment constraint.
 //
 // The plain path takes the rules matching the packets without a
-// transport header: the rules whose every range leaves the transport
-// byte whole match any byte, absent included, and the fragment
-// constrained rules resolve through the fragment suffix. The protocol
+// transport header: the fragment constrained rules - the ports and the
+// transport specific byte are not defined for a non-initial fragment,
+// so their conditions are ignored - and the rules whose every range
+// leaves the transport byte whole, matching any byte, absent included. The protocol
 // paths take every remaining rule that can match a packet of their
 // protocol: the tcp and the icmp paths discriminate through their
 // byte leaves, any covering span resolves; the udp path has no leaf,
@@ -163,7 +166,11 @@ func RulePathMembership(
 	plainOwned := split.WholeL4 && fullPorts
 
 	return PathFlags{
-		Plain: split.WholeL4 && (fragOnly || fullPorts),
+		// The plain path takes the fragment constrained rules outright:
+		// the ports and the transport specific byte are not defined for
+		// a non-initial fragment, so the rule's conditions on them are
+		// ignored rather than required.
+		Plain: fragOnly || (split.WholeL4 && fullPorts),
 		TCP:   !fragOnly && intersects(protos, ipProtoTCP) && !plainOwned,
 		UDP: !fragOnly && intersects(protos, ipProtoUDP) &&
 			coversZero(protos, ipProtoUDP) && !plainOwned,

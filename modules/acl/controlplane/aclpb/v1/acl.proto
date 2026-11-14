@@ -77,6 +77,14 @@ message Rule {
   repeated Action actions = 1;
   string counter = 2;
 
+  // kind declares the network layers the rule speaks about: which
+  // conditions of the rule are defined. An absent condition inside the
+  // declared kind is the no-constraint wildcard, and a condition
+  // authored outside the kind is rejected. An unspecified kind keeps
+  // the historical inference, where the kind is read out of the
+  // authored conditions themselves.
+  RuleKind kind = 15;
+
   repeated common.filterpb.v1.Device devices = 3;
   // Deprecated: accepted and ignored; acl classifies IP traffic only.
   repeated common.filterpb.v1.VlanRange vlan_ranges = 4;
@@ -88,6 +96,30 @@ message Rule {
   repeated common.filterpb.v1.PortRange src_port_ranges = 8;
   repeated common.filterpb.v1.PortRange dst_port_ranges = 9;
   common.filterpb.v1.Fragment fragment = 10;
+}
+
+// RuleKind spells the network layers of a rule explicitly.
+enum RuleKind {
+  // RULE_KIND_UNSPECIFIED keeps the historical inference: a rule with
+  // every network side absent is an l2 rule, an authored network side
+  // makes an ip rule, and the absent conditions of an ip rule match
+  // nothing.
+  RULE_KIND_UNSPECIFIED = 0;
+  // RULE_KIND_L2 speaks about the packets without an IP header: only
+  // the devices condition is defined, every other condition of the
+  // rule must stay absent.
+  RULE_KIND_L2 = 1;
+  // RULE_KIND_L3 speaks about the IP layer: the network, the protocol
+  // and the fragment conditions are defined; the transport specific
+  // conditions - the ports and the transport byte of the protocol
+  // ranges - are not and must stay absent. A family of the rule
+  // participates when either of its sides is authored; the absent
+  // partner side is the wildcard.
+  RULE_KIND_L3 = 2;
+  // RULE_KIND_L4 speaks about the transport layer on top of the L3
+  // conditions: the ports and the transport byte of the protocol
+  // ranges are defined as well.
+  RULE_KIND_L4 = 3;
 }
 
 message Action { ActionKind kind = 1; }

@@ -197,14 +197,24 @@ fwd_rule_get_net6_dsts(
 	*nets = fwd_rule->dst_net6s;
 }
 
+/*
+ * Every forward attribute variant declares the any policy for the
+ * empty set: a rule that leaves a condition out is the rule of every
+ * value of it, the authoring api of the module spells the wildcard
+ * that way.
+ */
 CLASSIFY_DEVICE_COMPILE(fwd_device, fwd_rule_get_devices)
 CLASSIFY_LINE_COMPILE(
-	fwd_vlan, struct classify_attr_line, 4096, fwd_rule_get_vlan_ranges
+	fwd_vlan,
+	struct classify_attr_line,
+	4096,
+	fwd_rule_get_vlan_ranges,
+	CLASSIFY_EMPTY_IS_ANY
 )
-CLASSIFY_NET4_COMPILE(fwd_net4_src, fwd_rule_get_net4_srcs)
-CLASSIFY_NET4_COMPILE(fwd_net4_dst, fwd_rule_get_net4_dsts)
-CLASSIFY_NET6_COMPILE(fwd_net6_src, fwd_rule_get_net6_srcs)
-CLASSIFY_NET6_COMPILE(fwd_net6_dst, fwd_rule_get_net6_dsts)
+CLASSIFY_NET4_COMPILE(fwd_net4_src, fwd_rule_get_net4_srcs, CLASSIFY_EMPTY_IS_ANY)
+CLASSIFY_NET4_COMPILE(fwd_net4_dst, fwd_rule_get_net4_dsts, CLASSIFY_EMPTY_IS_ANY)
+CLASSIFY_NET6_COMPILE(fwd_net6_src, fwd_rule_get_net6_srcs, CLASSIFY_EMPTY_IS_ANY)
+CLASSIFY_NET6_COMPILE(fwd_net6_dst, fwd_rule_get_net6_dsts, CLASSIFY_EMPTY_IS_ANY)
 
 // Spells a projection of the ruleset: every rule the check rejects
 // keeps a NULL slot, so the compile stages skip it.

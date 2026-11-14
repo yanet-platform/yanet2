@@ -98,8 +98,8 @@ test_rule_get_dsts(
 	*nets = test_rule->dsts;
 }
 
-CLASSIFY_NET6_COMPILE(test_net6_src, test_rule_get_srcs)
-CLASSIFY_NET6_COMPILE(test_net6_dst, test_rule_get_dsts)
+CLASSIFY_NET6_COMPILE(test_net6_src, test_rule_get_srcs, CLASSIFY_EMPTY_IS_ANY)
+CLASSIFY_NET6_COMPILE(test_net6_dst, test_rule_get_dsts, CLASSIFY_EMPTY_IS_ANY)
 
 /*
  * The pair classifier of the source with destination scenarios: the
@@ -595,7 +595,7 @@ run_failed_commit_zeroes_attr_test(struct memory_context *mctx, void *memory) {
 	const struct classifier_rule *rules[1] = {&rule.rule};
 
 	struct classify_compile_net6 *compile = classify_compile_net6_create(
-		mctx, rules, 1, test_rule_get_dsts, "failed_commit"
+		mctx, rules, 1, test_rule_get_dsts, CLASSIFY_EMPTY_IS_ANY, "failed_commit"
 	);
 	assert(compile != NULL);
 	const struct classify_attr_ops ops = {
@@ -826,6 +826,7 @@ run_hi_single_build_test(struct memory_context *mctx, void *memory) {
 		rule_ptrs,
 		TEST_HI_SINGLE_BUILD_RULES,
 		test_rule_get_dsts,
+		CLASSIFY_EMPTY_IS_ANY,
 		"test_net6_dst"
 	);
 	assert(compile != NULL);

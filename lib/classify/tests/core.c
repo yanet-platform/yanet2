@@ -44,8 +44,11 @@ put16(uint8_t *p, uint32_t g, uint16_t v) {
 // the rule format the compilers never see beyond its getters.
 struct test_rule {
 	struct classifier_rule rule;
+	struct filter_devices devices;
+	struct filter_device device_items[1];
 	struct filter_net6s srcs;
 	struct filter_net6s dsts;
+	struct classify_line_range ipproto_items[1];
 	struct classify_line_ranges ipproto_ranges;
 	struct filter_port_ranges src_port_ranges;
 	struct filter_port_ranges dst_port_ranges;
@@ -57,9 +60,7 @@ test_rule_get_devices(
 ) {
 	const struct test_rule *test_rule =
 		container_of(rule, struct test_rule, rule);
-	(void)test_rule;
-	devices->count = 0;
-	devices->items = NULL;
+	*devices = test_rule->devices;
 }
 
 static inline void
@@ -112,19 +113,22 @@ test_rule_get_dst_port_ranges(
 }
 
 CLASSIFY_DEVICE_COMPILE(test_device, test_rule_get_devices)
-CLASSIFY_NET6_COMPILE(test_net6_src, test_rule_get_net6_srcs)
-CLASSIFY_NET6_COMPILE(test_net6_dst, test_rule_get_net6_dsts)
+CLASSIFY_NET6_COMPILE(test_net6_src, test_rule_get_net6_srcs, CLASSIFY_EMPTY_IS_ANY)
+CLASSIFY_NET6_COMPILE(test_net6_dst, test_rule_get_net6_dsts, CLASSIFY_EMPTY_IS_ANY)
 CLASSIFY_LINE_COMPILE(
 	test_ipproto,
 	struct classify_attr_line,
 	0x100,
-	test_rule_get_ipproto_ranges
+	test_rule_get_ipproto_ranges,
+	CLASSIFY_EMPTY_IS_ANY
 )
 CLASSIFY_U16_RANGES_COMPILE(
-	test_src_port, struct classify_attr_port, test_rule_get_src_port_ranges
+	test_src_port, struct classify_attr_port, test_rule_get_src_port_ranges,
+	CLASSIFY_EMPTY_IS_ANY
 )
 CLASSIFY_U16_RANGES_COMPILE(
-	test_dst_port, struct classify_attr_port, test_rule_get_dst_port_ranges
+	test_dst_port, struct classify_attr_port, test_rule_get_dst_port_ranges,
+	CLASSIFY_EMPTY_IS_ANY
 )
 
 // Fills a v6 rule matching the given networks and port windows; a
@@ -158,6 +162,18 @@ make_rule(
 
 	struct test_rule rule;
 	memset(&rule, 0, sizeof(rule));
+	// The explicit device set of the zero id: an empty device set
+	// matches nothing, and the lookups below resolve through the module
+	// device id zero.
+	rule.device_items[0].id = 0;
+	rule.devices.count = 1;
+	rule.devices.items = rule.device_items;
+	// The explicit whole protocol byte range: an empty interval set
+	// matches nothing.
+	rule.ipproto_items[0].from = 0;
+	rule.ipproto_items[0].to = 0xff;
+	rule.ipproto_ranges.count = 1;
+	rule.ipproto_ranges.items = rule.ipproto_items;
 	rule.srcs.count = 1;
 	rule.srcs.items = srcs;
 	rule.dsts.count = 1;
@@ -733,6 +749,15 @@ main(void) {
 	const struct classifier_rule *union_rules[3] = {
 		&rule0.rule, &rule1.rule, &rule2.rule
 	};
+	// The embedded device and protocol item arrays travel by value, so
+	// the pointers set inside make_rule dangle after the copy returns;
+	// rebind them to the copies the ruleset owns.
+	rule0.devices.items = rule0.device_items;
+	rule1.devices.items = rule1.device_items;
+	rule2.devices.items = rule2.device_items;
+	rule0.ipproto_ranges.items = rule0.ipproto_items;
+	rule1.ipproto_ranges.items = rule1.ipproto_items;
+	rule2.ipproto_ranges.items = rule2.ipproto_items;
 	const struct classifier_rule *ip6_rules[3] = {&rule0.rule, NULL, NULL};
 	const struct classifier_rule *port_rules[3] = {
 		NULL, &rule1.rule, &rule2.rule

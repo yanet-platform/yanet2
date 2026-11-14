@@ -66,10 +66,19 @@ l3b_rule_get_port_ranges(
 		(const struct filter_u16_span *)source_rule->port_ranges.items;
 }
 
-CLASSIFY_NET4_COMPILE(l3b_net4_src, l3b_rule_get_net4_srcs)
-CLASSIFY_NET6_COMPILE(l3b_net6_src, l3b_rule_get_net6_srcs)
+/*
+ * The source filter attributes declare the any policy for the empty
+ * set: omitted service ports are the wildcard of the virtual service
+ * grammar, missing-family networks never match and are pruned by the
+ * object build instead.
+ */
+CLASSIFY_NET4_COMPILE(l3b_net4_src, l3b_rule_get_net4_srcs, CLASSIFY_EMPTY_IS_ANY)
+CLASSIFY_NET6_COMPILE(l3b_net6_src, l3b_rule_get_net6_srcs, CLASSIFY_EMPTY_IS_ANY)
 CLASSIFY_U16_RANGES_COMPILE(
-	l3b_port, struct classify_attr_port, l3b_rule_get_port_ranges
+	l3b_port,
+	struct classify_attr_port,
+	l3b_rule_get_port_ranges,
+	CLASSIFY_EMPTY_IS_ANY
 )
 
 // Missing-family networks never match; omitted service ports are wildcard.

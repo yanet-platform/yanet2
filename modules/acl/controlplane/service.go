@@ -260,7 +260,7 @@ func labeler(fullMethod string, req any) metrics.Labels {
 
 func convertRules(reqRules []*aclpb.Rule) ([]cacl.ACLRule, error) {
 	rules := make([]cacl.ACLRule, 0, len(reqRules))
-	for _, reqRule := range reqRules {
+	for idx, reqRule := range reqRules {
 		devices, err := filterpbconv.ToDevices(reqRule.Devices)
 		if err != nil {
 			return nil, err
@@ -302,6 +302,7 @@ func convertRules(reqRules []*aclpb.Rule) ([]cacl.ACLRule, error) {
 			return nil, err
 		}
 		rule := cacl.ACLRule{
+			Kind:          ruleKind(reqRule.GetKind()),
 			Actions:       actions,
 			Counter:       reqRule.GetCounter(),
 			Devices:       devices,
@@ -314,9 +315,18 @@ func convertRules(reqRules []*aclpb.Rule) ([]cacl.ACLRule, error) {
 			DstPortRanges: dstPortRanges,
 			Fragment:      fragment,
 		}
+		if err := cacl.ExpandRuleKind(&rule); err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "rule %d: %v", idx, err)
+		}
 		rules = append(rules, rule)
 	}
 	return rules, nil
+}
+
+// ruleKind maps the proto rule kind onto the bindings one; the enum
+// numbers travel verbatim.
+func ruleKind(kind aclpb.RuleKind) cacl.RuleKind {
+	return cacl.RuleKind(kind)
 }
 
 func rulesEqual(a, b []*aclpb.Rule) bool {

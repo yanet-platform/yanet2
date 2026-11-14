@@ -229,12 +229,14 @@ static inline int
 classify_compile_net4_hash_rule_is_any(
 	const void *compile, const struct classifier_rule *rule
 ) {
-	const struct classify_compile_net4_hash *net4_compile = compile;
+	(void)compile;
+	(void)rule;
 
-	struct classify_net4_addrs addrs;
-	net4_compile->get_addrs(rule, &addrs);
-
-	return addrs.count == 0;
+	/*
+	 * The attribute has no wildcard value: an empty address set
+	 * matches nothing rather than everything.
+	 */
+	return 0;
 }
 
 static inline int
