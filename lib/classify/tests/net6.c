@@ -11,7 +11,9 @@
 // alone, or the source and destination pair with their joint - decodes
 // its ruleset and classifies synthetic packets through the packet getters
 // and the library lookup core. One more scenario pins the unwind of a
-// failed attribute commit.
+// failed attribute commit, the region scenario checks the combined regions
+// against the network sets covering every cell, and one more refuses every
+// allocation of a compile in turn.
 
 #include "lib/classify/compiler/net6.h"
 #include "lib/classify/classify.h"
@@ -890,6 +892,198 @@ run_hi_single_build_test(struct memory_context *mctx, void *memory) {
 	test_filter_net6_dst_free(mctx, &flt);
 }
 
+#define TEST_REGIONS_SEEDS 1000
+#define TEST_REGIONS_MAX_NETS 48
+
+/*
+ * Compiles a seeded ruleset of one destination network per rule, nesting
+ * densely in both halves.
+ *
+ * The prefixes are 0 to 6 bits long, plus a few long ones, so the high
+ * intervals nest in deep trees with several low intervals each; wildcard
+ * and repeated networks are mixed in.
+ */
+static struct classify_compile_net6 *
+test_regions_compile(struct memory_context *mctx, uint64_t seed) {
+	static const uint8_t lens[] = {0, 1, 2, 3, 3, 4, 5, 6, 40, 64};
+	struct net6 nets[TEST_REGIONS_MAX_NETS];
+	struct test_rule rules[TEST_REGIONS_MAX_NETS];
+	const struct classifier_rule *rule_ptrs[TEST_REGIONS_MAX_NETS];
+
+	uint64_t state = seed;
+	uint32_t count = 1 + seed % TEST_REGIONS_MAX_NETS;
+	for (uint32_t idx = 0; idx < count; ++idx) {
+		uint8_t addr[NET6_LEN];
+		for (uint32_t byte = 0; byte < NET6_LEN; ++byte) {
+			addr[byte] = test_rand(&state);
+		}
+		uint8_t hi_bits = lens[test_rand(&state) % sizeof(lens)];
+		uint8_t lo_bits = lens[test_rand(&state) % sizeof(lens)];
+		if (test_rand(&state) % 16 == 0) {
+			hi_bits = 0;
+			lo_bits = 0;
+		}
+		nets[idx] = net6_bits(addr, hi_bits, lo_bits);
+		if (idx && test_rand(&state) % 8 == 0) {
+			nets[idx] = nets[test_rand(&state) % idx];
+		}
+		rules[idx] = rule_dst(nets + idx, 1);
+		rule_ptrs[idx] = &rules[idx].rule;
+	}
+	return classify_compile_net6_create(
+		mctx, rule_ptrs, count, test_rule_get_dsts, "test_net6_dst"
+	);
+}
+
+/*
+ * Asserts that a compile assigns a region per set of networks covering a
+ * cell: region 0 is the empty set, a row is split exactly when its cells
+ * differ, and the registry range of a masked network holds every region
+ * of a set with it, once.
+ */
+static void
+assert_regions_match_sets(struct classify_compile_net6 *compile) {
+	assert(compile->net_count <= 64);
+
+	// The set of every cell by half region ordinals, a bit per network.
+	uint32_t hi_count = compile->ri_hi.count;
+	uint32_t lo_count = compile->ri_lo.count;
+	uint64_t *sets = calloc(hi_count * lo_count, sizeof(uint64_t));
+	assert(sets != NULL);
+	for (uint32_t net = 0; net < compile->net_count; ++net) {
+		if (net6_is_any(compile->nets + net)) {
+			continue;
+		}
+		uint32_t bounds[4];
+		filter_net6_net_bounds(compile, compile->nets + net, bounds);
+		for (uint32_t hi = bounds[0]; hi < bounds[1]; ++hi) {
+			for (uint32_t lo = bounds[2]; lo < bounds[3]; ++lo) {
+				sets[hi * lo_count + lo] |= 1ull << net;
+			}
+		}
+	}
+
+	// The set of every region, all ones until a cell holds the region.
+	uint32_t region_count = compile->region_count;
+	uint64_t *region_sets = malloc(region_count * sizeof(uint64_t));
+	assert(region_sets != NULL);
+	memset(region_sets, 0xff, region_count * sizeof(uint64_t));
+	region_sets[0] = 0;
+
+	const uint32_t *values_hi = ADDR_OF(&compile->ri_hi.values);
+	const uint32_t *values_lo = ADDR_OF(&compile->ri_lo.values);
+	for (uint32_t hi = 0; hi < hi_count; ++hi) {
+		uint32_t value = vline_get(&compile->rows, values_hi[hi]);
+		uint32_t table_row = value & ~FILTER_NET6_ROW_MARK;
+		int split = value != table_row;
+		assert(!split || table_row < compile->comb.v_dim);
+		int differ = 0;
+		for (uint32_t lo = 0; lo < lo_count; ++lo) {
+			uint64_t set = sets[hi * lo_count + lo];
+			differ |= set != sets[hi * lo_count];
+			uint32_t region = split ? *value_table_get_ptr(
+							  &compile->comb,
+							  table_row,
+							  values_lo[lo]
+						  )
+						: value;
+			assert(region < region_count);
+			if (region_sets[region] == UINT64_MAX) {
+				region_sets[region] = set;
+			}
+			assert(region_sets[region] == set);
+		}
+		assert(split == differ);
+	}
+
+	// Every region but the empty set one holds a set of its own.
+	for (uint32_t region = 1; region < region_count; ++region) {
+		assert(region_sets[region] != UINT64_MAX);
+		for (uint32_t other = 0; other < region; ++other) {
+			assert(region_sets[other] != region_sets[region]);
+		}
+	}
+
+	// The last network listing every region, to catch a repeat.
+	uint32_t *seen = calloc(region_count, sizeof(uint32_t));
+	assert(seen != NULL);
+	const struct value_range *ranges =
+		ADDR_OF(&compile->net_registry.ranges);
+	for (uint32_t net = 0; net < compile->net_count; ++net) {
+		if (net6_is_any(compile->nets + net)) {
+			continue;
+		}
+		uint32_t expected = 0;
+		for (uint32_t region = 0; region < region_count; ++region) {
+			expected += region_sets[region] >> net & 1;
+		}
+		assert(ranges[net].count == expected);
+		const uint32_t *values = ADDR_OF(&ranges[net].values);
+		for (uint32_t idx = 0; idx < ranges[net].count; ++idx) {
+			assert(region_sets[values[idx]] >> net & 1);
+			assert(seen[values[idx]] != net + 1);
+			seen[values[idx]] = net + 1;
+		}
+	}
+
+	free(seen);
+	free(region_sets);
+	free(sets);
+}
+
+// Verifies that the combined regions are the network sets of the cells
+// on seeded rulesets.
+static void
+run_regions_match_sets_test(struct memory_context *mctx, void *memory) {
+	(void)memory;
+
+	for (uint64_t seed = 1; seed <= TEST_REGIONS_SEEDS; ++seed) {
+		struct classify_compile_net6 *compile =
+			test_regions_compile(mctx, seed);
+		assert(compile != NULL);
+		assert_regions_match_sets(compile);
+		classify_compile_net6_free(mctx, compile);
+	}
+}
+
+// Storage of the allocation failure injector the build force-includes.
+int filter_test_oom_armed;
+long filter_test_oom_fail_at;
+long filter_test_oom_calls;
+
+// A ruleset of twelve networks splitting nine rows.
+#define TEST_FAILED_CREATE_SEED 12
+
+// Verifies that a compile refused any one of its allocations fails and
+// leaves the arena as it found it.
+static void
+run_failed_create_releases_arena_test(
+	struct memory_context *mctx, void *memory
+) {
+	(void)memory;
+
+	struct block_allocator *allocator = ADDR_OF(&mctx->block_allocator);
+	for (long fail_at = 0;; ++fail_at) {
+		size_t initial = block_allocator_free_size(allocator);
+		filter_test_oom_fail_at = fail_at;
+		filter_test_oom_calls = 0;
+		filter_test_oom_armed = 1;
+		struct classify_compile_net6 *compile =
+			test_regions_compile(mctx, TEST_FAILED_CREATE_SEED);
+		filter_test_oom_armed = 0;
+
+		int refused = filter_test_oom_calls > fail_at;
+		assert((compile == NULL) == refused);
+		if (!refused) {
+			classify_compile_net6_free(mctx, compile);
+		}
+		assert(block_allocator_free_size(allocator) == initial);
+		if (!refused) {
+			break;
+		}
+	}
+}
+
 int
 main(void) {
 	void *memory = malloc(1 << 24);
@@ -900,6 +1094,8 @@ main(void) {
 	run_scenario(run_src_dst_test, memory);
 	run_scenario(run_failed_commit_zeroes_attr_test, memory);
 	run_scenario(run_hi_single_build_test, memory);
+	run_scenario(run_regions_match_sets_test, memory);
+	run_scenario(run_failed_create_releases_arena_test, memory);
 
 	free(memory);
 	return 0;

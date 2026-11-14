@@ -10,7 +10,6 @@
 #include "common/range_collector.h"
 #include "common/range_index.h"
 #include "common/registry.h"
-#include "common/remap.h"
 #include "common/value.h"
 
 #include "declare.h"
@@ -18,6 +17,7 @@
 #include "lib/classify/rule.h"
 
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 /*
@@ -34,17 +34,18 @@
  * prefix match, and the table holds the combined region of the pair. A
  * high region row without any low half distinction carries its combined
  * region in a uniform value line over the rows instead - the query
- * skips the low half lookup for it and the enumeration below touches
- * the single line value instead of every cell of the row.
+ * skips the low half lookup for it.
  *
  * The builder runs in two layers. The networks repeat across the
  * rules, so the first layer groups the unique normalized networks with
- * a hash index and runs the region assignment once per network: the
- * network touches the combined cells of its cross, the touch enumerates
- * the combined regions, and a registry with one range per network holds
- * the region values assigned to the network. A network without a mask
- * covers the whole domain and contributes no distinction on its own, so
- * it skips the touch and its range holds every region.
+ * a hash index and assigns the combined regions once: a combined region
+ * is the set of networks covering a cell, and a registry with one range
+ * per network holds the region values the network covers. The high half
+ * intervals of the networks nest, so one sweep over the high half carries
+ * the set of every low region and each interval changes only the cells
+ * of its own networks. A network without a mask covers the whole domain
+ * and contributes no distinction on its own, so its range holds every
+ * region.
  *
  * The second layer is the shared attribute driver itself: it groups the
  * rules by their network list - hashed and compared as stored, with no
@@ -77,15 +78,10 @@ struct classify_compile_net6 {
 	struct range_index ri_hi;
 	struct range_index ri_lo;
 
-	// Rows of the join table with a low half distinction; the compile
-	// time map drives the region enumeration and the commit packing.
-	uint8_t *row_split;
-	uint32_t row_count;
-	// Whole row values of the enumeration: a network covering whole
-	// rows through a wildcard low half touches the single line value
-	// instead of every cell of the row. The line dies at commit, the
-	// resolved classes move into the high half trie values.
-	struct vline uniform;
+	// The region of every high region row without a low half
+	// distinction, the marked join table row of any other. The line dies
+	// at commit, the resolved values move into the high half trie.
+	struct vline rows;
 
 	struct hash_index net_index;
 	struct net6 *nets;
@@ -95,8 +91,8 @@ struct classify_compile_net6 {
 	uint32_t *region_values;
 	uint32_t region_count;
 
-	// The dense high by low join table of the combined regions; it
-	// moves into the embedded attribute at commit.
+	// The join table of the combined regions of the split rows; it moves
+	// into the embedded attribute at commit.
 	struct value_table comb;
 };
 
@@ -299,79 +295,576 @@ filter_net6_net_bounds(
 	);
 }
 
+#define FILTER_NET6_NONE 0xffffffffu
+// The class store grows by chunks that never move; the tests narrow them.
+#ifndef FILTER_NET6_CLASS_CHUNK_BITS
+#define FILTER_NET6_CLASS_CHUNK_BITS 14
+#endif
+#define FILTER_NET6_CLASS_CHUNK (1u << FILTER_NET6_CLASS_CHUNK_BITS)
+
+// A masked network: its half region ordinal bounds, its network index
+// and the nearest network of its high interval enclosing its low one.
+struct filter_net6_tree_net {
+	uint32_t bounds[4];
+	uint32_t net;
+	uint32_t lo_parent;
+};
+
+// An entered high interval: its networks and the first class it made.
+struct filter_net6_level {
+	uint32_t first;
+	uint32_t end;
+	uint32_t first_class;
+};
+
 /*
- * Iterates the combined regions of a network: the cross of its high
- * region range with its low region range.
+ * A class is a set of networks covering a cell: the networks of its
+ * parent class plus a tree network and the networks of its high interval
+ * enclosing it.
+ */
+struct filter_net6_class {
+	uint32_t parent;
+	uint32_t net;
+	// Assigned when the sweep first writes the class.
+	uint32_t region;
+	// The class the parent moved into under the network applied last.
+	uint32_t child;
+};
+
+/*
+ * Scratch of the combined region sweep.
  *
- * A high region row without any low half distinction carries its value
- * in the uniform value line instead of the join table cells, so a
- * network covering whole rows through a wildcard low half iterates the
- * single line value of every uniform row of its range.
+ * Class 0 is the empty set. While no entered network has a partial low
+ * half every low region shares the uniform class; otherwise the vector
+ * holds the class of every low region, and only the ones under the
+ * levels entered since it was filled may hold another class than the
+ * uniform.
+ */
+struct filter_net6_sweep {
+	struct memory_context *memory_context;
+	struct classify_compile_net6 *compile;
+	const uint32_t *values_lo;
+	uint32_t h_dim;
+
+	// Sorted with the enclosing intervals first.
+	struct filter_net6_tree_net *nets;
+	uint32_t net_count;
+	// The entered high intervals: nested prefixes differ in length, so
+	// at most one per length from 0 to 64.
+	struct filter_net6_level levels[65];
+	uint32_t depth;
+
+	uint32_t uniform;
+	// The level that filled the vector, none while it is dead.
+	uint32_t vector_level;
+	uint32_t *vector;
+	// Low ordinals under the levels from the vector one.
+	uint32_t moved;
+
+	struct filter_net6_class **chunks;
+	uint64_t chunk_count;
+	uint32_t class_count;
+};
+
+static inline struct filter_net6_class *
+filter_net6_class_at(const struct filter_net6_sweep *sw, uint32_t cls) {
+	return sw->chunks[cls >> FILTER_NET6_CLASS_CHUNK_BITS] +
+	       (cls & (FILTER_NET6_CLASS_CHUNK - 1));
+}
+
+// Adds the class of a parent class plus a network, or returns none.
+static inline uint32_t
+filter_net6_new_class(
+	struct filter_net6_sweep *sw, uint32_t parent, uint32_t net
+) {
+	// A row line value marks a table row above the regions, so the
+	// classes stay below the mark.
+	uint32_t cls = sw->class_count;
+	if (cls == FILTER_NET6_ROW_MARK) {
+		return FILTER_NET6_NONE;
+	}
+	if (cls % FILTER_NET6_CLASS_CHUNK == 0) {
+		struct filter_net6_class *chunk = memory_balloc(
+			sw->memory_context,
+			FILTER_NET6_CLASS_CHUNK * sizeof(*chunk)
+		);
+		if (chunk == NULL) {
+			return FILTER_NET6_NONE;
+		}
+		if (mem_array_expand_exp(
+			    sw->memory_context,
+			    (void **)&sw->chunks,
+			    sizeof(*sw->chunks),
+			    &sw->chunk_count
+		    )) {
+			memory_bfree(
+				sw->memory_context,
+				chunk,
+				FILTER_NET6_CLASS_CHUNK * sizeof(*chunk)
+			);
+			return FILTER_NET6_NONE;
+		}
+		sw->chunks[sw->chunk_count - 1] = chunk;
+	}
+	++sw->class_count;
+	*filter_net6_class_at(sw, cls) =
+		(struct filter_net6_class){parent, net, FILTER_NET6_NONE, 0};
+	return cls;
+}
+
+static inline int
+filter_net6_same_hi(
+	const struct filter_net6_tree_net *a,
+	const struct filter_net6_tree_net *b
+) {
+	return a->bounds[0] == b->bounds[0] && a->bounds[1] == b->bounds[1];
+}
+
+static inline int
+filter_net6_partial(
+	const struct filter_net6_sweep *sw,
+	const struct filter_net6_tree_net *net
+) {
+	return net->bounds[2] != 0 ||
+	       net->bounds[3] != sw->compile->ri_lo.count;
+}
+
+/*
+ * Moves the low regions of a range into the classes of a network of the
+ * level entered last.
+ *
+ * A low region repeats only in the gaps around a nested low interval,
+ * where the innermost network is the same, so a region the level already
+ * moved keeps its class.
  */
 static inline int
-filter_net6_net_regions_iter(
-	struct classify_compile_net6 *net6_compile,
-	const struct net6 *net,
-	int (*iter_cb_func)(uint32_t *value, void *data),
-	void *cb_func_data
+filter_net6_sweep_move(
+	struct filter_net6_sweep *sw,
+	uint32_t net,
+	uint32_t from,
+	uint32_t to,
+	uint32_t first_class
 ) {
-	uint32_t bounds[4];
-	filter_net6_net_bounds(net6_compile, net, bounds);
-
-	const uint32_t *values_hi = ADDR_OF(&net6_compile->ri_hi.values);
-	const uint32_t *values_lo = ADDR_OF(&net6_compile->ri_lo.values);
-	struct value_table *comb = &net6_compile->comb;
-	const uint8_t *row_split = net6_compile->row_split;
-	struct vline *uniform = &net6_compile->uniform;
-
-	const int full_lo =
-		bounds[2] == 0 && bounds[3] == net6_compile->ri_lo.count;
-
-	for (uint32_t idx_hi = bounds[0]; idx_hi < bounds[1]; ++idx_hi) {
-		const uint32_t row = values_hi[idx_hi];
-
-		if (full_lo && !row_split[row]) {
-			if (iter_cb_func(
-				    vline_get_ptr(uniform, row), cb_func_data
-			    ) < 0) {
-				return -1;
-			}
+	for (uint32_t idx_lo = from; idx_lo < to; ++idx_lo) {
+		uint32_t *cls = sw->vector + sw->values_lo[idx_lo];
+		if (*cls >= first_class) {
 			continue;
 		}
-
-		for (uint32_t idx_lo = bounds[2]; idx_lo < bounds[3];
-		     ++idx_lo) {
-			if (iter_cb_func(
-				    value_table_get_ptr(
-					    comb, row, values_lo[idx_lo]
-				    ),
-				    cb_func_data
-			    ) < 0) {
+		uint32_t child = filter_net6_class_at(sw, *cls)->child;
+		if (filter_net6_class_at(sw, child)->net != net) {
+			child = filter_net6_new_class(sw, *cls, net);
+			if (child == FILTER_NET6_NONE) {
 				return -1;
 			}
+			filter_net6_class_at(sw, *cls)->child = child;
 		}
+		*cls = child;
 	}
-
 	return 0;
 }
 
-struct filter_net6_collect_ctx {
-	struct value_registry *registry;
-	uint32_t max_value;
-};
-
+/*
+ * Enters the high interval of the networks from the given one: every low
+ * region under them moves into a class of its own for the level, the
+ * class of the innermost network over it.
+ *
+ * The networks nested in one follow it, so a network moves the gaps
+ * between the networks directly nested in it.
+ */
 static inline int
-filter_net6_collect(uint32_t *value, void *data) {
-	struct filter_net6_collect_ctx *collect_ctx = data;
-
-	if (value_registry_collect(collect_ctx->registry, *value)) {
+filter_net6_sweep_push(struct filter_net6_sweep *sw, uint32_t first) {
+	// Only a mask half that is not a prefix nests deeper.
+	if (sw->depth == sizeof(sw->levels) / sizeof(sw->levels[0])) {
 		return -1;
 	}
-	if (*value > collect_ctx->max_value) {
-		collect_ctx->max_value = *value;
+	const struct filter_net6_tree_net *nets = sw->nets;
+	struct filter_net6_level *level = sw->levels + sw->depth;
+	*level = (struct filter_net6_level){
+		.first = first,
+		.end = first,
+		.first_class = sw->class_count,
+	};
+	int partial = 0;
+	while (level->end < sw->net_count &&
+	       filter_net6_same_hi(nets + first, nets + level->end)) {
+		partial |= filter_net6_partial(sw, nets + level->end++);
+	}
+	if (sw->vector_level == FILTER_NET6_NONE && partial) {
+		for (uint32_t col = 0; col < sw->h_dim; ++col) {
+			sw->vector[col] = sw->uniform;
+		}
+		sw->vector_level = sw->depth;
+		sw->moved = 0;
+	}
+	++sw->depth;
+	if (sw->vector_level == FILTER_NET6_NONE) {
+		// The only network of the level covers the whole low half.
+		sw->uniform = filter_net6_new_class(sw, sw->uniform, first);
+		return sw->uniform == FILTER_NET6_NONE ? -1 : 0;
 	}
 
+	for (uint32_t net = first; net < level->end; ++net) {
+		const uint32_t *bounds = nets[net].bounds;
+		if (nets[net].lo_parent == FILTER_NET6_NONE) {
+			sw->moved += bounds[3] - bounds[2];
+		}
+		uint32_t from = bounds[2];
+		for (uint32_t child = net + 1; from < bounds[3]; ++child) {
+			// The network end closes the gap after the last child.
+			uint32_t to = bounds[3];
+			uint32_t next = bounds[3];
+			if (child < level->end &&
+			    nets[child].bounds[2] < bounds[3]) {
+				if (nets[child].lo_parent != net) {
+					continue;
+				}
+				to = nets[child].bounds[2];
+				next = nets[child].bounds[3];
+			}
+			if (filter_net6_sweep_move(
+				    sw, net, from, to, level->first_class
+			    )) {
+				return -1;
+			}
+			from = next;
+		}
+	}
 	return 0;
+}
+
+// Leaves the innermost level: every low region it moved returns to the
+// parent of its class.
+static inline void
+filter_net6_sweep_pop(struct filter_net6_sweep *sw) {
+	const struct filter_net6_level *level = sw->levels + --sw->depth;
+	if (sw->vector_level == FILTER_NET6_NONE) {
+		sw->uniform = filter_net6_class_at(sw, sw->uniform)->parent;
+		return;
+	}
+	if (sw->vector_level == sw->depth) {
+		// The vector dies with the level that filled it.
+		sw->vector_level = FILTER_NET6_NONE;
+		return;
+	}
+
+	for (uint32_t net = level->first; net < level->end; ++net) {
+		const uint32_t *bounds = sw->nets[net].bounds;
+		if (sw->nets[net].lo_parent != FILTER_NET6_NONE) {
+			continue;
+		}
+		sw->moved -= bounds[3] - bounds[2];
+		for (uint32_t idx_lo = bounds[2]; idx_lo < bounds[3];
+		     ++idx_lo) {
+			uint32_t *cls = sw->vector + sw->values_lo[idx_lo];
+			if (*cls >= level->first_class) {
+				*cls = filter_net6_class_at(sw, *cls)->parent;
+			}
+		}
+	}
+}
+
+// Numbers a class the first time the sweep writes it.
+static inline uint32_t
+filter_net6_region(struct filter_net6_sweep *sw, uint32_t cls) {
+	uint32_t *region = &filter_net6_class_at(sw, cls)->region;
+	if (*region == FILTER_NET6_NONE) {
+		*region = sw->compile->region_count++;
+	}
+	return *region;
+}
+
+/*
+ * Writes the regions of a split row into its zeroed table row.
+ *
+ * A row with few low regions under the levels from the vector one writes
+ * the uniform region over the rest, and only when it is not the empty set
+ * one, then the regions under those levels.
+ */
+static inline void
+filter_net6_sweep_write_row(struct filter_net6_sweep *sw, uint32_t *cells) {
+	if ((uint64_t)sw->moved * 8 >= sw->h_dim) {
+		for (uint32_t col = 0; col < sw->h_dim; ++col) {
+			cells[col] = filter_net6_region(sw, sw->vector[col]);
+		}
+		return;
+	}
+
+	uint32_t uniform = filter_net6_region(sw, sw->uniform);
+	for (uint32_t col = 0; uniform != 0 && col < sw->h_dim; ++col) {
+		cells[col] = uniform;
+	}
+	for (uint32_t depth = sw->depth; depth-- > sw->vector_level;) {
+		const struct filter_net6_level *level = sw->levels + depth;
+		for (uint32_t net = level->first; net < level->end; ++net) {
+			const uint32_t *bounds = sw->nets[net].bounds;
+			if (sw->nets[net].lo_parent != FILTER_NET6_NONE) {
+				continue;
+			}
+			for (uint32_t idx_lo = bounds[2]; idx_lo < bounds[3];
+			     ++idx_lo) {
+				uint32_t col = sw->values_lo[idx_lo];
+				cells[col] =
+					filter_net6_region(sw, sw->vector[col]);
+			}
+		}
+	}
+}
+
+static inline int
+filter_net6_tree_net_cmp(const void *first, const void *second) {
+	const struct filter_net6_tree_net *a = first;
+	const struct filter_net6_tree_net *b = second;
+
+	// High start ascending, high end descending, then the same for the
+	// low half: enclosing intervals precede the ones they enclose.
+	static const int8_t order[4] = {1, -1, 1, -1};
+	for (uint32_t idx = 0; idx < 4; ++idx) {
+		if (a->bounds[idx] != b->bounds[idx]) {
+			return a->bounds[idx] < b->bounds[idx] ? -order[idx]
+							       : order[idx];
+		}
+	}
+	return 0;
+}
+
+static inline void
+filter_net6_sweep_free(struct filter_net6_sweep *sw) {
+	struct memory_context *memory_context = sw->memory_context;
+	struct classify_compile_net6 *net6_compile = sw->compile;
+
+	memory_bfree(
+		memory_context,
+		sw->nets,
+		(net6_compile->net_count + 1) * sizeof(*sw->nets)
+	);
+	memory_bfree(memory_context, sw->vector, sw->h_dim * sizeof(uint32_t));
+	for (uint64_t idx = 0; idx < sw->chunk_count; ++idx) {
+		memory_bfree(
+			memory_context,
+			sw->chunks[idx],
+			FILTER_NET6_CLASS_CHUNK *
+				sizeof(struct filter_net6_class)
+		);
+	}
+	mem_array_free_exp(
+		memory_context, sw->chunks, sizeof(*sw->chunks), sw->chunk_count
+	);
+}
+
+// Sorts the masked networks and links their low intervals.
+static inline int
+filter_net6_sweep_init(
+	struct filter_net6_sweep *sw,
+	struct memory_context *memory_context,
+	struct classify_compile_net6 *net6_compile
+) {
+	memset(sw, 0, sizeof(*sw));
+	sw->memory_context = memory_context;
+	sw->compile = net6_compile;
+	sw->values_lo = ADDR_OF(&net6_compile->ri_lo.values);
+	sw->h_dim = net6_compile->ri_lo.max_value + 1;
+	sw->vector_level = FILTER_NET6_NONE;
+	net6_compile->region_count = 1;
+
+	sw->nets = memory_balloc(
+		memory_context,
+		(net6_compile->net_count + 1) * sizeof(*sw->nets)
+	);
+	sw->vector =
+		memory_balloc(memory_context, sw->h_dim * sizeof(uint32_t));
+	if (sw->nets == NULL || sw->vector == NULL ||
+	    filter_net6_new_class(sw, FILTER_NET6_NONE, FILTER_NET6_NONE) ==
+		    FILTER_NET6_NONE) {
+		return -1;
+	}
+	filter_net6_class_at(sw, 0)->region = 0;
+
+	struct filter_net6_tree_net *nets = sw->nets;
+	for (uint32_t net_idx = 0; net_idx < net6_compile->net_count;
+	     ++net_idx) {
+		const struct net6 *net = net6_compile->nets + net_idx;
+		if (net6_is_any(net)) {
+			continue;
+		}
+		struct filter_net6_tree_net *tree_net = nets + sw->net_count++;
+		filter_net6_net_bounds(net6_compile, net, tree_net->bounds);
+		tree_net->net = net_idx;
+	}
+	qsort(nets, sw->net_count, sizeof(*nets), filter_net6_tree_net_cmp);
+
+	// The nearest low interval enclosing a network of a high interval is
+	// the previous network or one of the networks enclosing it.
+	for (uint32_t idx = 0; idx < sw->net_count; ++idx) {
+		uint32_t parent = idx - 1;
+		if (idx == 0 ||
+		    !filter_net6_same_hi(nets + parent, nets + idx)) {
+			parent = FILTER_NET6_NONE;
+		}
+		while (parent != FILTER_NET6_NONE &&
+		       nets[parent].bounds[3] <= nets[idx].bounds[2]) {
+			parent = nets[parent].lo_parent;
+		}
+		nets[idx].lo_parent = parent;
+	}
+	return 0;
+}
+
+/*
+ * Marks the line value of every row under a high interval with a partial
+ * low half as pending a table row and counts the rows; the intervals
+ * nest, so every ordinal is marked once.
+ */
+static inline uint32_t
+filter_net6_sweep_mark_split(struct filter_net6_sweep *sw) {
+	struct classify_compile_net6 *net6_compile = sw->compile;
+	const uint32_t *values_hi = ADDR_OF(&net6_compile->ri_hi.values);
+
+	uint32_t count = 0;
+	uint32_t end = 0;
+	for (uint32_t net = 0; net < sw->net_count; ++net) {
+		const uint32_t *bounds = sw->nets[net].bounds;
+		if (!filter_net6_partial(sw, sw->nets + net) ||
+		    bounds[0] < end) {
+			continue;
+		}
+		for (uint32_t idx_hi = bounds[0]; idx_hi < bounds[1];
+		     ++idx_hi) {
+			uint32_t *row = vline_get_ptr(
+				&net6_compile->rows, values_hi[idx_hi]
+			);
+			count += *row != FILTER_NET6_NONE;
+			*row = FILTER_NET6_NONE;
+		}
+		end = bounds[1];
+	}
+	return count;
+}
+
+/*
+ * Sweeps the high ordinals over the nested high intervals and writes the
+ * line value of every row: a pending row once into the next table row,
+ * any other into its region.
+ */
+static inline int
+filter_net6_sweep_rows(struct filter_net6_sweep *sw) {
+	struct classify_compile_net6 *net6_compile = sw->compile;
+	const uint32_t *values_hi = ADDR_OF(&net6_compile->ri_hi.values);
+	const struct filter_net6_tree_net *nets = sw->nets;
+
+	uint32_t next = 0;
+	uint32_t table_row = 0;
+	for (uint32_t idx_hi = 0; idx_hi < net6_compile->ri_hi.count;
+	     ++idx_hi) {
+		while (sw->depth != 0 &&
+		       nets[sw->levels[sw->depth - 1].first].bounds[1] <= idx_hi
+		) {
+			filter_net6_sweep_pop(sw);
+		}
+		while (next < sw->net_count && nets[next].bounds[0] == idx_hi) {
+			if (filter_net6_sweep_push(sw, next)) {
+				return -1;
+			}
+			next = sw->levels[sw->depth - 1].end;
+		}
+
+		uint32_t *row =
+			vline_get_ptr(&net6_compile->rows, values_hi[idx_hi]);
+		if (*row == FILTER_NET6_NONE) {
+			*row = FILTER_NET6_ROW_MARK | table_row;
+			filter_net6_sweep_write_row(
+				sw,
+				value_table_get_ptr(
+					&net6_compile->comb, table_row++, 0
+				)
+			);
+		} else if (!(*row & FILTER_NET6_ROW_MARK)) {
+			*row = filter_net6_region(sw, sw->uniform);
+		}
+	}
+	return 0;
+}
+
+// Fills the registry range of every masked network with the regions of
+// the classes holding it.
+static inline int
+filter_net6_sweep_assign(struct filter_net6_sweep *sw, const char *name) {
+	struct classify_compile_net6 *net6_compile = sw->compile;
+
+	char nets_name[MEMORY_CONTEXT_NAME_SIZE];
+	classify_leaf_name(nets_name, sizeof(nets_name), name, "nets");
+	struct value_registry *registry = &net6_compile->net_registry;
+	if (value_registry_init(registry, sw->memory_context, nets_name)) {
+		return -1;
+	}
+	for (uint32_t net_idx = 0; net_idx < net6_compile->net_count;
+	     ++net_idx) {
+		if (value_registry_start(registry)) {
+			return -1;
+		}
+	}
+	struct value_range *ranges = ADDR_OF(&registry->ranges);
+	struct memory_context *registry_context =
+		ADDR_OF(&registry->memory_context);
+
+	for (uint32_t first = 1; first < sw->class_count; ++first) {
+		uint32_t region = filter_net6_class_at(sw, first)->region;
+		for (uint32_t cls = first;
+		     region != FILTER_NET6_NONE && cls != 0;
+		     cls = filter_net6_class_at(sw, cls)->parent) {
+			for (uint32_t net = filter_net6_class_at(sw, cls)->net;
+			     net != FILTER_NET6_NONE;
+			     net = sw->nets[net].lo_parent) {
+				if (value_range_append(
+					    registry_context,
+					    ranges + sw->nets[net].net,
+					    region
+				    )) {
+					return -1;
+				}
+			}
+		}
+	}
+	registry->max_value = net6_compile->region_count - 1;
+	return 0;
+}
+
+// Fills the rows line, the join table, the network registry and the
+// region count of the compile.
+static inline int
+filter_net6_build_regions(
+	struct memory_context *memory_context,
+	struct classify_compile_net6 *net6_compile,
+	const char *name
+) {
+	int rc = -1;
+	struct filter_net6_sweep sw;
+	if (filter_net6_sweep_init(&sw, memory_context, net6_compile)) {
+		goto out;
+	}
+
+	uint32_t split_count = filter_net6_sweep_mark_split(&sw);
+	if (split_count != 0) {
+		char comb_name[MEMORY_CONTEXT_NAME_SIZE];
+		classify_leaf_name(comb_name, sizeof(comb_name), name, "comb");
+		if (value_table_init(
+			    &net6_compile->comb,
+			    memory_context,
+			    comb_name,
+			    split_count,
+			    sw.h_dim
+		    )) {
+			goto out;
+		}
+	}
+	if (filter_net6_sweep_rows(&sw) ||
+	    filter_net6_sweep_assign(&sw, name)) {
+		goto out;
+	}
+	rc = 0;
+
+out:
+	filter_net6_sweep_free(&sw);
+	return rc;
 }
 
 // Resolves the network of a rule into its registry range of assigned
@@ -510,165 +1003,23 @@ classify_compile_net6_create(
 	}
 
 	/*
-	 * The dense high by low value table carries the join of the half
-	 * region values into the combined regions. A high region row
-	 * without any low half distinction carries its value in the
-	 * uniform value line instead, so the line joins the same
-	 * enumeration below as one more value of the domain.
+	 * The join table carries the combined regions of the high region
+	 * rows with a low half distinction; the rows line carries the
+	 * region of every other row, or the table row of a split one.
 	 */
-	char comb_name[MEMORY_CONTEXT_NAME_SIZE];
-	classify_leaf_name(comb_name, sizeof(comb_name), name, "comb");
-	if (value_table_init(
-		    &compile->comb,
+	char rows_name[MEMORY_CONTEXT_NAME_SIZE];
+	classify_leaf_name(rows_name, sizeof(rows_name), name, "rows");
+	if (vline_init(
+		    &compile->rows,
 		    memory_context,
-		    comb_name,
-		    compile->ri_hi.max_value + 1,
-		    compile->ri_lo.max_value + 1
+		    rows_name,
+		    compile->ri_hi.max_value + 1
 	    )) {
 		goto error_free_parts;
 	}
 
-	compile->row_count = compile->comb.v_dim;
-	char rows_name[MEMORY_CONTEXT_NAME_SIZE];
-	classify_leaf_name(rows_name, sizeof(rows_name), name, "rows");
-	if (vline_init(
-		    &compile->uniform,
-		    memory_context,
-		    rows_name,
-		    compile->row_count
-	    )) {
-		goto error_free_comb;
-	}
-
-	compile->row_split = memory_balloc(memory_context, compile->row_count);
-	if (compile->row_split == NULL) {
-		goto error_free_uniform;
-	}
-	memset(compile->row_split, 0, compile->row_count);
-
-	/*
-	 * A row keeps the whole row value only while no network ever
-	 * covers a strict sub range of the low half within the row; the
-	 * marking pass visits the high range of every such network once,
-	 * before any region enumeration.
-	 */
-	{
-		const uint32_t *values_hi = ADDR_OF(&compile->ri_hi.values);
-
-		for (uint32_t net_idx = 0; net_idx < compile->net_count;
-		     ++net_idx) {
-			const struct net6 *net = compile->nets + net_idx;
-			if (net6_is_any(net)) {
-				continue;
-			}
-
-			uint32_t bounds[4];
-			filter_net6_net_bounds(compile, net, bounds);
-			if (bounds[2] == 0 &&
-			    bounds[3] == compile->ri_lo.count) {
-				continue;
-			}
-
-			for (uint32_t idx_hi = bounds[0]; idx_hi < bounds[1];
-			     ++idx_hi) {
-				compile->row_split[values_hi[idx_hi]] = 1;
-			}
-		}
-	}
-
-	/*
-	 * Enumerate the combined regions once per unique network: the
-	 * network touches the values of its cross, so every covered value
-	 * gains a class specific to the set of networks covering it;
-	 * compaction removes the gaps of unused values.
-	 */
-	{
-		struct remap_table remap_table;
-		if (remap_table_init(
-			    &remap_table,
-			    memory_context,
-			    compile->comb.v_dim * compile->comb.h_dim +
-				    compile->row_count
-		    )) {
-			goto error_free_row_split;
-		}
-
-		for (uint32_t net_idx = 0; net_idx < compile->net_count;
-		     ++net_idx) {
-			const struct net6 *net = compile->nets + net_idx;
-			if (net6_is_any(net)) {
-				continue;
-			}
-
-			remap_table_new_gen(&remap_table);
-
-			if (filter_net6_net_regions_iter(
-				    compile,
-				    net,
-				    classify_attr_touch,
-				    &remap_table
-			    )) {
-				remap_table_free(&remap_table);
-				goto error_free_row_split;
-			}
-		}
-
-		remap_table_compact(&remap_table);
-		value_table_compact(&compile->comb, &remap_table);
-		// The line values join the cells in one region space, so the
-		// compaction must renumber them through the same table: a raw
-		// line key left beside the compacted cell ids would collide
-		// with an unrelated cell region.
-		for (uint32_t row = 0; row < compile->row_count; ++row) {
-			uint32_t *value = vline_get_ptr(&compile->uniform, row);
-			*value = remap_table_compacted(&remap_table, *value);
-		}
-		remap_table_free(&remap_table);
-	}
-
-	/*
-	 * Assign the combined region values of every network into a
-	 * registry, one range per network. A network without a mask covers
-	 * the whole domain, so its range holds every region - the region
-	 * count is known only after the masked networks are collected, and
-	 * their ranges are filled first.
-	 */
-	char nets_name[MEMORY_CONTEXT_NAME_SIZE];
-	classify_leaf_name(nets_name, sizeof(nets_name), name, "nets");
-	if (value_registry_init(
-		    &compile->net_registry, memory_context, nets_name
-	    )) {
-		goto error_free_row_split;
-	}
-
-	{
-		struct filter_net6_collect_ctx collect_ctx = {
-			&compile->net_registry,
-			0,
-		};
-
-		for (uint32_t net_idx = 0; net_idx < compile->net_count;
-		     ++net_idx) {
-			if (value_registry_start(&compile->net_registry)) {
-				goto error_free_net_registry;
-			}
-
-			const struct net6 *net = compile->nets + net_idx;
-			if (net6_is_any(net)) {
-				continue;
-			}
-
-			if (filter_net6_net_regions_iter(
-				    compile,
-				    net,
-				    filter_net6_collect,
-				    &collect_ctx
-			    )) {
-				goto error_free_net_registry;
-			}
-		}
-
-		compile->region_count = collect_ctx.max_value + 1;
+	if (filter_net6_build_regions(memory_context, compile, name)) {
+		goto error_free_net_registry;
 	}
 
 	{
@@ -718,21 +1069,10 @@ error_free_net_registry:
 		);
 	}
 	value_registry_fini(&compile->net_registry);
-
-error_free_row_split:
-	if (compile->row_split != NULL) {
-		memory_bfree(
-			memory_context, compile->row_split, compile->row_count
-		);
-	}
-
-error_free_uniform:
-	vline_free(&compile->uniform);
-
-error_free_comb:
-	value_table_free(&compile->comb);
+	vline_free(&compile->rows);
 
 error_free_parts:
+	value_table_free(&compile->comb);
 	range_index_free(&compile->ri_lo);
 
 error_free_part_hi:
@@ -875,17 +1215,9 @@ classify_compile_net6_free(
 	);
 	hash_index_fini(&net6_compile->net_index);
 
-	if (net6_compile->row_split != NULL) {
-		memory_bfree(
-			memory_context,
-			net6_compile->row_split,
-			net6_compile->row_count
-		);
-	}
-
-	// The uniform line is compile side scratch: it is released here in
+	// The rows line is compile side scratch: it is released here in
 	// every path, including the commit one.
-	vline_free(&net6_compile->uniform);
+	vline_free(&net6_compile->rows);
 
 	// The join table is detached by a successful commit, so this
 	// releases it only while it still belongs to the scratch.
@@ -937,9 +1269,8 @@ classify_compile_net6_commit(
 	 * region identifiers. A row without any low half distinction
 	 * resolves into its final class carried by the high half trie
 	 * value itself, so the lookup finishes after the high half walk;
-	 * the rows of a low half distinction pack densely into a rebuilt
-	 * join table referenced from the marked trie values, and the cells
-	 * of the uniform rows are never read again.
+	 * the rows of a low half distinction keep their join table rows
+	 * marked in the trie values, and their cells resolve in place.
 	 */
 	struct value_table *comb = &net6_compile->comb;
 
@@ -949,119 +1280,31 @@ classify_compile_net6_commit(
 	const uint32_t *hi_values = ADDR_OF(&net6_compile->ri_hi.values);
 	uint32_t hi_count = net6_compile->ri_hi.count;
 
-	uint32_t *dense_of_row = (uint32_t *)memory_balloc(
-		memory_context, sizeof(uint32_t) * net6_compile->row_count
-	);
 	uint32_t *lpm_values = (uint32_t *)memory_balloc(
 		memory_context, sizeof(uint32_t) * (hi_count ? hi_count : 1)
 	);
-	if (dense_of_row == NULL || lpm_values == NULL) {
-		if (dense_of_row != NULL) {
-			memory_bfree(
-				memory_context,
-				dense_of_row,
-				sizeof(uint32_t) * net6_compile->row_count
-			);
-		}
-		if (lpm_values != NULL) {
-			memory_bfree(
-				memory_context,
-				lpm_values,
-				sizeof(uint32_t) * (hi_count ? hi_count : 1)
-			);
-		}
+	if (lpm_values == NULL) {
 		goto error;
 	}
-
-	// A region value repeats across the ordinals of the deduplicated
-	// partition, so a dense row is assigned per row and every ordinal
-	// of the row shares the assigned one.
-	memset(dense_of_row, 0xff, sizeof(uint32_t) * net6_compile->row_count);
-
-	uint32_t dense_count = 0;
 	for (uint32_t idx = 0; idx < hi_count; ++idx) {
-		uint32_t row = hi_values[idx];
-		if (net6_compile->row_split[row]) {
-			if (dense_of_row[row] == 0xffffffffu) {
-				dense_of_row[row] = dense_count;
-				++dense_count;
-			}
-			lpm_values[idx] =
-				FILTER_NET6_ROW_MARK | dense_of_row[row];
-			continue;
-		}
-
-		lpm_values[idx] = net6_compile->region_values[vline_get(
-			&net6_compile->uniform, row
-		)];
+		uint32_t value = vline_get(&net6_compile->rows, hi_values[idx]);
+		lpm_values[idx] = value & FILTER_NET6_ROW_MARK
+					  ? value
+					  : net6_compile->region_values[value];
 	}
 
-	if (dense_count != 0) {
-		struct value_table dense;
-		char dense_name[MEMORY_CONTEXT_NAME_SIZE];
-		classify_leaf_name(
-			dense_name,
-			sizeof(dense_name),
-			net6_compile->name,
-			"comb"
-		);
-		if (value_table_init(
-			    &dense,
-			    memory_context,
-			    dense_name,
-			    dense_count,
-			    comb->h_dim
-		    )) {
-			memory_bfree(
-				memory_context,
-				dense_of_row,
-				sizeof(uint32_t) * net6_compile->row_count
-			);
-			memory_bfree(
-				memory_context,
-				lpm_values,
-				sizeof(uint32_t) * (hi_count ? hi_count : 1)
-			);
-			goto error;
+	for (uint32_t row = 0; row < comb->v_dim; ++row) {
+		uint32_t *cells = value_table_get_ptr(comb, row, 0);
+		for (uint32_t h_idx = 0; h_idx < comb->h_dim; ++h_idx) {
+			cells[h_idx] =
+				net6_compile->region_values[cells[h_idx]];
 		}
-
-		for (uint32_t row = 0; row < net6_compile->row_count; ++row) {
-			if (!net6_compile->row_split[row]) {
-				continue;
-			}
-
-			uint32_t dense_row = dense_of_row[row];
-			for (uint32_t h_idx = 0; h_idx < comb->h_dim; ++h_idx) {
-				*value_table_get_ptr(&dense, dense_row, h_idx) =
-					net6_compile->region_values
-						[*value_table_get_ptr(
-							comb, row, h_idx
-						)];
-			}
-		}
-
-		value_table_free(comb);
-		// Field by field: the table carries relative pointers that a
-		// struct copy would strand.
-		comb->v_dim = dense.v_dim;
-		comb->h_dim = dense.h_dim;
-		SET_OFFSET_OF(&comb->values, ADDR_OF(&dense.values));
-		SET_OFFSET_OF(
-			&comb->memory_context, ADDR_OF(&dense.memory_context)
-		);
-	} else {
-		value_table_free(comb);
 	}
 
 	int hi_rc = range_index_build_lpm_values(
 		&net6_compile->ri_hi, 8, lpm_values, &net6_attr->hi
 	);
 
-	memory_bfree(
-		memory_context,
-		dense_of_row,
-		sizeof(uint32_t) * net6_compile->row_count
-	);
 	memory_bfree(
 		memory_context,
 		lpm_values,
