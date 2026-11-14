@@ -167,6 +167,7 @@ classify_coverage_map(
 	if (keys == NULL || slot_rep == NULL) {
 		free(keys);
 		free(slot_rep);
+		vline_free(map);
 		goto error_free;
 	}
 
