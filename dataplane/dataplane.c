@@ -801,6 +801,7 @@ dataplane_init(
 			"decap",
 			"dscp",
 			"nat64",
+			"nat64s",
 			"pdump",
 			"acl",
 			"fwstate",
