@@ -126,6 +126,10 @@ cd bindings/rust
 export CLANG_PATH=/usr/bin/clang-23 LIBCLANG_PATH=/usr/lib/llvm-23/lib
 cargo test --workspace                      # native suites
 MIRIFLAGS="-Zmiri-strict-provenance" cargo +nightly-2026-10-22 miri nextest run --workspace --exclude yanet-packet   # Miri (cargo-nextest); add -Zmiri-tree-borrows for Tree Borrows; yanet-packet forbids unsafe code
+cargo bench -p yanet-sys --bench dp --no-run                                        # dataplane hot path, built on every core
+taskset -c 2 cargo bench -p yanet-sys --bench dp -- --save-baseline main            # run pinned to one core, -- --baseline main on the change
+cargo bench -p yanet-sys --bench dp --profile plugin --no-run                       # adds the plugins' thin LTO, keeps unwinding
+taskset -c 2 cargo bench -p yanet-sys --bench dp --profile plugin -- --save-baseline main-plugin   # a baseline of its own, -- --baseline main-plugin on the change
 ```
 
 ## Tests against the C dataplane
