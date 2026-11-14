@@ -1,5 +1,5 @@
 install_data(
-    'etc/yanet/bird-adapter-default.yaml',
+    'etc/yanet2/bird-adapter-default.yaml',
     install_dir: '/etc/yanet2',
 )
 

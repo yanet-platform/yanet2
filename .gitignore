@@ -1,7 +1,7 @@
 ### C ###
 # Prerequisites
 *.d
-!**/etc/yanet/*.d/
+!**/etc/yanet2/*.d/
 
 # Object files
 *.o

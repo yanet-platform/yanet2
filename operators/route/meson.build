@@ -1,5 +1,5 @@
 install_data(
-    'etc/yanet/yanet-route-operator-default.yaml',
+    'etc/yanet2/yanet-route-operator-default.yaml',
     install_dir: '/etc/yanet2',
 )
 

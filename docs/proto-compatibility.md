@@ -68,7 +68,7 @@ The following changes are wire-incompatible and are blocked by the gate on any f
 - Renaming or removing a field, message, enum value, RPC, or service.
 - Renaming the package itself.
 
-The package and service name together form the gateway's HTTP-to-gRPC wire route (`POST /api/<package>.<Service>/<Method>`). A rename therefore breaks the Rust CLI clients, the web client, and the auth permissions file at `controlplane/etc/yanet/auth/permissions.yaml` simultaneously — and must never happen in place. When a genuinely incompatible evolution is required, create a new versioned package (`.v2` in a `v2/` directory) rather than modifying the existing one.
+The package and service name together form the gateway's HTTP-to-gRPC wire route (`POST /api/<package>.<Service>/<Method>`). A rename therefore breaks the Rust CLI clients, the web client, and the auth permissions file at `controlplane/etc/yanet2/auth/permissions.yaml` simultaneously — and must never happen in place. When a genuinely incompatible evolution is required, create a new versioned package (`.v2` in a `v2/` directory) rather than modifying the existing one.
 
 ## Deprecating and Removing Fields
 
@@ -152,5 +152,5 @@ make proto-breaking
 - [ ] Retiring a field? Keep the declaration and mark it `[deprecated = true]` with a comment pointing at the replacement. Do NOT delete the field from a frozen `.v1` package — the gate forbids it. Reserve old numbers and names only when creating a new `v2` package.
 - [ ] Ran `make proto-lint` locally and it passed with zero errors.
 - [ ] Ran `make proto-breaking` locally and it passed with zero errors.
-- [ ] Added a new RPC or service? Updated all consumers: Go generated code, Rust CLI `build.rs`, web client, and `controlplane/etc/yanet/auth/permissions.yaml`.
+- [ ] Added a new RPC or service? Updated all consumers: Go generated code, Rust CLI `build.rs`, web client, and `controlplane/etc/yanet2/auth/permissions.yaml`.
 - [ ] Need an incompatible change? Open a discussion about introducing a `.v2` package in a `v2/` directory instead of modifying the existing one.
