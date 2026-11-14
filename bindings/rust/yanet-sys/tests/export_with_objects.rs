@@ -5,6 +5,7 @@
 use core::ffi::{CStr, c_void};
 
 use netip as _;
+use proptest as _;
 use yanet_packet as _;
 use yanet_sdk_testing as _;
 use yanet_shm as _;

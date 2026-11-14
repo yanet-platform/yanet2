@@ -22,6 +22,7 @@ use arena::ArenaOwner;
 // The workspace denies unused crate dependencies, and this test names none of
 // the crates it imports `as _`.
 use netip as _;
+use proptest as _;
 use yanet_packet as _;
 use yanet_sdk_testing as _;
 use yanet_shm::{index::HashIndexKey, shm::ShmLayout};
