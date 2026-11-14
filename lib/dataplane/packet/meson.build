@@ -29,3 +29,5 @@ lib_packet_dp_dep = declare_dependency(
   include_directories: yanet_rootdir,
 )
 
+subdir('nat64')
+

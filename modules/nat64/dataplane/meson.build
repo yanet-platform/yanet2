@@ -1,6 +1,7 @@
 dp_dependencies = [
   lib_common_dep,
   libdpdk_inc_dep,
+  lib_nat64_packet_dep,
 ]
 
 dp_sources = files(

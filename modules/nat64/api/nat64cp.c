@@ -5,8 +5,8 @@
 
 /* Project headers */
 #include "api/agent.h"
-#include "common.h"
 #include "config.h"
+#include "lib/dataplane/packet/nat64/nat64.h"
 #include "nat64cp.h"
 
 /* Common headers */
