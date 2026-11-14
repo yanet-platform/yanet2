@@ -47,11 +47,13 @@ classify_context_names = executable(
 
 test('classify_context_names', classify_context_names, suite: ['filter'])
 
+# The join is built in with colliding class hashes and a count of the cells
+# it interns.
 classify_join_test = executable(
   'classify_join_test',
-  ['join.c'],
-  c_args: yanet_test_c_args,
-  dependencies: [lib_common_dep, lib_classify_compiler_dep, libdpdk_inc_dep],
+  ['join.c', '../compiler/helper.c'],
+  c_args: yanet_test_c_args + ['-DJOIN_TEST'],
+  dependencies: [lib_common_dep, libdpdk_inc_dep],
   include_directories: yanet_rootdir,
 )
 test('classify_join_test', classify_join_test, suite: ['filter'])
