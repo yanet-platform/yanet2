@@ -20,6 +20,7 @@ members = [
     "common/rust/commonpb",
     "common/rust/filterpb",
     "common/rust/readinesspb",
+    "common/rust/servicepb",
     "common/rust/ynpb",
     "cli/ync-build",
     "cli/rpc",
@@ -75,6 +76,7 @@ publish = false
 commonpb = { path = "common/rust/commonpb", package = "yanet-commonpb" }
 filterpb = { path = "common/rust/filterpb", package = "yanet-filterpb" }
 readinesspb = { path = "common/rust/readinesspb", package = "yanet-readinesspb" }
+servicepb = { path = "common/rust/servicepb", package = "yanet-servicepb" }
 ync = { path = "cli/core", package = "yanet-cli" }
 ync-build = { path = "cli/ync-build", package = "yanet-cli-build" }
 ync-rpc = { path = "cli/rpc", package = "yanet-cli-rpc" }
@@ -162,4 +164,5 @@ yanet-cli-unrdup = { opt-level = "s", codegen-units = 1 }
 yanet-commonpb = { opt-level = "s" }
 yanet-filterpb = { opt-level = "s" }
 yanet-readinesspb = { opt-level = "s" }
+yanet-servicepb = { opt-level = "s" }
 yanet-ynpb = { opt-level = "s" }

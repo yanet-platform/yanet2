@@ -1,0 +1,15 @@
+yanet_srcroot=@YANET_SRCROOT@
+yanet_builddir=@YANET_BUILDDIR@
+# The dataplane ABI this build stamps into plugins; consumers can assert
+# their mirrors match it.
+yanet_abi_version=@YANET_MODULE_ABI_VERSION@
+# The sanitizer set this build is instrumented with, for consumers that
+# compile or link against its artifacts without using Cflags/Libs (the Go
+# build of a module control plane).
+yanet_sanitize_flags=@SDK_SANITIZE_FLAGS@
+
+Name: yanet-module-sdk
+Description: Build YANET dataplane module plugins against this configured yanet2 tree
+Version: @YANET_VERSION@
+Cflags: @SDK_CFLAGS@
+Libs: @SDK_LIBS@

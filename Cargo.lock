@@ -3085,6 +3085,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "yanet-servicepb"
+version = "0.5.0"
+dependencies = [
+ "prost",
+ "serde",
+ "tonic",
+ "yanet-cli-build",
+ "yanet-cli-rpc",
+ "yanet-commonpb",
+ "yanet-filterpb",
+ "yanet-readinesspb",
+]
+
+[[package]]
 name = "yanet-ynpb"
 version = "0.5.0"
 dependencies = [
