@@ -26,9 +26,6 @@ use std::{collections::hash_map::RandomState, env, panic};
 
 use arena::ArenaOwner;
 use classify::{TestRule, any_or, build4, build6, edges, first, in4, in6, net4, net6};
-// The workspace denies unused crate dependencies; this test names no crate it
-// imports `as _`.
-use netip as _;
 use proptest::{
     arbitrary::any,
     bool::weighted,
@@ -38,8 +35,6 @@ use proptest::{
     strategy::{Just, Strategy},
     test_runner::{Config, RngSeed, TestCaseError, TestError, TestRunner},
 };
-use yanet_packet as _;
-use yanet_sdk_testing as _;
 use yanet_sys::classify::{Addr4, LineRange, Net4, Net6, PortRange, Rule};
 
 /// Rulesets per property when `PROPTEST_CASES` is unset: a few seconds of a

@@ -211,10 +211,6 @@ pub mod __private {
     pub use yanet_sys::cp::{Build, FfiRecord, MemoryContext, Owner, Partial, Refusal};
 }
 
-// Test-only dependencies are visible to the library's own test target.
-#[cfg(test)]
-use yanet_sdk_testing as _;
-
 /// Doc tests that pin what a build refuses, with the compile error each
 /// refusal produces, and the accepted twin of the ranges case.
 #[cfg(doctest)]

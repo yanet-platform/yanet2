@@ -25,9 +25,6 @@ use yanet_sdk::{
     ObjectLink, PerWorker, PerWorkerSlice, ShmLayout, ShmSlice, TaggedCounter, TaggedCounters, TaggedCountersRef,
     Traffic, Verdict, WorkerSlice, WorkerSlot,
 };
-// The plugin examples use it.
-#[cfg(feature = "plugin")]
-use yanet_sdk_plugin as _;
 
 // What the fixture module does with a batch, as values of its mode word. The
 // names are prefixed because the api crate's C header carries them as macros.
