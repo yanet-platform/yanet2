@@ -1,12 +1,12 @@
 #pragma once
 
-// Allocation-failure injector for the filter-compiler OOM sweep test.
+// Allocation-failure injector for the compiler OOM tests.
 //
 // Force-included ahead of every shimmed translation unit (see the
 // filter_compiler_oom_shim library and the oom_sweep executable in
-// meson.build) so every memory_balloc call on the compile path routes
-// through a counter that can be made to fail at an exact, armed call
-// index.
+// meson.build, and classify_net6 in lib/classify/tests/meson.build) so
+// every memory_balloc call on the compile path routes through a counter
+// that can be made to fail at an exact, armed call index.
 //
 // The real header is included first, so its static inline memory_balloc
 // definition is fully parsed before the macro below exists. Dropping this
@@ -15,8 +15,8 @@
 // to call sites rather than the definition itself.
 #include "common/memory.h"
 
-// Armed by the sweep driver around one filter_init call at a time, so a
-// fixture's own setup allocations are never subject to injection.
+// Armed by the driver around one compile call at a time, so a fixture's
+// own setup allocations are never subject to injection.
 extern int filter_test_oom_armed;
 
 // -1 disables injection while still counting, which is how the sweep
