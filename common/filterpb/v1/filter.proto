@@ -24,6 +24,13 @@ message PortRange {
   uint32 to = 2;
 }
 
+// Represents an inclusive byte range [from; to], the transport
+// specific values of a protocol: the TCP flag byte or an ICMP type.
+message ByteRange {
+  uint32 from = 1;
+  uint32 to = 2;
+}
+
 enum FragmentKind {
   Any = 0;
   None = 1;

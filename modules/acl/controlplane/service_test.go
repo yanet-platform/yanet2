@@ -20,7 +20,9 @@ import (
 	"github.com/yanet-platform/xnetip"
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
+	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -1429,4 +1431,117 @@ func TestUpdateAndDeleteConfig_NoDoubleFree(t *testing.T) {
 		require.NoError(t, err)
 	}
 	assertAllHandlesFreed(t, backend)
+}
+
+// TestUpdateConfig_Transports verifies that the transport protocols of
+// a rule cross into the packed protocol ranges the compile consumes:
+// the dedicated paths of tcp, udp and icmp carry their transport
+// specific values natively, and a rule of another declared kind or with
+// both spellings authored is rejected.
+func TestUpdateConfig_Transports(t *testing.T) {
+	backend := newFakeBackend()
+	svc := newTestService(backend)
+
+	kind := aclpb.RuleKind_RULE_KIND_L4
+	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+		Name: "acl0",
+		Rules: []*aclpb.Rule{{
+			Kind:          kind,
+			Actions:       []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}},
+			Devices:       []*filterpb.Device{{Name: "port0"}},
+			Sources4:      []*commonpb.IPv4Network{mustV4Network("192.0.2.0/24")},
+			Transports: []*aclpb.Transport{
+				{Protocol: &aclpb.Transport_Tcp{Tcp: &aclpb.Tcp{
+					Flags: []*filterpb.ByteRange{{From: 0x02, To: 0x02}},
+				}}},
+				{Protocol: &aclpb.Transport_Udp{Udp: &aclpb.Udp{}}},
+				{Protocol: &aclpb.Transport_Icmp{Icmp: &aclpb.Icmp{
+					Types: []*filterpb.ByteRange{{From: 0, To: 8}},
+				}}},
+				{Protocol: &aclpb.Transport_Icmpv6{Icmpv6: &aclpb.Icmpv6{}}},
+				{Protocol: &aclpb.Transport_Ipproto{Ipproto: 47}},
+			},
+		}},
+	})
+	require.NoError(t, err)
+
+	handles := backend.CreatedHandles()
+	require.Len(t, handles, 1)
+	rules := handles[0].Rules()
+	require.Len(t, rules, 1)
+
+	assert.Equal(t, filter.ProtoRanges{
+		// TCP with the SYN flag byte.
+		{From: 6<<8 | 0x02, To: 6<<8 | 0x02},
+		// The whole UDP protocol.
+		{From: 17 << 8, To: 17<<8 | 0xff},
+		// ICMP echo request types.
+		{From: 1 << 8, To: 1<<8 | 8},
+		// The whole ICMPv6 protocol.
+		{From: 58 << 8, To: 58<<8 | 0xff},
+		// GRE by its protocol number, the whole byte.
+		{From: 47 << 8, To: 47<<8 | 0xff},
+	}, rules[0].ProtoRanges)
+	// The l4 kind fills the absent port sides with the whole range.
+	assert.Equal(t, filter.PortRanges{{From: 0, To: 65535}}, rules[0].SrcPortRanges)
+	assert.Equal(t, filter.PortRanges{{From: 0, To: 65535}}, rules[0].DstPortRanges)
+
+	for _, tc := range []struct {
+		name string
+		rule *aclpb.Rule
+	}{
+		{
+			name: "transports and proto ranges together",
+			rule: &aclpb.Rule{
+				Transports: []*aclpb.Transport{
+					{Protocol: &aclpb.Transport_Udp{Udp: &aclpb.Udp{}}},
+				},
+				ProtoRanges: []*filterpb.ProtoRange{{From: 17 << 8, To: 17<<8 | 0xff}},
+			},
+		},
+		{
+			name: "transports on an l3 rule",
+			rule: &aclpb.Rule{
+				Kind: aclpb.RuleKind_RULE_KIND_L3,
+				Transports: []*aclpb.Transport{
+					{Protocol: &aclpb.Transport_Udp{Udp: &aclpb.Udp{}}},
+				},
+			},
+		},
+		{
+			name: "transports on an l2 rule",
+			rule: &aclpb.Rule{
+				Kind:      aclpb.RuleKind_RULE_KIND_L2,
+				Transports: []*aclpb.Transport{
+					{Protocol: &aclpb.Transport_Udp{Udp: &aclpb.Udp{}}},
+				},
+			},
+		},
+		{
+			name: "tcp flag byte out of range",
+			rule: &aclpb.Rule{
+				Transports: []*aclpb.Transport{
+					{Protocol: &aclpb.Transport_Tcp{Tcp: &aclpb.Tcp{
+						Flags: []*filterpb.ByteRange{{From: 0, To: 0x100}},
+					}}},
+				},
+			},
+		},
+		{
+			name: "transport without a protocol",
+			rule: &aclpb.Rule{
+				Transports: []*aclpb.Transport{{}},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.rule.Actions = []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}}
+			_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+				Name:  "acl0",
+				Rules: []*aclpb.Rule{tc.rule},
+			})
+			require.Error(t, err)
+			assert.Equal(t, codes.InvalidArgument, status.Code(err))
+		})
+	}
 }

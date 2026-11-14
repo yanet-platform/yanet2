@@ -10,7 +10,11 @@ use filterpb::pb::{FragmentKind, PortRange, ProtoRange, VlanRange};
 use netip::{IpNetwork, fmt::Compact};
 use ync::output::{Paint, Painted};
 
-use crate::aclpb::{ActionKind, Rule};
+use crate::aclpb::{
+    Rule, RuleKind, Transport,
+    transport::Protocol as TransportProtocol,
+    ActionKind,
+};
 
 /// The colour role of one token of a rule line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +51,13 @@ pub struct RuleLine<'a> {
     has4: bool,
     has6: bool,
     layer2: bool,
+    /// An absent family side of a declared-kind rule reads as the
+    /// wildcard, not as a match of nothing.
+    absent_is_any: bool,
+    /// The protocol condition as the compile reads it: the authored
+    /// packed ranges, or the transport protocols encoded; a declared
+    /// kind with neither is the whole range.
+    protos: Vec<ProtoRange>,
     /// The rule matches no packet and is dimmed as a whole.
     dead: bool,
 }
@@ -58,24 +69,43 @@ impl<'a> RuleLine<'a> {
             .iter()
             .position(|action| action.kind == ActionKind::Pass as i32 || action.kind == ActionKind::Deny as i32);
 
-        let src = Side::new(&rule.sources4, &rule.sources6, true, true);
-        let dst = Side::new(&rule.destinations4, &rule.destinations6, true, true);
-        let (src4, src6) = (src.nets().any(|net| net.is_ipv4()), src.nets().any(|net| net.is_ipv6()));
-        let (dst4, dst6) = (dst.nets().any(|net| net.is_ipv4()), dst.nets().any(|net| net.is_ipv6()));
+        let kind = RuleKind::try_from(rule.kind).unwrap_or(RuleKind::Unspecified);
 
-        let has4 = src4 && dst4;
-        let has6 = src6 && dst6;
-        let layer2 = !(src4 || src6 || dst4 || dst6);
+        // A declared kind states the layers the rule speaks about: a
+        // family participates when either of its sides is authored and
+        // the absent partner side is the wildcard, while an unspecified
+        // kind is read out of the authored sides themselves.
+        let (has4, has6, absent_is_any) = match kind {
+            RuleKind::L2 => (false, false, false),
+            RuleKind::L3 | RuleKind::L4 => (
+                !rule.sources4.is_empty() || !rule.destinations4.is_empty(),
+                !rule.sources6.is_empty() || !rule.destinations6.is_empty(),
+                true,
+            ),
+            RuleKind::Unspecified => (
+                !rule.sources4.is_empty() && !rule.destinations4.is_empty(),
+                !rule.sources6.is_empty() && !rule.destinations6.is_empty(),
+                false,
+            ),
+        };
+        let layer2 = kind == RuleKind::L2
+            || (kind == RuleKind::Unspecified
+                && rule.sources4.is_empty()
+                && rule.destinations4.is_empty()
+                && rule.sources6.is_empty()
+                && rule.destinations6.is_empty());
+
+        let protos = display_proto_ranges(rule, kind);
         let fragment = rule.fragment.as_ref().map_or(FragmentKind::Any, |fragment| {
             FragmentKind::try_from(fragment.kind).unwrap_or(FragmentKind::Any)
         });
-        let no_protocols = !protocols_matchable(&rule.proto_ranges);
+        let no_protocols = !protocols_matchable(&protos);
         // A fragment rule leaves port matching, so its ports restrict nothing.
         let ports =
             fragment != FragmentKind::Frag && (has_ports(&rule.src_port_ranges) || has_ports(&rule.dst_port_ranges));
         let no_vlans = !rule.vlan_ranges.is_empty() && rule.vlan_ranges.iter().all(|r| r.from > r.to);
         let dead = no_vlans
-            || (!layer2 && (!(has4 || has6) || no_protocols || (ports && !protocols_with_ports(&rule.proto_ranges))));
+            || (!layer2 && (!(has4 || has6) || no_protocols || (ports && !protocols_with_ports(&protos))));
 
         Self {
             rule,
@@ -85,6 +115,8 @@ impl<'a> RuleLine<'a> {
             has4,
             has6,
             layer2,
+            protos,
+            absent_is_any,
             dead,
         }
     }
@@ -178,8 +210,8 @@ impl Display for RuleLine<'_> {
         // matches.
         let with4 = self.has4 || self.dead;
         let with6 = self.has6 || self.dead;
-        let src = Side::new(&rule.sources4, &rule.sources6, with4, with6);
-        let dst = Side::new(&rule.destinations4, &rule.destinations6, with4, with6);
+        let src = Side::new(&rule.sources4, &rule.sources6, with4, with6, self.absent_is_any);
+        let dst = Side::new(&rule.destinations4, &rule.destinations6, with4, with6, self.absent_is_any);
 
         // A single-family rule open on both sides would read as matching
         // both families, so the family is spelled out.
@@ -189,7 +221,7 @@ impl Display for RuleLine<'_> {
             _ => None,
         };
 
-        let protocols = Protocols::new(&rule.proto_ranges);
+        let protocols = Protocols::new(&self.protos);
         let class = protocols.class();
         match family {
             Some(family) if class == Class::All => out.token(Tone::Plain, family)?,
@@ -402,16 +434,25 @@ struct Side<'a> {
     nets6: &'a [IPv6Network],
     with4: bool,
     with6: bool,
+    /// An absent family reads as the wildcard, the declared-kind rule
+    /// shape.
+    absent_any: bool,
 }
 
 impl<'a> Side<'a> {
-    fn new(nets4: &'a [IPv4Network], nets6: &'a [IPv6Network], with4: bool, with6: bool) -> Self {
-        Self { nets4, nets6, with4, with6 }
+    fn new(
+        nets4: &'a [IPv4Network],
+        nets6: &'a [IPv6Network],
+        with4: bool,
+        with6: bool,
+        absent_any: bool,
+    ) -> Self {
+        Self { nets4, nets6, with4, with6, absent_any }
     }
 
     /// Returns the networks of the shown families, IPv4 first.
     fn nets(&self) -> impl Iterator<Item = IpNetwork> + Clone + 'a {
-        let Self { nets4, nets6, with4, with6 } = *self;
+        let Self { nets4, nets6, with4, with6, .. } = *self;
 
         nets4
             .iter()
@@ -420,10 +461,13 @@ impl<'a> Side<'a> {
             .chain(nets6.iter().map(net6).filter(move |_| with6))
     }
 
-    /// Returns whether every shown family holds a zero-mask network.
+    /// Returns whether every shown family holds a zero-mask network or is
+    /// the wildcard of an absent side.
     fn is_any(&self) -> bool {
-        let full4 = self.nets().any(|net| net.is_ipv4() && net.mask().is_unspecified());
-        let full6 = self.nets().any(|net| net.is_ipv6() && net.mask().is_unspecified());
+        let full4 = self.nets4.is_empty()
+            || self.nets().any(|net| net.is_ipv4() && net.mask().is_unspecified());
+        let full6 = self.nets6.is_empty()
+            || self.nets().any(|net| net.is_ipv6() && net.mask().is_unspecified());
 
         (!self.with4 || full4) && (!self.with6 || full6)
     }
@@ -432,7 +476,11 @@ impl<'a> Side<'a> {
         if self.is_any() {
             out.token(Tone::Keyword, "any")
         } else if self.nets().next().is_none() {
-            out.token(Tone::Keyword, "none")
+            if self.absent_any {
+                out.token(Tone::Keyword, "any")
+            } else {
+                out.token(Tone::Keyword, "none")
+            }
         } else {
             let list = out.list(self.nets().map(Compact), Tone::Plain);
             out.token(Tone::Plain, list)
@@ -723,4 +771,58 @@ impl Display for TcpFlags {
 
         Ok(())
     }
+}
+
+/// The protocol condition of a rule as the compile reads it: the
+/// authored packed ranges, the transport protocols encoded, or the
+/// whole range of a declared kind authoring neither.
+fn display_proto_ranges(rule: &Rule, kind: RuleKind) -> Vec<ProtoRange> {
+    if !rule.proto_ranges.is_empty() {
+        return rule.proto_ranges.clone();
+    }
+
+    let mut encoded = encode_transports(&rule.transports);
+    if encoded.is_empty() && matches!(kind, RuleKind::L3 | RuleKind::L4) {
+        encoded.push(ProtoRange { from: 0, to: 0xffff });
+    }
+    encoded
+}
+
+/// Encodes the transport protocols as the packed ranges the compile
+/// consumes: every transport specific byte range crosses into the low
+/// byte of its protocol, and a protocol without any is the whole byte.
+fn encode_transports(transports: &[Transport]) -> Vec<ProtoRange> {
+    fn whole_or(proto: u32, bytes: &[::filterpb::pb::ByteRange]) -> Vec<ProtoRange> {
+        if bytes.is_empty() {
+            return vec![ProtoRange { from: proto << 8, to: proto << 8 | 0xff }];
+        }
+
+        bytes
+            .iter()
+            .map(|r| ProtoRange {
+                from: proto << 8 | (r.from & 0xff),
+                to: proto << 8 | (r.to & 0xff),
+            })
+            .collect()
+    }
+
+    transports
+        .iter()
+        .filter_map(|transport| match transport.protocol.as_ref() {
+            Some(TransportProtocol::Tcp(tcp)) => Some(whole_or(6, &tcp.flags)),
+            Some(TransportProtocol::Udp(..)) => {
+                Some(vec![ProtoRange { from: 17 << 8, to: 17 << 8 | 0xff }])
+            }
+            Some(TransportProtocol::Icmp(icmp)) => Some(whole_or(1, &icmp.types)),
+            Some(TransportProtocol::Icmpv6(icmp6)) => Some(whole_or(58, &icmp6.types)),
+            Some(TransportProtocol::Ipproto(number)) => (*number <= 0xff).then(|| {
+                vec![ProtoRange {
+                    from: *number << 8,
+                    to: *number << 8 | 0xff,
+                }]
+            }),
+            None => None,
+        })
+        .flatten()
+        .collect()
 }

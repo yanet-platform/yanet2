@@ -609,6 +609,64 @@ func TestACL_KindL2_MatchesNonIP(t *testing.T) {
 	require.Empty(t, result.Drop)
 }
 
+// TestACL_Transports_TCPFlagsMatch verifies the transport protocol
+// spellings end to end: a rule with the TCP transport limited to the
+// SYN flag byte matches a SYN packet and misses an ACK-only one.
+func TestACL_Transports_TCPFlagsMatch(t *testing.T) {
+	base := func(flags uint8) (gopacket.Packet, error) {
+		eth := layers.Ethernet{
+			SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+			DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+			EthernetType: layers.EthernetTypeIPv4,
+		}
+		ip4 := layers.IPv4{
+			Version:  4,
+			TTL:      64,
+			Protocol: layers.IPProtocolTCP,
+			SrcIP:    net.ParseIP("192.0.2.1"),
+			DstIP:    net.ParseIP("10.0.0.1"),
+		}
+		tcp := layers.TCP{SrcPort: 12345, DstPort: 80, SYN: flags == 0x02, ACK: flags == 0x10}
+		tcp.SetNetworkLayerForChecksum(&ip4)
+		pkt := xpacket.LayersToPacket(t, &eth, &ip4, &tcp)
+		return pkt, nil
+	}
+
+	// The TCP transport with the SYN flag byte alone; the absent port
+	// sides of the l4 kind are the wildcard.
+	rules := []*aclpb.Rule{{
+		Kind:          aclpb.RuleKind_RULE_KIND_L4,
+		Actions:       []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}},
+		Devices:       []*filterpb.Device{{Name: "port0"}},
+		Sources4:      []*commonpb.IPv4Network{commonpb.NewIPv4NetworkFrom4(xnetip.MustParseNetwork4("192.0.2.0/24"))},
+		Destinations4: []*commonpb.IPv4Network{commonpb.NewIPv4NetworkFrom4(xnetip.MustParseNetwork4("10.0.0.0/8"))},
+		Transports: []*aclpb.Transport{{
+			Protocol: &aclpb.Transport_Tcp{Tcp: &aclpb.Tcp{
+				Flags: []*filterpb.ByteRange{{From: 0x02, To: 0x02}},
+			}},
+		}},
+	}}
+
+	h, agent, backend := setupACLHarness(t, []string{"port0"})
+	service := acl.NewACLService(backend)
+	_, err := service.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{Name: "test", Rules: rules})
+	require.NoError(t, err)
+	wireACLPipeline(t, agent, "port0", "test")
+
+	syn, err := base(0x02)
+	require.NoError(t, err)
+	result, err := h.HandlePackets(syn)
+	require.NoError(t, err)
+	require.Len(t, result.Output, 1, "the SYN packet must match the tcp transport rule")
+
+	ack, err := base(0x10)
+	require.NoError(t, err)
+	result, err = h.HandlePackets(ack)
+	require.NoError(t, err)
+	require.Empty(t, result.Output, "the ACK-only packet must not match the SYN-limited rule")
+	require.Len(t, result.Drop, 1)
+}
+
 // Test_ACLService_UpdateConfig_RejectsOutOfKindFields verifies the gRPC
 // boundary: a condition authored outside the declared kind is rejected
 // with InvalidArgument.
