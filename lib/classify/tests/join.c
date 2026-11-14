@@ -454,8 +454,8 @@ run_join_failure_cleanup_test(void) {
 	join_arena_open(&regs, 4 << 20);
 	struct join_arena tight;
 	join_arena_open(&tight, 8 << 10);
-	// Rule g covers every class but g on both sides: the small table fits,
-	// the overlapping output ranges exceed the arena.
+	// Each rule covers every class but its own on both sides: the small
+	// table fits, the overlapping output ranges exceed the arena.
 	uint32_t ring[48];
 	for (uint32_t i = 0; i < 48; ++i) {
 		ring[i] = i % 24;

@@ -600,14 +600,10 @@ static uint32_t
 join_classes_intern(
 	struct join_classes *classes, uint32_t hash, struct join_span key
 ) {
-	if (classes->count == (classes->mask + 1) / 2 &&
-	    join_classes_grow(classes)) {
-		return UINT32_MAX;
-	}
-	struct join_slot *slot;
-	for (uint32_t pos = hash & classes->mask;;
-	     pos = (pos + 1) & classes->mask) {
-		slot = classes->slots + pos;
+	uint32_t pos = hash & classes->mask;
+	// The slots come with the first class.
+	for (; classes->count != 0; pos = (pos + 1) & classes->mask) {
+		struct join_slot *slot = classes->slots + pos;
 		if (slot->id == UINT32_MAX) {
 			break;
 		}
@@ -620,6 +616,16 @@ join_classes_intern(
 			    key.values,
 			    (size_t)key.count * sizeof(uint32_t))) {
 			return slot->id;
+		}
+	}
+	if (classes->count == (classes->mask + 1) / 2) {
+		if (join_classes_grow(classes)) {
+			return UINT32_MAX;
+		}
+		// The key is new, so the first free slot on its path takes it.
+		pos = hash & classes->mask;
+		while (classes->slots[pos].id != UINT32_MAX) {
+			pos = (pos + 1) & classes->mask;
 		}
 	}
 
@@ -653,7 +659,7 @@ join_classes_intern(
 		       (size_t)key.count * sizeof(uint32_t));
 		classes->pool_count = end;
 	}
-	*slot = (struct join_slot){hash, classes->count};
+	classes->slots[pos] = (struct join_slot){hash, classes->count};
 	return classes->count++;
 }
 
