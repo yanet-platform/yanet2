@@ -1,7 +1,8 @@
 //! Fixture of the runtime reach test: only what the runtime reads, laid out
 //! by hand, as the control plane would, in the block arena.
 //!
-//! It follows no packet rule of C and no rule of the dataplane.
+//! It follows no packet rule of C and no rule of the dataplane. The dataplane
+//! bench includes it too, so a change here moves the bench's figures.
 
 use alloc::alloc::{alloc_zeroed, dealloc, handle_alloc_error};
 use core::{

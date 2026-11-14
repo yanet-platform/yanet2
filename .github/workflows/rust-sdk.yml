@@ -195,6 +195,10 @@ jobs:
           meson setup build -Ddataplane_only=true
       - working-directory: bindings/rust
         run: cargo test --workspace --locked
+      # The workspace tests build no bench, so the dataplane bench runs each
+      # case once in Criterion's test mode here, its setup checks included.
+      - working-directory: bindings/rust
+        run: cargo test -p yanet-sys --bench dp --locked
 
   packet:
     name: yanet-packet standalone
