@@ -24,6 +24,8 @@ edition = "2024"
 rust-version = "1.99"
 publish = false
 
+# rust-sdk.yml runs cargo shear, and unused_crate_dependencies on library
+# targets only: rustc checks it per target, so tests would name every crate.
 [workspace.lints.rust]
 elided_lifetimes_in_paths = "deny"
 let_underscore_drop = "deny"
@@ -32,7 +34,6 @@ raw_borrows_via_references = "deny"
 trivial_casts = "deny"
 unit_bindings = "deny"
 unsafe_op_in_unsafe_fn = "deny"
-unused_crate_dependencies = "deny"
 unused_lifetimes = "deny"
 unused_qualifications = "deny"
 

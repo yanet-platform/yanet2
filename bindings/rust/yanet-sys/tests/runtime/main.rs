@@ -10,10 +10,6 @@
 
 extern crate alloc;
 
-use netip as _;
-use proptest as _;
-use yanet_packet as _;
-
 mod common;
 mod handler;
 mod link;

@@ -17,12 +17,6 @@ use core::net::Ipv4Addr;
 
 use arena::ArenaOwner;
 use classify::{Error, TestRule, Tree, Tree4, TreeAny, any_or, build4, build6, edges, first, in4, in6, net4, net6};
-// The workspace denies unused crate dependencies; this test names no crate it
-// imports `as _`.
-use netip as _;
-use proptest as _;
-use yanet_packet as _;
-use yanet_sdk_testing as _;
 use yanet_sys::{
     classify::{Addr4, BURST, LineRange, Lines, Net4, Net6, Nets4, PortRange, Ports, Rule},
     cp::{BuildError, Builder, Built, Refusal},

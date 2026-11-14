@@ -6,8 +6,6 @@
 //! into a directory of its own under a name the loader maps.
 
 #![no_std]
-// The example shares the dependencies of its package.
-#![allow(unused_crate_dependencies)]
 
 yanet_sdk_plugin::export_module!(
     name = stash,

@@ -1,7 +1,8 @@
 name: Rust SDK
 
-# Checks of the Rust module SDK workspace (bindings/rust): formatting, lints, the
-# test suite, std-freedom of the SDK crates and the extractable packet.
+# Checks of the Rust module SDK workspace (bindings/rust): formatting, lints,
+# unused dependencies, tests, std-freedom and the extractable packet.
+#
 # Clippy with the bare-metal check and the tests also run on arm64, where
 # the C bindings and the layouts they check can differ; the rest does not
 # depend on the architecture and runs on x86_64 only.
@@ -83,6 +84,22 @@ jobs:
       - working-directory: bindings/rust
         run: cargo fmt -- --check
 
+  # Unused dependencies of each package as a whole, its tests included.
+  shear:
+    name: cargo shear
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        with:
+          tool: cargo-shear@1.14.1
+      - working-directory: bindings/rust
+        run: cargo shear --deny-warnings --locked
+
   # Every check on this toolchain runs in this one job, which owns the
   # rust-sdk cache family for the host and bare-metal builds.
   clippy:
@@ -131,6 +148,10 @@ jobs:
         run: cargo clippy --profile plugin -p yanet-sdk-fixture --features plugin --examples --locked --keep-going
         env:
           CARGO_BUILD_WARNINGS: deny
+      # A crate only unit tests use fails here when it sits in [dependencies]:
+      # cargo shear counts a use under cfg(test) as a library use.
+      - working-directory: bindings/rust
+        run: cargo clippy --workspace --lib --locked -- -D unused_crate_dependencies
       # Clippy runs no rustdoc, so the rustdoc lints of the workspace, such as
       # broken intra-doc links, fail only here.
       #
