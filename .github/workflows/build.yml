@@ -239,7 +239,7 @@ jobs:
 
       - name: Install Rust toolchain
         if: steps.built.outputs.cache-hit != 'true'
-        uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
+        uses: dtolnay/rust-toolchain@d5e4d57b030548f435d0befec15ff413a2c60eff # 1.100.0
 
       # A cache written on a pull-request ref is readable only from that
       # same pull request, so only main writes this one.
@@ -400,7 +400,7 @@ jobs:
 
       - name: Install Rust toolchain
         if: steps.binaries.outputs.cache-hit != 'true'
-        uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
+        uses: dtolnay/rust-toolchain@d5e4d57b030548f435d0befec15ff413a2c60eff # 1.100.0
 
       # A cache written on a pull-request ref is readable only from that
       # same pull request, so only main writes this one.
