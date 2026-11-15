@@ -4,6 +4,7 @@ use core::{
     marker::PhantomData,
     mem::size_of,
     ops::{AddAssign, SubAssign},
+    panic::{RefUnwindSafe, UnwindSafe},
     ptr::NonNull,
 };
 
@@ -133,6 +134,56 @@ pub struct Cx<'id, M: Module> {
 ///     *kept = Some(cx.config().resolve(cx));
 /// }
 /// ```
+///
+/// Prepared handles retain their non-sharing contract for every layout:
+///
+/// ```compile_fail,E0277
+/// # use yanet_sys::dp::{CounterRef, Gauge, Traffic};
+/// fn requires<T: Sync>() {}
+/// requires::<CounterRef<'static, u64>>();
+/// ```
+///
+/// ```compile_fail,E0277
+/// # use yanet_sys::dp::{CounterRef, Gauge, Traffic};
+/// fn requires<T: Sync>() {}
+/// requires::<CounterRef<'static, Traffic>>();
+/// ```
+///
+/// ```compile_fail,E0277
+/// # use yanet_sys::dp::{CounterRef, Gauge, Traffic};
+/// fn requires<T: Sync>() {}
+/// requires::<CounterRef<'static, Gauge>>();
+/// ```
+///
+/// ```compile_fail,E0277
+/// # use yanet_sys::dp::{CounterRef, Gauge, Traffic};
+/// fn requires<T: Sync>() {}
+/// requires::<CounterRef<'static, [[Traffic; 3]; 2]>>();
+/// ```
+///
+/// ```compile_fail,E0277
+/// # use yanet_sys::dp::{CounterRef, Gauge, Traffic};
+/// fn requires<T: Sync>() {}
+/// requires::<CounterRef<'static, [u64; 0]>>();
+/// ```
+///
+/// ```compile_fail,E0277
+/// # use yanet_sys::dp::{CounterRef, Gauge, Traffic};
+/// fn requires<T: Sync>() {}
+/// requires::<CounterRef<'static, [Traffic; 0]>>();
+/// ```
+///
+/// ```compile_fail,E0277
+/// # use yanet_sys::dp::{CounterRef, Gauge, Traffic};
+/// fn requires<T: Sync>() {}
+/// requires::<CounterRef<'static, [[Gauge; 0]; 3]>>();
+/// ```
+///
+/// ```compile_fail,E0277
+/// # use yanet_sys::dp::{CounterRef, Gauge, Traffic};
+/// fn requires<T: Sync>() {}
+/// requires::<CounterRef<'static, [[Traffic; 3]; 0]>>();
+/// ```
 pub struct CounterRef<'p, T = u64> {
     value: NonNull<u64>,
     // Invariant brand: values of two different contexts never unify, so they cannot be mixed.
@@ -190,9 +241,16 @@ impl<'id, T> CounterRef<'id, T> {
     /// }
     /// ```
     #[inline(always)]
-    pub fn bind<M: Module>(&self, _cx: &Cx<'id, M>) -> BoundCounter<'id, T> {
+    pub fn bind<M: Module>(&self, _cx: &Cx<'id, M>) -> BoundCounter<'id, T>
+    where
+        T: CounterLayout,
+    {
+        // SAFETY: TCB counter binding. The prepared pointer retains the mapping
+        // provenance and names initialized, aligned values of this worker,
+        // live for the same branded call. All overlapping accesses use cells.
+        let cells = unsafe { counter_cells::<T>(self.value.as_ptr()) };
         BoundCounter {
-            value: self.value,
+            cells,
             _brand: PhantomData,
             _local: PhantomData,
             _layout: PhantomData,
@@ -226,8 +284,128 @@ impl<'id, T> CounterRef<'id, T> {
 ///     });
 /// }
 /// ```
-pub struct BoundCounter<'id, T = u64> {
-    value: NonNull<u64>,
+///
+/// Copies share worker-local cells. Arithmetic wraps and multi-value updates
+/// are not transactional. Both unwind markers describe plain-word state,
+/// not rollback on panic.
+///
+/// Every layout stays local, including empty arrays:
+///
+/// ```compile_fail,E0277
+/// # use yanet_sys::dp::{BoundCounter, Gauge, Traffic};
+/// fn requires<T: Send>() {}
+/// requires::<BoundCounter<'static, u64>>();
+/// ```
+///
+/// ```compile_fail,E0277
+/// # use yanet_sys::dp::{BoundCounter, Gauge, Traffic};
+/// fn requires<T: Sync>() {}
+/// requires::<BoundCounter<'static, u64>>();
+/// ```
+///
+/// ```compile_fail,E0277
+/// # use yanet_sys::dp::{BoundCounter, Gauge, Traffic};
+/// fn requires<T: Send>() {}
+/// requires::<BoundCounter<'static, Traffic>>();
+/// ```
+///
+/// ```compile_fail,E0277
+/// # use yanet_sys::dp::{BoundCounter, Gauge, Traffic};
+/// fn requires<T: Sync>() {}
+/// requires::<BoundCounter<'static, Traffic>>();
+/// ```
+///
+/// ```compile_fail,E0277
+/// # use yanet_sys::dp::{BoundCounter, Gauge, Traffic};
+/// fn requires<T: Send>() {}
+/// requires::<BoundCounter<'static, Gauge>>();
+/// ```
+///
+/// ```compile_fail,E0277
+/// # use yanet_sys::dp::{BoundCounter, Gauge, Traffic};
+/// fn requires<T: Sync>() {}
+/// requires::<BoundCounter<'static, Gauge>>();
+/// ```
+///
+/// ```compile_fail,E0277
+/// # use yanet_sys::dp::{BoundCounter, Gauge, Traffic};
+/// fn requires<T: Send>() {}
+/// requires::<BoundCounter<'static, [[Traffic; 3]; 2]>>();
+/// ```
+///
+/// ```compile_fail,E0277
+/// # use yanet_sys::dp::{BoundCounter, Gauge, Traffic};
+/// fn requires<T: Sync>() {}
+/// requires::<BoundCounter<'static, [[Traffic; 3]; 2]>>();
+/// ```
+///
+/// ```compile_fail,E0277
+/// # use yanet_sys::dp::{BoundCounter, Gauge, Traffic};
+/// fn requires<T: Send>() {}
+/// requires::<BoundCounter<'static, [u64; 0]>>();
+/// ```
+///
+/// ```compile_fail,E0277
+/// # use yanet_sys::dp::{BoundCounter, Gauge, Traffic};
+/// fn requires<T: Sync>() {}
+/// requires::<BoundCounter<'static, [u64; 0]>>();
+/// ```
+///
+/// ```compile_fail,E0277
+/// # use yanet_sys::dp::{BoundCounter, Gauge, Traffic};
+/// fn requires<T: Send>() {}
+/// requires::<BoundCounter<'static, [Traffic; 0]>>();
+/// ```
+///
+/// ```compile_fail,E0277
+/// # use yanet_sys::dp::{BoundCounter, Gauge, Traffic};
+/// fn requires<T: Sync>() {}
+/// requires::<BoundCounter<'static, [Traffic; 0]>>();
+/// ```
+///
+/// ```compile_fail,E0277
+/// # use yanet_sys::dp::{BoundCounter, Gauge, Traffic};
+/// fn requires<T: Send>() {}
+/// requires::<BoundCounter<'static, [[Gauge; 0]; 3]>>();
+/// ```
+///
+/// ```compile_fail,E0277
+/// # use yanet_sys::dp::{BoundCounter, Gauge, Traffic};
+/// fn requires<T: Sync>() {}
+/// requires::<BoundCounter<'static, [[Gauge; 0]; 3]>>();
+/// ```
+///
+/// ```compile_fail,E0277
+/// # use yanet_sys::dp::{BoundCounter, Gauge, Traffic};
+/// fn requires<T: Send>() {}
+/// requires::<BoundCounter<'static, [[Traffic; 3]; 0]>>();
+/// ```
+///
+/// ```compile_fail,E0277
+/// # use yanet_sys::dp::{BoundCounter, Gauge, Traffic};
+/// fn requires<T: Sync>() {}
+/// requires::<BoundCounter<'static, [[Traffic; 3]; 0]>>();
+/// ```
+///
+/// The invariant call brand cannot be shortened:
+///
+/// ```compile_fail
+/// # use yanet_sys::dp::BoundCounter;
+/// fn shorten<'a>(view: BoundCounter<'static>) -> BoundCounter<'a> {
+///     view
+/// }
+/// ```
+///
+/// A bound view cannot escape a call:
+///
+/// ```compile_fail
+/// # use yanet_sys::dp::{CounterRef, Cx, Module, BoundCounter};
+/// fn escape<'id, M: Module>(cx: &Cx<'id, M>, handle: CounterRef<'id>) -> BoundCounter<'static> {
+///     handle.bind(cx)
+/// }
+/// ```
+pub struct BoundCounter<'id, T: CounterLayout = u64> {
+    cells: &'id T::Storage,
     // Invariant brand: values of two different contexts never unify, so they cannot be mixed.
     _brand: PhantomData<fn(&'id ()) -> &'id ()>,
     // Neither Send nor Sync on purpose, independent of the pointer fields.
@@ -236,13 +414,18 @@ pub struct BoundCounter<'id, T = u64> {
     _layout: PhantomData<fn() -> T>,
 }
 
-impl<T> Clone for BoundCounter<'_, T> {
+impl<T: CounterLayout> Clone for BoundCounter<'_, T> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<T> Copy for BoundCounter<'_, T> {}
+impl<T: CounterLayout> Copy for BoundCounter<'_, T> {}
+
+// Unwinding exposes only plain wrapping words, not borrow guards or poisoned
+// invariants. Multi-value updates do not promise transactional snapshots.
+impl<T: CounterLayout> UnwindSafe for BoundCounter<'_, T> {}
+impl<T: CounterLayout> RefUnwindSafe for BoundCounter<'_, T> {}
 
 impl<T: CounterLayout> BoundCounter<'_, T> {
     /// Adds the value to the worker's copy of the counter.
@@ -251,17 +434,13 @@ impl<T: CounterLayout> BoundCounter<'_, T> {
     /// copy.
     #[inline(always)]
     pub fn add(&self, value: T::Value) {
-        // SAFETY: the handle holds the first value of this worker's counter
-        // of the layout `T`, resolved for the generation the call runs
-        // (bound to the call context of the same brand).
-        unsafe { T::add_to(value, self.value.as_ptr()) };
+        T::add(self.cells, value);
     }
 
     /// The worker's copy of the counter, which only this worker writes.
     #[inline(always)]
     pub fn get(&self) -> T::Value {
-        // SAFETY: as for adding, for reading.
-        unsafe { T::read(self.value.as_ptr()) }
+        T::read(self.cells)
     }
 }
 
@@ -292,13 +471,7 @@ impl BoundCounter<'_, Gauge> {
     /// ```
     #[inline(always)]
     pub fn sub(&self, value: u64) {
-        let slot = self.value.as_ptr();
-        // SAFETY: the handle holds this worker's aligned value of the gauge,
-        // resolved for the generation the call runs (bound to the call
-        // context of the same brand), which only this worker writes. The
-        // control plane reads it with memcpy (lib/controlplane/agent/
-        // counters.c), as it does after the plain `-=` of a C module.
-        unsafe { *slot = (*slot).wrapping_sub(value) };
+        self.cells.set(self.cells.get().wrapping_sub(value));
     }
 }
 
@@ -361,10 +534,7 @@ where
     pub fn at<const I: usize>(&self) -> BoundCounter<'id, T> {
         const { assert!(I < N, "an index past the counter's values") };
         BoundCounter {
-            // SAFETY: the handle holds the first of this worker's N runs of
-            // the element's values, next to each other, and the index is
-            // below N.
-            value: unsafe { self.value.add(I * T::VALUES) },
+            cells: &self.cells[I],
             _brand: PhantomData,
             _local: PhantomData,
             _layout: PhantomData,
@@ -413,6 +583,20 @@ where
 ///         cx.config().resolve(cx)
 ///     }
 /// }
+/// ```
+///
+/// Prepared tagged handles cannot be shared, even for an empty layout:
+///
+/// ```compile_fail,E0277
+/// # use yanet_sys::dp::TaggedCountersRef;
+/// fn requires<T: Sync>() {}
+/// requires::<TaggedCountersRef<'static>>();
+/// ```
+///
+/// ```compile_fail,E0277
+/// # use yanet_sys::dp::{TaggedCountersRef, Traffic};
+/// fn requires<T: Sync>() {}
+/// requires::<TaggedCountersRef<'static, [Traffic; 0]>>();
 /// ```
 pub struct TaggedCountersRef<'p, T = u64> {
     table: NonNull<isize>,
@@ -509,7 +693,10 @@ where
         // id is below the counters the configuration registered, which C keeps
         // first in the registry, each of the layout `T`, so the handle names
         // this worker's aligned values of the counter, as many as the layout's.
-        unsafe { T::add_to(value, counter_handle_value(self.table.as_ptr(), id)) };
+        let slot = unsafe { counter_handle_value(self.table.as_ptr(), id) };
+        // SAFETY: TCB tagged cells. The resolved values are initialized and
+        // worker-local, live for this call, and aliased only through cells.
+        T::add(unsafe { counter_cells::<T>(slot) }, value);
     }
 }
 
@@ -783,6 +970,27 @@ mod sealed {
     }
 }
 
+/// Borrows initialized worker-local counter words as their sealed cell layout.
+///
+/// # Safety
+///
+/// The pointer retains the storage's provenance and is non-null and aligned,
+/// even for an empty layout. Non-empty storage contains all initialized words
+/// of the layout and stays live for the returned lifetime, within this worker's
+/// call. Only this worker writes it. Overlapping accesses must use shared cells
+/// or compatible raw accesses, never ordinary shared or exclusive references.
+#[inline(always)]
+unsafe fn counter_cells<'a, T: CounterLayout>(slot: *mut u64) -> &'a T::Storage {
+    const {
+        assert!(size_of::<T::Storage>() == T::VALUES * size_of::<u64>());
+        assert!(align_of::<T::Storage>() == align_of::<u64>());
+    }
+    // SAFETY: TCB counter cells. Sealed layouts are transparent cells or
+    // recursive arrays of them. The caller guarantees validity, locality,
+    // compatible aliases and call-bounded liveness, including for empty views.
+    unsafe { &*slot.cast::<T::Storage>() }
+}
+
 /// Address of the context's worker's value of a counter, as C's
 /// `counter_get_address(id, ectx->abs_counter_storage)`.
 ///
@@ -816,7 +1024,10 @@ impl<T: CounterLayout> Counter<T> {
         // registry, whose storage of this context holds the counter's
         // aligned values next to each other, as many as the layout's, the
         // size it was registered with.
-        unsafe { T::add_to(value, counter_value(cx.root, cx.ectx, self.id())) };
+        let slot = unsafe { counter_value(cx.root, cx.ectx, self.id()) };
+        // SAFETY: TCB direct cells. The resolved initialized values belong to
+        // this worker for the call. Overlapping bound views also use cells.
+        T::add(unsafe { counter_cells::<T>(slot) }, value);
     }
 
     /// The context's worker's values of the counter, for the prepared value.
@@ -924,12 +1135,11 @@ where
         // module and an id of it, whose storage of this context holds the
         // counter's aligned values next to each other, as many as the
         // layout's, the size it was registered with.
-        unsafe {
-            T::add_to(
-                value,
-                tagged_counter_value(cx.root, cx.ectx, self.registry(), self.id()),
-            )
-        };
+        let slot = unsafe { tagged_counter_value(cx.root, cx.ectx, self.registry(), self.id()) };
+        // SAFETY: TCB tagged direct cells. The resolved initialized values
+        // belong to this worker for the call, with only compatible cell
+        // aliases.
+        T::add(unsafe { counter_cells::<T>(slot) }, value);
     }
 
     /// The context's worker's values of the counter, for the prepared value,
@@ -1197,5 +1407,172 @@ fn linked_object_ectx<'id>(cx: &impl ModuleCx<'id>, index: u64) -> *const bindin
         );
         let links = root.ptr::<bindings::module_object_link_ectx>((*ectx).abs_object_links.addr());
         root.ptr::<bindings::object_ectx>((*links.add(index as usize)).abs_object_ectx.addr())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate std;
+
+    use core::{
+        assert_matches,
+        cell::Cell,
+        marker::PhantomData,
+        panic::{RefUnwindSafe, UnwindSafe},
+        ptr::NonNull,
+    };
+
+    use super::{BoundCounter, BoundTaggedCounters, CounterRef, TaggedCountersRef, counter_cells};
+    use crate::dp::{CounterLayout, Gauge, Traffic};
+
+    /// A worker-local view over owner-local test cells.
+    fn bound<T: CounterLayout>(cells: &T::Storage) -> BoundCounter<'_, T> {
+        BoundCounter {
+            cells,
+            _brand: PhantomData,
+            _local: PhantomData,
+            _layout: PhantomData,
+        }
+    }
+
+    /// Pins the positive traits and pointer niches independently of cell Copy.
+    fn assert_traits<T: CounterLayout>() {
+        fn copy_unwind<T: Copy + Clone + UnwindSafe + RefUnwindSafe>() {}
+        fn moves<T: Send>() {}
+        copy_unwind::<BoundCounter<'_, T>>();
+        copy_unwind::<BoundTaggedCounters<'_, T>>();
+        copy_unwind::<CounterRef<'_, T>>();
+        copy_unwind::<TaggedCountersRef<'_, T>>();
+        moves::<CounterRef<'_, T>>();
+        moves::<TaggedCountersRef<'_, T>>();
+        assert_eq!(size_of::<usize>(), size_of::<BoundCounter<'_, T>>());
+        assert_eq!(size_of::<usize>(), size_of::<Option<BoundCounter<'_, T>>>());
+        assert_eq!(align_of::<usize>(), align_of::<BoundCounter<'_, T>>());
+        assert_eq!(size_of::<usize>(), size_of::<CounterRef<'_, T>>());
+        assert_eq!(size_of::<usize>(), size_of::<Option<CounterRef<'_, T>>>());
+    }
+
+    #[test]
+    fn test_bound_counter_traits_and_niches_for_all_layouts() {
+        struct NotLayout;
+        fn moves_copy<T: Copy + Send>() {}
+        moves_copy::<CounterRef<'_, NotLayout>>();
+        moves_copy::<TaggedCountersRef<'_, NotLayout>>();
+        assert_traits::<u64>();
+        assert_traits::<Traffic>();
+        assert_traits::<Gauge>();
+        assert_traits::<[[Traffic; 3]; 2]>();
+        assert_traits::<[u64; 0]>();
+        assert_traits::<[Traffic; 0]>();
+        assert_traits::<[[Gauge; 0]; 3]>();
+        assert_traits::<[[Traffic; 3]; 0]>();
+    }
+
+    #[test]
+    fn test_bound_counter_copied_gauge_wrap_and_unwind_captures() {
+        let cells = Cell::new(0);
+        let gauge = bound::<Gauge>(&cells);
+        let copy = gauge;
+        copy.sub(1);
+        assert_eq!(u64::MAX, gauge.get());
+        assert_matches!(std::panic::catch_unwind(|| gauge.add(2)), Ok(()));
+        assert_matches!(std::panic::catch_unwind(move || copy.sub(3)), Ok(()));
+        assert_eq!(u64::MAX - 1, gauge.get());
+        assert_matches!(
+            std::panic::catch_unwind(move || {
+                copy.add(5);
+                panic!("after the completed counter update");
+            }),
+            Err(_),
+        );
+        assert_eq!(3, gauge.get());
+        gauge.sub(4);
+        assert_eq!(u64::MAX, gauge.get());
+    }
+
+    #[test]
+    fn test_bound_counter_nested_copied_views_overlap() {
+        let cells = core::array::from_fn(|_| core::array::from_fn(|_| [Cell::new(0), Cell::new(0)]));
+        let pairs = bound::<[[Traffic; 2]; 3]>(&cells);
+        let copy = pairs;
+        pairs.at::<2>().at::<1>().add(Traffic::packet(7));
+        copy.at::<2>()
+            .at::<1>()
+            .add(Traffic { packets: u64::MAX, bytes: u64::MAX });
+        assert_eq!(Traffic { packets: 0, bytes: 6 }, pairs.get()[2][1]);
+        assert_eq!(Traffic::default(), pairs.at::<0>().at::<0>().get());
+    }
+
+    #[test]
+    fn test_counter_cells_nested_views_match_flat_word_offsets() {
+        let flat = Cell::new([11u64, 12, 21, 22, 31, 32, 41, 42]);
+        let slot = flat.as_ptr().cast::<u64>();
+        // SAFETY: the flat buffer holds eight initialized, aligned words,
+        // local and live for the nested view, with only compatible cell access.
+        let cells = unsafe { counter_cells::<[[Traffic; 2]; 2]>(slot) };
+        let pairs = bound::<[[Traffic; 2]; 2]>(cells);
+        assert_eq!(
+            [
+                [Traffic { packets: 11, bytes: 12 }, Traffic { packets: 21, bytes: 22 }],
+                [Traffic { packets: 31, bytes: 32 }, Traffic { packets: 41, bytes: 42 }],
+            ],
+            pairs.get(),
+        );
+        pairs.at::<1>().at::<0>().add(Traffic { packets: 5, bytes: 7 });
+        assert_eq!([11, 12, 21, 22, 36, 39, 41, 42], flat.get());
+        pairs.at::<0>().at::<1>().add(Traffic { packets: 3, bytes: 9 });
+        assert_eq!([11, 12, 24, 31, 36, 39, 41, 42], flat.get());
+        assert_eq!(Traffic { packets: 36, bytes: 39 }, pairs.get()[1][0]);
+    }
+
+    #[test]
+    fn test_counter_cells_raw_and_bound_aliases_overlap() {
+        let cell = Cell::new(0);
+        let slot = cell.as_ptr();
+        // SAFETY: the initialized cell is aligned and local for both views.
+        let first = unsafe { counter_cells::<Gauge>(slot) };
+        let view = bound::<Gauge>(first);
+        // SAFETY: the same live storage permits shared cells and raw word
+        // accesses, without ordinary shared or exclusive references.
+        let second = unsafe { counter_cells::<Gauge>(slot) };
+        view.sub(1);
+        // SAFETY: the original pointer reads the live initialized word locally.
+        assert_eq!(u64::MAX, unsafe { slot.read() });
+        // SAFETY: a raw write to the cell payload is compatible with the views.
+        unsafe { slot.write(7) };
+        assert_eq!(7, view.get());
+        Gauge::add(second, 2);
+        // SAFETY: the original pointer observes the completed cell update.
+        assert_eq!(9, unsafe { slot.read() });
+        // SAFETY: the live cell payload permits another raw write.
+        unsafe { slot.write(u64::MAX) };
+        view.add(2);
+        assert_eq!(1, Gauge::read(second));
+        assert_eq!(1, view.get());
+    }
+
+    #[test]
+    fn test_counter_cells_empty_dangling_views_access_no_storage() {
+        let slot = NonNull::<u64>::dangling().as_ptr();
+        // SAFETY: a zero-sized layout needs no storage, only word alignment.
+        let scalar = unsafe { counter_cells::<[u64; 0]>(slot) };
+        bound::<[u64; 0]>(scalar).add([]);
+        // SAFETY: the same aligned dangling pointer suffices for empty traffic.
+        let traffic = unsafe { counter_cells::<[Traffic; 0]>(slot) };
+        assert_eq!(
+            [Traffic { packets: 0, bytes: 0 }; 0],
+            bound::<[Traffic; 0]>(traffic).get()
+        );
+        // SAFETY: every row is empty, so there are no words to access.
+        let nested = unsafe { counter_cells::<[[Gauge; 0]; 3]>(slot) };
+        let nested = bound::<[[Gauge; 0]; 3]>(nested);
+        nested.at::<2>().add([]);
+        assert_eq!([[0u64; 0]; 3], nested.get());
+        // SAFETY: an empty outer array has no storage either.
+        let outer = unsafe { counter_cells::<[[Traffic; 3]; 0]>(slot) };
+        assert_eq!(
+            [[Traffic { packets: 0, bytes: 0 }; 3]; 0],
+            bound::<[[Traffic; 3]; 0]>(outer).get()
+        );
     }
 }

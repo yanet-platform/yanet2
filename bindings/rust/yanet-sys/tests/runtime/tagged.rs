@@ -50,7 +50,10 @@ impl Module for Tally {
     fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
         let by_id = cx.prepared().bind(cx);
         batch.dispatch(|packet| {
-            by_id.add(0, Traffic::packet(packet.data().len() as u64));
+            let value = Traffic::packet(packet.data().len() as u64);
+            by_id.add(0, value);
+            by_id.add(cx.config().by_id.len(), value);
+            by_id.add(u64::MAX, value);
             Verdict::Pass
         });
     }
@@ -101,4 +104,51 @@ fn test_tagged_counters_of_a_registry_past_the_context_count_nowhere() {
     // arena or written by a handler that has returned.
     let values = [0, 1].map(|idx| unsafe { ectx.arena.root().ptr::<u64>(pair + idx * size_of::<u64>()).read() });
     assert_eq!([0, 0], values);
+}
+
+/// verifies that empty and missing registries never follow an unreadable table.
+#[test]
+fn test_tagged_counters_empty_and_missing_registries_do_not_read_sentinel() {
+    for (registry, len, count) in [(0, 0, 1), (0, 1, 0), (u64::MAX, 1, 1)] {
+        // SAFETY: the field is empty or its registry is absent. Neither path
+        // may read the dangling table, and no packet is redirected.
+        let mut ectx = unsafe {
+            Ectx::<Tally>::new(&[registry, len], |_, _, context| {
+                context.runtime_counter_storage_count = count;
+                context.abs_runtime_counter_storages_base = core::ptr::NonNull::dangling().as_ptr();
+            })
+        };
+        ectx.run(&mut numbered(2));
+    }
+}
+
+/// verifies that a valid one-entry table is never indexed at its length or
+/// at the largest id, while the in-range update still reaches its cells.
+#[test]
+fn test_tagged_counters_out_of_range_ids_do_not_read_past_table() {
+    let mut pair = 0;
+    // SAFETY: registry zero has exactly one handle and two initialized words.
+    // The handler redirects no packet.
+    let mut ectx = unsafe {
+        Ectx::<Tally>::new(&[0, 1], |arena, _, context| {
+            let alloc = |size: usize| arena.alloc(size).as_ptr().addr();
+            let (storage, table, values, storages) = (
+                alloc(size_of::<bindings::counter_storage>()),
+                alloc(size_of::<RelPtr<u64>>()),
+                alloc(2 * size_of::<u64>()),
+                alloc(size_of::<*mut bindings::counter_storage>()),
+            );
+            write(arena, table, values as isize - table as isize);
+            let handles = storage + offset_of!(bindings::counter_storage, counter_value_handles);
+            write(arena, handles, table as isize - handles as isize);
+            write(arena, storages, arena.root().ptr::<bindings::counter_storage>(storage));
+            context.runtime_counter_storage_count = 1;
+            context.abs_runtime_counter_storages_base = arena.root().ptr(storages);
+            pair = values;
+        })
+    };
+    ectx.run(&mut numbered(2));
+    // SAFETY: the initialized pair is aligned and no handler is running.
+    let values = unsafe { ectx.arena.root().ptr::<[u64; 2]>(pair).read() };
+    assert_eq!([2, 120], values);
 }

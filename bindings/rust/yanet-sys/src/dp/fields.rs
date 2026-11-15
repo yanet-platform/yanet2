@@ -1,7 +1,7 @@
 //! Configuration field types backed by C registries of the module or the
 //! object, and the per-worker state of a configuration.
 
-use core::{marker::PhantomData, ptr::NonNull};
+use core::{cell::Cell, marker::PhantomData, ptr::NonNull};
 
 use yanet_shm::{
     rel::RelPtr,
@@ -196,6 +196,10 @@ impl<T> ObjectCounter<T> {
 /// - `[T; N]`: N values of the layout `T` under one name, each picked by its
 ///   index; C registers a counter of up to 64 values.
 ///
+/// Worker storage is represented by typed cells with wrapping arithmetic.
+/// Traffic puts packets before bytes, and recursive arrays use row-major
+/// order, including empty arrays with word alignment and no storage access.
+///
 /// Sealed: a module adds no layout of its own:
 ///
 /// ```compile_fail,E0277
@@ -204,8 +208,9 @@ impl<T> ObjectCounter<T> {
 /// impl CounterLayout for Mine {
 ///     const VALUES: usize = 1;
 ///     type Value = u64;
-///     unsafe fn add_to(_: u64, _: *mut u64) {}
-///     unsafe fn read(_: *const u64) -> u64 {
+///     type Storage = core::cell::Cell<u64>;
+///     fn add(_: &Self::Storage, _: u64) {}
+///     fn read(_: &Self::Storage) -> u64 {
 ///         0
 ///     }
 /// }
@@ -217,23 +222,17 @@ pub trait CounterLayout: 'static + sealed::Sealed {
     /// What an add takes and a read gives.
     type Value: Copy;
 
-    /// Adds each value to the worker's value at the same place.
-    ///
-    /// # Safety
-    ///
-    /// The address is the first of this worker's values of the counter, as
-    /// many as the layout holds, aligned and next to each other, which only
-    /// this worker writes and which stay live for the call.
+    /// This worker's values, with the same size and alignment as its words.
     #[doc(hidden)]
-    unsafe fn add_to(value: Self::Value, slot: *mut u64);
+    type Storage: 'static;
 
-    /// Reads the worker's values.
-    ///
-    /// # Safety
-    ///
-    /// As for [`CounterLayout::add_to`], for reading.
+    /// Adds each value to the corresponding worker-local cell, wrapping.
     #[doc(hidden)]
-    unsafe fn read(slot: *const u64) -> Self::Value;
+    fn add(cells: &Self::Storage, value: Self::Value);
+
+    /// Reads the worker-local cells in layout order.
+    #[doc(hidden)]
+    fn read(cells: &Self::Storage) -> Self::Value;
 }
 
 /// The packets and bytes of the traffic a counter counts, as the counters
@@ -258,43 +257,35 @@ impl Traffic {
 impl CounterLayout for u64 {
     const VALUES: usize = 1;
     type Value = u64;
+    type Storage = Cell<u64>;
 
     #[inline(always)]
-    unsafe fn add_to(value: u64, slot: *mut u64) {
-        // SAFETY: the counter's only value (caller contract).
-        unsafe { add_value(slot, value) };
+    fn add(cells: &Self::Storage, value: u64) {
+        cells.set(cells.get().wrapping_add(value));
     }
 
     #[inline(always)]
-    unsafe fn read(slot: *const u64) -> u64 {
-        // SAFETY: the counter's only value (caller contract).
-        unsafe { slot.read() }
+    fn read(cells: &Self::Storage) -> u64 {
+        cells.get()
     }
 }
 
 impl CounterLayout for Traffic {
     const VALUES: usize = 2;
     type Value = Traffic;
+    type Storage = [Cell<u64>; 2];
 
     #[inline(always)]
-    unsafe fn add_to(value: Traffic, slot: *mut u64) {
-        let Traffic { packets, bytes } = value;
-        // SAFETY: the counter's two values (caller contract), in the order
-        // of the fields.
-        unsafe {
-            add_value(slot, packets);
-            add_value(slot.add(1), bytes);
-        }
+    fn add([packets, bytes]: &Self::Storage, value: Traffic) {
+        u64::add(packets, value.packets);
+        u64::add(bytes, value.bytes);
     }
 
     #[inline(always)]
-    unsafe fn read(slot: *const u64) -> Traffic {
-        // SAFETY: as for adding, for reading.
-        unsafe {
-            Traffic {
-                packets: slot.read(),
-                bytes: slot.add(1).read(),
-            }
+    fn read([packets, bytes]: &Self::Storage) -> Traffic {
+        Traffic {
+            packets: packets.get(),
+            bytes: bytes.get(),
         }
     }
 }
@@ -339,17 +330,16 @@ pub enum Gauge {}
 impl CounterLayout for Gauge {
     const VALUES: usize = 1;
     type Value = u64;
+    type Storage = Cell<u64>;
 
     #[inline(always)]
-    unsafe fn add_to(value: u64, slot: *mut u64) {
-        // SAFETY: the counter's only value (caller contract).
-        unsafe { add_value(slot, value) };
+    fn add(cells: &Self::Storage, value: u64) {
+        u64::add(cells, value);
     }
 
     #[inline(always)]
-    unsafe fn read(slot: *const u64) -> u64 {
-        // SAFETY: the counter's only value (caller contract).
-        unsafe { slot.read() }
+    fn read(cells: &Self::Storage) -> u64 {
+        cells.get()
     }
 }
 
@@ -359,36 +349,19 @@ where
 {
     const VALUES: usize = N * T::VALUES;
     type Value = [T::Value; N];
+    type Storage = [T::Storage; N];
 
     #[inline(always)]
-    unsafe fn add_to(value: [T::Value; N], slot: *mut u64) {
-        for (idx, value) in value.into_iter().enumerate() {
-            // SAFETY: the counter's N runs of the element's values (caller
-            // contract), in the order of the indices.
-            unsafe { T::add_to(value, slot.add(idx * T::VALUES)) };
+    fn add(cells: &Self::Storage, value: [T::Value; N]) {
+        for (cells, value) in cells.iter().zip(value) {
+            T::add(cells, value);
         }
     }
 
     #[inline(always)]
-    unsafe fn read(slot: *const u64) -> [T::Value; N] {
-        // SAFETY: as for adding, for reading.
-        core::array::from_fn(|idx| unsafe { T::read(slot.add(idx * T::VALUES)) })
+    fn read(cells: &Self::Storage) -> [T::Value; N] {
+        core::array::from_fn(|idx| T::read(&cells[idx]))
     }
-}
-
-/// Adds to one value of the worker's counter in place.
-///
-/// # Safety
-///
-/// As for [`CounterLayout::add_to`], for one value.
-#[inline(always)]
-unsafe fn add_value(slot: *mut u64, value: u64) {
-    // SAFETY: the address is an aligned value of this worker's counter
-    // storage, written only by this worker and live as long as the generation
-    // the address was resolved for (caller contract). The control plane reads
-    // it with memcpy (lib/controlplane/agent/counters.c), as it does for the
-    // plain `+=` of a C module.
-    unsafe { *slot = (*slot).wrapping_add(value) };
 }
 
 // The traffic layout is the C values it adds to: `u64`s with nothing between.
@@ -1312,3 +1285,79 @@ const _: () = {
     assert!(core::mem::offset_of!(PerWorkerSlice<u64>, workers) == size_of::<isize>());
     assert!(core::mem::offset_of!(PerWorkerSlice<u64>, len) == 2 * size_of::<isize>());
 };
+
+#[cfg(test)]
+mod tests {
+    use core::cell::Cell;
+
+    use super::{CounterLayout, Gauge, Traffic};
+
+    const fn assert_cell_layout<T: CounterLayout>() {
+        assert!(size_of::<T::Storage>() == T::VALUES * size_of::<u64>());
+        assert!(align_of::<T::Storage>() == align_of::<u64>());
+    }
+
+    const _: () = {
+        assert_cell_layout::<u64>();
+        assert_cell_layout::<Traffic>();
+        assert_cell_layout::<Gauge>();
+        assert_cell_layout::<[[Traffic; 3]; 2]>();
+        assert_cell_layout::<[u64; 0]>();
+        assert_cell_layout::<[Traffic; 0]>();
+        assert_cell_layout::<[[Gauge; 0]; 3]>();
+        assert_cell_layout::<[[Traffic; 3]; 0]>();
+    };
+
+    #[test]
+    fn test_counter_layout_scalar_and_gauge_wrap() {
+        let scalar = Cell::new(u64::MAX);
+        u64::add(&scalar, 2);
+        assert_eq!(1, u64::read(&scalar));
+        let gauge = Cell::new(0);
+        Gauge::add(&gauge, u64::MAX);
+        Gauge::add(&gauge, 2);
+        assert_eq!(1, Gauge::read(&gauge));
+    }
+
+    #[test]
+    fn test_counter_layout_traffic_packets_before_bytes_wrap() {
+        let cells = [Cell::new(u64::MAX), Cell::new(u64::MAX - 1)];
+        Traffic::add(&cells, Traffic { packets: 2, bytes: 4 });
+        assert_eq!([1, 2], cells.each_ref().map(Cell::get));
+        assert_eq!(Traffic { packets: 1, bytes: 2 }, Traffic::read(&cells));
+    }
+
+    #[test]
+    fn test_counter_layout_recursive_arrays_row_major() {
+        let cells = core::array::from_fn(|_| core::array::from_fn(|_| [Cell::new(0), Cell::new(0)]));
+        let values = core::array::from_fn(|row| {
+            core::array::from_fn(|column| Traffic {
+                packets: (row * 6 + column * 2 + 1) as u64,
+                bytes: (row * 6 + column * 2 + 2) as u64,
+            })
+        });
+        <[[Traffic; 3]; 2]>::add(&cells, values);
+        assert_eq!(values, <[[Traffic; 3]; 2]>::read(&cells));
+        assert_eq!(
+            [[[1, 2], [3, 4], [5, 6]], [[7, 8], [9, 10], [11, 12]]],
+            cells
+                .each_ref()
+                .map(|row| row.each_ref().map(|pair| pair.each_ref().map(Cell::get))),
+        );
+    }
+
+    #[test]
+    fn test_counter_layout_empty_arrays_are_noops() {
+        <[u64; 0]>::add(&[], []);
+        assert_eq!([0u64; 0], <[u64; 0]>::read(&[]));
+        <[Traffic; 0]>::add(&[], []);
+        assert_eq!([Traffic { packets: 0, bytes: 0 }; 0], <[Traffic; 0]>::read(&[]));
+        <[[Gauge; 0]; 3]>::add(&[[], [], []], [[], [], []]);
+        assert_eq!([[0u64; 0]; 3], <[[Gauge; 0]; 3]>::read(&[[], [], []]));
+        <[[Traffic; 3]; 0]>::add(&[], []);
+        assert_eq!(
+            [[Traffic { packets: 0, bytes: 0 }; 3]; 0],
+            <[[Traffic; 3]; 0]>::read(&[])
+        );
+    }
+}
