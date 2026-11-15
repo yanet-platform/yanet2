@@ -869,27 +869,58 @@ classify_join_rules(
 		}
 	}
 
-	// The compact class rows are published chunk by chunk out of the
-	// heap scratch, and the class map goes in only once every row is
-	// in, so a failure above leaves the map empty.
+	// The compact class rows are published out of the heap scratch in
+	// their bitmap-with-ranks encoding, and the class map goes in only
+	// once every row is in, so a failure above leaves the map empty.
+	uint32_t tuple_count = (h_dim + 31) / 32;
 	struct memory_context *table_context = ADDR_OF(&table->memory_context);
-	uint32_t **interned = memory_balloc(
-		table_context, distinct_count * sizeof(uint32_t *)
+	struct rule_row **interned = memory_balloc(
+		table_context, distinct_count * sizeof(struct rule_row *)
 	);
 	if (interned == NULL) {
 		goto done;
 	}
-	memset(interned, 0, distinct_count * sizeof(uint32_t *));
+	memset(interned, 0, distinct_count * sizeof(struct rule_row *));
 	SET_OFFSET_OF(&table->rows, interned);
 	table->class_count = distinct_count;
 	for (uint32_t d = 0; d < distinct_count; ++d) {
-		uint32_t *stored = memory_balloc(
-			table_context, (size_t)h_dim * sizeof(uint32_t)
+		const uint32_t *dense = distinct[d];
+		uint32_t value_count = 0;
+		for (uint32_t h = 0; h < h_dim; ++h) {
+			if (dense[h] != FILTER_RULE_INVALID) {
+				++value_count;
+			}
+		}
+		struct rule_row *stored = memory_balloc(
+			table_context, rule_row_size(tuple_count, value_count)
 		);
 		if (stored == NULL) {
 			goto done;
 		}
-		memcpy(stored, distinct[d], (size_t)h_dim * sizeof(uint32_t));
+		stored->value_count = value_count;
+		stored->tuple_count = tuple_count;
+		union rule_tuple *tuples = rule_row_tuples(stored);
+		uint32_t *values = rule_row_values(stored);
+		uint32_t rank = 0;
+		for (uint32_t w = 0; w < tuple_count; ++w) {
+			uint32_t bits = 0;
+			for (uint32_t k = 0; k < 32; ++k) {
+				uint32_t h = w * 32 + k;
+				if (h < h_dim &&
+				    dense[h] != FILTER_RULE_INVALID) {
+					bits |= 1u << k;
+				}
+			}
+			tuples[w].split.bits = bits;
+			tuples[w].split.rank = rank;
+			for (uint32_t k = 0; k < 32; ++k) {
+				uint32_t h = w * 32 + k;
+				if (h < h_dim && (bits & (1u << k)) != 0) {
+					*values++ = dense[h];
+				}
+			}
+			rank += __builtin_popcount(bits);
+		}
 		SET_OFFSET_OF(interned + d, stored);
 	}
 	if (vline_init(&table->class_map, table_context, "classes", v_dim)) {
