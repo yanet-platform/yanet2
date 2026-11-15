@@ -117,14 +117,14 @@ filter_u16_commit_iterate(
 		struct value_table value_table;                                \
 	};                                                                     \
                                                                                \
-	static inline struct classify_compile_##tag *                          \
-	classify_compile_##tag##_create(                                       \
-		struct memory_context *memory_context,                         \
-		const struct classifier_rule *const *rules,                    \
-		uint32_t rule_count,                                           \
-		classify_u16_get_ranges_func adapted_get_ranges,               \
-		const char *name                                               \
-	) {                                                                    \
+	static inline struct classify_compile_##tag                            \
+		*classify_compile_##tag##_create(                              \
+			struct memory_context *memory_context,                 \
+			const struct classifier_rule *const *rules,            \
+			uint32_t rule_count,                                   \
+			classify_u16_get_ranges_func adapted_get_ranges,       \
+			const char *name                                       \
+		) {                                                            \
 		struct classify_compile_##tag *compile =                       \
 			(struct classify_compile_##tag *)memory_balloc(        \
 				memory_context,                                \
@@ -266,8 +266,8 @@ filter_u16_commit_iterate(
                                                                                \
 		return memcmp(first_ranges.items,                              \
 			      second_ranges.items,                             \
-			      first_ranges.count *                             \
-				      sizeof(*first_ranges.items)) != 0;       \
+			      first_ranges.count * sizeof(*first_ranges.items) \
+		       ) != 0;                                                 \
 	}                                                                      \
                                                                                \
 	static inline int classify_compile_##tag##_rule_iter(                  \

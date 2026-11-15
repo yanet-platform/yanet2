@@ -206,16 +206,14 @@ acl_module_config_init(
 	memset(&config->classifier_l2, 0, sizeof(config->classifier_l2));
 	memset(&config->classifier_core4, 0, sizeof(config->classifier_core4));
 	memset(&config->classifier_frag4, 0, sizeof(config->classifier_frag4));
-	memset(&config->classifier_ports4,
-	       0,
-	       sizeof(config->classifier_ports4));
+	memset(&config->classifier_ports4, 0, sizeof(config->classifier_ports4)
+	);
 	memset(&config->classifier_tcp4, 0, sizeof(config->classifier_tcp4));
 	memset(&config->classifier_icmp4, 0, sizeof(config->classifier_icmp4));
 	memset(&config->classifier_core6, 0, sizeof(config->classifier_core6));
 	memset(&config->classifier_frag6, 0, sizeof(config->classifier_frag6));
-	memset(&config->classifier_ports6,
-	       0,
-	       sizeof(config->classifier_ports6));
+	memset(&config->classifier_ports6, 0, sizeof(config->classifier_ports6)
+	);
 	memset(&config->classifier_tcp6, 0, sizeof(config->classifier_tcp6));
 	memset(&config->classifier_icmp6, 0, sizeof(config->classifier_icmp6));
 
@@ -1340,11 +1338,9 @@ acl_module_build_paths(
 		    &stage_ports,
 		    acl_rules,
 		    acl_rule_count,
-		    &(struct acl_final_build){
-			    build->udp_root_joint,
-			    build->udp_rule_count,
-			    check_acl_rule_udp
-		    }
+		    &(struct acl_final_build){build->udp_root_joint,
+					      build->udp_rule_count,
+					      check_acl_rule_udp}
 	    )) {
 		goto error;
 	}
@@ -1395,11 +1391,9 @@ acl_module_build_paths(
 		    &stage_tcp_mid,
 		    acl_rules,
 		    acl_rule_count,
-		    &(struct acl_final_build){
-			    build->tcp_root_joint,
-			    build->tcp_rule_count,
-			    check_acl_rule_tcp
-		    }
+		    &(struct acl_final_build){build->tcp_root_joint,
+					      build->tcp_rule_count,
+					      check_acl_rule_tcp}
 	    )) {
 		goto error;
 	}
@@ -1436,11 +1430,9 @@ acl_module_build_paths(
 		    &stage_type,
 		    acl_rules,
 		    acl_rule_count,
-		    &(struct acl_final_build){
-			    build->icmp_root_joint,
-			    build->icmp_rule_count,
-			    check_acl_rule_icmp
-		    }
+		    &(struct acl_final_build){build->icmp_root_joint,
+					      build->icmp_rule_count,
+					      check_acl_rule_icmp}
 	    )) {
 		goto error;
 	}

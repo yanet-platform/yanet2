@@ -58,9 +58,8 @@ struct classify_compile_net6_hash_dedup_ctx {
 static inline int
 classify_compile_net6_hash_dedup_eq(uint32_t region, const void *data) {
 	const struct classify_compile_net6_hash_dedup_ctx *ctx = data;
-	return memcmp(ctx->compile->keys + region * NET6_LEN,
-		      ctx->key,
-		      NET6_LEN) == 0
+	return memcmp(ctx->compile->keys + region * NET6_LEN, ctx->key, NET6_LEN
+	       ) == 0
 		       ? 0
 		       : 1;
 }

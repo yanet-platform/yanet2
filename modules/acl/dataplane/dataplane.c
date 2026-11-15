@@ -179,19 +179,18 @@ acl_handle_packets(
 						pos = ip4_tcp_pos;
 						pkts = ip4_tcp_packets;
 						idx = &ip4_tcp_idx;
-					} else if (
-						packet->transport_header.type ==
-						IPPROTO_UDP
-					) {
+					} else if (packet->transport_header
+							   .type ==
+						   IPPROTO_UDP) {
 						pos = ip4_udp_pos;
 						pkts = ip4_udp_packets;
 						idx = &ip4_udp_idx;
-					} else if (
-						packet->transport_header.type ==
-							IPPROTO_ICMP ||
-						packet->transport_header.type ==
-							IPPROTO_ICMPV6
-					) {
+					} else if (packet->transport_header
+								   .type ==
+							   IPPROTO_ICMP ||
+						   packet->transport_header
+								   .type ==
+							   IPPROTO_ICMPV6) {
 						pos = ip4_icmp_pos;
 						pkts = ip4_icmp_packets;
 						idx = &ip4_icmp_idx;
@@ -216,19 +215,18 @@ acl_handle_packets(
 						pos = ip6_tcp_pos;
 						pkts = ip6_tcp_packets;
 						idx = &ip6_tcp_idx;
-					} else if (
-						packet->transport_header.type ==
-						IPPROTO_UDP
-					) {
+					} else if (packet->transport_header
+							   .type ==
+						   IPPROTO_UDP) {
 						pos = ip6_udp_pos;
 						pkts = ip6_udp_packets;
 						idx = &ip6_udp_idx;
-					} else if (
-						packet->transport_header.type ==
-							IPPROTO_ICMP ||
-						packet->transport_header.type ==
-							IPPROTO_ICMPV6
-					) {
+					} else if (packet->transport_header
+								   .type ==
+							   IPPROTO_ICMP ||
+						   packet->transport_header
+								   .type ==
+							   IPPROTO_ICMPV6) {
 						pos = ip6_icmp_pos;
 						pkts = ip6_icmp_packets;
 						idx = &ip6_icmp_idx;
@@ -427,18 +425,17 @@ acl_handle_packets(
 					    IPPROTO_TCP) {
 						path_result = ip4_tcp_result;
 						path_idx = &ip4_tcp_idx;
-					} else if (
-						packet->transport_header.type ==
-						IPPROTO_UDP
-					) {
+					} else if (packet->transport_header
+							   .type ==
+						   IPPROTO_UDP) {
 						path_result = ip4_udp_result;
 						path_idx = &ip4_udp_idx;
-					} else if (
-						packet->transport_header.type ==
-							IPPROTO_ICMP ||
-						packet->transport_header.type ==
-							IPPROTO_ICMPV6
-					) {
+					} else if (packet->transport_header
+								   .type ==
+							   IPPROTO_ICMP ||
+						   packet->transport_header
+								   .type ==
+							   IPPROTO_ICMPV6) {
 						path_result = ip4_icmp_result;
 						path_idx = &ip4_icmp_idx;
 					} else {
@@ -452,10 +449,8 @@ acl_handle_packets(
 						++(*path_idx);
 					}
 				}
-			} else if (
-				packet->network_header.type ==
-				rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)
-			) {
+			} else if (packet->network_header.type ==
+				   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
 				state = &prepared->fw6;
 
 				if (ip6_result[ip6_idx] < action) {
@@ -471,18 +466,17 @@ acl_handle_packets(
 					    IPPROTO_TCP) {
 						path_result = ip6_tcp_result;
 						path_idx = &ip6_tcp_idx;
-					} else if (
-						packet->transport_header.type ==
-						IPPROTO_UDP
-					) {
+					} else if (packet->transport_header
+							   .type ==
+						   IPPROTO_UDP) {
 						path_result = ip6_udp_result;
 						path_idx = &ip6_udp_idx;
-					} else if (
-						packet->transport_header.type ==
-							IPPROTO_ICMP ||
-						packet->transport_header.type ==
-							IPPROTO_ICMPV6
-					) {
+					} else if (packet->transport_header
+								   .type ==
+							   IPPROTO_ICMP ||
+						   packet->transport_header
+								   .type ==
+							   IPPROTO_ICMPV6) {
 						path_result = ip6_icmp_result;
 						path_idx = &ip6_icmp_idx;
 					} else {
