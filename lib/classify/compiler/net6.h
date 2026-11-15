@@ -139,7 +139,9 @@ net6_is_any(const struct net6 *net) {
 // domain; the empty list is the any condition only of the variants
 // that declare the any policy for it.
 static inline int
-net6s_is_any(const struct filter_net6s *nets, enum classify_empty_policy empty_policy) {
+net6s_is_any(
+	const struct filter_net6s *nets, enum classify_empty_policy empty_policy
+) {
 	if (nets->count == 0) {
 		return empty_policy == CLASSIFY_EMPTY_IS_ANY;
 	}
@@ -1235,7 +1237,7 @@ classify_net6_compile(
  * The tag must carry the consumer prefix, so the generated symbols
  * never collide with the library ones.
  */
-#define CLASSIFY_NET6_COMPILE(tag, get_net6s, empty_policy)                   \
+#define CLASSIFY_NET6_COMPILE(tag, get_net6s, empty_policy)                    \
 	static inline int classify_##tag##_compile(                            \
 		struct memory_context *memory_context,                         \
 		const char *name,                                              \

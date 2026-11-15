@@ -1446,10 +1446,10 @@ func TestUpdateConfig_Transports(t *testing.T) {
 	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
 		Name: "acl0",
 		Rules: []*aclpb.Rule{{
-			Kind:          kind,
-			Actions:       []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}},
-			Devices:       []*filterpb.Device{{Name: "port0"}},
-			Sources4:      []*commonpb.IPv4Network{mustV4Network("192.0.2.0/24")},
+			Kind:     kind,
+			Actions:  []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}},
+			Devices:  []*filterpb.Device{{Name: "port0"}},
+			Sources4: []*commonpb.IPv4Network{mustV4Network("192.0.2.0/24")},
 			Transports: []*aclpb.Transport{
 				{Protocol: &aclpb.Transport_Tcp{Tcp: &aclpb.Tcp{
 					Flags: []*filterpb.ByteRange{{From: 0x02, To: 0x02}},
@@ -1511,7 +1511,7 @@ func TestUpdateConfig_Transports(t *testing.T) {
 		{
 			name: "transports on an l2 rule",
 			rule: &aclpb.Rule{
-				Kind:      aclpb.RuleKind_RULE_KIND_L2,
+				Kind: aclpb.RuleKind_RULE_KIND_L2,
 				Transports: []*aclpb.Transport{
 					{Protocol: &aclpb.Transport_Udp{Udp: &aclpb.Udp{}}},
 				},

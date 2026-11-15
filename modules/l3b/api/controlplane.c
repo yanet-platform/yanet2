@@ -51,8 +51,12 @@ l3b_rule_get_proto_ranges(
 				destination_rule->proto_ranges.items;
 }
 
-CLASSIFY_NET4_COMPILE(l3b_net4_dst, l3b_rule_get_net4_dsts, CLASSIFY_EMPTY_IS_ANY)
-CLASSIFY_NET6_COMPILE(l3b_net6_dst, l3b_rule_get_net6_dsts, CLASSIFY_EMPTY_IS_ANY)
+CLASSIFY_NET4_COMPILE(
+	l3b_net4_dst, l3b_rule_get_net4_dsts, CLASSIFY_EMPTY_IS_ANY
+)
+CLASSIFY_NET6_COMPILE(
+	l3b_net6_dst, l3b_rule_get_net6_dsts, CLASSIFY_EMPTY_IS_ANY
+)
 /*
  * The l3b attribute variants declare the any policy for the empty
  * set: a rule that leaves a condition out is the rule of every value

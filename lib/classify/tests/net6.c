@@ -595,7 +595,12 @@ run_failed_commit_zeroes_attr_test(struct memory_context *mctx, void *memory) {
 	const struct classifier_rule *rules[1] = {&rule.rule};
 
 	struct classify_compile_net6 *compile = classify_compile_net6_create(
-		mctx, rules, 1, test_rule_get_dsts, CLASSIFY_EMPTY_IS_ANY, "failed_commit"
+		mctx,
+		rules,
+		1,
+		test_rule_get_dsts,
+		CLASSIFY_EMPTY_IS_ANY,
+		"failed_commit"
 	);
 	assert(compile != NULL);
 	const struct classify_attr_ops ops = {
@@ -734,8 +739,8 @@ assert_lpm_equal(const struct lpm *first, const struct lpm *second) {
 			union lpm_value *second_value =
 				second_page->values + slot;
 			if (first_value->value & LPM_VALUE_FLAG) {
-				assert(first_value->value == second_value->value
-				);
+				assert(first_value->value ==
+				       second_value->value);
 				continue;
 			}
 			assert(!(second_value->value & LPM_VALUE_FLAG));
@@ -873,16 +878,18 @@ run_hi_single_build_test(struct memory_context *mctx, void *memory) {
 	for (uint32_t idx = 0; idx < TEST_HI_SINGLE_BUILD_RULES; ++idx) {
 		uint8_t addr[NET6_LEN];
 		memcpy(addr, nets[idx].addr, NET6_LEN);
-		assert(classify_dst(&flt, src, addr) ==
-		       test_first_match(nets, TEST_HI_SINGLE_BUILD_RULES, addr)
+		assert(
+			classify_dst(&flt, src, addr) ==
+			test_first_match(nets, TEST_HI_SINGLE_BUILD_RULES, addr)
 		);
 
 		for (uint32_t byte = 4; byte < NET6_LEN; ++byte) {
 			addr[byte] |= bytes[test_rand(&seed) % 4] &
 				      ~nets[idx].mask[byte];
 		}
-		assert(classify_dst(&flt, src, addr) ==
-		       test_first_match(nets, TEST_HI_SINGLE_BUILD_RULES, addr)
+		assert(
+			classify_dst(&flt, src, addr) ==
+			test_first_match(nets, TEST_HI_SINGLE_BUILD_RULES, addr)
 		);
 	}
 

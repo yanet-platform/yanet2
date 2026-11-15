@@ -113,8 +113,12 @@ test_rule_get_dst_port_ranges(
 }
 
 CLASSIFY_DEVICE_COMPILE(test_device, test_rule_get_devices)
-CLASSIFY_NET6_COMPILE(test_net6_src, test_rule_get_net6_srcs, CLASSIFY_EMPTY_IS_ANY)
-CLASSIFY_NET6_COMPILE(test_net6_dst, test_rule_get_net6_dsts, CLASSIFY_EMPTY_IS_ANY)
+CLASSIFY_NET6_COMPILE(
+	test_net6_src, test_rule_get_net6_srcs, CLASSIFY_EMPTY_IS_ANY
+)
+CLASSIFY_NET6_COMPILE(
+	test_net6_dst, test_rule_get_net6_dsts, CLASSIFY_EMPTY_IS_ANY
+)
 CLASSIFY_LINE_COMPILE(
 	test_ipproto,
 	struct classify_attr_line,
@@ -123,11 +127,15 @@ CLASSIFY_LINE_COMPILE(
 	CLASSIFY_EMPTY_IS_ANY
 )
 CLASSIFY_U16_RANGES_COMPILE(
-	test_src_port, struct classify_attr_port, test_rule_get_src_port_ranges,
+	test_src_port,
+	struct classify_attr_port,
+	test_rule_get_src_port_ranges,
 	CLASSIFY_EMPTY_IS_ANY
 )
 CLASSIFY_U16_RANGES_COMPILE(
-	test_dst_port, struct classify_attr_port, test_rule_get_dst_port_ranges,
+	test_dst_port,
+	struct classify_attr_port,
+	test_rule_get_dst_port_ranges,
 	CLASSIFY_EMPTY_IS_ANY
 )
 

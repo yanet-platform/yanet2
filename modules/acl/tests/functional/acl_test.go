@@ -678,9 +678,9 @@ func Test_ACLService_UpdateConfig_RejectsOutOfKindFields(t *testing.T) {
 		{
 			name: "l2 with networks",
 			rule: &aclpb.Rule{
-				Kind:      aclpb.RuleKind_RULE_KIND_L2,
-				Actions:   []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}},
-				Devices:   []*filterpb.Device{{Name: "port0"}},
+				Kind:    aclpb.RuleKind_RULE_KIND_L2,
+				Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}},
+				Devices: []*filterpb.Device{{Name: "port0"}},
 				Sources4: []*commonpb.IPv4Network{
 					commonpb.NewIPv4NetworkFrom4(
 						xnetip.MustParseNetwork4("0.0.0.0/0"),

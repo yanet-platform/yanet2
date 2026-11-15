@@ -95,7 +95,9 @@ CLASSIFY_NET4_HASH_COMPILE(test_net4_hash, test_rule_get_addrs4)
 CLASSIFY_NET6_COMPILE(test_net6, test_rule_get_net6s, CLASSIFY_EMPTY_IS_ANY)
 CLASSIFY_NET6_HASH_COMPILE(test_net6_hash, test_rule_get_addrs6)
 CLASSIFY_U16_RANGES_COMPILE(
-	test_port, struct classify_attr_port, test_rule_get_port_ranges,
+	test_port,
+	struct classify_attr_port,
+	test_rule_get_port_ranges,
 	CLASSIFY_EMPTY_IS_ANY
 )
 
@@ -386,15 +388,44 @@ main(void) {
 	       ) == 0);
 
 	const uint8_t addrs6_probe[][NET6_LEN] = {
-		{0x2a, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
-		}, // rule 0
-		{0x2a, 0x0d, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
+		{0x2a, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, // rule
+									// 0
+		{
+			0x2a, 0x0d, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
 		}, // rule 2
-		{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
-		},							// miss
+		{0x20,
+		 0x01,
+		 0x0d,
+		 0xb8,
+		 0,
+		 0,
+		 0,
+		 0,
+		 0,
+		 0,
+		 0,
+		 0,
+		 0,
+		 0,
+		 0,
+		 1},							// miss
 		{0x2a, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2}, // miss
-		{0x2a, 0x0d, 0x11, 0x22, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
-		}, // miss
+		{0x2a,
+		 0x0d,
+		 0x11,
+		 0x22,
+		 0,
+		 0,
+		 0,
+		 0,
+		 0,
+		 0,
+		 0,
+		 0,
+		 0,
+		 0,
+		 0,
+		 1}, // miss
 	};
 	for (uint32_t addr_idx = 0;
 	     addr_idx < sizeof(addrs6_probe) / sizeof(addrs6_probe[0]);

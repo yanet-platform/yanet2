@@ -6,8 +6,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
+	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
 )
 

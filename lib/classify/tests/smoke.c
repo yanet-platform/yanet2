@@ -148,14 +148,25 @@ smoke_rule_get_dst_port_ranges(
 // one.
 CLASSIFY_DEVICE_COMPILE(smoke_device, smoke_rule_get_devices)
 CLASSIFY_LINE_COMPILE(
-	smoke_vlan, struct classify_attr_line, 4096, smoke_rule_get_vlan_ranges,
+	smoke_vlan,
+	struct classify_attr_line,
+	4096,
+	smoke_rule_get_vlan_ranges,
 	CLASSIFY_EMPTY_IS_ANY
 )
 CLASSIFY_IPFRAG_COMPILE(smoke_ipfrag, smoke_rule_get_fragment)
-CLASSIFY_NET4_COMPILE(smoke_net4_src, smoke_rule_get_net4_srcs, CLASSIFY_EMPTY_IS_ANY)
-CLASSIFY_NET4_COMPILE(smoke_net4_dst, smoke_rule_get_net4_dsts, CLASSIFY_EMPTY_IS_ANY)
-CLASSIFY_NET6_COMPILE(smoke_net6_src, smoke_rule_get_net6_srcs, CLASSIFY_EMPTY_IS_ANY)
-CLASSIFY_NET6_COMPILE(smoke_net6_dst, smoke_rule_get_net6_dsts, CLASSIFY_EMPTY_IS_ANY)
+CLASSIFY_NET4_COMPILE(
+	smoke_net4_src, smoke_rule_get_net4_srcs, CLASSIFY_EMPTY_IS_ANY
+)
+CLASSIFY_NET4_COMPILE(
+	smoke_net4_dst, smoke_rule_get_net4_dsts, CLASSIFY_EMPTY_IS_ANY
+)
+CLASSIFY_NET6_COMPILE(
+	smoke_net6_src, smoke_rule_get_net6_srcs, CLASSIFY_EMPTY_IS_ANY
+)
+CLASSIFY_NET6_COMPILE(
+	smoke_net6_dst, smoke_rule_get_net6_dsts, CLASSIFY_EMPTY_IS_ANY
+)
 CLASSIFY_LINE_COMPILE(
 	smoke_ipproto,
 	struct classify_attr_line,
@@ -164,7 +175,10 @@ CLASSIFY_LINE_COMPILE(
 	CLASSIFY_EMPTY_IS_NOTHING
 )
 CLASSIFY_LINE_COMPILE(
-	smoke_l4, struct classify_attr_line, 0x101, smoke_rule_get_l4_ranges,
+	smoke_l4,
+	struct classify_attr_line,
+	0x101,
+	smoke_rule_get_l4_ranges,
 	CLASSIFY_EMPTY_IS_ANY
 )
 CLASSIFY_U16_RANGES_COMPILE(

@@ -145,12 +145,23 @@ names_rule_get_dst_port_ranges(
 }
 
 CLASSIFY_DEVICE_COMPILE(names_device, names_rule_get_devices)
-CLASSIFY_NET4_COMPILE(names_net4_src, names_rule_get_net4_srcs, CLASSIFY_EMPTY_IS_ANY)
-CLASSIFY_NET4_COMPILE(names_net4_dst, names_rule_get_net4_dsts, CLASSIFY_EMPTY_IS_ANY)
-CLASSIFY_NET6_COMPILE(names_net6_src, names_rule_get_net6_srcs, CLASSIFY_EMPTY_IS_ANY)
-CLASSIFY_NET6_COMPILE(names_net6_dst, names_rule_get_net6_dsts, CLASSIFY_EMPTY_IS_ANY)
+CLASSIFY_NET4_COMPILE(
+	names_net4_src, names_rule_get_net4_srcs, CLASSIFY_EMPTY_IS_ANY
+)
+CLASSIFY_NET4_COMPILE(
+	names_net4_dst, names_rule_get_net4_dsts, CLASSIFY_EMPTY_IS_ANY
+)
+CLASSIFY_NET6_COMPILE(
+	names_net6_src, names_rule_get_net6_srcs, CLASSIFY_EMPTY_IS_ANY
+)
+CLASSIFY_NET6_COMPILE(
+	names_net6_dst, names_rule_get_net6_dsts, CLASSIFY_EMPTY_IS_ANY
+)
 CLASSIFY_LINE_COMPILE(
-	names_vlan, struct classify_attr_line, 4096, names_rule_get_vlan_ranges,
+	names_vlan,
+	struct classify_attr_line,
+	4096,
+	names_rule_get_vlan_ranges,
 	CLASSIFY_EMPTY_IS_ANY
 )
 CLASSIFY_LINE_COMPILE(

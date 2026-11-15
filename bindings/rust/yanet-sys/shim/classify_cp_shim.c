@@ -50,11 +50,23 @@ _Static_assert(
 	"a port range is read as the span of the u16 compile"
 );
 
+/*
+ * The sdk attribute variants declare the any policy for the empty set:
+ * the out of tree modules compile rulesets whose empty conditions are
+ * the wildcard spelling, the contract the sdk has always carried.
+ */
 CLASSIFY_LINE_COMPILE(
-	yanet_sys_line, struct classify_attr_line, 0x100, get_lines
+	yanet_sys_line,
+	struct classify_attr_line,
+	0x100,
+	get_lines,
+	CLASSIFY_EMPTY_IS_ANY
 )
 CLASSIFY_U16_RANGES_COMPILE(
-	yanet_sys_port, struct classify_attr_port, get_ports
+	yanet_sys_port,
+	struct classify_attr_port,
+	get_ports,
+	CLASSIFY_EMPTY_IS_ANY
 )
 
 int
@@ -72,6 +84,7 @@ yanet_sys_classify_net4_compile(
 		(const struct classifier_rule *const *)rules,
 		rule_count,
 		get_net4s,
+		CLASSIFY_EMPTY_IS_ANY,
 		attr,
 		stage
 	);
@@ -92,6 +105,7 @@ yanet_sys_classify_net6_compile(
 		(const struct classifier_rule *const *)rules,
 		rule_count,
 		get_net6s,
+		CLASSIFY_EMPTY_IS_ANY,
 		attr,
 		stage
 	);

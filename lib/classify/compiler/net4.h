@@ -156,8 +156,8 @@ classify_net4s_any(
 	}
 	for (uint32_t idx = 0; idx < nets->count; ++idx) {
 		const struct net4 *net = nets->items + idx;
-		if (net->mask[0] == 0 && net->mask[1] == 0 && net->mask[2] == 0 &&
-		    net->mask[3] == 0) {
+		if (net->mask[0] == 0 && net->mask[1] == 0 &&
+		    net->mask[2] == 0 && net->mask[3] == 0) {
 			return 1;
 		}
 	}
@@ -452,7 +452,7 @@ classify_net4_compile(
  * The tag must carry the consumer prefix, so the generated symbols
  * never collide with the library ones.
  */
-#define CLASSIFY_NET4_COMPILE(tag, get_net4s, empty_policy)                   \
+#define CLASSIFY_NET4_COMPILE(tag, get_net4s, empty_policy)                    \
 	static inline int classify_##tag##_compile(                            \
 		struct memory_context *memory_context,                         \
 		const char *name,                                              \

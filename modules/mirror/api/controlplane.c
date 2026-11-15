@@ -196,10 +196,18 @@ CLASSIFY_LINE_COMPILE(
 	mirror_rule_get_vlan_ranges,
 	CLASSIFY_EMPTY_IS_ANY
 )
-CLASSIFY_NET4_COMPILE(mirror_net4_src, mirror_rule_get_net4_srcs, CLASSIFY_EMPTY_IS_ANY)
-CLASSIFY_NET4_COMPILE(mirror_net4_dst, mirror_rule_get_net4_dsts, CLASSIFY_EMPTY_IS_ANY)
-CLASSIFY_NET6_COMPILE(mirror_net6_src, mirror_rule_get_net6_srcs, CLASSIFY_EMPTY_IS_ANY)
-CLASSIFY_NET6_COMPILE(mirror_net6_dst, mirror_rule_get_net6_dsts, CLASSIFY_EMPTY_IS_ANY)
+CLASSIFY_NET4_COMPILE(
+	mirror_net4_src, mirror_rule_get_net4_srcs, CLASSIFY_EMPTY_IS_ANY
+)
+CLASSIFY_NET4_COMPILE(
+	mirror_net4_dst, mirror_rule_get_net4_dsts, CLASSIFY_EMPTY_IS_ANY
+)
+CLASSIFY_NET6_COMPILE(
+	mirror_net6_src, mirror_rule_get_net6_srcs, CLASSIFY_EMPTY_IS_ANY
+)
+CLASSIFY_NET6_COMPILE(
+	mirror_net6_dst, mirror_rule_get_net6_dsts, CLASSIFY_EMPTY_IS_ANY
+)
 
 // Spells a projection of the ruleset: every rule the check rejects
 // keeps a NULL slot, so the compile stages skip it.

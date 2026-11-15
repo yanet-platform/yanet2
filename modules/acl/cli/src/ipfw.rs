@@ -10,11 +10,7 @@ use filterpb::pb::{FragmentKind, PortRange, ProtoRange, VlanRange};
 use netip::{IpNetwork, fmt::Compact};
 use ync::output::{Paint, Painted};
 
-use crate::aclpb::{
-    Rule, RuleKind, Transport,
-    transport::Protocol as TransportProtocol,
-    ActionKind,
-};
+use crate::aclpb::{ActionKind, Rule, RuleKind, Transport, transport::Protocol as TransportProtocol};
 
 /// The colour role of one token of a rule line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -104,8 +100,8 @@ impl<'a> RuleLine<'a> {
         let ports =
             fragment != FragmentKind::Frag && (has_ports(&rule.src_port_ranges) || has_ports(&rule.dst_port_ranges));
         let no_vlans = !rule.vlan_ranges.is_empty() && rule.vlan_ranges.iter().all(|r| r.from > r.to);
-        let dead = no_vlans
-            || (!layer2 && (!(has4 || has6) || no_protocols || (ports && !protocols_with_ports(&protos))));
+        let dead =
+            no_vlans || (!layer2 && (!(has4 || has6) || no_protocols || (ports && !protocols_with_ports(&protos))));
 
         Self {
             rule,
@@ -211,7 +207,13 @@ impl Display for RuleLine<'_> {
         let with4 = self.has4 || self.dead;
         let with6 = self.has6 || self.dead;
         let src = Side::new(&rule.sources4, &rule.sources6, with4, with6, self.absent_is_any);
-        let dst = Side::new(&rule.destinations4, &rule.destinations6, with4, with6, self.absent_is_any);
+        let dst = Side::new(
+            &rule.destinations4,
+            &rule.destinations6,
+            with4,
+            with6,
+            self.absent_is_any,
+        );
 
         // A single-family rule open on both sides would read as matching
         // both families, so the family is spelled out.
@@ -440,14 +442,14 @@ struct Side<'a> {
 }
 
 impl<'a> Side<'a> {
-    fn new(
-        nets4: &'a [IPv4Network],
-        nets6: &'a [IPv6Network],
-        with4: bool,
-        with6: bool,
-        absent_any: bool,
-    ) -> Self {
-        Self { nets4, nets6, with4, with6, absent_any }
+    fn new(nets4: &'a [IPv4Network], nets6: &'a [IPv6Network], with4: bool, with6: bool, absent_any: bool) -> Self {
+        Self {
+            nets4,
+            nets6,
+            with4,
+            with6,
+            absent_any,
+        }
     }
 
     /// Returns the networks of the shown families, IPv4 first.
@@ -464,10 +466,8 @@ impl<'a> Side<'a> {
     /// Returns whether every shown family holds a zero-mask network or is
     /// the wildcard of an absent side.
     fn is_any(&self) -> bool {
-        let full4 = self.nets4.is_empty()
-            || self.nets().any(|net| net.is_ipv4() && net.mask().is_unspecified());
-        let full6 = self.nets6.is_empty()
-            || self.nets().any(|net| net.is_ipv6() && net.mask().is_unspecified());
+        let full4 = self.nets4.is_empty() || self.nets().any(|net| net.is_ipv4() && net.mask().is_unspecified());
+        let full6 = self.nets6.is_empty() || self.nets().any(|net| net.is_ipv6() && net.mask().is_unspecified());
 
         (!self.with4 || full4) && (!self.with6 || full6)
     }
@@ -794,7 +794,10 @@ fn display_proto_ranges(rule: &Rule, kind: RuleKind) -> Vec<ProtoRange> {
 fn encode_transports(transports: &[Transport]) -> Vec<ProtoRange> {
     fn whole_or(proto: u32, bytes: &[::filterpb::pb::ByteRange]) -> Vec<ProtoRange> {
         if bytes.is_empty() {
-            return vec![ProtoRange { from: proto << 8, to: proto << 8 | 0xff }];
+            return vec![ProtoRange {
+                from: proto << 8,
+                to: proto << 8 | 0xff,
+            }];
         }
 
         bytes
@@ -810,9 +813,7 @@ fn encode_transports(transports: &[Transport]) -> Vec<ProtoRange> {
         .iter()
         .filter_map(|transport| match transport.protocol.as_ref() {
             Some(TransportProtocol::Tcp(tcp)) => Some(whole_or(6, &tcp.flags)),
-            Some(TransportProtocol::Udp(..)) => {
-                Some(vec![ProtoRange { from: 17 << 8, to: 17 << 8 | 0xff }])
-            }
+            Some(TransportProtocol::Udp(..)) => Some(vec![ProtoRange { from: 17 << 8, to: 17 << 8 | 0xff }]),
             Some(TransportProtocol::Icmp(icmp)) => Some(whole_or(1, &icmp.types)),
             Some(TransportProtocol::Icmpv6(icmp6)) => Some(whole_or(58, &icmp6.types)),
             Some(TransportProtocol::Ipproto(number)) => (*number <= 0xff).then(|| {

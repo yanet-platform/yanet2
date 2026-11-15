@@ -72,8 +72,12 @@ l3b_rule_get_port_ranges(
  * grammar, missing-family networks never match and are pruned by the
  * object build instead.
  */
-CLASSIFY_NET4_COMPILE(l3b_net4_src, l3b_rule_get_net4_srcs, CLASSIFY_EMPTY_IS_ANY)
-CLASSIFY_NET6_COMPILE(l3b_net6_src, l3b_rule_get_net6_srcs, CLASSIFY_EMPTY_IS_ANY)
+CLASSIFY_NET4_COMPILE(
+	l3b_net4_src, l3b_rule_get_net4_srcs, CLASSIFY_EMPTY_IS_ANY
+)
+CLASSIFY_NET6_COMPILE(
+	l3b_net6_src, l3b_rule_get_net6_srcs, CLASSIFY_EMPTY_IS_ANY
+)
 CLASSIFY_U16_RANGES_COMPILE(
 	l3b_port,
 	struct classify_attr_port,

@@ -52,14 +52,14 @@ typedef void (*classify_line_get_ranges_func)(
 		struct vline line;                                             \
 	};                                                                     \
                                                                                \
-	static inline struct classify_compile_##tag                            \
-		*classify_compile_##tag##_create(                              \
-			struct memory_context *memory_context,                 \
-			const struct classifier_rule *const *rules,            \
-			uint32_t rule_count,                                   \
-			classify_line_get_ranges_func adapted_get_ranges,      \
-			const char *name                                       \
-		) {                                                            \
+	static inline struct classify_compile_##tag *                          \
+	classify_compile_##tag##_create(                                       \
+		struct memory_context *memory_context,                         \
+		const struct classifier_rule *const *rules,                    \
+		uint32_t rule_count,                                           \
+		classify_line_get_ranges_func adapted_get_ranges,              \
+		const char *name                                               \
+	) {                                                                    \
 		(void)rules;                                                   \
 		(void)rule_count;                                              \
                                                                                \
