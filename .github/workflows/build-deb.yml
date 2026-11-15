@@ -121,7 +121,7 @@ jobs:
           apt-get update
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
+        uses: dtolnay/rust-toolchain@d5e4d57b030548f435d0befec15ff413a2c60eff # 1.100.0
 
       - name: Install packaging tools
         timeout-minutes: 10
