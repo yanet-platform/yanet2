@@ -170,3 +170,22 @@ Miri stays the layer for the language rules of the unsafe code; these tests
 add bounds, use after free and the C behaviour, on real memory. CI runs them
 natively in `.github/workflows/rust-sdk-ut.yml` and under ASan in
 `.github/workflows/rust-sdk-ut-asan.yml`.
+
+## Worker counter cells
+
+Counter layouts use typed worker-local `Cell<u64>` storage: one cell for
+`u64` and `Gauge`, packet then byte cells for `Traffic`, and recursive arrays
+in row-major order. Adds and gauge subtraction wrap. Prepared handles retain
+mapping-provenance pointers and only become shared cell views when bound to a
+worker call. Copies and overlapping direct or bound views observe the same
+worker values. Bound views stay call-branded, neither `Send` nor `Sync`, and
+preserve both unwind-safety markers. Multi-value updates are not transactional.
+Zero-length arrays retain word alignment without accessing storage. C counter
+registration rejects zero values, so zero-sized cell-view support does not make
+zero-value counters registerable.
+
+This changes the sealed, hidden layout API: `CounterLayout::Storage: 'static`
+and safe `add(&Storage, Value)` replace unsafe `add_to(Value, *mut u64)`, and
+`read` now takes `&Storage` rather than a raw pointer. `BoundCounter`, its
+`Copy`/`Clone` impls, and `CounterRef::bind` require `T: CounterLayout`.
+Other configuration and prepared-handle generic domains are unchanged.
