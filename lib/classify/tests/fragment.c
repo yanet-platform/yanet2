@@ -118,18 +118,13 @@ fragment_rule_get_fragment(const struct classifier_rule *rule) {
 }
 
 CLASSIFY_DEVICE_COMPILE(fragment_device, fragment_rule_get_devices)
-CLASSIFY_NET4_COMPILE(
-	fragment_net4_src, fragment_rule_get_net4_srcs, CLASSIFY_EMPTY_IS_ANY
-)
-CLASSIFY_NET4_COMPILE(
-	fragment_net4_dst, fragment_rule_get_net4_dsts, CLASSIFY_EMPTY_IS_ANY
-)
+CLASSIFY_NET4_COMPILE(fragment_net4_src, fragment_rule_get_net4_srcs)
+CLASSIFY_NET4_COMPILE(fragment_net4_dst, fragment_rule_get_net4_dsts)
 CLASSIFY_LINE_COMPILE(
 	fragment_ipproto,
 	struct classify_attr_line,
 	0x100,
-	fragment_rule_get_ipproto_ranges,
-	CLASSIFY_EMPTY_IS_ANY
+	fragment_rule_get_ipproto_ranges
 )
 CLASSIFY_IPFRAG_COMPILE(fragment_ipfrag, fragment_rule_get_fragment)
 

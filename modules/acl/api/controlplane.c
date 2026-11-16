@@ -396,33 +396,24 @@ acl_rule_get_ipproto_ranges(
 }
 
 /*
- * Every value condition of the acl declares the nothing policy for the
- * empty set: a rule that leaves a condition out matches no packet of
- * it, and the any condition is the whole range authored explicitly.
- * The device attribute keeps the empty list as its any condition: the
+ * Every value condition of the acl is spelled whole by the authoring
+ * layer: a rule that leaves a condition out matches no packet of it,
+ * and the any condition is the whole range authored explicitly. The
+ * device attribute keeps the empty list as its any condition: the
  * device identifier domain is machine local, so no explicit spelling
  * of the whole device set exists.
  */
 CLASSIFY_DEVICE_COMPILE(acl_device, acl_rule_get_devices)
-CLASSIFY_NET4_COMPILE(
-	acl_net4_src, acl_rule_get_net4_srcs, CLASSIFY_EMPTY_IS_NOTHING
-)
-CLASSIFY_NET4_COMPILE(
-	acl_net4_dst, acl_rule_get_net4_dsts, CLASSIFY_EMPTY_IS_NOTHING
-)
-CLASSIFY_NET6_COMPILE(
-	acl_net6_src, acl_rule_get_net6_srcs, CLASSIFY_EMPTY_IS_NOTHING
-)
-CLASSIFY_NET6_COMPILE(
-	acl_net6_dst, acl_rule_get_net6_dsts, CLASSIFY_EMPTY_IS_NOTHING
-)
+CLASSIFY_NET4_COMPILE(acl_net4_src, acl_rule_get_net4_srcs)
+CLASSIFY_NET4_COMPILE(acl_net4_dst, acl_rule_get_net4_dsts)
+CLASSIFY_NET6_COMPILE(acl_net6_src, acl_rule_get_net6_srcs)
+CLASSIFY_NET6_COMPILE(acl_net6_dst, acl_rule_get_net6_dsts)
 CLASSIFY_IPFRAG_COMPILE(acl_ipfrag, acl_rule_get_fragment)
 CLASSIFY_LINE_COMPILE(
 	acl_ipproto,
 	struct classify_attr_line,
 	0x100,
-	acl_rule_get_ipproto_ranges,
-	CLASSIFY_EMPTY_IS_NOTHING
+	acl_rule_get_ipproto_ranges
 )
 static inline void
 acl_rule_get_tcp_flags_ranges(
@@ -455,22 +446,19 @@ CLASSIFY_LINE_COMPILE(
 	acl_tcp_flags,
 	struct classify_attr_line,
 	0x100,
-	acl_rule_get_tcp_flags_ranges,
-	CLASSIFY_EMPTY_IS_NOTHING
+	acl_rule_get_tcp_flags_ranges
 )
 CLASSIFY_LINE_COMPILE(
 	acl_icmp_type,
 	struct classify_attr_line,
 	0x100,
-	acl_rule_get_icmp_type_ranges,
-	CLASSIFY_EMPTY_IS_NOTHING
+	acl_rule_get_icmp_type_ranges
 )
 CLASSIFY_LINE_COMPILE(
 	acl_icmp6_type,
 	struct classify_attr_line,
 	0x100,
-	acl_rule_get_icmp6_type_ranges,
-	CLASSIFY_EMPTY_IS_NOTHING
+	acl_rule_get_icmp6_type_ranges
 )
 static inline void
 acl_rule_get_src_port_ranges(
@@ -495,16 +483,10 @@ acl_rule_get_dst_port_ranges(
 }
 
 CLASSIFY_U16_RANGES_COMPILE(
-	acl_src_port,
-	struct classify_attr_port,
-	acl_rule_get_src_port_ranges,
-	CLASSIFY_EMPTY_IS_NOTHING
+	acl_src_port, struct classify_attr_port, acl_rule_get_src_port_ranges
 )
 CLASSIFY_U16_RANGES_COMPILE(
-	acl_dst_port,
-	struct classify_attr_port,
-	acl_rule_get_dst_port_ranges,
-	CLASSIFY_EMPTY_IS_NOTHING
+	acl_dst_port, struct classify_attr_port, acl_rule_get_dst_port_ranges
 )
 
 // Spells a projection of the ruleset: every rule the check rejects

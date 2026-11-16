@@ -30,13 +30,11 @@ typedef void (*classify_net4_get_net4s_func)(
  * of the address domain with the class table over its regions.
  *
  * The rule field selector of the compiled side - source or destination
- * networks - and the declared empty set policy of the variant are
- * stored in the scratch, so one body and one set of callbacks serve
- * every side and policy.
+ * networks - is stored in the scratch, so one body and one set of
+ * callbacks serve both sides.
  */
 struct classify_compile_net4 {
 	classify_net4_get_net4s_func get_net4s;
-	enum classify_empty_policy empty_policy;
 	const char *name;
 
 	struct range_index range_index;
@@ -49,7 +47,6 @@ classify_compile_net4_create(
 	const struct classifier_rule *const *rules,
 	uint32_t rule_count,
 	classify_net4_get_net4s_func get_net4s,
-	enum classify_empty_policy empty_policy,
 	const char *name
 ) {
 	struct classify_compile_net4 *compile =
@@ -61,7 +58,6 @@ classify_compile_net4_create(
 	}
 
 	compile->get_net4s = get_net4s;
-	compile->empty_policy = empty_policy;
 	compile->name = name;
 
 	struct range_collector collector;
@@ -145,15 +141,10 @@ classify_compile_net4_size(const void *compile) {
 }
 
 // Reports whether the network list covers the whole address domain:
-// a list holding a network without a mask. The empty list is the any
-// condition only of the variants that declare the any policy for it.
+// a list holding a network without a mask. The empty list matches
+// nothing - the whole domain coverage must be spelled explicitly.
 static inline int
-classify_net4s_any(
-	const struct filter_net4s *nets, enum classify_empty_policy empty_policy
-) {
-	if (nets->count == 0) {
-		return empty_policy == CLASSIFY_EMPTY_IS_ANY;
-	}
+classify_net4s_any(const struct filter_net4s *nets) {
 	for (uint32_t idx = 0; idx < nets->count; ++idx) {
 		const struct net4 *net = nets->items + idx;
 		if (net->mask[0] == 0 && net->mask[1] == 0 &&
@@ -173,7 +164,7 @@ classify_compile_net4_rule_is_any(
 	struct filter_net4s nets;
 	net4_compile->get_net4s(rule, &nets);
 
-	return classify_net4s_any(&nets, net4_compile->empty_policy);
+	return classify_net4s_any(&nets);
 }
 
 static inline int
@@ -407,12 +398,11 @@ classify_net4_compile(
 	const struct classifier_rule *const *rules,
 	uint32_t rule_count,
 	classify_net4_get_net4s_func get_net4s,
-	enum classify_empty_policy empty_policy,
 	struct classify_attr_net4 *attr,
 	struct classifier *cls
 ) {
 	struct classify_compile_net4 *compile = classify_compile_net4_create(
-		memory_context, rules, rule_count, get_net4s, empty_policy, name
+		memory_context, rules, rule_count, get_net4s, name
 	);
 	if (compile == NULL) {
 		memset(attr, 0, sizeof(*attr));
@@ -452,7 +442,7 @@ classify_net4_compile(
  * The tag must carry the consumer prefix, so the generated symbols
  * never collide with the library ones.
  */
-#define CLASSIFY_NET4_COMPILE(tag, get_net4s, empty_policy)                    \
+#define CLASSIFY_NET4_COMPILE(tag, get_net4s)                                  \
 	static inline int classify_##tag##_compile(                            \
 		struct memory_context *memory_context,                         \
 		const char *name,                                              \
@@ -467,7 +457,6 @@ classify_net4_compile(
 			rules,                                                 \
 			rule_count,                                            \
 			get_net4s,                                             \
-			empty_policy,                                          \
 			attr,                                                  \
 			cls                                                    \
 		);                                                             \

@@ -92,12 +92,43 @@ func (m *ForwardRule) cBuild(pinner *runtime.Pinner) C.struct_forward_rule {
 
 	cRule.mode = m.Mode.toC()
 
+	// A condition the rule leaves out is the rule of every value of
+	// it: the wildcard is spelled here, so the compile never sees an
+	// empty condition. A rule naming no network side at all is the
+	// layer2 one - it matches every packet of its devices regardless
+	// of the family - and keeps its empty sides.
+	// A family of the rule participates when either of its sides is
+	// authored; the absent partner side is the wildcard, while a family
+	// left out entirely keeps its empty sides and never matches.
+	src4s, dst4s := m.Src4s, m.Dst4s
+	if len(src4s) > 0 || len(dst4s) > 0 {
+		if len(src4s) == 0 {
+			src4s = []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4}
+		}
+		if len(dst4s) == 0 {
+			dst4s = []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4}
+		}
+	}
+	src6s, dst6s := m.Src6s, m.Dst6s
+	if len(src6s) > 0 || len(dst6s) > 0 {
+		if len(src6s) == 0 {
+			src6s = []xnetip.BiContiguous{filter.UnspecifiedIPv6}
+		}
+		if len(dst6s) == 0 {
+			dst6s = []xnetip.BiContiguous{filter.UnspecifiedIPv6}
+		}
+	}
+	vlans := m.VlanRanges
+	if len(vlans) == 0 {
+		vlans = filter.VlanRanges{{From: 0, To: 4095}}
+	}
+
 	filter.CBuildDevices(&cRule.devices, m.Devices, pinner)
-	filter.CBuildVlanLineRanges(&cRule.vlan_ranges, m.VlanRanges, pinner)
-	filter.CBuildNet4s(&cRule.src_net4s, m.Src4s, pinner)
-	filter.CBuildNet4s(&cRule.dst_net4s, m.Dst4s, pinner)
-	filter.CBuildNet6s(&cRule.src_net6s, m.Src6s, pinner)
-	filter.CBuildNet6s(&cRule.dst_net6s, m.Dst6s, pinner)
+	filter.CBuildVlanLineRanges(&cRule.vlan_ranges, vlans, pinner)
+	filter.CBuildNet4s(&cRule.src_net4s, src4s, pinner)
+	filter.CBuildNet4s(&cRule.dst_net4s, dst4s, pinner)
+	filter.CBuildNet6s(&cRule.src_net6s, src6s, pinner)
+	filter.CBuildNet6s(&cRule.dst_net6s, dst6s, pinner)
 
 	return cRule
 }

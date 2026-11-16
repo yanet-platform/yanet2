@@ -68,13 +68,11 @@ typedef void (*classify_net6_get_net6s_func)(
  * Compile scratch of the IPv6 network attribute.
  *
  * The rule field selector of the compiled side - source or destination
- * networks - and the declared empty set policy of the variant are
- * stored in the scratch, so one body serves every side and policy; the
- * grouping callbacks bake their side in and need no scratch.
+ * networks - is stored in the scratch, so one body serves both sides;
+ * the grouping callbacks bake their side in and need no scratch.
  */
 struct classify_compile_net6 {
 	classify_net6_get_net6s_func get_net6s;
-	enum classify_empty_policy empty_policy;
 	const char *name;
 
 	struct range_index ri_hi;
@@ -132,15 +130,10 @@ net6_is_any(const struct net6 *net) {
 }
 
 // A list holding a network without a mask covers the whole address
-// domain; the empty list is the any condition only of the variants
-// that declare the any policy for it.
+// domain; the empty list matches nothing - the whole domain coverage
+// must be spelled explicitly.
 static inline int
-net6s_is_any(
-	const struct filter_net6s *nets, enum classify_empty_policy empty_policy
-) {
-	if (nets->count == 0) {
-		return empty_policy == CLASSIFY_EMPTY_IS_ANY;
-	}
+net6s_is_any(const struct filter_net6s *nets) {
 	for (uint32_t idx = 0; idx < nets->count; ++idx) {
 		if (net6_is_any(nets->items + idx)) {
 			return 1;
@@ -906,7 +899,6 @@ classify_compile_net6_create(
 	const struct classifier_rule *const *rules,
 	uint32_t rule_count,
 	classify_net6_get_net6s_func get_net6s,
-	enum classify_empty_policy empty_policy,
 	const char *name
 ) {
 	struct classify_compile_net6 *compile =
@@ -919,7 +911,6 @@ classify_compile_net6_create(
 	memset(compile, 0, sizeof(struct classify_compile_net6));
 
 	compile->get_net6s = get_net6s;
-	compile->empty_policy = empty_policy;
 	compile->name = name;
 
 	/*
@@ -1137,7 +1128,7 @@ classify_compile_net6_rule_is_any(
 	struct filter_net6s nets;
 	net6_compile->get_net6s(rule, &nets);
 
-	return net6s_is_any(&nets, net6_compile->empty_policy);
+	return net6s_is_any(&nets);
 }
 
 static inline int
@@ -1153,29 +1144,12 @@ classify_compile_net6_rule_iter(
 	 * Every network of the rule resolves through the net index into
 	 * its range of combined regions, so the iteration replays the
 	 * values assigned to the networks of the list instead of walking
-	 * the crosses again. A list without networks is the any condition
-	 * of the any policy alone - it replays every region directly -
-	 * while under the nothing policy it matches no address and
-	 * replays no region.
+	 * the crosses again. A list without networks matches no address
+	 * and replays no region - the whole domain coverage must be
+	 * spelled explicitly.
 	 */
 	struct filter_net6s nets;
 	net6_compile->get_net6s(rule, &nets);
-
-	if (nets.count == 0) {
-		if (net6_compile->empty_policy != CLASSIFY_EMPTY_IS_ANY) {
-			return 0;
-		}
-		for (uint32_t idx = 0; idx < net6_compile->region_count;
-		     ++idx) {
-			if (iter_cb_func(
-				    net6_compile->region_values + idx,
-				    cb_func_data
-			    ) < 0) {
-				return -1;
-			}
-		}
-		return 0;
-	}
 
 	for (uint32_t net_idx = 0; net_idx < nets.count; ++net_idx) {
 		struct net6 net6;
@@ -1435,12 +1409,11 @@ classify_net6_compile(
 	const struct classifier_rule *const *rules,
 	uint32_t rule_count,
 	classify_net6_get_net6s_func get_net6s,
-	enum classify_empty_policy empty_policy,
 	struct classify_attr_net6 *attr,
 	struct classifier *cls
 ) {
 	struct classify_compile_net6 *compile = classify_compile_net6_create(
-		memory_context, rules, rule_count, get_net6s, empty_policy, name
+		memory_context, rules, rule_count, get_net6s, name
 	);
 	if (compile == NULL) {
 		memset(attr, 0, sizeof(*attr));
@@ -1480,7 +1453,7 @@ classify_net6_compile(
  * The tag must carry the consumer prefix, so the generated symbols
  * never collide with the library ones.
  */
-#define CLASSIFY_NET6_COMPILE(tag, get_net6s, empty_policy)                    \
+#define CLASSIFY_NET6_COMPILE(tag, get_net6s)                                  \
 	static inline int classify_##tag##_compile(                            \
 		struct memory_context *memory_context,                         \
 		const char *name,                                              \
@@ -1495,7 +1468,6 @@ classify_net6_compile(
 			rules,                                                 \
 			rule_count,                                            \
 			get_net6s,                                             \
-			empty_policy,                                          \
 			attr,                                                  \
 			cls                                                    \
 		);                                                             \

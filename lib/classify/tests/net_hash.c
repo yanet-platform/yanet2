@@ -90,15 +90,12 @@ test_rule_get_port_ranges(
 	*ranges = test_rule->port_ranges;
 }
 
-CLASSIFY_NET4_COMPILE(test_net4, test_rule_get_net4s, CLASSIFY_EMPTY_IS_ANY)
+CLASSIFY_NET4_COMPILE(test_net4, test_rule_get_net4s)
 CLASSIFY_NET4_HASH_COMPILE(test_net4_hash, test_rule_get_addrs4)
-CLASSIFY_NET6_COMPILE(test_net6, test_rule_get_net6s, CLASSIFY_EMPTY_IS_ANY)
+CLASSIFY_NET6_COMPILE(test_net6, test_rule_get_net6s)
 CLASSIFY_NET6_HASH_COMPILE(test_net6_hash, test_rule_get_addrs6)
 CLASSIFY_U16_RANGES_COMPILE(
-	test_port,
-	struct classify_attr_port,
-	test_rule_get_port_ranges,
-	CLASSIFY_EMPTY_IS_ANY
+	test_port, struct classify_attr_port, test_rule_get_port_ranges
 )
 
 // One host route of the LPM reference: the address with the full mask.

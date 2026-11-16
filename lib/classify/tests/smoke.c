@@ -143,55 +143,35 @@ smoke_rule_get_dst_port_ranges(
 				smoke_rule->dst_port_ranges.items;
 }
 
-// Both policies instantiated: the vlan, network and port attributes of
-// the any spelling, the protocol attributes of the explicit whole range
-// one.
+// Every condition of every rule is spelled whole: the compile reads an
+// empty condition as a match of nothing.
 CLASSIFY_DEVICE_COMPILE(smoke_device, smoke_rule_get_devices)
 CLASSIFY_LINE_COMPILE(
-	smoke_vlan,
-	struct classify_attr_line,
-	4096,
-	smoke_rule_get_vlan_ranges,
-	CLASSIFY_EMPTY_IS_ANY
+	smoke_vlan, struct classify_attr_line, 4096, smoke_rule_get_vlan_ranges
 )
 CLASSIFY_IPFRAG_COMPILE(smoke_ipfrag, smoke_rule_get_fragment)
-CLASSIFY_NET4_COMPILE(
-	smoke_net4_src, smoke_rule_get_net4_srcs, CLASSIFY_EMPTY_IS_ANY
-)
-CLASSIFY_NET4_COMPILE(
-	smoke_net4_dst, smoke_rule_get_net4_dsts, CLASSIFY_EMPTY_IS_ANY
-)
-CLASSIFY_NET6_COMPILE(
-	smoke_net6_src, smoke_rule_get_net6_srcs, CLASSIFY_EMPTY_IS_ANY
-)
-CLASSIFY_NET6_COMPILE(
-	smoke_net6_dst, smoke_rule_get_net6_dsts, CLASSIFY_EMPTY_IS_ANY
-)
+CLASSIFY_NET4_COMPILE(smoke_net4_src, smoke_rule_get_net4_srcs)
+CLASSIFY_NET4_COMPILE(smoke_net4_dst, smoke_rule_get_net4_dsts)
+CLASSIFY_NET6_COMPILE(smoke_net6_src, smoke_rule_get_net6_srcs)
+CLASSIFY_NET6_COMPILE(smoke_net6_dst, smoke_rule_get_net6_dsts)
 CLASSIFY_LINE_COMPILE(
 	smoke_ipproto,
 	struct classify_attr_line,
 	0x100,
-	smoke_rule_get_ipproto_ranges,
-	CLASSIFY_EMPTY_IS_NOTHING
+	smoke_rule_get_ipproto_ranges
 )
 CLASSIFY_LINE_COMPILE(
-	smoke_l4,
-	struct classify_attr_line,
-	0x101,
-	smoke_rule_get_l4_ranges,
-	CLASSIFY_EMPTY_IS_ANY
+	smoke_l4, struct classify_attr_line, 0x101, smoke_rule_get_l4_ranges
 )
 CLASSIFY_U16_RANGES_COMPILE(
 	smoke_src_port,
 	struct classify_attr_port,
-	smoke_rule_get_src_port_ranges,
-	CLASSIFY_EMPTY_IS_ANY
+	smoke_rule_get_src_port_ranges
 )
 CLASSIFY_U16_RANGES_COMPILE(
 	smoke_dst_port,
 	struct classify_attr_port,
-	smoke_rule_get_dst_port_ranges,
-	CLASSIFY_EMPTY_IS_ANY
+	smoke_rule_get_dst_port_ranges
 )
 
 static void (*const sign_compile[])(void) = {

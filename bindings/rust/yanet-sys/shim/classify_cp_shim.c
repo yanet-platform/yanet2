@@ -18,16 +18,31 @@ _Static_assert(
 	"the rule word of no match is the library's"
 );
 
+static const struct net4 any_net4 = {
+	.addr = {0, 0, 0, 0}, .mask = {0, 0, 0, 0}
+};
+static const struct net6 any_net6 = {.addr = {0}, .mask = {0}};
+static const struct classify_line_range any_line = {.from = 0, .to = 0xff};
+static const struct filter_port_range any_port = {.from = 0, .to = 65535};
+
 // The getters of the attribute compiles: a rule is the address of the view
 // the compile reads, so each getter hands out the view itself.
 static void
 get_net4s(const struct classifier_rule *rule, struct filter_net4s *view) {
 	*view = *(const struct filter_net4s *)rule;
+	if (view->count == 0) {
+		view->items = (const struct net4 *)&any_net4;
+		view->count = 1;
+	}
 }
 
 static void
 get_net6s(const struct classifier_rule *rule, struct filter_net6s *view) {
 	*view = *(const struct filter_net6s *)rule;
+	if (view->count == 0) {
+		view->items = (const struct net6 *)&any_net6;
+		view->count = 1;
+	}
 }
 
 static void
@@ -35,12 +50,21 @@ get_lines(
 	const struct classifier_rule *rule, struct classify_line_ranges *view
 ) {
 	*view = *(const struct classify_line_ranges *)rule;
+	if (view->count == 0) {
+		view->items = &any_line;
+		view->count = 1;
+	}
 }
 
 static void
 get_ports(const struct classifier_rule *rule, struct filter_u16_ranges *view) {
 	const struct filter_port_ranges *ports =
 		(const struct filter_port_ranges *)rule;
+	if (ports->count == 0) {
+		view->items = (const struct filter_u16_span *)&any_port;
+		view->count = 1;
+		return;
+	}
 	view->count = ports->count;
 	view->items = (const struct filter_u16_span *)ports->items;
 }
@@ -51,22 +75,16 @@ _Static_assert(
 );
 
 /*
- * The sdk attribute variants declare the any policy for the empty set:
- * the out of tree modules compile rulesets whose empty conditions are
- * the wildcard spelling, the contract the sdk has always carried.
+ * The sdk spells the wildcard of an empty condition itself: the out of
+ * tree modules compile rulesets whose empty conditions are the wildcard
+ * spelling, the contract the sdk has always carried, and the boundary
+ * hands the compile the explicit whole range item instead.
  */
 CLASSIFY_LINE_COMPILE(
-	yanet_sys_line,
-	struct classify_attr_line,
-	0x100,
-	get_lines,
-	CLASSIFY_EMPTY_IS_ANY
+	yanet_sys_line, struct classify_attr_line, 0x100, get_lines
 )
 CLASSIFY_U16_RANGES_COMPILE(
-	yanet_sys_port,
-	struct classify_attr_port,
-	get_ports,
-	CLASSIFY_EMPTY_IS_ANY
+	yanet_sys_port, struct classify_attr_port, get_ports
 )
 
 int
@@ -84,7 +102,6 @@ yanet_sys_classify_net4_compile(
 		(const struct classifier_rule *const *)rules,
 		rule_count,
 		get_net4s,
-		CLASSIFY_EMPTY_IS_ANY,
 		attr,
 		stage
 	);
@@ -105,7 +122,6 @@ yanet_sys_classify_net6_compile(
 		(const struct classifier_rule *const *)rules,
 		rule_count,
 		get_net6s,
-		CLASSIFY_EMPTY_IS_ANY,
 		attr,
 		stage
 	);
