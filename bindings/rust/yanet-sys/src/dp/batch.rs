@@ -371,7 +371,7 @@ impl<'id> Batch<'id> {
     #[doc(alias = "packet_front_pass")]
     #[inline(always)]
     pub fn pass_all(&mut self) {
-        let front = &mut self.front.0;
+        let PacketFront(front) = &mut *self.front;
         // SAFETY: attach: packet. Both lists and their packets belong to this
         // exclusive front. Keep the existing intrusive-list operation.
         unsafe { concat(&raw mut front.output, &raw mut front.input) };
@@ -415,7 +415,8 @@ impl<'id> Batch<'id> {
             // its layout; nothing writes it while the batch is borrowed.
             NonNull::new(raw).map(|raw| unsafe { raw.cast::<PacketMeta>().as_ref() })
         };
-        let first = self.front.0.input.first;
+        let PacketFront(front) = &*self.front;
+        let first = front.input.first;
         core::iter::successors(view(first), move |PacketMeta(packet)| view(packet.next))
     }
 
@@ -426,9 +427,10 @@ impl<'id> Batch<'id> {
     #[allow(clippy::should_implement_trait)]
     #[inline(always)]
     pub fn next(&mut self) -> Option<Packet<'id>> {
+        let PacketFront(front) = &mut *self.front;
         // SAFETY: the front and its packets are exclusively this call's
         // (constructor contract); this is the C list pop.
-        let packet = NonNull::new(unsafe { pop(&raw mut self.front.0.input) })?;
+        let packet = NonNull::new(unsafe { pop(&raw mut front.input) })?;
         Some(Packet {
             raw: packet,
             _brand: PhantomData,
@@ -458,7 +460,7 @@ impl<'id> Batch<'id> {
     #[inline(always)]
     pub fn dispose(&mut self, packet: Packet<'id>, verdict: Verdict<'id>) {
         let raw = packet.raw.as_ptr();
-        let front = &mut self.front.0;
+        let PacketFront(front) = &mut *self.front;
         // SAFETY: an owned packet of this batch is on no list and
         // exclusively ours (only taking, allocating and copying create one,
         // and its value is consumed once); the front is this call's, and a

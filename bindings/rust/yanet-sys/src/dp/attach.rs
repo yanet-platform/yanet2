@@ -96,13 +96,14 @@ impl<'id, M: Module> ModuleCall<'id, M> {
             raw: unsafe { NonNull::new_unchecked(worker) },
             _brand: PhantomData,
         };
+        let ModuleEctx(context) = ectx;
         // SAFETY: attach: binding, frozen. The opaque header and frozen body
         // belong to M. Derive from the raw root, not the narrow ectx reference.
-        let config = unsafe { (*root.ptr::<ModuleConfig<M::Config>>(ectx.0.abs_cp_module.addr())).body() };
+        let config = unsafe { (*root.ptr::<ModuleConfig<M::Config>>(context.abs_cp_module.addr())).body() };
         let prepared: *mut M::Prepared<'id> = if size_of::<M::Prepared<'id>>() == 0 {
             NonNull::dangling().as_ptr()
         } else {
-            root.ptr(ectx.0.abs_module_prepared.addr())
+            root.ptr(context.abs_module_prepared.addr())
         };
         debug_assert!(prepared.is_aligned(), "misaligned prepared buffer");
         // SAFETY: attach: publish, align. The commit initialized this worker's
@@ -141,6 +142,7 @@ impl<'id, M: Module> ModuleCommit<'id, M> {
         let graph = unsafe { Graph::new(root) };
         // SAFETY: attach: call, frozen. The output is a separate allocation.
         let ectx = unsafe { &*ectx.cast::<ModuleEctx>() };
+        let ModuleEctx(context) = ectx;
         // SAFETY: attach: binding, frozen. Only the config body's shared bytes
         // are exposed, its mutable C header stays opaque.
         let config = unsafe { (*root.ptr::<ModuleConfig<M::Config>>(config.addr())).body() };
@@ -148,7 +150,7 @@ impl<'id, M: Module> ModuleCommit<'id, M> {
             graph,
             ectx,
             config,
-            out: root.ptr(ectx.0.abs_module_prepared.addr()),
+            out: root.ptr(context.abs_module_prepared.addr()),
         }
     }
 }
@@ -174,13 +176,14 @@ impl<'id, O: Object> ObjectCommit<'id, O> {
         let graph = unsafe { Graph::new(root) };
         // SAFETY: attach: call, frozen. The output is a separate allocation.
         let ectx = unsafe { &*ectx.cast::<ObjectEctx>() };
+        let ObjectEctx(context) = ectx;
         // SAFETY: attach: binding, frozen. The config header remains opaque.
         let config = unsafe { (*root.ptr::<ObjectConfig<O::Config>>(config.addr())).body() };
         Self {
             graph,
             ectx,
             config,
-            out: root.ptr(ectx.0.abs_object_prepared.addr()),
+            out: root.ptr(context.abs_object_prepared.addr()),
         }
     }
 }
@@ -188,25 +191,28 @@ impl<'id, O: Object> ObjectCommit<'id, O> {
 impl ModuleEctx {
     #[inline(always)]
     pub fn as_ptr(&self) -> *mut bindings::module_ectx {
-        (&raw const self.0).cast_mut()
+        let Self(ectx) = self;
+        (&raw const *ectx).cast_mut()
     }
 
     #[inline(always)]
     pub fn recirc_limit(&self) -> u16 {
-        self.0.packet_recirc_limit
+        let Self(ectx) = self;
+        ectx.packet_recirc_limit
     }
 
     #[inline(always)]
     pub fn device_targets<'id>(&'id self, graph: Graph<'id>) -> &'id [DeviceTarget] {
-        if self.0.device_target_count == 0 {
+        let Self(ectx) = self;
+        if ectx.device_target_count == 0 {
             return &[];
         }
         // SAFETY: attach: call, frozen. C derived exactly count targets, whose
         // own bytes are frozen. Their pointed-to scheduling entries are not.
         unsafe {
             slice::from_raw_parts(
-                graph.root().ptr(self.0.abs_device_targets.addr()),
-                self.0.device_target_count as usize,
+                graph.root().ptr(ectx.abs_device_targets.addr()),
+                ectx.device_target_count as usize,
             )
         }
     }
@@ -218,8 +224,9 @@ impl ModuleEctx {
 
     #[inline(always)]
     pub fn counters<'id>(&'id self, graph: Graph<'id>) -> CounterStorage<'id> {
+        let Self(ectx) = self;
         CounterStorage {
-            raw: graph.root().ptr(self.0.abs_counter_storage.addr()),
+            raw: graph.root().ptr(ectx.abs_counter_storage.addr()),
             graph,
         }
     }
@@ -240,10 +247,11 @@ impl ModuleEctx {
     ) -> &'id T::Storage {
         let registry = counter.registry();
         let id = counter.id();
-        debug_assert!(registry < self.0.runtime_counter_storage_count);
+        let Self(ectx) = self;
+        debug_assert!(registry < ectx.runtime_counter_storage_count);
         let tables = graph
             .root()
-            .ptr::<*mut bindings::counter_storage>(self.0.abs_runtime_counter_storages_base.addr());
+            .ptr::<*mut bindings::counter_storage>(ectx.abs_runtime_counter_storages_base.addr());
         // SAFETY: attach: counters, frozen. The typed built counter supplies
         // its own registry, before storage resolution as in the C path.
         let raw = unsafe { *tables.add(registry as usize) };
@@ -258,12 +266,13 @@ impl ModuleEctx {
 
     #[inline(always)]
     pub fn tagged<'id>(&'id self, graph: Graph<'id>, registry: u64) -> Option<CounterStorage<'id>> {
-        if registry >= self.0.runtime_counter_storage_count {
+        let Self(ectx) = self;
+        if registry >= ectx.runtime_counter_storage_count {
             return None;
         }
         let tables = graph
             .root()
-            .ptr::<*mut bindings::counter_storage>(self.0.abs_runtime_counter_storages_base.addr());
+            .ptr::<*mut bindings::counter_storage>(ectx.abs_runtime_counter_storages_base.addr());
         // SAFETY: attach: counters, frozen. The registry is in range. Keep this
         // lazy so empty tagged fields never reference a sentinel table.
         let raw = unsafe { *tables.add(registry as usize) };
@@ -277,12 +286,14 @@ impl ModuleEctx {
 impl ObjectEctx {
     #[inline(always)]
     pub fn worker(&self) -> u64 {
-        self.0.worker_idx
+        let Self(ectx) = self;
+        ectx.worker_idx
     }
 
     #[inline(always)]
     pub fn counters<'id>(&'id self, graph: Graph<'id>) -> CounterStorage<'id> {
-        let slot = &raw const self.0.counter_storage;
+        let Self(ectx) = self;
+        let slot = &raw const ectx.counter_storage;
         // SAFETY: attach: counters, frozen. C stores a relative integer here.
         let offset = unsafe { slot.cast::<isize>().read() };
         debug_assert!(offset != 0, "an object context without a counter storage");
@@ -315,14 +326,15 @@ impl<'id, O: Object> LinkedObject<'id, O> {
     #[inline(always)]
     fn ectx(&self) -> &'id ObjectEctx {
         let index = self.link.index() as usize;
+        let ModuleEctx(module) = self.module;
         debug_assert!(
-            index < self.module.0.object_link_count as usize,
+            index < module.object_link_count as usize,
             "C installs only resolvable links"
         );
         let links = self
             .graph
             .root()
-            .ptr::<bindings::module_object_link_ectx>(self.module.0.abs_object_links.addr());
+            .ptr::<bindings::module_object_link_ectx>(module.abs_object_links.addr());
         // SAFETY: attach: binding, frozen. C installs the typed built link
         // within the table. Keep its check debug-only as on the original path.
         let link = unsafe { &*links.add(index) };
@@ -336,10 +348,10 @@ impl<'id, O: Object> LinkedObject<'id, O> {
         // SAFETY: attach: binding, frozen, reclaim. The typed link established
         // O.
         unsafe {
-            (*self
-                .graph
-                .root()
-                .ptr::<ObjectConfig<O::Config>>(self.ectx().0.abs_cp_object.addr()))
+            (*self.graph.root().ptr::<ObjectConfig<O::Config>>({
+                let ObjectEctx(ectx) = self.ectx();
+                ectx.abs_cp_object.addr()
+            }))
             .body()
         }
     }
@@ -349,7 +361,8 @@ impl<'id, O: Object> LinkedObject<'id, O> {
         let prepared = if size_of::<O::Prepared<'id>>() == 0 {
             NonNull::dangling().as_ptr()
         } else {
-            let raw = self.ectx().0.abs_object_prepared;
+            let ObjectEctx(ectx) = self.ectx();
+            let raw = ectx.abs_object_prepared;
             debug_assert!(!raw.is_null(), "no prepared buffer of an object that declares one");
             self.graph.root().ptr(raw.addr())
         };
@@ -362,12 +375,14 @@ impl<'id, O: Object> LinkedObject<'id, O> {
 impl DeviceTarget {
     #[inline(always)]
     pub fn id(&self) -> u16 {
-        self.0.device_id
+        let Self(target) = self;
+        target.device_id
     }
 
     #[inline(always)]
     pub fn as_ptr(&self) -> *mut bindings::module_device_target {
-        (&raw const self.0).cast_mut()
+        let Self(target) = self;
+        (&raw const *target).cast_mut()
     }
 }
 
