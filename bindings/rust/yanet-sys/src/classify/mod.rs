@@ -377,16 +377,12 @@ const _: fn(&bindings::value_table) -> (*mut bindings::memory_context, u32, u32,
 //
 // The resolving context keeps storage frozen. These private accessors rely on
 // built dimensions and offsets, not arbitrary caller-supplied metadata.
-#[inline(always)]
-fn check_index(index: u32, len: u32) {
-    debug_assert!(index < len, "index {index} outside a table of {len}");
-}
 
 #[deny(clippy::multiple_unsafe_ops_per_block)]
 impl Line {
     #[inline(always)]
     fn get<'g>(&'g self, cx: &impl Resolve<'g>, index: u32) -> u32 {
-        check_index(index, self.size);
+        debug_assert!(index < self.size, "index {index} outside a table of {}", self.size);
         let values: *const u32 = cx
             .shm_root()
             .rel(ptr::from_ref(&self.values).addr(), self.values.offset());
@@ -402,8 +398,8 @@ impl Line {
 impl Rows {
     #[inline(always)]
     fn get<'g>(&'g self, cx: &impl Resolve<'g>, rows: u32, columns: u32, row: u32, column: u32) -> u32 {
-        check_index(row, rows);
-        check_index(column, columns);
+        debug_assert!(row < rows, "index {row} outside a table of {rows}");
+        debug_assert!(column < columns, "index {column} outside a table of {columns}");
         let root = cx.shm_root();
         let directory = &self.0;
         let slots: *const isize = root.rel(ptr::from_ref(directory).addr(), directory.offset());
