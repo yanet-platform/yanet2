@@ -9,18 +9,17 @@
 //! plugin crate. Nothing outside this module names a hook, and a hook is
 //! handed out only after the export checks pass for its type.
 
-use core::{mem::size_of, ptr::NonNull};
-
-use yanet_shm::root::ShmRoot;
+use core::mem::size_of;
 
 use crate::{
     bindings,
     dp::{
         __private::{check_module, check_object},
+        attach::{ModuleCall, ModuleCommit, ObjectCommit},
         batch::Batch,
         cx::{CommitCx, Cx, ObjectCommitCx},
-        module::{Module, ModuleConfig},
-        object::{Object, ObjectConfig},
+        module::Module,
+        object::Object,
     },
 };
 
@@ -42,38 +41,11 @@ unsafe extern "C" fn handle<M: Module>(
     ectx: *mut bindings::module_ectx,
     front: *mut bindings::packet_front,
 ) {
-    // SAFETY: the caller passes non-null worker, context and front (attach:
-    // call).
-    let (worker, ectx, front) = unsafe {
-        (
-            NonNull::new_unchecked(worker),
-            NonNull::new_unchecked(ectx),
-            NonNull::new_unchecked(front),
-        )
-    };
-    let root = ShmRoot::from_mapping(ectx.cast());
-    // SAFETY: the context is frozen once handed to the worker and its
-    // absolute fields were derived before release (attach: call, frozen,
-    // publish).
-    let (config, prepared) = unsafe { ((*ectx.as_ptr()).abs_cp_module, (*ectx.as_ptr()).abs_module_prepared) };
-    // SAFETY: the front, context and worker belong to this call (attach:
-    // call).
-    let mut batch = unsafe { Batch::new(front, ectx, worker) };
-    let prepared = if size_of::<M::Prepared<'_>>() == 0 {
-        // C allocates no buffer for a module without a prepared size.
-        NonNull::dangling()
-    } else {
-        // SAFETY: the control plane allocates a buffer for every context of a
-        // module declaring a size (attach: call).
-        unsafe { NonNull::new_unchecked(root.ptr::<M::Prepared<'_>>(prepared.addr())) }
-    };
-    debug_assert!(prepared.is_aligned(), "misaligned prepared buffer");
-    // SAFETY: the context's configuration is set and is this module's
-    // (attach: call, binding); its C header bytes stay opaque and the body
-    // is frozen and live for the call (attach: frozen, reclaim).
-    let config = unsafe { (*root.ptr::<ModuleConfig<M::Config>>(config.addr())).body() };
-    // SAFETY: every argument comes from the dataplane call (attach: call).
-    let mut cx = unsafe { Cx::<M>::new(root, ectx, worker, config, prepared) };
+    // SAFETY: the dataplane calls this entry with M's handler arguments
+    // (attach: call, mapping, binding, frozen, publish, reclaim).
+    let call = unsafe { ModuleCall::<M>::attach(worker, ectx, front) };
+    let mut cx = Cx::new(&call);
+    let mut batch = Batch::new(call.front, call.ectx, call.worker);
     M::handle(&mut cx, &mut batch);
 }
 
@@ -93,27 +65,13 @@ unsafe extern "C" fn commit_ectx<M: Module>(ectx: *mut bindings::module_ectx, cp
         // C allocates no buffer for a module without a prepared size.
         return;
     }
-    // SAFETY: the caller passes a non-null context inside the mapping with
-    // mapping-wide provenance (attach: call, mapping).
-    let ectx = unsafe { NonNull::new_unchecked(ectx) };
-    let root = ShmRoot::from_mapping(ectx.cast());
-    // SAFETY: the context is frozen except for the prepared buffer, which
-    // the single commit pass owns until release to the worker, and the pass
-    // runs only for a context whose buffer is allocated (attach: call,
-    // frozen, publish).
-    let out = root.ptr::<M::Prepared<'_>>(unsafe { (*ectx.as_ptr()).abs_module_prepared }.addr());
-    // SAFETY: the header is this module's configuration (attach: binding).
-    let config = unsafe { (*root.ptr::<ModuleConfig<M::Config>>(cp_module.addr())).body() };
-    // SAFETY: root, context and configuration as stated above; the
-    // context's counter storage was derived before the pass (attach: call).
-    let cx = unsafe { CommitCx::<M>::new(root, ectx, config) };
-    // SAFETY: the buffer holds the prepared value's size, aligned by the
-    // allocator (attach: align), and is exclusively owned by this pass.
-    //
-    // The hook is handed out only after the export checks, which bound the
-    // alignment by what the allocator guarantees and refuse a value that
-    // needs a drop, so the value leaks nothing if the buffer is overwritten.
-    unsafe { out.write(M::prepare(&cx)) };
+    // SAFETY: attach: call, mapping, binding, frozen. The callback exclusively
+    // initializes the separate prepared allocation after absolutization.
+    let call = unsafe { ModuleCommit::<M>::attach(ectx, cp_module) };
+    let cx = CommitCx::new(&call);
+    // SAFETY: attach: align. Export checks bound alignment and exclude drop.
+    // The raw output remains unborrowed until prepare has produced its value.
+    unsafe { call.out.write(M::prepare(&cx)) };
 }
 
 /// Allocates the module descriptor the loader copies and frees, with the
@@ -217,21 +175,12 @@ unsafe extern "C" fn commit_object_ectx<O: Object>(
         // The descriptor of such a type registers no hook.
         return;
     }
-    // SAFETY: the caller passes a non-null context inside the mapping with
-    // mapping-wide provenance (attach: call, mapping).
-    let root = ShmRoot::from_mapping(unsafe { NonNull::new_unchecked(ectx) }.cast());
-    // SAFETY: the context is frozen except for the prepared buffer, which the
-    // single commit pass owns, and the pass runs only for a context whose
-    // buffer is allocated (attach: call, frozen, publish).
-    let out = root.ptr::<O::Prepared<'_>>(unsafe { (*ectx).abs_object_prepared }.addr());
-    // SAFETY: the header is an object of this type, its body frozen but for
-    // its atomics and mutex payloads (attach: binding, frozen).
-    let config = unsafe { (*root.ptr::<ObjectConfig<O::Config>>(cp_object.addr())).body() };
-    // SAFETY: root, context and configuration as stated above.
-    let cx = unsafe { ObjectCommitCx::<O>::new(root, NonNull::new_unchecked(ectx), config) };
-    // SAFETY: as for a module, the buffer is aligned (attach: align) and
-    // owned by this pass, and the hook is handed out after the export checks.
-    unsafe { out.write(O::prepare(&cx)) };
+    // SAFETY: attach: call, mapping, binding, frozen. As for module commit,
+    // this pass exclusively initializes the separate prepared allocation.
+    let call = unsafe { ObjectCommit::<O>::attach(ectx, cp_object) };
+    let cx = ObjectCommitCx::new(&call);
+    // SAFETY: attach: align. The buffer is exclusive and export-checked.
+    unsafe { call.out.write(O::prepare(&cx)) };
 }
 
 /// Allocates the object type descriptor the loader copies and frees, with

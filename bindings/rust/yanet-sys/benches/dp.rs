@@ -285,6 +285,43 @@ impl Module for PassOnly {
     }
 }
 
+/// Passes the complete front without visiting individual packet descriptors.
+struct PassAll;
+
+impl Module for PassAll {
+    const NAME: &'static str = "pass_all";
+    type Config = Config;
+    type Prepared<'p> = Handles<'p>;
+
+    fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+        batch.pass_all();
+    }
+
+    fn prepare<'p>(cx: &CommitCx<'p, Self>) -> Handles<'p> {
+        Handles::new(cx)
+    }
+}
+
+/// Reads the call's stable worker fields while dispatching every packet.
+struct WorkerRead;
+
+impl Module for WorkerRead {
+    const NAME: &'static str = "worker_read";
+    type Config = Config;
+    type Prepared<'p> = Handles<'p>;
+
+    fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+        batch.dispatch(|_| {
+            black_box((cx.worker(), cx.now()));
+            Verdict::Pass
+        });
+    }
+
+    fn prepare<'p>(cx: &CommitCx<'p, Self>) -> Handles<'p> {
+        Handles::new(cx)
+    }
+}
+
 /// Adds each packet to the traffic through the handle, bound before the loop.
 struct TrafficBoundBefore;
 
@@ -742,6 +779,7 @@ where
     // module redirects a packet.
     let mut ectx = unsafe { Ectx::<M>::new(&WORDS, |arena, _, context| lay_out(arena, context)) };
     ectx.set_worker(WORKER);
+    ectx.set_time(1_234_567);
     let prepared = ectx.prepared();
     assert!(prepared.slot.is_some(), "the layout gives the worker no slot");
     assert!(
@@ -776,6 +814,8 @@ where
 fn harness(c: &mut Criterion) {
     let mut group = per_packet(c, "harness");
     handler::<PassOnly>(&mut group);
+    handler::<PassAll>(&mut group);
+    handler::<WorkerRead>(&mut group);
     group.finish();
 }
 

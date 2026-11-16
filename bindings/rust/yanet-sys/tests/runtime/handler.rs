@@ -229,3 +229,32 @@ fn test_miri_reach_of_the_handler_and_commit_entries() {
     // module decided is not checked here.
     ectx.run(&mut packets);
 }
+
+/// Reads the attached worker values on every callback, including a later round.
+struct WorkerValues;
+
+impl Module for WorkerValues {
+    const NAME: &'static str = "worker_values";
+    type Config = u64;
+    type Prepared<'p> = ();
+
+    fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
+        assert_eq!(cx.worker() * 100 + cx.config(), cx.now());
+        batch.pass_all();
+    }
+
+    fn prepare(_: &CommitCx<'_, Self>) {}
+}
+
+#[test]
+fn test_worker_values_belong_to_each_callback() {
+    // SAFETY: the one word is the whole configuration. This module uses no
+    // storage, links, pool or routing generation.
+    let mut ectx = unsafe { Ectx::<WorkerValues>::new(&[7], |_, _, _| {}) };
+    let mut packets = numbered(2);
+    for worker in [1, 3] {
+        ectx.set_worker(worker);
+        ectx.set_time(worker * 100 + 7);
+        ectx.run(&mut packets);
+    }
+}

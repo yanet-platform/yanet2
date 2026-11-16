@@ -253,3 +253,29 @@ authorizes graph resolution.
 External implementations replace `unsafe impl Resolve` and its hidden
 `shm_root()` method with an ordinary implementation returning `Graph` from
 `graph()`. Remove obsolete unsafe blocks around `ShmRoot::from_mapping`.
+
+## Dataplane attachment
+
+The callback boundary captures the incoming raw mapping provenance before
+borrowing individual structures. Its type-bound attachments give contexts
+shared references to frozen module/object execution-context bytes and give
+the batch exclusive ownership of its packet front. Module and object APIs
+are unchanged.
+
+The worker remains an opaque, call-branded pointer because C can change
+unrelated fields. Safe TCB accessors read only its stable index and round
+time on demand. Modules that do not use them perform no eager snapshot work.
+
+Prepared output is a separate allocation and stays raw until the prepare
+callback returns its initialized value. C must not reassign a context while
+a callback is live, even when reassignment would write identical values.
+Redirect temporarily reborrows the exclusive front and changes pointed-to
+scheduling state, not the referenced execution-context or target-table bytes.
+The runtime never borrows the whole generation or mutable scheduling entries
+as shared references.
+
+Counter and link projections keep the graph brand and registered type.
+Empty tagged fields and missing registries do not reference their storage
+table. A zero-sized prepared value does not read a missing prepared buffer.
+The `dp` benchmark's harness group also covers whole-front passing and reads
+of stable worker fields.
