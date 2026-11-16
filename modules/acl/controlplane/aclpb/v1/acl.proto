@@ -137,9 +137,10 @@ enum RuleKind {
   // makes an ip rule, and the absent conditions of an ip rule match
   // nothing.
   RULE_KIND_UNSPECIFIED = 0;
-  // RULE_KIND_L2 speaks about the packets without an IP header: only
-  // the devices condition is defined, every other condition of the
-  // rule must stay absent.
+  // RULE_KIND_L2 speaks about the packets of the rule's devices
+  // regardless of the protocol family, the non-IP ones included: the
+  // networks, the ports and the protocols are not defined for such a
+  // rule, so every other condition must stay absent.
   RULE_KIND_L2 = 1;
   // RULE_KIND_L3 speaks about the IP layer: the network, the protocol
   // and the fragment conditions are defined; the transport specific

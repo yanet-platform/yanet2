@@ -442,6 +442,15 @@ acl_rule_get_icmp_type_ranges(
 	*ranges = acl_rule->icmp_type_ranges;
 }
 
+static inline void
+acl_rule_get_icmp6_type_ranges(
+	const struct classifier_rule *rule, struct classify_line_ranges *ranges
+) {
+	const struct acl_rule *acl_rule =
+		container_of(rule, struct acl_rule, rule);
+	*ranges = acl_rule->icmp6_type_ranges;
+}
+
 CLASSIFY_LINE_COMPILE(
 	acl_tcp_flags,
 	struct classify_attr_line,
@@ -454,6 +463,13 @@ CLASSIFY_LINE_COMPILE(
 	struct classify_attr_line,
 	0x100,
 	acl_rule_get_icmp_type_ranges,
+	CLASSIFY_EMPTY_IS_NOTHING
+)
+CLASSIFY_LINE_COMPILE(
+	acl_icmp6_type,
+	struct classify_attr_line,
+	0x100,
+	acl_rule_get_icmp6_type_ranges,
 	CLASSIFY_EMPTY_IS_NOTHING
 )
 static inline void
@@ -1159,6 +1175,9 @@ struct acl_path_filters_build {
 	// The family the paths belong to - "ip4" or "ip6" - prefixing the
 	// memory context names of the compile below.
 	const char *family;
+	// The ip6 side reads its own ICMP type leaf: the two protocols
+	// never share each other's types.
+	bool family6;
 	struct acl_classifier_ports *ports;
 	struct acl_classifier_tcp *tcp;
 	struct acl_classifier_icmp *icmp;
@@ -1409,14 +1428,23 @@ acl_module_build_paths(
 		}
 
 		acl_path_name(name, sizeof(name), build, "icmp_type");
-		if (classify_acl_icmp_type_compile(
-			    memory_context,
-			    name,
-			    rule_ptrs,
-			    acl_rule_count,
-			    &build->icmp->type_attr,
-			    &stage_type
-		    )) {
+		int icmp_rc = build->family6 ? classify_acl_icmp6_type_compile(
+						       memory_context,
+						       name,
+						       rule_ptrs,
+						       acl_rule_count,
+						       &build->icmp->type_attr,
+						       &stage_type
+					       )
+					     : classify_acl_icmp_type_compile(
+						       memory_context,
+						       name,
+						       rule_ptrs,
+						       acl_rule_count,
+						       &build->icmp->type_attr,
+						       &stage_type
+					       );
+		if (icmp_rc) {
 			free(rule_ptrs);
 			goto error;
 		}
@@ -1686,6 +1714,7 @@ acl_module_compile_rules(
 	{
 		struct acl_path_filters_build path4_build = {
 			.family = "ip4",
+			.family6 = false,
 			.ports = &config->classifier_ports4,
 			.tcp = &config->classifier_tcp4,
 			.icmp = &config->classifier_icmp4,
@@ -1728,6 +1757,7 @@ acl_module_compile_rules(
 	{
 		struct acl_path_filters_build path6_build = {
 			.family = "ip6",
+			.family6 = true,
 			.ports = &config->classifier_ports6,
 			.tcp = &config->classifier_tcp6,
 			.icmp = &config->classifier_icmp6,

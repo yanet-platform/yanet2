@@ -40,6 +40,29 @@ func transportsToProtoRanges(rule *aclpb.Rule) (filter.ProtoRanges, error) {
 		return nil, status.Errorf(codes.InvalidArgument, "a rule carries both transports and proto ranges")
 	}
 
+	// A generic protocol resolves through the plain path alone, which a
+	// rule with a transport byte condition never takes: the tcp and the
+	// icmp paths alone have leaves. A rule mixing the two shapes would
+	// silently drop its generic protocols, so it is rejected and must be
+	// spelled as two rules.
+	generic, byteConstrained := false, false
+	for _, transport := range transports {
+		switch protocol := transport.GetProtocol().(type) {
+		case *aclpb.Transport_Ipproto:
+			generic = true
+		case *aclpb.Transport_Tcp:
+			byteConstrained = byteConstrained || len(protocol.Tcp.GetFlags()) > 0
+		case *aclpb.Transport_Icmp:
+			byteConstrained = byteConstrained || len(protocol.Icmp.GetTypes()) > 0
+		case *aclpb.Transport_Icmpv6:
+			byteConstrained = byteConstrained || len(protocol.Icmpv6.GetTypes()) > 0
+		}
+	}
+	if generic && byteConstrained {
+		return nil, status.Errorf(codes.InvalidArgument,
+			"a rule mixing a transport byte condition with a generic protocol must be split into two rules")
+	}
+
 	ranges := make([]filter.ProtoRange, 0, len(transports))
 	for idx, transport := range transports {
 		added, err := transportToProtoRanges(transport)

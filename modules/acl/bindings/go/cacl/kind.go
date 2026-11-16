@@ -30,10 +30,6 @@ const (
 	RuleKindL4
 )
 
-// wholeProtoRange spans every protocol with every transport byte: the
-// no-constraint wildcard of the protocol condition.
-var wholeProtoRange = filter.ProtoRanges{{From: 0, To: 0xffff}}
-
 // ExpandRuleKind validates a rule against its declared kind and spells
 // the absent conditions inside the kind out as the explicit wildcards
 // the compile expects: a family of the rule participates when either
@@ -108,15 +104,19 @@ func ExpandRuleKind(rule *ACLRule) error {
 			}
 		}
 		if len(rule.ProtoRanges) == 0 {
-			rule.ProtoRanges = wholeProtoRange
+			// A fresh slice per rule: the wildcard is the rule's own
+			// storage from here on.
+			rule.ProtoRanges = filter.ProtoRanges{{From: 0, To: 0xffff}}
 		}
-		if rule.Kind == RuleKindL4 {
-			if len(rule.SrcPortRanges) == 0 {
-				rule.SrcPortRanges = filter.PortRanges{{From: 0, To: 65535}}
-			}
-			if len(rule.DstPortRanges) == 0 {
-				rule.DstPortRanges = filter.PortRanges{{From: 0, To: 65535}}
-			}
+		// The ports are not defined at the l3 layer and unrestricted at
+		// an l4 rule leaving them out: either way the absent side spells
+		// the whole port domain, so the path selection never reads it as
+		// a restriction.
+		if len(rule.SrcPortRanges) == 0 {
+			rule.SrcPortRanges = filter.PortRanges{{From: 0, To: 65535}}
+		}
+		if len(rule.DstPortRanges) == 0 {
+			rule.DstPortRanges = filter.PortRanges{{From: 0, To: 65535}}
 		}
 		return nil
 

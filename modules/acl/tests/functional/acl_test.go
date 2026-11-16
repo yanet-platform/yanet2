@@ -593,6 +593,96 @@ func TestACL_KindL4_AbsentPortsAreAny(t *testing.T) {
 	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_action_allow", 1)
 }
 
+// TestACL_KindL3_MatchesAnyTransport verifies the l3 kind contract end
+// to end: the ports are not defined at the l3 layer, so a rule leaving
+// them out matches any port of its protocol - the UDP path included.
+func TestACL_KindL3_MatchesAnyTransport(t *testing.T) {
+	eth := layers.Ethernet{
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	ip4 := layers.IPv4{
+		Version:  4,
+		TTL:      64,
+		Protocol: layers.IPProtocolUDP,
+		SrcIP:    net.ParseIP("192.0.2.1"),
+		DstIP:    net.ParseIP("10.0.0.1"),
+	}
+	udp := layers.UDP{SrcPort: 12345, DstPort: 53}
+	udp.SetNetworkLayerForChecksum(&ip4)
+	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &udp)
+
+	rule := allow4Rule(
+		[]xnetip.Contiguous[xnetip.Network4]{mustContiguous4("192.0.2.0/24")},
+		[]xnetip.Contiguous[xnetip.Network4]{mustContiguous4("10.0.0.0/8")},
+		udpProto,
+	)
+	rule.Kind = cacl.RuleKindL3
+	rule.SrcPortRanges = nil
+	rule.DstPortRanges = nil
+	require.NoError(t, cacl.ExpandRuleKind(&rule))
+
+	h, agent, backend := setupACLHarness(t, []string{"port0"})
+	applyACLRules(t, backend, "test", []cacl.ACLRule{rule})
+	wireACLPipeline(t, agent, "port0", "test")
+
+	result, err := h.HandlePackets(pkt)
+	require.NoError(t, err)
+	require.Len(t, result.Output, 1, "the l3 rule must match the UDP packet")
+	require.Empty(t, result.Drop)
+
+	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_action_allow", 1)
+}
+
+// TestACL_IcmpTypesStayPerFamily verifies that the ICMP and the ICMPv6
+// type conditions never leak across the families: a dual-family rule
+// with the ICMP echo request type matches an ICMP echo and misses an
+// ICMPv6 packet of the very type ICMPv6 rules used to inherit.
+func TestACL_IcmpTypesStayPerFamily(t *testing.T) {
+	eth := layers.Ethernet{
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+		EthernetType: layers.EthernetTypeIPv6,
+	}
+	ip6 := layers.IPv6{
+		Version:    6,
+		NextHeader: layers.IPProtocolICMPv6,
+		HopLimit:   64,
+		SrcIP:      net.ParseIP("2001:db8::1"),
+		DstIP:      net.ParseIP("2001:db8::2"),
+	}
+	echoRequest6 := layers.ICMPv6{
+		TypeCode: layers.CreateICMPv6TypeCode(layers.ICMPv6TypeEchoRequest, 0),
+	}
+	echoRequest6.SetNetworkLayerForChecksum(&ip6)
+	pkt := xpacket.LayersToPacket(t, &eth, &ip6, &echoRequest6)
+
+	// A dual-family rule limiting the ICMP type to the echo request:
+	// the ICMPv6 side carries no type condition and must not inherit
+	// the ICMP one, so the ICMPv6 echo request misses the rule.
+	rules := []cacl.ACLRule{{
+		Actions:       []cacl.ACLAction{{Kind: cacl.ActionAllow}},
+		Devices:       filter.Devices{{Name: "port0"}},
+		Src4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Dst4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Src6s:         []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+		Dst6s:         []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+		SrcPortRanges: allPorts,
+		DstPortRanges: allPorts,
+		ProtoRanges:   icmp4Proto,
+	}}
+
+	h, agent, backend := setupACLHarness(t, []string{"port0"})
+	applyACLRules(t, backend, "test", rules)
+	wireACLPipeline(t, agent, "port0", "test")
+
+	result, err := h.HandlePackets(pkt)
+	require.NoError(t, err)
+	require.Empty(t, result.Output, "the ICMPv6 echo must not match the ICMP-typed rule")
+	require.Len(t, result.Drop, 1)
+}
+
 // TestACL_KindL2_MatchesNonIP verifies the declared l2 kind: the rule
 // carries every field condition absent and matches the non-IP packets.
 func TestACL_KindL2_MatchesNonIP(t *testing.T) {

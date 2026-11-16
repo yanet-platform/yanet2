@@ -51,6 +51,23 @@ fn deserialize_action_kind<'de, D: Deserializer<'de>>(deserializer: D) -> Result
     Ok(kind as i32)
 }
 
+/// Serializes a rule kind as its declared name, an undeclared number as
+/// the number itself, so one unknown kind cannot hide the rest of a ruleset.
+fn serialize_rule_kind<S: Serializer>(kind: &i32, serializer: S) -> Result<S::Ok, S::Error> {
+    serde_with::declared_name(kind, serializer, aclpb::RuleKind::as_str_name)
+}
+
+/// Deserializes a rule kind from its declared name only: a null or a
+/// number is refused, because the zero kind would silently read as the
+/// historical inference.
+fn deserialize_rule_kind<'de, D: Deserializer<'de>>(deserializer: D) -> Result<i32, D::Error> {
+    let name = String::deserialize(deserializer)?;
+    let kind = aclpb::RuleKind::from_str_name(&name)
+        .ok_or_else(|| de::Error::custom(format!("unknown RuleKind name `{name}`")))?;
+
+    Ok(kind as i32)
+}
+
 #[derive(Tabled)]
 struct CounterRow {
     #[tabled(rename = "Counter")]

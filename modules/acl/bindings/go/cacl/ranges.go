@@ -29,10 +29,14 @@ type ProtoSplit struct {
 	// range, clamped to the whole byte at the edges outside TCP: the
 	// only protocol the flags leaf discriminates.
 	TCPFlags []LineRange
-	// ICMPTypes holds the low byte sub-spans of the ICMP and the
-	// ICMPv6 covering ranges: the two protocols share the type byte
-	// semantics, so one leaf discriminates both.
+	// ICMPTypes holds the low byte sub-spans of the ICMP covering
+	// ranges: the type leaf of the ip4 family.
 	ICMPTypes []LineRange
+	// ICMPTypes6 holds the low byte sub-spans of the ICMPv6 covering
+	// ranges: the type leaf of the ip6 family. The two protocols share
+	// the type byte semantics but never each other's types, so the
+	// families keep their own leaves.
+	ICMPTypes6 []LineRange
 	// WholeL4 reports that every authored range leaves the low byte
 	// whole: such a rule matches any transport specific byte, the
 	// fragments without one included.
@@ -104,7 +108,7 @@ func SplitProtoRanges(ranges filter.ProtoRanges) ProtoSplit {
 			split.ICMPTypes = append(split.ICMPTypes, interval)
 		}
 		if interval, ok := subspan(r, ipProtoICMPv6); ok {
-			split.ICMPTypes = append(split.ICMPTypes, interval)
+			split.ICMPTypes6 = append(split.ICMPTypes6, interval)
 		}
 
 		if r.From&0xff != 0 || r.To&0xff != 0xff {

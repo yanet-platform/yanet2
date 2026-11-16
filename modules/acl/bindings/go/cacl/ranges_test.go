@@ -35,6 +35,7 @@ func TestSplitProtoRanges(t *testing.T) {
 	assert.Empty(t, empty.IpProto)
 	assert.Empty(t, empty.TCPFlags)
 	assert.Empty(t, empty.ICMPTypes)
+	assert.Empty(t, empty.ICMPTypes6)
 	assert.False(t, empty.WholeL4)
 
 	assert.Equal(t, []cacl.LineRange{
@@ -51,8 +52,10 @@ func TestSplitProtoRanges(t *testing.T) {
 
 	assert.Equal(t, []cacl.LineRange{
 		{From: 0, To: 0xff},
-		{From: 0x80, To: 0xff},
 	}, split.ICMPTypes)
+	assert.Equal(t, []cacl.LineRange{
+		{From: 0x80, To: 0xff},
+	}, split.ICMPTypes6)
 
 	assert.False(t, split.WholeL4)
 }

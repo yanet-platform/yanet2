@@ -1450,16 +1450,15 @@ func TestUpdateConfig_Transports(t *testing.T) {
 			Actions:  []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}},
 			Devices:  []*filterpb.Device{{Name: "port0"}},
 			Sources4: []*commonpb.IPv4Network{mustV4Network("192.0.2.0/24")},
+			// Whole-byte entries mix with the generic protocol; a
+			// byte constrained one does not and has its own case.
 			Transports: []*aclpb.Transport{
-				{Protocol: &aclpb.Transport_Tcp{Tcp: &aclpb.Tcp{
-					Flags: []*filterpb.ByteRange{{From: 0x02, To: 0x02}},
-				}}},
+				{Protocol: &aclpb.Transport_Tcp{Tcp: &aclpb.Tcp{}}},
 				{Protocol: &aclpb.Transport_Udp{Udp: &aclpb.Udp{}}},
 				{Protocol: &aclpb.Transport_Icmp{Icmp: &aclpb.Icmp{
 					Types: []*filterpb.ByteRange{{From: 0, To: 8}},
 				}}},
 				{Protocol: &aclpb.Transport_Icmpv6{Icmpv6: &aclpb.Icmpv6{}}},
-				{Protocol: &aclpb.Transport_Ipproto{Ipproto: 47}},
 			},
 		}},
 	})
@@ -1471,20 +1470,44 @@ func TestUpdateConfig_Transports(t *testing.T) {
 	require.Len(t, rules, 1)
 
 	assert.Equal(t, filter.ProtoRanges{
-		// TCP with the SYN flag byte.
-		{From: 6<<8 | 0x02, To: 6<<8 | 0x02},
+		// The whole TCP protocol.
+		{From: 6 << 8, To: 6<<8 | 0xff},
 		// The whole UDP protocol.
 		{From: 17 << 8, To: 17<<8 | 0xff},
 		// ICMP echo request types.
 		{From: 1 << 8, To: 1<<8 | 8},
 		// The whole ICMPv6 protocol.
 		{From: 58 << 8, To: 58<<8 | 0xff},
-		// GRE by its protocol number, the whole byte.
-		{From: 47 << 8, To: 47<<8 | 0xff},
 	}, rules[0].ProtoRanges)
 	// The l4 kind fills the absent port sides with the whole range.
 	assert.Equal(t, filter.PortRanges{{From: 0, To: 65535}}, rules[0].SrcPortRanges)
 	assert.Equal(t, filter.PortRanges{{From: 0, To: 65535}}, rules[0].DstPortRanges)
+
+	// A whole-byte protocol mixes with the generic one: both resolve
+	// through the plain path.
+	_, err = svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+		Name: "acl1",
+		Rules: []*aclpb.Rule{{
+			Kind:    aclpb.RuleKind_RULE_KIND_L4,
+			Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}},
+			Sources4: []*commonpb.IPv4Network{
+				commonpb.NewIPv4NetworkFrom4(xnetip.MustParseNetwork4("192.0.2.0/24")),
+			},
+			Transports: []*aclpb.Transport{
+				{Protocol: &aclpb.Transport_Tcp{Tcp: &aclpb.Tcp{}}},
+				{Protocol: &aclpb.Transport_Ipproto{Ipproto: 47}},
+			},
+		}},
+	})
+	require.NoError(t, err)
+	handles = backend.CreatedHandles()
+	require.Len(t, handles, 2)
+	rules = handles[1].Rules()
+	require.Len(t, rules, 1)
+	assert.Equal(t, filter.ProtoRanges{
+		{From: 6 << 8, To: 6<<8 | 0xff},
+		{From: 47 << 8, To: 47<<8 | 0xff},
+	}, rules[0].ProtoRanges)
 
 	for _, tc := range []struct {
 		name string
@@ -1531,6 +1554,17 @@ func TestUpdateConfig_Transports(t *testing.T) {
 			name: "transport without a protocol",
 			rule: &aclpb.Rule{
 				Transports: []*aclpb.Transport{{}},
+			},
+		},
+		{
+			name: "generic protocol mixed with a transport byte condition",
+			rule: &aclpb.Rule{
+				Transports: []*aclpb.Transport{
+					{Protocol: &aclpb.Transport_Tcp{Tcp: &aclpb.Tcp{
+						Flags: []*filterpb.ByteRange{{From: 0x02, To: 0x02}},
+					}}},
+					{Protocol: &aclpb.Transport_Ipproto{Ipproto: 47}},
+				},
 			},
 		},
 	} {

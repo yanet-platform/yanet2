@@ -156,6 +156,7 @@ func (m *ACLRule) cBuild(pinner *runtime.Pinner) C.struct_acl_rule {
 	cBuildLineRanges(&cRule.ipproto_ranges, split.IpProto, pinner)
 	cBuildLineRanges(&cRule.tcp_flags_ranges, split.TCPFlags, pinner)
 	cBuildLineRanges(&cRule.icmp_type_ranges, split.ICMPTypes, pinner)
+	cBuildLineRanges(&cRule.icmp6_type_ranges, split.ICMPTypes6, pinner)
 
 	flags := RulePathMembership(
 		m.ProtoRanges, m.SrcPortRanges, m.DstPortRanges, m.Fragment,

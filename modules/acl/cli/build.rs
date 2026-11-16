@@ -52,6 +52,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                     ".modules.acl.controlplane.aclpb.v1.Action.kind",
                     "#[serde(serialize_with = \"crate::serialize_action_kind\", deserialize_with = \"crate::deserialize_action_kind\")]",
                 )
+                .field_attribute(
+                    ".modules.acl.controlplane.aclpb.v1.Rule.kind",
+                    "#[serde(serialize_with = \"crate::serialize_rule_kind\", deserialize_with = \"crate::deserialize_rule_kind\")]",
+                )
         })
         .compile()
 }

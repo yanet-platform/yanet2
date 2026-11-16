@@ -59,6 +59,7 @@ struct acl_rule {
 	struct classify_line_ranges ipproto_ranges;
 	struct classify_line_ranges tcp_flags_ranges;
 	struct classify_line_ranges icmp_type_ranges;
+	struct classify_line_ranges icmp6_type_ranges;
 
 	// The family path membership decided alongside the interval
 	// split: the plain path takes the rules matching the packets

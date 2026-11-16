@@ -72,9 +72,11 @@ func TestExpandRuleKind(t *testing.T) {
 				Src4s: []xnetip.Contiguous[xnetip.Network4]{mustContiguous4("10.0.0.0/8")},
 			},
 			want: cacl.ACLRule{
-				Kind:  cacl.RuleKindL3,
-				Src4s: []xnetip.Contiguous[xnetip.Network4]{mustContiguous4("10.0.0.0/8")},
-				Dst4s: []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+				Kind:          cacl.RuleKindL3,
+				Src4s:         []xnetip.Contiguous[xnetip.Network4]{mustContiguous4("10.0.0.0/8")},
+				Dst4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+				SrcPortRanges: anyPorts,
+				DstPortRanges: anyPorts,
 				ProtoRanges: filter.ProtoRanges{
 					{From: 0, To: 0xffff},
 				},
@@ -87,9 +89,11 @@ func TestExpandRuleKind(t *testing.T) {
 				Dst6s: []xnetip.BiContiguous{xnetip.MustParseBiContiguous("2a02::/32")},
 			},
 			want: cacl.ACLRule{
-				Kind:  cacl.RuleKindL3,
-				Src6s: []xnetip.BiContiguous{filter.UnspecifiedIPv6},
-				Dst6s: []xnetip.BiContiguous{xnetip.MustParseBiContiguous("2a02::/32")},
+				Kind:          cacl.RuleKindL3,
+				Src6s:         []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+				Dst6s:         []xnetip.BiContiguous{xnetip.MustParseBiContiguous("2a02::/32")},
+				SrcPortRanges: anyPorts,
+				DstPortRanges: anyPorts,
 				ProtoRanges: filter.ProtoRanges{
 					{From: 0, To: 0xffff},
 				},
@@ -106,9 +110,11 @@ func TestExpandRuleKind(t *testing.T) {
 				},
 			},
 			want: cacl.ACLRule{
-				Kind:  cacl.RuleKindL3,
-				Src4s: []xnetip.Contiguous[xnetip.Network4]{mustContiguous4("10.0.0.0/8")},
-				Dst4s: []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+				Kind:          cacl.RuleKindL3,
+				Src4s:         []xnetip.Contiguous[xnetip.Network4]{mustContiguous4("10.0.0.0/8")},
+				Dst4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+				SrcPortRanges: anyPorts,
+				DstPortRanges: anyPorts,
 				ProtoRanges: filter.ProtoRanges{
 					{From: 6 << 8, To: 6<<8 | 0xff},
 				},
