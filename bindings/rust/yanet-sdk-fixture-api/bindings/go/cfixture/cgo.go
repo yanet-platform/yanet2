@@ -30,7 +30,8 @@ yanet_cp_yanet_sdk_fixture_api__fixture_free(
 
 struct cp_module *
 yanet_cp_yanet_sdk_fixture_api__tally_build(
-	struct agent *agent, const char *name, uint64_t word, yanet_error **err
+	struct agent *agent, const char *name, uint64_t word,
+	uint8_t with_lanes, yanet_error **err
 );
 
 int
@@ -422,19 +423,24 @@ func freeFixture(ptr unsafe.Pointer) (int, unsafe.Pointer, error) {
 }
 
 // NewTallyConfig builds a tally configuration named name over word in the
-// memory of the agent.
-func NewTallyConfig(agent *ffi.Agent, name string, word uint64) (*ModuleConfig, error) {
+// memory of the agent. Without lanes, its lanes registry has no active counters.
+func NewTallyConfig(agent *ffi.Agent, name string, word uint64, withLanes bool) (*ModuleConfig, error) {
 	if err := refuseNUL(name); err != nil {
 		return nil, fmt.Errorf("failed to build tally config: %w", err)
 	}
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
+	var cWithLanes C.uint8_t
+	if withLanes {
+		cWithLanes = 1
+	}
 
 	var cErr *C.yanet_error
 	ptr := C.yanet_cp_yanet_sdk_fixture_api__tally_build(
 		(*C.struct_agent)(agent.AsRawPtr()),
 		cName,
 		C.uint64_t(word),
+		cWithLanes,
 		&cErr,
 	)
 	if ptr == nil {

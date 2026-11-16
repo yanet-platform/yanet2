@@ -104,6 +104,20 @@ wrapper declares typed prototypes over the header's structs. An api crate is
 built with unwinding (the guards need it); a plugin is built with
 `--profile plugin`.
 
+### Empty tagged counter registries
+
+`scope.counters_in("rules")` creates a lazy registrar. With no counter
+registrations it leaves the module without that registry. Call
+`registrar.ensure_registry()?` to create the registry explicitly, even when
+no active counters follow. It uses C's `cp_module_counter_registry` without
+registering a dummy counter or consuming a counter id. Repeated calls find
+the same registry.
+
+An explicitly empty registry participates in native replacement linking:
+omitted counters retain their values for one replacement and expire after
+two consecutive omissions. This is useful when a configuration temporarily
+has no rules. Existing callers keep lazy creation unless they opt in.
+
 ## Build
 
 The build script of `yanet-sys` reads the C flags of the dataplane

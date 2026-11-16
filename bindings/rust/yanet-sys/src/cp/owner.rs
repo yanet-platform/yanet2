@@ -132,6 +132,15 @@ pub unsafe trait Owner: 'static {
     /// The header must be initialised by this owner and not published.
     unsafe fn register_counter(&self, header: Header, name: &str, size: u64) -> Result<u64, Self::Error>;
 
+    /// Creates the module's tagged counter registry if absent and returns
+    /// its index, without registering a counter.
+    ///
+    /// # Safety
+    ///
+    /// As for [`Owner::register_counter`].
+    #[doc(alias = "cp_module_counter_registry")]
+    unsafe fn ensure_counter_registry(&self, header: Header, tag: &str) -> Result<u64, Self::Error>;
+
     /// Registers a counter of the given number of values (C size) with the
     /// module's tagged registry of the tag and returns the registry's index
     /// and the counter's id in it.

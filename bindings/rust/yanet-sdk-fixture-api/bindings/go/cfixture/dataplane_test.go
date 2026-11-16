@@ -298,6 +298,48 @@ func Test_Tally_TaggedCounters_CarryOverToANewConfiguration(t *testing.T) {
 	)
 }
 
+// An explicitly empty registry retains counters for one replacement, not two.
+// Packets processed while it is empty must not increment the carried counters.
+func Test_Tally_TaggedCounters_CarryAcrossEmptyRegistry(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		absent  int
+		packets int
+	}{
+		{name: "one empty replacement retains values", absent: 1, packets: 2},
+		{name: "two empty replacements expire values", absent: 2, packets: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bed := newBed(t)
+			inst := bed.tallyInstance("config", 7)
+			bed.serveBeforeForward(inst)
+			bed.run(1, arpFrames(1)...)
+			for range tc.absent {
+				config, err := cfixture.NewTallyConfig(bed.agent, inst.name, 7, false)
+				require.NoError(t, err)
+				bed.freeAtEnd(config)
+				empty := &instance{
+					moduleType: "tally",
+					name:       inst.name,
+					config:     config,
+					path:       inst.path,
+				}
+				bed.publishModules(empty)
+				bed.run(1, arpFrames(1)...)
+			}
+			restored := bed.tallyInstance(inst.name, 7)
+			restored.path = inst.path
+			bed.publishModules(restored)
+			bed.run(1, arpFrames(1)...)
+
+			require.Equal(t,
+				[][]uint64{{0, 0}, packetsAndBytes(tc.packets, tc.packets*60), {0, 0}, {0, 0}},
+				bed.taggedCounter(restored, "lanes", "wide"),
+			)
+		})
+	}
+}
+
 // perWorkerValues returns a single-value counter of every worker of a bed,
 // zero except for the given workers.
 func perWorkerValues(values map[int]uint64) [][]uint64 {

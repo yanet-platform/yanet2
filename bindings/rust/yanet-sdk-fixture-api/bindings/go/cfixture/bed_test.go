@@ -161,7 +161,7 @@ func (m *bed) forwardInstance() *instance {
 func (m *bed) tallyInstance(name string, word uint64) *instance {
 	m.t.Helper()
 
-	config, err := cfixture.NewTallyConfig(m.agent, name, word)
+	config, err := cfixture.NewTallyConfig(m.agent, name, word, true)
 	require.NoError(m.t, err)
 	m.freeAtEnd(config)
 	return &instance{moduleType: "tally", name: name, config: config}
