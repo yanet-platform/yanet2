@@ -152,6 +152,29 @@ func TestCountersCollectEmitsPoolGauges(t *testing.T) {
 	require.NotNil(t, disposed, "existing counters must keep their label set")
 }
 
+// TestCountersCollectEmitsChainedDrops verifies that the worker's chained
+// ingress drop counter surfaces as its own series with the standard worker
+// label set, keeping it out of the generic disposed bucket. The counter
+// name and series name are plain strings so the case also compiles against
+// a dataplane that predates the counter, where the injection fails.
+func TestCountersCollectEmitsChainedDrops(t *testing.T) {
+	harness := newCountersHarness(t, 1)
+	require.NoError(t, harness.SetWorkerCounter(0, "rx_chained_drops", 7))
+
+	svc := builtin.NewCounters(0, harness.SharedMemory())
+
+	metrics := svc.Collect()
+
+	chained := metricByExactLabels(t, metrics, "worker_rx_chained_drops", map[string]string{
+		"worker_idx": "0",
+		"core_id":    "0",
+		"device_id":  "0",
+		"queue_id":   "0",
+	})
+	require.NotNil(t, chained, "the chained drops series is missing")
+	require.Equal(t, uint64(7), chained.GetCounter())
+}
+
 // TestCountersWorkersRejectsInvalidPoolSnapshot verifies that a pool
 // snapshot no healthy dataplane would publish fails the read naming the
 // worker instead of rendering a plausible value.

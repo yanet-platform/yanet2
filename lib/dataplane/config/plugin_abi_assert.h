@@ -60,7 +60,7 @@ _Static_assert(
 	"struct config_gen_ectx size changed, bump YANET_MODULE_ABI_VERSION"
 );
 _Static_assert(
-	sizeof(struct dp_worker) == 176,
+	sizeof(struct dp_worker) == 184,
 	"struct dp_worker size changed, bump YANET_MODULE_ABI_VERSION"
 );
 _Static_assert(

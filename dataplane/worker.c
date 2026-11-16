@@ -153,6 +153,20 @@ worker_process_staged(
 				config_gen_ectx->abs_backing_registry
 					[assignment->device_id];
 
+			// Ingress policy: every packet the pipeline sees
+			// is single-segment. The parse layer bounds its
+			// reads by the whole-chain length but dereferences
+			// through the head segment, so a chained mbuf
+			// would desynchronize the two for every
+			// downstream consumer. Drop and count it before
+			// parsing; the freed packet is also disposed.
+			if (!worker_rx_admits(ctx->staged[idx])) {
+				rte_pktmbuf_free(ctx->staged[idx]);
+				*(worker->dp_worker->rx_chained_drops) += 1;
+				*(worker->dp_worker->disposed_count) += 1;
+				continue;
+			}
+
 			if (parse_packet(packet)) {
 				struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 				rte_pktmbuf_free(mbuf);

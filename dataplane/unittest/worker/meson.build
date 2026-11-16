@@ -3,5 +3,6 @@ dp_worker_scheduler_test = executable(
   'main.c',
   c_args: yanet_test_c_args,
   include_directories: yanet_rootdir,
+  dependencies: libdpdk_inc_dep,
 )
 test('dataplane_worker_scheduler', dp_worker_scheduler_test)

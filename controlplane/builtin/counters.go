@@ -196,6 +196,7 @@ func (m *Counters) Workers(
 			RemoteTxPackets: worker.RemoteTxPackets,
 			LocalTxDrops:    worker.LocalTxDrops,
 			RemoteTxDrops:   worker.RemoteTxDrops,
+			RxChainedDrops:  worker.RxChainedDrops,
 			Disposed:        worker.Disposed,
 			RxMempool:       pool,
 			Assignments:     assignments,
@@ -338,6 +339,7 @@ func workerMetrics(workers []ffi.WorkerCounter, instanceID uint32) []*commonpb.M
 			commonpb.NewMetricCounter("worker_remote_tx_packets", worker.RemoteTxPackets, labels...),
 			commonpb.NewMetricCounter("worker_local_tx_drops", worker.LocalTxDrops, labels...),
 			commonpb.NewMetricCounter("worker_remote_tx_drops", worker.RemoteTxDrops, labels...),
+			commonpb.NewMetricCounter("worker_rx_chained_drops", worker.RxChainedDrops, labels...),
 			commonpb.NewMetricCounter("worker_disposed", worker.Disposed, labels...),
 		)
 

@@ -46,7 +46,8 @@
 // 47: struct dp_port gained rss_queue_count.
 // 48: struct dp_worker_assignment gained the assignment's rx service
 // weight; the list stays part of dp_worker's plugin-visible contract.
-#define YANET_MODULE_ABI_VERSION 49
+// 49: struct dp_worker gained the rx_chained_drops counter pointer.
+#define YANET_MODULE_ABI_VERSION 50
 
 // Symbol name a module .so exports carrying its compiled-against
 // YANET_MODULE_ABI_VERSION, as a uint32_t global.
