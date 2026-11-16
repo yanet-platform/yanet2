@@ -60,8 +60,9 @@ func Test_RegisterRequest_Validate(t *testing.T) {
 	}
 }
 
-// Test_BackendDesc_Validate verifies that a backend descriptor requires both
-// the service name and the endpoint, including for a nil descriptor.
+// Test_BackendDesc_Validate verifies that a backend descriptor requires
+// both the service name and the endpoint, and that the endpoint is an
+// absolute path or a host:port pair, including for a nil descriptor.
 func Test_BackendDesc_Validate(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -84,8 +85,26 @@ func Test_BackendDesc_Validate(t *testing.T) {
 			message: "endpoint is required",
 		},
 		{
+			name:    "endpoint without port",
+			backend: &ynpb.BackendDesc{Name: "svc.Test", Endpoint: "127.0.0.1"},
+			message: "endpoint: address 127.0.0.1: missing port in address",
+		},
+		{
+			name:    "endpoint as bare word",
+			backend: &ynpb.BackendDesc{Name: "svc.Test", Endpoint: "passthrough"},
+			message: "endpoint: address passthrough: missing port in address",
+		},
+		{
 			name:    "valid backend",
 			backend: &ynpb.BackendDesc{Name: "svc.Test", Endpoint: "passthrough:test-endpoint"},
+		},
+		{
+			name:    "valid backend with empty host",
+			backend: &ynpb.BackendDesc{Name: "svc.Test", Endpoint: ":9000"},
+		},
+		{
+			name:    "valid backend with absolute path endpoint",
+			backend: &ynpb.BackendDesc{Name: "svc.Test", Endpoint: "/run/module.sock"},
 		},
 	}
 

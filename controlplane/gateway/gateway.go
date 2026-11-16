@@ -539,7 +539,7 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 		),
 	}
 
-	gatewayService := NewGatewayService(registry, WithGatewayServiceLog(log))
+	gatewayService := NewGatewayService(registry, WithGatewayServiceAuthorizer(authManager), WithGatewayServiceLog(log))
 
 	// The gateway scope is set once at startup and has no heartbeat source,
 	// so it declares no expected freshness.
@@ -657,7 +657,9 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 		ynpb.MetricsService_ServiceDesc.ServiceName,
 		ynpb.PortMetricsService_ServiceDesc.ServiceName,
 	} {
-		registry.RegisterBackend(service, loopback, BackendKindBuiltin)
+		if _, err := registry.RegisterBackend(service, loopback, BackendKindBuiltin); err != nil {
+			return nil, fmt.Errorf("failed to register builtin service %q: %w", service, err)
+		}
 		log.Info("registered service in registry",
 			zap.String("service", service),
 			zap.Stringer("kind", BackendKindBuiltin),
@@ -676,7 +678,9 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 			// Shared-server service: registered on the gateway's gRPC servers
 			// above, every service name points at the shared loopback backend.
 			for _, name := range entry.Service.ServicesNames() {
-				registry.RegisterBackend(name, loopback, entry.Kind)
+				if _, err := registry.RegisterBackend(name, loopback, entry.Kind); err != nil {
+					return nil, fmt.Errorf("failed to register builtin service %q: %w", name, err)
+				}
 				log.Info("registered service in registry",
 					zap.String("service", name),
 					zap.Stringer("kind", entry.Kind),

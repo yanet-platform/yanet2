@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"sort"
 	"sync"
@@ -28,6 +29,15 @@ const (
 	BackendKindInProcess
 	BackendKindExternal
 )
+
+// ErrBackendKindMismatch reports a registration that would displace an
+// entry held under a different hosting kind.
+//
+// The hosting kind is fixed at registration: displacing across kinds either
+// tears down a connection the gateway shares across its own services, or
+// arms eviction against one it must never lose. The existing entry is left
+// untouched, and the caller keeps ownership of the backend it passed.
+var ErrBackendKindMismatch = errors.New("backend kind mismatch")
 
 // String returns the human-readable name of the backend kind.
 func (m BackendKind) String() string {
@@ -222,13 +232,16 @@ func (m *BackendRegistry) releaseRef(ref *backendRef) {
 // proxying through it leaves it open until that call finishes. This matters
 // because one dialed connection, such as the gateway's own loopback
 // backend, is commonly registered under several service names at once.
-func (m *BackendRegistry) RegisterBackend(service string, b Backend, kind BackendKind) RegistrationStatus {
-	status, evicted := m.registerBackend(service, b, kind)
+// A registration that would displace an existing entry held under a
+// different hosting kind fails with ErrBackendKindMismatch: the entry is
+// left untouched, and the caller keeps ownership of the backend it passed.
+func (m *BackendRegistry) RegisterBackend(service string, b Backend, kind BackendKind) (RegistrationStatus, error) {
+	status, evicted, err := m.registerBackend(service, b, kind)
 	if evicted != nil {
 		_ = evicted.Close()
 	}
 
-	return status
+	return status, err
 }
 
 // registerBackend performs the registration under the write lock and
@@ -241,7 +254,7 @@ func (m *BackendRegistry) RegisterBackend(service string, b Backend, kind Backen
 // displaced value is nil instead: b is a connection this registration never
 // retained, so closing it would tear down every other entry still
 // resolving to it.
-func (m *BackendRegistry) registerBackend(service string, b Backend, kind BackendKind) (RegistrationStatus, Backend) {
+func (m *BackendRegistry) registerBackend(service string, b Backend, kind BackendKind) (RegistrationStatus, Backend, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -250,17 +263,25 @@ func (m *BackendRegistry) registerBackend(service string, b Backend, kind Backen
 	switch {
 	case ok && m.renewLocked(service, b.Endpoint(), now):
 		if _, tracked := m.refs[b]; tracked {
-			return RegistrationRenewed, nil
+			return RegistrationRenewed, nil, nil
 		}
-		return RegistrationRenewed, b
+		return RegistrationRenewed, b, nil
+	case ok && existing.Kind() != kind:
+		return 0, nil, fmt.Errorf(
+			"%w: service %q is registered as %s, not %s",
+			ErrBackendKindMismatch,
+			service,
+			existing.Kind(),
+			kind,
+		)
 	case ok:
 		m.backends[service] = newBackendEntry(service, b, kind, now)
 		m.retainLocked(b)
-		return RegistrationUpdated, m.releaseLocked(existing.GetBackend())
+		return RegistrationUpdated, m.releaseLocked(existing.GetBackend()), nil
 	default:
 		m.backends[service] = newBackendEntry(service, b, kind, now)
 		m.retainLocked(b)
-		return RegistrationRegistered, nil
+		return RegistrationRegistered, nil, nil
 	}
 }
 
