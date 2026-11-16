@@ -937,7 +937,12 @@ test_regions_compile(struct memory_context *mctx, uint64_t seed) {
 		rule_ptrs[idx] = &rules[idx].rule;
 	}
 	return classify_compile_net6_create(
-		mctx, rule_ptrs, count, test_rule_get_dsts, "test_net6_dst"
+		mctx,
+		rule_ptrs,
+		count,
+		test_rule_get_dsts,
+		CLASSIFY_EMPTY_IS_ANY,
+		"test_net6_dst"
 	);
 }
 
