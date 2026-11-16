@@ -113,10 +113,14 @@ struct dp_worker {
 	// Packets dropped because the inter-worker data pipe was full or
 	// absent.
 	uint64_t *remote_tx_drops;
+	// Packets dropped at ingress because the mbuf arrived chained, in
+	// violation of the single-segment pipeline invariant.
+	uint64_t *rx_chained_drops;
 	// Total packets this worker itself freed rather than forwarding.
 	//
-	// Includes both transmit drops above; excludes packets lost below
-	// the worker, such as a receive-ring overflow.
+	// Includes both transmit drops and the chained ingress drops above;
+	// excludes packets lost below the worker, such as a receive-ring
+	// overflow.
 	uint64_t *disposed_count;
 
 	// Packet source pool of the worker's first assignment.
@@ -161,7 +165,7 @@ struct dp_worker {
 // against a different layout of the control-plane zone or the dataplane
 // structures recognises a foreign magic and refuses the attach instead
 // of misreading shifted fields. Bump it on every layout change.
-#define DP_CONFIG_READY_MAGIC UINT64_C(0xDEAD10CC0000000C)
+#define DP_CONFIG_READY_MAGIC UINT64_C(0xDEAD10CC0000000D)
 
 struct dp_config {
 	uint32_t instance_count;

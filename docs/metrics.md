@@ -31,8 +31,11 @@ since the counters were reset:
 - `worker_tx_packets`, `worker_tx_bytes` — sent to the NIC.
 - `worker_remote_rx_packets`, `worker_remote_tx_packets` — inter-worker
   traffic.
-- `worker_local_tx_drops`, `worker_remote_tx_drops`, `worker_disposed` —
-  drops by cause; `worker_disposed` already includes both drop counters.
+- `worker_local_tx_drops`, `worker_remote_tx_drops`,
+  `worker_rx_chained_drops`, `worker_disposed` — drops by cause;
+  `worker_disposed` already includes the other drop counters.
+  `worker_rx_chained_drops` counts multi-segment mbufs refused at ingress
+  under the single-segment pipeline invariant.
 - `worker_rx_bursts` (histogram) — RX poll size distribution.
 
 ### RX packet pool gauges

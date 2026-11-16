@@ -104,11 +104,18 @@ message WorkerCounter {
   uint64 local_tx_drops = 14;
   // Packets dropped because the inter-worker data pipe was full or absent.
   uint64 remote_tx_drops = 15;
+  // Packets dropped at ingress because the mbuf arrived chained, in
+  // violation of the single-segment pipeline invariant. Absent only when
+  // the serving control plane predates this field; a dataplane without
+  // the counter fails the whole read instead, so an empty value here is
+  // never a stand-in for a real drop count.
+  uint64 rx_chained_drops = 19;
   // Packets this worker itself freed rather than forwarded.
   //
   // Covers malformed input, transmit failures, and deliberate module policy
   // drops such as an ACL deny, so nonzero alone is not a fault. Already
-  // includes every local_tx_drops and remote_tx_drops packet.
+  // includes every local_tx_drops, remote_tx_drops and rx_chained_drops
+  // packet.
   uint64 disposed = 16;
   // Occupancy of this worker's RX packet pool. Absent only when the
   // serving control plane predates this field; a dataplane without the

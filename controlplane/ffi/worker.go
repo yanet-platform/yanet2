@@ -50,6 +50,7 @@ type WorkerCounter struct {
 	RemoteTxPackets uint64
 	LocalTxDrops    uint64
 	RemoteTxDrops   uint64
+	RxChainedDrops  uint64
 	Disposed        uint64
 	RxMempool       *WorkerRxMempool
 	// Assignments lists every (device, queue) the worker polls; the
@@ -76,6 +77,7 @@ func (m *DPConfig) WorkerCounters() ([]WorkerCounter, error) {
 	remoteTx := counterSet.Lookup("remote_tx", 2).Require()
 	localTxDrops := counterSet.Lookup("local_tx_drops", 1).Require()
 	remoteTxDrops := counterSet.Lookup("remote_tx_drops", 1).Require()
+	rxChainedDrops := counterSet.Lookup("rx_chained_drops", 1).Require()
 	disposed := counterSet.Lookup("disposed", 1).Require()
 	rxMempoolCapacity := counterSet.Lookup("rx_mempool_capacity", 1).Require()
 	rxMempoolAvailable := counterSet.Lookup("rx_mempool_available", 1).Require()
@@ -124,6 +126,7 @@ func (m *DPConfig) WorkerCounters() ([]WorkerCounter, error) {
 			RemoteTxPackets: remoteTx.Value(idx, packetsIdx),
 			LocalTxDrops:    localTxDrops.Value(idx, singleValueIdx),
 			RemoteTxDrops:   remoteTxDrops.Value(idx, singleValueIdx),
+			RxChainedDrops:  rxChainedDrops.Value(idx, singleValueIdx),
 			Disposed:        disposed.Value(idx, singleValueIdx),
 			RxMempool:       pool,
 			Assignments:     assignments,

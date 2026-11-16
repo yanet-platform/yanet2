@@ -234,6 +234,8 @@ struct WorkerRow {
     local_tx_drops: String,
     #[tabled(rename = "RemTX Drp")]
     remote_tx_drops: String,
+    #[tabled(rename = "RX Chn Drp")]
+    rx_chained_drops: String,
     #[tabled(rename = "Disposed")]
     disposed: String,
     #[tabled(rename = "RX pool free")]
@@ -281,6 +283,7 @@ impl From<&WorkerCounter> for WorkerRow {
             remote_tx: format_compact(w.remote_tx_packets),
             local_tx_drops: format_compact(w.local_tx_drops),
             remote_tx_drops: format_compact(w.remote_tx_drops),
+            rx_chained_drops: format_compact(w.rx_chained_drops),
             disposed: format_compact(w.disposed),
             rx_pool_free: format_rx_pool_free(w.rx_mempool.as_ref()),
         }

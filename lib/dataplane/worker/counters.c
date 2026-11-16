@@ -62,6 +62,11 @@ worker_counters_register(
 	    )) {
 		return -1;
 	}
+	if (register_one(
+		    registry, "rx_chained_drops", 1, &ids->rx_chained_drops
+	    )) {
+		return -1;
+	}
 	if (register_one(registry, "disposed", 1, &ids->disposed)) {
 		return -1;
 	}
@@ -110,6 +115,8 @@ bind_one(
 		counter_get_address(ids->local_tx_drops, storage);
 	dp_worker->remote_tx_drops =
 		counter_get_address(ids->remote_tx_drops, storage);
+	dp_worker->rx_chained_drops =
+		counter_get_address(ids->rx_chained_drops, storage);
 	dp_worker->disposed_count = counter_get_address(ids->disposed, storage);
 }
 

@@ -54,6 +54,7 @@ check_worker(struct dp_config *dp_config, uint64_t worker_idx) {
 		{"rx_bursts", 0, worker->rx_bursts},
 		{"local_tx_drops", 0, worker->local_tx_drops},
 		{"remote_tx_drops", 0, worker->remote_tx_drops},
+		{"rx_chained_drops", 0, worker->rx_chained_drops},
 		{"disposed", 0, worker->disposed_count},
 	};
 
