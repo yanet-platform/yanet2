@@ -8,6 +8,7 @@ use yanet_sdk_testing::{BlockArena, View};
 use yanet_shm::{
     opaque::Opaque,
     rel::{ShmBox, ShmSlice},
+    resolve::{Graph as Token, Resolve},
 };
 
 /// A C-like object header: bytes C updates while Rust holds a reference to
@@ -47,6 +48,14 @@ struct Graph {
     items: ShmSlice<Item>,
 }
 
+struct Delegated<'g>(Token<'g>);
+
+impl<'g> Resolve<'g> for Delegated<'g> {
+    fn graph(&self) -> Token<'g> {
+        self.0
+    }
+}
+
 /// Writes a word at `addr`.
 ///
 /// # Safety
@@ -69,16 +78,16 @@ unsafe fn point(arena: &'static BlockArena, slot: usize, target: usize) {
 }
 
 /// A graph laid out as the builder lays it out, in blocks of the arena: the
-/// configuration block (the C object, then the body) with a boxed item 7 and
-/// the items 0..4; returns the header.
-fn build(arena: &'static BlockArena) -> usize {
+/// configuration block (the C object, then the body) with the supplied boxed
+/// value and the items 0..4. Returns the header.
+fn build(arena: &'static BlockArena, boxed_value: u64) -> usize {
     let header = arena.alloc(size_of::<Block<Graph>>()).as_ptr().addr();
     let body = header + BODY_OFFSET;
     let boxed = arena.alloc(size_of::<Item>()).as_ptr().addr();
     let items = arena.alloc(4 * size_of::<Item>()).as_ptr().addr();
     // SAFETY: words of the blocks just allocated.
     unsafe {
-        write(arena, boxed, 7);
+        write(arena, boxed, boxed_value);
         for idx in 0..4 {
             write(arena, items + idx * size_of::<Item>(), idx as u64);
         }
@@ -103,18 +112,21 @@ fn body(arena: &'static BlockArena, header: usize) -> &'static Graph {
 #[test]
 fn test_provenance_resolution_through_the_root() {
     let arena = BlockArena::new();
-    let header = build(arena);
+    let header = build(arena, 7);
+    let sibling = build(arena, 11);
     // SAFETY: the graph is valid and stays frozen for the test.
     let view = unsafe { View::new(arena.root()) };
+    let delegated = Delegated(view.graph());
 
     let config = body(arena, header);
 
-    assert_eq!(7, config.boxed.get(&view).value);
+    assert_eq!(7, config.boxed.get(&delegated).value);
+    assert_eq!(11, body(arena, sibling).boxed.get(&delegated.graph()).value);
     assert_eq!(
         vec![0, 1, 2, 3],
         config
             .items
-            .as_slice(&view)
+            .as_slice(&delegated)
             .iter()
             .map(|item| item.value)
             .collect::<Vec<_>>()
@@ -138,7 +150,7 @@ fn read_while_c_writes<'g>(block: &'g Block<Graph>, view: &View<'g>, write_c: im
 #[test]
 fn test_provenance_opaque_object_tolerates_c_writes() {
     let arena = BlockArena::new();
-    let header = build(arena);
+    let header = build(arena, 7);
     let root = arena.root();
     // SAFETY: a configuration block valid by construction; the object bytes
     // are opaque.

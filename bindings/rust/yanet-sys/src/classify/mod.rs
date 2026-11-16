@@ -383,7 +383,8 @@ impl Line {
     fn get<'g>(&'g self, cx: &impl Resolve<'g>, index: u32) -> u32 {
         debug_assert!(index < self.size, "index {index} outside a table of {}", self.size);
         let values: *const u32 = cx
-            .shm_root()
+            .graph()
+            .root()
             .rel(ptr::from_ref(&self.values).addr(), self.values.offset());
         // SAFETY: the line's built length covers every class its node emits,
         // checked above in debug builds.
@@ -397,7 +398,7 @@ impl Rows {
     #[inline(always)]
     fn get<'g>(&'g self, cx: &impl Resolve<'g>, row: u32, column: u32) -> u32 {
         let Self(directory) = self;
-        let root = cx.shm_root();
+        let root = cx.graph().root();
         let slots: *const isize = root.rel(ptr::from_ref(directory).addr(), directory.offset());
         // SAFETY: the C-built directory spans every row its owner can select.
         // The owner checks its row bound in debug builds.

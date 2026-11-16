@@ -1,32 +1,37 @@
-//! Provenance root of the shared-memory mapping.
+//! Raw-pointer factory retaining the provenance of a supplied base.
 //!
-//! Every pointer into shared memory the SDK dereferences is minted from a
-//! root: a raw pointer whose provenance covers the whole mapping. Stored
-//! offsets and absolute addresses contribute only their address
-//! (`with_addr`), so no exposed provenance is ever used.
+//! Stored offsets and absolute addresses contribute only their address
+//! (`with_addr`), so no exposed provenance is ever used. The factory proves
+//! no allocation validity, liveness or graph publication. Graph tokens,
+//! owners and unsafe dereference contracts establish those obligations.
 
 use core::ptr::NonNull;
 
-/// Pointer factory for addresses inside the shared-memory mapping.
+/// Pointer factory retaining the provenance of `base`.
 ///
-/// Computing a pointer is safe; dereferencing one is sound only under the
-/// contract of the constructor that produced the root.
+/// It only computes raw pointers. Dereferencing one requires a separate
+/// contract establishing its provenance, validity, lifetime and aliasing.
 #[derive(Clone, Copy)]
 pub struct ShmRoot {
     base: NonNull<u8>,
 }
 
 impl ShmRoot {
-    /// Root over the shared mapping.
+    /// Stores a base without accessing memory or validating a mapping.
     ///
-    /// # Safety
+    /// The factory preserves exactly the provenance of `base`. It does not
+    /// establish that the pointer covers a mapping or that any target is live.
     ///
-    /// `base` must be a raw pointer, never derived from a Rust reference,
-    /// whose provenance covers every byte of the one contiguous mapping any
-    /// pointer of this root is used to access (in a product, C's shared
-    /// mapping).
+    /// ```
+    /// #![forbid(unsafe_code)]
+    /// use core::ptr::NonNull;
+    ///
+    /// use yanet_shm::root::ShmRoot;
+    /// let root = ShmRoot::from_mapping(NonNull::dangling());
+    /// assert_eq!(root.ptr::<u8>(128).addr(), 128);
+    /// ```
     #[inline(always)]
-    pub const unsafe fn from_mapping(base: NonNull<u8>) -> Self {
+    pub const fn from_mapping(base: NonNull<u8>) -> Self {
         Self { base }
     }
 

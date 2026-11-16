@@ -79,11 +79,11 @@ impl<T> ShmSlice<T> {
             return &[];
         }
         let slot = core::ptr::from_ref(self).addr();
-        let ptr = cx.shm_root().rel::<T>(slot, self.ptr.offset);
+        let ptr = cx.graph().root().rel::<T>(slot, self.ptr.offset);
         debug_assert!(ptr.is_aligned(), "misaligned relative target");
         // SAFETY: a built non-null slice edge points at `len` aligned,
         // live elements inside the graph, frozen for 'g (contract of the
-        // resolving context).
+        // graph token).
         unsafe { slice::from_raw_parts(ptr, self.len()) }
     }
 }
@@ -93,11 +93,11 @@ impl<T> ShmBox<T> {
     #[inline(always)]
     pub fn get<'g>(&'g self, cx: &impl Resolve<'g>) -> &'g T {
         let slot = core::ptr::from_ref(self).addr();
-        let ptr = cx.shm_root().rel::<T>(slot, self.ptr.offset);
+        let ptr = cx.graph().root().rel::<T>(slot, self.ptr.offset);
         debug_assert!(ptr.is_aligned(), "misaligned owned block pointer");
         // SAFETY: a built owned edge points at an
-        // aligned, live `T` frozen for 'g (trait contract); the root gives
-        // the pointer provenance over it.
+        // aligned, live `T` frozen for 'g (graph token contract). The root
+        // gives the pointer provenance over it.
         unsafe { &*ptr }
     }
 }

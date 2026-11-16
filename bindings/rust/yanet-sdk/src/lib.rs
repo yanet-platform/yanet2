@@ -171,7 +171,7 @@ pub use yanet_shm::{
     index::{HashIndexKey, HashIndexRef},
     mutex::{Mutex, MutexGuard},
     rel::{ShmBox, ShmSlice},
-    resolve::Resolve,
+    resolve::{Graph, Resolve},
     shm::ShmLayout,
 };
 pub use yanet_sys::{

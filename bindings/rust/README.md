@@ -229,3 +229,27 @@ and safe `add(&Storage, Value)` replace unsafe `add_to(Value, *mut u64)`, and
 `read` now takes `&Storage` rather than a raw pointer. `BoundCounter`, its
 `Copy`/`Clone` impls, and `CounterRef::bind` require `T: CounterLayout`.
 Other configuration and prepared-handle generic domains are unchanged.
+
+## Graph resolution
+
+`Resolve<'g>` is a safe delegation trait returning an invariant `Graph<'g>`
+token. Existing module code taking `&impl Resolve<'g>` is unchanged. A custom
+context implements `graph()` by copying a token from a legitimate context of
+the same brand, rather than implementing an unsafe trait. `Graph` is `Copy`,
+neither `Send` nor `Sync`, and exported beside `Resolve` by `yanet-sdk`.
+
+`Graph::new` is unsafe. Its issuer guarantees mapping-wide raw provenance and
+that every accessible graph stays published and frozen for the token's
+lifetime, except for opaque bytes, atomics and guarded mutex payloads.
+Worker-local slots and regions retain their call-borrowed access discipline.
+Compatible sibling graphs in the same mapping remain resolvable.
+
+`ShmRoot::from_mapping` is now safe because it only stores a base for raw
+pointer computation. It does not validate a mapping or prove liveness,
+publication or aliasing. Those obligations belong to `Graph::new`, the unsafe
+`Owner` contract and actual dereferences. Constructing a raw root alone never
+authorizes graph resolution.
+
+External implementations replace `unsafe impl Resolve` and its hidden
+`shm_root()` method with an ordinary implementation returning `Graph` from
+`graph()`. Remove obsolete unsafe blocks around `ShmRoot::from_mapping`.

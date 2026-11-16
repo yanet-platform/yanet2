@@ -3,13 +3,15 @@
 use core::{
     ffi::{CStr, c_char, c_int},
     fmt,
-    marker::PhantomData,
     mem::offset_of,
     ptr::{self, NonNull},
     slice,
 };
 
-use yanet_shm::{resolve::Resolve, root::ShmRoot};
+use yanet_shm::{
+    resolve::{Graph, Resolve},
+    root::ShmRoot,
+};
 use yanet_sys::{
     bindings::{
         self, COUNTER_NAME_LEN, COUNTER_TAG_VALUE_LEN, CP_DEVICE_NAME_LEN, CP_MODULE_NAME_LEN, CP_MODULE_TYPE_LEN,
@@ -71,10 +73,11 @@ impl Agent {
     /// # Safety
     ///
     /// `agent` is live, whose pointer has the provenance of the whole
-    /// mapping, as the pointer the attach returns. It is attached, or held
-    /// alive as C holds the owner of a module being destroyed. All agents a
-    /// process makes handles for are of one mapping (yanet attaches one),
-    /// which stays mapped, and the agent live, while the value, or any
+    /// mapping, as the pointer the attach returns, never derived from a Rust
+    /// reference. It is attached, or held alive as C holds the owner of a
+    /// module being destroyed. All agents a process makes handles for are
+    /// of one mapping (yanet attaches one), which stays mapped, and the agent
+    /// live, while the value, or any
     /// configuration built through any of them, is used. While such a
     /// configuration is released, its agent is also the current one for its
     /// name, not superseded: C reads the item unlocked behind the gate.
@@ -222,13 +225,14 @@ impl Agent {
         // (constructor contract), so the memory the object was built in is
         // this agent's.
         let config = unsafe { built.config(self) };
-        f(
-            ObjectCx {
-                root: self.root(),
-                _brand: PhantomData,
-            },
-            config,
-        )
+        // SAFETY: the root covers the whole mapping (agent constructor
+        // contract). The fresh invariant read brand bounds every reference
+        // handed to safe code to this live object's built body. Build types
+        // change through shared references only by opaque bytes, atomics and
+        // guarded mutex payloads. The borrowed handle keeps the body live,
+        // because release consumes it.
+        let graph = unsafe { Graph::new(self.root()) };
+        f(ObjectCx { graph }, config)
     }
 
     /// Runs `f` over the configuration of module `M` named `name` that the
@@ -304,12 +308,17 @@ impl Agent {
         // payloads; the pin keeps it live until the read returns. C
         // returned a pointer of the mapping.
         let config = unsafe { (*root.ptr::<ModuleConfig<M::Config>>(module.addr().get())).body() };
+        // SAFETY: the root covers the whole mapping (agent constructor
+        // contract). This fresh invariant read brand bounds references to
+        // the built configuration and its linked objects of the pinned
+        // generation. Their Build bodies change only through opaque bytes,
+        // atomics and guarded mutex payloads. The pin outlives the read.
+        let graph = unsafe { Graph::new(root) };
         Ok(f(
             PublishedCx {
-                root,
+                graph,
                 generation: pin.generation,
                 module,
-                _brand: PhantomData,
             },
             config,
         ))
@@ -344,11 +353,9 @@ impl Drop for GenerationPin<'_> {
 /// edges, and its object links to the objects of the pinned generation.
 #[derive(Clone, Copy)]
 pub struct PublishedCx<'g> {
-    root: ShmRoot,
+    graph: Graph<'g>,
     generation: *mut bindings::cp_config_gen,
     module: NonNull<bindings::cp_module>,
-    // Invariant brand, as an object read's.
-    _brand: PhantomData<fn(&'g ()) -> &'g ()>,
 }
 
 impl fmt::Debug for PublishedCx<'_> {
@@ -389,7 +396,7 @@ impl<'g> PublishedCx<'g> {
         // whole and frozen but for its atomics and mutex payloads; the pin
         // keeps it live until the read returns. C returned a pointer of
         // the mapping.
-        unsafe { (*self.root.ptr::<ObjectConfig<O::Config>>(object.addr().get())).body() }
+        unsafe { (*self.graph.root().ptr::<ObjectConfig<O::Config>>(object.addr().get())).body() }
     }
 
     fn link_count(&self) -> usize {
@@ -407,7 +414,8 @@ impl<'g> PublishedCx<'g> {
         unsafe {
             let slot = &raw const (*self.module.as_ptr()).objects;
             let first = self
-                .root
+                .graph
+                .root()
                 .rel::<bindings::cp_module_object>(slot.addr(), slot.cast::<isize>().read());
             let link = first.add(index);
             ObjectKey {
@@ -418,17 +426,10 @@ impl<'g> PublishedCx<'g> {
     }
 }
 
-// SAFETY: the root covers the whole mapping (constructor contract of the
-// agent). A context is made only by `Agent::read_published`, under a fresh
-// invariant brand, together with the one `'g` reference it hands out: the
-// body of a configuration the pinned generation holds, which its build wrote
-// whole, and it resolves the configuration's links only to objects of that
-// generation. Both are `Build` types, which change through a shared reference
-// only by their atomics, opaque bytes and guarded mutex payloads, and live for
-// the read, as the pin is released only once it returns.
-unsafe impl<'g> Resolve<'g> for PublishedCx<'g> {
-    fn shm_root(&self) -> ShmRoot {
-        self.root
+impl<'g> Resolve<'g> for PublishedCx<'g> {
+    #[inline(always)]
+    fn graph(&self) -> Graph<'g> {
+        self.graph
     }
 }
 
@@ -456,10 +457,7 @@ impl<'g> ObjectKey<'g> {
 /// made by [`Agent::read`] for that read alone.
 #[derive(Clone, Copy)]
 pub struct ObjectCx<'g> {
-    root: ShmRoot,
-    // Invariant brand: the contexts of two reads never unify, so a reference
-    // one read reached is not resolved through another's context.
-    _brand: PhantomData<fn(&'g ()) -> &'g ()>,
+    graph: Graph<'g>,
 }
 
 impl fmt::Debug for ObjectCx<'_> {
@@ -468,20 +466,10 @@ impl fmt::Debug for ObjectCx<'_> {
     }
 }
 
-// SAFETY: the root covers the whole mapping (constructor contract of the
-// agent). A context is made only by `Agent::read`, under a fresh invariant
-// brand, together with the one `'g` reference it hands out: the body of a
-// live object, which its build wrote whole. The `Sync` bound does not by
-// itself rule out a shared change; what does is that the body is a `Build`
-// type, an unsafe trait whose impls are the SDK's (scalars, atomics, opaque
-// bytes, mutexes, the edge types, the C objects it binds, and the derive over
-// those), of which only atomics, opaque bytes and guarded mutex payloads
-// change through a shared reference.
-// The body lives for the read, as the object's handle is borrowed for it and
-// a release takes the handle by value.
-unsafe impl<'g> Resolve<'g> for ObjectCx<'g> {
-    fn shm_root(&self) -> ShmRoot {
-        self.root
+impl<'g> Resolve<'g> for ObjectCx<'g> {
+    #[inline(always)]
+    fn graph(&self) -> Graph<'g> {
+        self.graph
     }
 }
 
@@ -620,9 +608,7 @@ impl<O: Object> Releasable for BuiltObject<O, Agent> {
 /// detected. When its type name is the handle's, it is a header of such a
 /// handle, built over an [`Agent`].
 pub unsafe fn handle_at<B: Releasable>(raw: NonNull<B::Raw>) -> Result<B, Error> {
-    // SAFETY: the pointer has the provenance of the whole mapping (caller
-    // contract).
-    let root = unsafe { ShmRoot::from_mapping(raw.cast()) };
+    let root = ShmRoot::from_mapping(raw.cast());
     // SAFETY: the type name field lies in the initialised header (caller
     // contract); C wrote it whole.
     let field = unsafe { slice::from_raw_parts(root.ptr::<u8>(raw.addr().get() + B::TYPE_FIELD), B::TYPE_LEN) };
@@ -649,9 +635,7 @@ pub unsafe fn handle_at<B: Releasable>(raw: NonNull<B::Raw>) -> Result<B, Error>
 /// whole mapping, as the header pointer of an agent's root. The other
 /// requirements are those of [`Agent::from_raw`] and of the handle's destroy.
 pub unsafe fn release_at<B: Releasable>(raw: NonNull<B::Raw>) -> Result<(), Retained<B>> {
-    // SAFETY: the pointer has the provenance of the whole mapping (caller
-    // contract).
-    let root = unsafe { ShmRoot::from_mapping(raw.cast()) };
+    let root = ShmRoot::from_mapping(raw.cast());
     let header = Header::at(BlockAddr::new(raw.addr().get()));
     // SAFETY: the header is the one of such a handle (caller contract).
     let built = unsafe { B::from_header(header) };
@@ -725,9 +709,7 @@ unsafe impl Owner for Agent {
     type Error = Error;
 
     fn root(&self) -> ShmRoot {
-        // SAFETY: the pointer has the provenance of the whole mapping
-        // (constructor contract).
-        unsafe { ShmRoot::from_mapping(self.agent.cast()) }
+        ShmRoot::from_mapping(self.agent.cast())
     }
 
     fn worker_count(&self) -> u64 {
