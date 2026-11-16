@@ -25,7 +25,7 @@ use core::{
 use std::{collections::hash_map::RandomState, env, panic};
 
 use arena::ArenaOwner;
-use classify::{TestRule, any_or, build4, build6, edges, first, in4, in6, net4, net6};
+use classify::{TestRule, any_or, build_any, build4, build6, edges, first, in4, in6, net4, net6};
 use proptest::{
     arbitrary::any,
     bool::weighted,
@@ -593,5 +593,48 @@ fn test_tree_build_and_release_of_random_rulesets_leave_the_arena_as_they_found_
         // SAFETY: built by this owner and referenced by nothing.
         unsafe { build6(&owner, &rules).destroy(&owner) };
         released(before)
+    });
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "Miri does not run C")]
+fn test_decode_lookups_are_the_first_projected_rule_of_random_rulesets() {
+    let owner = ArenaOwner::new();
+    run(net4s(), |(rules, seed)| {
+        let mut mix = Mix(seed);
+        let projection = (0..rules.len())
+            .map(|index| match seed % 4 {
+                0 => true,
+                1 => false,
+                2 => index % 2 == 1,
+                _ => mix.next() & 1 != 0,
+            })
+            .collect::<Vec<_>>();
+        let built = build_any(&owner, &rules, &projection);
+        let tree = owner.body(&built).get(&owner);
+        let (protos, ports) = edges(&rules);
+        let keys = keys(&[()], &[()], &protos, &ports, &mut mix, |_| ());
+        let compare = |keys: &[Key<()>]| {
+            mismatch(
+                keys,
+                |(_, _, proto, port)| {
+                    rules.iter().enumerate().find_map(|(index, rule)| {
+                        (projection[index]
+                            && any_or(&rule.protos, |range| {
+                                (range.from..=range.to).contains(&u32::from(proto))
+                            })
+                            && any_or(&rule.ports, |range| (range.from..=range.to).contains(&port)))
+                        .then_some(index)
+                    })
+                },
+                |(_, _, proto, port)| (proto, port),
+                |key| tree.lookup(&owner, key),
+                |keys, rules| tree.lookup_burst(&owner, keys, |&key| key, rules),
+            )
+        };
+        let found = compare(&keys).or_else(|| [0, 1, 31, 32, 33, 65].into_iter().find_map(|len| compare(&keys[..len])));
+        // SAFETY: built by this owner, and no lookup outlives it.
+        unsafe { built.destroy(&owner) };
+        found.map_or(Ok(()), |found| Err(TestCaseError::fail(found)))
     });
 }

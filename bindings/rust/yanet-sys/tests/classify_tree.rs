@@ -1,10 +1,9 @@
 //! The classifier trees against the first rule each key matches, over
 //! classifiers the C compiler builds through the builder in a C block arena.
 //!
-//! A tree reads its joints, rule tables and rule maps unchecked, so these
-//! tests hold every lookup to an oracle that matches the rules one by one,
-//! at the edges of every network and range of the rules. Natively only: Miri
-//! does not run C.
+//! These tests hold every lookup to an oracle that matches the rules one by
+//! one, at the edges of every network and range. Natively only: Miri does not
+//! run C.
 
 extern crate alloc;
 
@@ -16,7 +15,9 @@ mod classify;
 use core::net::Ipv4Addr;
 
 use arena::ArenaOwner;
-use classify::{Error, TestRule, Tree, Tree4, TreeAny, any_or, build4, build6, edges, first, in4, in6, net4, net6};
+use classify::{
+    Error, TestRule, Tree, Tree4, TreeAny, any_or, build_any, build4, build6, edges, first, in4, in6, net4, net6,
+};
 use yanet_sys::{
     classify::{Addr4, BURST, LineRange, Lines, Net4, Net6, Nets4, PortRange, Ports, Rule},
     cp::{BuildError, Builder, Built, Refusal},
@@ -200,23 +201,8 @@ fn test_rules_tree6_lookup_is_the_first_matching_rule() {
 fn test_decode_tree_lookup_is_the_first_rule_of_the_projection() {
     let owner = ArenaOwner::new();
     let rules = rules4();
-    let views = rules
-        .iter()
-        .map(|rule| (Lines::new(&rule.protos).unwrap(), Ports::new(&rule.ports).unwrap()))
-        .collect::<Vec<_>>();
-    let protos = views.iter().map(|view| Some(&view.0)).collect::<Vec<_>>();
-    let ports = views.iter().map(|view| Some(&view.1)).collect::<Vec<_>>();
-    // Every other rule is in the projection.
-    let projection = (0..rules.len())
-        .map(|idx| (idx % 2 == 1).then_some(&()))
-        .collect::<Vec<_>>();
-    let built: Built<Tree<TreeAny>, ArenaOwner> = Builder::build(&owner, "any", |scope| -> Result<_, Error> {
-        let proto = scope.compile(c"proto", &protos)?;
-        let port = scope.compile(c"port", &ports)?;
-        let transport = scope.join(c"transport", proto, port)?;
-        scope.decode(c"rules", transport, &projection)
-    })
-    .unwrap();
+    let projection = (0..rules.len()).map(|idx| idx % 2 == 1).collect::<Vec<_>>();
+    let built = build_any(&owner, &rules, &projection);
     let tree = owner.body(&built).get(&owner);
     let (edge_protos, edge_ports) = edges(&rules);
     for &proto in &edge_protos {

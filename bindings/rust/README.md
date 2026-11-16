@@ -132,6 +132,33 @@ cargo bench -p yanet-sys --bench dp --profile plugin --no-run                   
 taskset -c 2 cargo bench -p yanet-sys --bench dp --profile plugin -- --save-baseline main-plugin   # a baseline of its own, -- --baseline main-plugin on the change
 ```
 
+## Classifier table checks
+
+Classifier lines, row directories and columns check indices in debug builds.
+The opt-in `yanet-sys/checked-lookups` feature also enables those checks in
+optimized builds. An invalid index panics with the index and bound before an
+invalid access. Ordinary optimized builds retain unchecked lookups.
+
+The checks rely on C-built dimensions, offsets and allocation extents. They
+do not validate arbitrary corrupted storage, and do not change LPM reads.
+
+The existing seeded properties compare IPv4 and IPv6 Rules and projected
+Decode scalar/burst lookups against independent first-match oracles:
+
+```sh
+PROPTEST_CASES=200 PROPTEST_RNG_SEED=19567271 cargo test -p yanet-sys --release --features checked-lookups --locked
+PROPTEST_CASES=100000 PROPTEST_RNG_SEED=19567271 cargo test -p yanet-sys --release --features checked-lookups --test classify_tree_prop --locked
+cargo test -p yanet-sys --bench lookup --locked
+taskset -c 2 cargo bench -p yanet-sys --bench lookup -- --save-baseline main-lookup
+taskset -c 2 cargo bench -p yanet-sys --bench lookup --profile plugin -- --save-baseline main-lookup-plugin
+```
+
+The lookup benchmark builds and oracle-checks IPv4, split-path IPv6 and
+transport Decode trees before timing scalar and burst lookups. Compare the
+same harness and inputs on the base and change, in each profile separately,
+with repeated interleaved runs on one core. Preserve run spread and timing
+uncertainty rather than treating an interval containing zero as parity.
+
 ## Tests against the C dataplane
 
 The behaviour of the runtime and of the builder against the real C dataplane

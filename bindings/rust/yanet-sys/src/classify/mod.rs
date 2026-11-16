@@ -9,8 +9,8 @@
 //! its C struct, and each node of the tree holds the classifiers whose classes
 //! it reads. The dataplane looks a packet's fields up, for one packet or a
 //! burst of them, through Rust ports of the C lookups over those layouts, as
-//! the LPM's is: no call into C and, the classes never leaving the tree, no
-//! check of a class against the table it indexes.
+//! the LPM's is: no call into C. Classes never leave the tree. Table indices
+//! are checked in debug builds and when checked lookups are enabled.
 //!
 //! The compiles are C the shim compiles in, but the joins and the decode call
 //! the classification library's compiler (`lib/classify/compiler/helper.c`):
@@ -373,65 +373,60 @@ const _: fn(&bindings::vline) -> (*mut bindings::memory_context, u32, *mut u32) 
 const _: fn(&bindings::value_table) -> (*mut bindings::memory_context, u32, u32, *mut *mut u32) =
     |table| (table.memory_context, table.v_dim, table.h_dim, table.values);
 
-impl Line {
-    /// The value at an index of the line.
-    ///
-    /// # Safety
-    ///
-    /// The index is below the line's size.
-    #[inline(always)]
-    unsafe fn get<'g>(&'g self, cx: &impl Resolve<'g>, idx: u32) -> u32 {
-        debug_assert!(idx < self.size, "index {idx} past a line of {}", self.size);
-        let slot = ptr::from_ref(&self.values).addr();
-        let values: *const u32 = cx.shm_root().rel(slot, self.values.offset());
-        // SAFETY: a line of a classifier is built whole by C, its slot
-        // pointing at its values, and frozen for 'g (`Resolve` contract); the
-        // caller keeps the index inside.
-        unsafe { values.add(idx as usize).read() }
+// TCB: C-built classifier geometry and classes supplied by the sealed tree.
+//
+// The resolving context keeps storage frozen. These private accessors rely on
+// built dimensions and offsets, not arbitrary caller-supplied metadata.
+#[inline(always)]
+fn check_index(index: u32, len: u32) {
+    if cfg!(any(debug_assertions, feature = "checked-lookups")) {
+        assert!(index < len, "index {index} outside a table of {len}");
     }
 }
 
-impl Rows {
-    /// The value at a column of a row.
-    ///
-    /// # Safety
-    ///
-    /// The directory holds the row, and the row the column.
+#[deny(clippy::multiple_unsafe_ops_per_block)]
+impl Line {
     #[inline(always)]
-    unsafe fn get<'g>(&'g self, cx: &impl Resolve<'g>, row: u32, column: u32) -> u32 {
-        let Self(directory) = self;
+    fn get<'g>(&'g self, cx: &impl Resolve<'g>, index: u32) -> u32 {
+        check_index(index, self.size);
+        let values: *const u32 = cx
+            .shm_root()
+            .rel(ptr::from_ref(&self.values).addr(), self.values.offset());
+        // SAFETY: the line's built length covers every class its node emits,
+        // checked above in checked builds.
+        let word = unsafe { values.add(index as usize) };
+        // SAFETY: the selected word is initialized and frozen for the call.
+        unsafe { word.read() }
+    }
+}
+
+#[deny(clippy::multiple_unsafe_ops_per_block)]
+impl Rows {
+    #[inline(always)]
+    fn get<'g>(&'g self, cx: &impl Resolve<'g>, rows: u32, columns: u32, row: u32, column: u32) -> u32 {
+        check_index(row, rows);
+        check_index(column, columns);
         let root = cx.shm_root();
+        let directory = &self.0;
         let slots: *const isize = root.rel(ptr::from_ref(directory).addr(), directory.offset());
-        // SAFETY: the rows of a classifier are built whole by C, an aligned
-        // offset slot per row, and frozen for 'g (`Resolve` contract); the
-        // caller keeps the row inside.
+        // SAFETY: the C-built directory has the supplied number of slots, and
+        // the tree selects a row inside it, checked above in checked builds.
         let slot = unsafe { slots.add(row as usize) };
-        // SAFETY: as above; the offset is read as integer bits and never as a
-        // pointer.
-        let block: *const u32 = root.rel(slot.addr(), unsafe { slot.read() });
-        // SAFETY: as above, the row's block holds every column; the caller
-        // keeps the column inside.
-        unsafe { block.add(column as usize).read() }
+        // SAFETY: the frozen slot holds initialized relative-offset bits.
+        let offset = unsafe { slot.read() };
+        let values: *const u32 = root.rel(slot.addr(), offset);
+        // SAFETY: each built row has the supplied number of columns, and the
+        // tree's class is inside it, checked above in checked builds.
+        let word = unsafe { values.add(column as usize) };
+        // SAFETY: the selected word is initialized and frozen for the call.
+        unsafe { word.read() }
     }
 }
 
 impl Table {
-    /// The value of a pair inside the table.
-    ///
-    /// # Safety
-    ///
-    /// The row and the column are below the table's counts of them.
     #[inline(always)]
-    unsafe fn get<'g>(&'g self, cx: &impl Resolve<'g>, row: u32, column: u32) -> u32 {
-        debug_assert!(
-            row < self.v_dim && column < self.h_dim,
-            "pair ({row}, {column}) outside a table of {} by {}",
-            self.v_dim,
-            self.h_dim
-        );
-        // SAFETY: the table's directory holds every row below its count of
-        // rows, each every column below its count of columns.
-        unsafe { self.values.get(cx, row, column) }
+    fn get<'g>(&'g self, cx: &impl Resolve<'g>, row: u32, column: u32) -> u32 {
+        self.values.get(cx, self.v_dim, self.h_dim, row, column)
     }
 }
 
@@ -495,7 +490,7 @@ pub struct RuleTable {
     /// first-match row share.
     class_map: Line,
     rows: Rows,
-    _class_count: u32,
+    class_count: u32,
     /// The padding of the C layout after the count of the rows.
     _pad: u32,
 }
@@ -521,7 +516,7 @@ const _: () = {
     assert!(offset_of!(RuleTable, h_dim) == offset_of!(C, h_dim));
     assert!(offset_of!(RuleTable, class_map) == offset_of!(C, class_map));
     assert!(offset_of!(RuleTable, rows) == offset_of!(C, rows));
-    assert!(offset_of!(RuleTable, _class_count) == offset_of!(C, class_count));
+    assert!(offset_of!(RuleTable, class_count) == offset_of!(C, class_count));
     // The fields leave no padding.
     assert!(size_of::<Net6Attr>() == 2 * size_of::<Lpm<8>>() + size_of::<Table>());
     assert!(
@@ -636,9 +631,7 @@ impl Net6Attr {
             return value;
         }
         let column = lpm_value(&self.lo, cx, lo);
-        // SAFETY: the compile marks only rows of the table, whose columns are
-        // the classes of the low half.
-        unsafe { self.comb.get(cx, value & !ROW_MARK, column) }
+        self.comb.get(cx, value & !ROW_MARK, column)
     }
 }
 
@@ -670,7 +663,9 @@ mod tests {
 
     use yanet_sdk_testing::{BlockArena, View};
 
-    use super::{Addr4, LineRange, Lines, Net4, Net6, Net6Attr, Nets4, Nets6, PortRange, Ports, ROW_MARK, Rule};
+    use super::{
+        Addr4, Line, LineRange, Lines, Net4, Net6, Net6Attr, Nets4, Nets6, PortRange, Ports, ROW_MARK, Rule, Table,
+    };
     use crate::{bindings, cp::Refusal};
 
     /// Writes a value at an address of a block of the arena.
@@ -851,5 +846,127 @@ mod tests {
 
         assert_eq!(addr, Addr4::from(Ipv4Addr::new(192, 0, 2, 1)));
         assert_eq!([192, 0, 2, 1], addr.0.to_ne_bytes());
+    }
+
+    /// A frozen line of the supplied words in one leaked arena.
+    fn line(values: &[u32]) -> (View<'static>, &'static Line) {
+        let arena = BlockArena::new();
+        let addr = block(arena, size_of::<Line>());
+        lay_line(arena, addr, values);
+        // SAFETY: the initialized line and its words are frozen in the arena.
+        let view = unsafe { View::new(arena.root()) };
+        // SAFETY: the aligned block holds the initialized mirrored line.
+        let line = unsafe { &*arena.root().ptr::<Line>(addr) };
+        (view, line)
+    }
+
+    /// A frozen rectangular table, two rows of three words each.
+    fn table() -> (View<'static>, &'static Table) {
+        let arena = BlockArena::new();
+        let addr = block(arena, size_of::<Table>());
+        lay_table(arena, addr, &[&[7, 8, 9], &[10, 11, u32::MAX]]);
+        // SAFETY: the initialized table graph is frozen in this leaked arena.
+        let view = unsafe { View::new(arena.root()) };
+        // SAFETY: the aligned block holds the initialized mirrored table.
+        let table = unsafe { &*arena.root().ptr::<Table>(addr) };
+        (view, table)
+    }
+
+    #[test]
+    fn test_line_reads_first_and_last_word() {
+        let (view, line) = line(&[17, 23, 31]);
+        assert_eq!(17, line.get(&view, 0));
+        assert_eq!(31, line.get(&view, 2));
+    }
+
+    #[test]
+    fn test_table_reads_relative_rows_and_last_column() {
+        let (view, table) = table();
+        assert_eq!(7, table.get(&view, 0, 0));
+        assert_eq!(10, table.get(&view, 1, 0));
+        assert_eq!(u32::MAX, table.get(&view, 1, 2));
+    }
+
+    #[test]
+    #[cfg(any(debug_assertions, feature = "checked-lookups"))]
+    #[should_panic(expected = "index 3 outside a table of 3")]
+    fn test_line_rejects_index_at_length() {
+        let (view, line) = line(&[17, 23, 31]);
+        line.get(&view, 3);
+    }
+
+    #[test]
+    #[cfg(any(debug_assertions, feature = "checked-lookups"))]
+    #[should_panic(expected = "index 0 outside a table of 0")]
+    fn test_empty_line_rejects_index_without_storage_access() {
+        let arena = BlockArena::new();
+        let addr = block(arena, size_of::<Line>());
+        // SAFETY: the zeroed line is an empty frozen graph in the arena.
+        let view = unsafe { View::new(arena.root()) };
+        // SAFETY: every bit pattern is a line, and the block is initialized.
+        let line = unsafe { &*arena.root().ptr::<Line>(addr) };
+        line.get(&view, 0);
+    }
+
+    #[test]
+    #[cfg(any(debug_assertions, feature = "checked-lookups"))]
+    #[should_panic(expected = "index 2 outside a table of 2")]
+    fn test_table_rejects_row_at_height() {
+        let (view, table) = table();
+        table.get(&view, 2, 0);
+    }
+
+    #[test]
+    #[cfg(any(debug_assertions, feature = "checked-lookups"))]
+    #[should_panic(expected = "index 3 outside a table of 3")]
+    fn test_table_rejects_column_at_width() {
+        let (view, table) = table();
+        table.get(&view, 1, 3);
+    }
+
+    #[test]
+    #[cfg(any(debug_assertions, feature = "checked-lookups"))]
+    #[should_panic(expected = "index 2 outside a table of 2")]
+    fn test_rows_reject_mapped_class_at_compact_count() {
+        use super::Rows;
+
+        let arena = BlockArena::new();
+        let directory = block(arena, size_of::<Rows>());
+        lay_rows(arena, directory, &[&[7, 8, 9], &[10, 11, 12]]);
+        let map = block(arena, size_of::<Line>());
+        lay_line(arena, map, &[1, 0, 2]);
+        // These are independent valid blocks, not a malformed published tree.
+        // The invalid compact class is supplied only to the private accessor.
+        // SAFETY: both initialized graphs are frozen within the same arena.
+        let view = unsafe { View::new(arena.root()) };
+        // SAFETY: the aligned blocks hold the initialized mirrored records.
+        let (rows, map) = unsafe { (&*arena.root().ptr::<Rows>(directory), &*arena.root().ptr::<Line>(map)) };
+        rows.get(&view, 2, 3, map.get(&view, 2), 0);
+    }
+
+    #[test]
+    fn test_net6_unmarked_class_does_not_resolve_absent_combination() {
+        type C = bindings::classify_attr_net6;
+        let arena = BlockArena::new();
+        let addr = block(arena, size_of::<Net6Attr>());
+        lay_lpm(arena, addr + offset_of!(C, hi), |_| 7);
+        lay_lpm(arena, addr + offset_of!(C, lo), |_| 0);
+        // C may leave stale dimensions after freeing unused combination rows.
+        put(
+            arena,
+            addr + offset_of!(C, comb) + offset_of!(bindings::value_table, v_dim),
+            3u32,
+        );
+        put(
+            arena,
+            addr + offset_of!(C, comb) + offset_of!(bindings::value_table, h_dim),
+            5u32,
+        );
+        // SAFETY: the high-half classifier covers all keys. Its unmarked
+        // classes never access the absent low-half or combination storage.
+        let view = unsafe { View::new(arena.root()) };
+        // SAFETY: the initialized mirrored classifier is frozen in the arena.
+        let attr = unsafe { &*arena.root().ptr::<Net6Attr>(addr) };
+        assert_eq!(7, attr.class(&view, &[0; 16]));
     }
 }
