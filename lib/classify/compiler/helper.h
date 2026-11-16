@@ -9,9 +9,6 @@
 
 // The rule coverage classes of a stage's value space over a rule
 // projection, written as a shared memory value line.
-//
-// The stage must be a join output: its classes are numbered from
-// one, so zero never carries coverage.
 int
 classify_coverage_map(
 	struct memory_context *memory_context,
