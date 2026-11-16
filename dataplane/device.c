@@ -1,6 +1,7 @@
 #include "device.h"
 #include "dataplane.h"
 
+#include <assert.h>
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
@@ -176,6 +177,11 @@ dataplane_device_init(
 		device->rss_queue_count +=
 			!dataplane_device_queue_is_steering(device, idx);
 	}
+
+	// Config load bounds max_lro_packet_size by the RX pool's usable
+	// room, well inside uint16_t, so the narrowing here cannot
+	// truncate.
+	assert(config->max_lro_packet_size <= UINT16_MAX);
 
 	if (dpdk_port_init(
 		    config->port_name,

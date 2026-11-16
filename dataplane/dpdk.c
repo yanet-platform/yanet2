@@ -12,6 +12,10 @@
 #include <rte_eth_ring.h>
 #include <rte_ethdev.h>
 
+#include <rte_build_config.h> // RTE_PKTMBUF_HEADROOM
+
+#include "yanet_build_config.h" // MBUF_MAX_SIZE
+
 #include "lib/logging/log.h"
 
 struct eal_args {
@@ -186,6 +190,18 @@ dpdk_port_init(
 	int rc;
 	if ((rc = rte_eth_dev_get_port_by_name(name, port_id))) {
 		LOG(ERROR, "failed to get port id for %s: %d", name, rc);
+		return -1;
+	}
+
+	// The RX pool carves each mbuf at MBUF_MAX_SIZE with the headroom
+	// reserved, so a larger LRO packet would scatter frames the packet
+	// layer cannot hold.
+	if (max_lro_packet_size > MBUF_MAX_SIZE - RTE_PKTMBUF_HEADROOM) {
+		LOG(ERROR,
+		    "max_lro_packet_size %u exceeds the RX pool's usable "
+		    "room of %u",
+		    (unsigned)max_lro_packet_size,
+		    (unsigned)(MBUF_MAX_SIZE - RTE_PKTMBUF_HEADROOM));
 		return -1;
 	}
 
