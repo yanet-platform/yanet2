@@ -14,18 +14,15 @@ use core::{
     sync::atomic::{AtomicU32, Ordering},
 };
 
-use yanet_packet as _;
 use yanet_sdk::{
     Batch, Build, BuiltObject, CommitCx, Counter, Cx, Device, HashIndex, Kind, Lpm4, Lpm6, Module, Object,
     ObjectBuilder, ObjectCommitCx, ObjectCounter, ObjectLink, OwnedSlice, PerWorker, PerWorkerSlice, Refusal,
     Registered, ShmBox, ShmLayout, ShmSlice, TaggedCounter, TaggedCounters, Traffic, Verdict,
 };
-use yanet_sdk_derive as _;
 use yanet_sdk_testing::{
     View,
     cp::{Call, LiveHeaders, TestError, TestOwner},
 };
-use yanet_shm as _;
 use yanet_sys::{
     bindings::{COUNTER_TAG_VALUE_LEN, CP_MODULE_NAME_LEN, CP_OBJECT_NAME_LEN},
     common::LINE_BLOCK_ALIGN,

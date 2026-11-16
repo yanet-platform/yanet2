@@ -1,17 +1,17 @@
 install_data(
-    'etc/yanet/generic-operator.d/forward-default.yaml',
-    'etc/yanet/generic-operator.d/decap-default.yaml',
+    'etc/yanet2/generic-operator.d/forward-default.yaml',
+    'etc/yanet2/generic-operator.d/decap-default.yaml',
     install_dir: '/etc/yanet2/generic-operator.d',
 )
 
 install_data(
-    'etc/yanet/forward.d/vlan-phy-default.yaml',
-    'etc/yanet/forward.d/phy-vlan-default.yaml',
+    'etc/yanet2/forward.d/vlan-phy-default.yaml',
+    'etc/yanet2/forward.d/phy-vlan-default.yaml',
     install_dir: '/etc/yanet2/forward.d',
 )
 
 install_data(
-    'etc/yanet/decap.d/default.yaml',
+    'etc/yanet2/decap.d/default.yaml',
     install_dir: '/etc/yanet2/decap.d',
 )
 

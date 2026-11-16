@@ -19,8 +19,8 @@ import (
 // shippedInstanceConfigs lists the instance configs the package installs
 // under /etc/yanet2/generic-operator.d, relative to this test.
 var shippedInstanceConfigs = []string{
-	"../etc/yanet/generic-operator.d/forward-default.yaml",
-	"../etc/yanet/generic-operator.d/decap-default.yaml",
+	"../etc/yanet2/generic-operator.d/forward-default.yaml",
+	"../etc/yanet2/generic-operator.d/decap-default.yaml",
 }
 
 // Test_Config_PollInterval verifies that polling is opt-in and that an invalid
@@ -78,10 +78,10 @@ func Test_ShippedInstanceConfigs_ConstructEndToEnd(t *testing.T) {
 			require.NotEmpty(t, cfg.Functions)
 
 			// The shipped files reference install paths, which the
-			// repository keeps under etc/yanet.
+			// repository keeps under etc/yanet2.
 			for idx := range cfg.Configs {
 				cfg.Configs[idx].File = xcfg.MustNonEmptyString(strings.Replace(
-					cfg.Configs[idx].File.Unwrap(), "/etc/yanet2/", "../etc/yanet/", 1,
+					cfg.Configs[idx].File.Unwrap(), "/etc/yanet2/", "../etc/yanet2/", 1,
 				))
 			}
 

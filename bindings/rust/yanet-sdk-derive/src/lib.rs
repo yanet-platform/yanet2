@@ -204,10 +204,6 @@ pub fn api(args: TokenStream, item: TokenStream) -> TokenStream {
         .into()
 }
 
-// Doc tests are the only users of the facade, which depends on this crate.
-#[cfg(test)]
-use {yanet_sdk as _, yanet_sdk_api as _};
-
 /// Doc tests that pin what the derive refuses, with the compile error each
 /// refusal produces, and the accepted twin of each.
 #[cfg(doctest)]

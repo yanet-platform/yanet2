@@ -23,6 +23,11 @@ yanet-sdk-plugin = { path = "../yanet-sdk-plugin", optional = true }
 # `cargo build --profile plugin -p yanet-sdk-fixture --features plugin --examples`.
 plugin = ["dep:yanet-sdk-plugin"]
 
+# Only the plugin examples use the plugin runtime, which a dev-dependency
+# cannot gate behind their feature.
+[package.metadata.cargo-shear]
+ignored = ["yanet-sdk-plugin"]
+
 # The plugins, which the dataplane loader maps to module names by file name;
 # an object type plugin is looked up by its type name.
 [[example]]

@@ -208,10 +208,15 @@ impl Module for Holder {
 
     fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
         let held = cx.config().prepared(cx).bind(cx);
+        let copied = held;
+        let before = held.get();
+        copied.sub(1);
+        assert_eq!(before.wrapping_sub(1), held.get());
+        held.add(1);
         batch.dispatch(|packet| {
             match packet.data().first() {
                 Some(byte) if byte % 2 == 0 => held.add(1),
-                Some(..) if held.get() != 0 => held.sub(1),
+                Some(..) if held.get() != 0 => copied.sub(1),
                 _ => {}
             }
             Verdict::Pass

@@ -17,9 +17,3 @@ pub mod resolve;
 pub mod root;
 pub mod shm;
 mod spinlock;
-
-// Test-only dependencies are visible to the library's own test target.
-#[cfg(test)]
-use criterion as _;
-#[cfg(test)]
-use yanet_sdk_testing as _;

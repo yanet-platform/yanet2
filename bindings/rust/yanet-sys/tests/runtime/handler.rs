@@ -21,7 +21,7 @@ use crate::common::{Ectx, numbered, write};
 
 /// Configuration of the reach module: a counter, a device, a pair of packet
 /// and byte counts, a pair of a tagged registry, the pairs of that registry
-/// picked by id and a counter of two pairs.
+/// picked by id and a nested counter of four pairs.
 #[repr(C)]
 struct Config {
     counter: Counter,
@@ -29,7 +29,7 @@ struct Config {
     pair: Counter<Traffic>,
     tagged: TaggedCounter<Traffic>,
     by_id: TaggedCounters<Traffic>,
-    pairs: Counter<[Traffic; 2]>,
+    pairs: Counter<[[Traffic; 2]; 2]>,
 }
 
 // SAFETY: seven registry indices and a number of counters of eight bytes,
@@ -54,7 +54,7 @@ unsafe impl Build for Config {
 ///
 /// It adds to every counter per packet, through the handles and by value, to
 /// the registry's pair of the id its first byte names and to the second pair
-/// of the counter of two, reads the counters it holds handles on, and passes
+/// of the nested counter, reads the counters it holds handles on, and passes
 /// the packets whose first byte is zero while the device is present.
 struct Reach;
 
@@ -66,7 +66,7 @@ impl Module for Reach {
         CounterRef<'p, Traffic>,
         CounterRef<'p, Traffic>,
         TaggedCountersRef<'p, Traffic>,
-        CounterRef<'p, [Traffic; 2]>,
+        CounterRef<'p, [[Traffic; 2]; 2]>,
     );
 
     fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
@@ -78,17 +78,69 @@ impl Module for Reach {
             cx.prepared().3.bind(cx),
             cx.prepared().4.bind(cx),
         );
+        let copied_pair = held_pair;
+        let rebound_pair = cx.prepared().1.bind(cx);
+        let copied_pairs = pairs;
         let present = config.device.resolve(cx).is_some();
         let _ = (cx.worker(), cx.now());
         batch.dispatch(|packet| {
             config.counter.add(cx, 1);
             held += 1;
             config.pair.add(cx, Traffic::packet(packet.data().len() as u64));
-            held_pair += Traffic::packet(packet.data().len() as u64);
+            let before = held_pair.get();
+            let len = packet.data().len() as u64;
+            held_pair += Traffic::packet(len);
+            assert_eq!(
+                Traffic {
+                    packets: before.packets.wrapping_add(1),
+                    bytes: before.bytes.wrapping_add(len),
+                },
+                rebound_pair.get(),
+            );
+            rebound_pair.add(Traffic { packets: 3, bytes: 5 });
+            let expected = Traffic {
+                packets: before.packets.wrapping_add(4),
+                bytes: before.bytes.wrapping_add(len).wrapping_add(5),
+            };
+            assert_eq!(expected, held_pair.get());
+            assert_eq!(expected, copied_pair.get());
             config.tagged.add(cx, Traffic::packet(packet.data().len() as u64));
             held_tagged += Traffic::packet(packet.data().len() as u64);
             by_id.add(u64::from(packet.data()[0]), Traffic::packet(packet.data().len() as u64));
-            pairs.at::<1>().add(Traffic::packet(packet.data().len() as u64));
+            let before = pairs.get();
+            let nested = pairs.at::<1>().at::<0>();
+            nested.add(Traffic::packet(len));
+            config.pairs.add(
+                cx,
+                [
+                    [Traffic { packets: 1, bytes: 10 }, Traffic { packets: 2, bytes: 20 }],
+                    [Traffic { packets: 4, bytes: 40 }, Traffic { packets: 8, bytes: 80 }],
+                ],
+            );
+            let expected = [
+                [
+                    Traffic {
+                        packets: before[0][0].packets.wrapping_add(1),
+                        bytes: before[0][0].bytes.wrapping_add(10),
+                    },
+                    Traffic {
+                        packets: before[0][1].packets.wrapping_add(2),
+                        bytes: before[0][1].bytes.wrapping_add(20),
+                    },
+                ],
+                [
+                    Traffic {
+                        packets: before[1][0].packets.wrapping_add(5),
+                        bytes: before[1][0].bytes.wrapping_add(len).wrapping_add(40),
+                    },
+                    Traffic {
+                        packets: before[1][1].packets.wrapping_add(8),
+                        bytes: before[1][1].bytes.wrapping_add(80),
+                    },
+                ],
+            ];
+            assert_eq!(expected, copied_pairs.get());
+            assert_eq!(expected[1][0], nested.get());
             let _ = (held.get(), held_pair.get(), held_tagged.get(), pairs.get());
             if present && packet.data()[0] == 0 {
                 Verdict::Pass
@@ -115,8 +167,8 @@ impl Module for Reach {
 ///
 /// The commit entry resolves the counters into the prepared buffer; the
 /// handler entry reads the configuration, the prepared buffer, the counter
-/// storage, both values of the pair and the four of the counter of two pairs
-/// included, the runtime storage of the tagged registry, by id below the
+/// storage, both values of the pair and the eight of the nested counter of four
+/// pairs included, the runtime storage of the tagged registry, by id below the
 /// registry's one counter and past it, and the device targets from the context
 /// and moves two packets over the front.
 #[test]
@@ -128,7 +180,7 @@ fn test_miri_reach_of_the_handler_and_commit_entries() {
     //
     // SAFETY: the counter ids are below the three slots of the counter storage
     // and the one of the runtime storage, the pairs' of two values, which the
-    // registry's one counter is, and the two pairs' of four; the module
+    // registry's one counter is, and the nested pairs' of eight; the module
     // redirects no packet.
     let mut ectx = unsafe {
         Ectx::<Reach>::new(&[0, 0, 1, 0, 0, 0, 1, 2], |arena, _, context| {
@@ -138,7 +190,7 @@ fn test_miri_reach_of_the_handler_and_commit_entries() {
                 alloc(3 * size_of::<RelPtr<u64>>()),
                 alloc(size_of::<u64>()),
                 alloc(2 * size_of::<u64>()),
-                alloc(4 * size_of::<u64>()),
+                alloc(size_of::<[u64; 8]>()),
             );
             // A self-relative slot stores the offset to its target.
             write(arena, table, word as isize - table as isize);

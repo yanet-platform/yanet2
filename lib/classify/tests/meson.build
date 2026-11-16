@@ -7,10 +7,13 @@ classify_smoke = executable(
 
 test('classify_smoke', classify_smoke, suite: ['filter'])
 
+# The allocation failure injector lets the net6 tests refuse any one
+# allocation of a compile; classes stored four to a chunk make the class
+# store cross chunks.
 classify_net6 = executable(
   'classify_net6',
   ['net6.c'],
-  c_args: yanet_test_c_args,
+  c_args: yanet_test_c_args + ['-include', meson.project_source_root() / 'lib/filter/tests/oom_shim.h', '-DFILTER_NET6_CLASS_CHUNK_BITS=2'],
   dependencies: [lib_common_dep, lib_classify_compiler_dep, lib_lib_utils_dep, libdpdk_inc_dep],
   include_directories: yanet_rootdir,
 )

@@ -14,7 +14,6 @@ use core::{
 };
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use yanet_sdk_testing as _;
 use yanet_shm::index::{HashIndexKey, HashIndexRef, Slot, place, slots_for};
 
 /// The sizes of the indexes measured.

@@ -62,7 +62,7 @@ members = [
 [workspace.package]
 version = "0.5.0"
 edition = "2024"
-rust-version = "1.99"
+rust-version = "1.100"
 publish = false
 
 # The workspace crates, every external crate two or more members use, and the
