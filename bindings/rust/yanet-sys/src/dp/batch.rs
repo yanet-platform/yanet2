@@ -6,7 +6,7 @@
 //! passed, dropped or routed to a device (module: drain); a packet the module
 //! made may go back to its pool instead.
 
-use core::{marker::PhantomData, mem::size_of, ops::Deref, ptr::NonNull};
+use core::{marker::PhantomData, mem::size_of, ops::Deref, panic::UnwindSafe, ptr::NonNull};
 
 use yanet_packet::{
     ETHERTYPE_IPV4, ETHERTYPE_IPV6, IPPROTO_AH, IPPROTO_DSTOPTS, IPPROTO_FRAGMENT, IPPROTO_HOPOPTS, IPPROTO_IPIP,
@@ -15,7 +15,10 @@ use yanet_packet::{
     resize::{Insertion, Layout, Parsed},
 };
 
-use crate::bindings;
+use crate::{
+    bindings,
+    dp::attach::{DeviceTarget, ModuleEctx, PacketFront, WorkerRef},
+};
 
 /// Length of the Ethernet header, before which no parsed network header
 /// starts: the tunnel operations write its ether type in the two bytes
@@ -49,15 +52,27 @@ const ETHERNET_HEADER_LEN: usize = 14;
 ///     }
 /// }
 /// ```
+///
+/// Its unwind marker is retained for generic consumer bounds. Catching a
+/// panic does not roll back packet-list operations.
+///
+/// ```
+/// fn accepts<T: core::panic::UnwindSafe>() {}
+/// accepts::<yanet_sys::dp::Batch<'static>>()
+/// ```
 pub struct Batch<'id> {
-    front: NonNull<bindings::packet_front>,
-    ectx: NonNull<bindings::module_ectx>,
-    worker: NonNull<bindings::dp_worker>,
+    front: &'id mut PacketFront,
+    ectx: &'id ModuleEctx,
+    worker: WorkerRef<'id>,
     // Invariant brand: values of two different contexts never unify, so they cannot be mixed.
     _brand: PhantomData<fn(&'id ()) -> &'id ()>,
     // Neither Send nor Sync on purpose, independent of the pointer fields.
     _local: PhantomData<*mut ()>,
 }
+
+// The exclusive front changes the representation, not the previous
+// pointer-backed batch's non-transactional unwind contract.
+impl UnwindSafe for Batch<'_> {}
 
 /// A packet taken from or allocated by the batch, owned until it is
 /// disposed of.
@@ -199,22 +214,18 @@ pub enum OuterDscp {
 /// ```
 #[derive(Clone, Copy)]
 pub struct DeviceRef<'d> {
-    target: NonNull<bindings::module_device_target>,
+    target: &'d DeviceTarget,
     input: bool,
     // Invariant brand: values of two different contexts never unify, so they cannot be mixed.
     _brand: PhantomData<fn(&'d ()) -> &'d ()>,
 }
 
-impl DeviceRef<'_> {
-    /// Wraps a target of the running context.
-    ///
-    /// # Safety
-    ///
-    /// The target must be a present routing target of the running execution
-    /// context, valid for the lifetime.
+impl<'d> DeviceRef<'d> {
+    /// Wraps a present target of the running context. C uses `u16::MAX` for
+    /// a device absent from the generation.
     #[inline(always)]
-    pub(crate) unsafe fn new(target: NonNull<bindings::module_device_target>, input: bool) -> Self {
-        Self { target, input, _brand: PhantomData }
+    pub(super) fn new(target: &'d DeviceTarget, input: bool) -> Option<Self> {
+        (target.id() != u16::MAX).then_some(Self { target, input, _brand: PhantomData })
     }
 }
 
@@ -254,20 +265,9 @@ unsafe extern "C" {
 }
 
 impl<'id> Batch<'id> {
-    /// Wraps the front of one handler call.
-    ///
-    /// # Safety
-    ///
-    /// The front must be the one C passed to the running handler, valid and
-    /// exclusively owned by this call, with well-formed lists of packets that
-    /// are themselves exclusively owned; the execution context and the worker
-    /// must be the call's.
+    /// Wraps the exclusively attached front of one handler call.
     #[inline(always)]
-    pub(crate) unsafe fn new(
-        front: NonNull<bindings::packet_front>,
-        ectx: NonNull<bindings::module_ectx>,
-        worker: NonNull<bindings::dp_worker>,
-    ) -> Self {
+    pub(super) fn new(front: &'id mut PacketFront, ectx: &'id ModuleEctx, worker: WorkerRef<'id>) -> Self {
         Self {
             front,
             ectx,
@@ -335,11 +335,7 @@ impl<'id> Batch<'id> {
         // this call, borrowed mutably, so no Rust reference covers the
         // metadata C updates.
         let raw = NonNull::new(unsafe {
-            worker_clone_packet(
-                self.worker.as_ptr(),
-                packet.raw.as_ptr(),
-                (*self.ectx.as_ptr()).packet_recirc_limit,
-            )
+            worker_clone_packet(self.worker.as_ptr(), packet.raw.as_ptr(), self.ectx.recirc_limit())
         })?;
         Some(Packet {
             raw,
@@ -375,16 +371,14 @@ impl<'id> Batch<'id> {
     #[doc(alias = "packet_front_pass")]
     #[inline(always)]
     pub fn pass_all(&mut self) {
-        let front = self.front.as_ptr();
-        // SAFETY: the front and its packets are exclusively this call's
-        // (constructor contract).
-        unsafe {
-            concat(&raw mut (*front).output, &raw mut (*front).input);
-            (*front).output_count += (*front).input_count;
-            (*front).output_bytes += (*front).input_bytes;
-            (*front).input_count = 0;
-            (*front).input_bytes = 0;
-        }
+        let PacketFront(front) = &mut *self.front;
+        // SAFETY: attach: packet. Both lists and their packets belong to this
+        // exclusive front. Keep the existing intrusive-list operation.
+        unsafe { concat(&raw mut front.output, &raw mut front.input) };
+        front.output_count += front.input_count;
+        front.output_bytes += front.input_bytes;
+        front.input_count = 0;
+        front.input_bytes = 0;
     }
 
     /// Walks the input packets the handler has not taken, in order,
@@ -421,9 +415,8 @@ impl<'id> Batch<'id> {
             // its layout; nothing writes it while the batch is borrowed.
             NonNull::new(raw).map(|raw| unsafe { raw.cast::<PacketMeta>().as_ref() })
         };
-        // SAFETY: the input list is exclusively this call's (constructor
-        // contract) and stays unchanged while the batch is borrowed.
-        let first = unsafe { (*self.front.as_ptr()).input.first };
+        let PacketFront(front) = &*self.front;
+        let first = front.input.first;
         core::iter::successors(view(first), move |PacketMeta(packet)| view(packet.next))
     }
 
@@ -434,9 +427,10 @@ impl<'id> Batch<'id> {
     #[allow(clippy::should_implement_trait)]
     #[inline(always)]
     pub fn next(&mut self) -> Option<Packet<'id>> {
+        let PacketFront(front) = &mut *self.front;
         // SAFETY: the front and its packets are exclusively this call's
         // (constructor contract); this is the C list pop.
-        let packet = NonNull::new(unsafe { pop(&raw mut (*self.front.as_ptr()).input) })?;
+        let packet = NonNull::new(unsafe { pop(&raw mut front.input) })?;
         Some(Packet {
             raw: packet,
             _brand: PhantomData,
@@ -466,7 +460,7 @@ impl<'id> Batch<'id> {
     #[inline(always)]
     pub fn dispose(&mut self, packet: Packet<'id>, verdict: Verdict<'id>) {
         let raw = packet.raw.as_ptr();
-        let front = self.front.as_ptr();
+        let PacketFront(front) = &mut *self.front;
         // SAFETY: an owned packet of this batch is on no list and
         // exclusively ours (only taking, allocating and copying create one,
         // and its value is consumed once); the front is this call's, and a
@@ -478,15 +472,15 @@ impl<'id> Batch<'id> {
                 Verdict::Pass => {
                     // `packet_front_output`,
                     // lib/dataplane/module/packet_front.h.
-                    push(&raw mut (*front).output, raw);
-                    (*front).output_count += 1;
-                    (*front).output_bytes += u64::from((*raw).data_len);
+                    push(&raw mut front.output, raw);
+                    front.output_count += 1;
+                    front.output_bytes += u64::from((*raw).data_len);
                 }
                 Verdict::Drop => {
                     // `packet_front_drop`, as above.
-                    push(&raw mut (*front).drop, raw);
-                    (*front).drop_count += 1;
-                    (*front).drop_bytes += u64::from((*raw).data_len);
+                    push(&raw mut front.drop, raw);
+                    front.drop_count += 1;
+                    front.drop_bytes += u64::from((*raw).data_len);
                 }
                 // `module_ectx_route_input` and `module_ectx_route_output`,
                 // lib/dataplane/pipeline/schedule.h, through the shim.

@@ -141,6 +141,11 @@ impl<M: Module> Ectx<M> {
         self.worker.idx = idx;
     }
 
+    /// Sets the round time before the next synchronous callback.
+    pub fn set_time(&mut self, now: u64) {
+        self.worker.current_time = now;
+    }
+
     /// Calls the handler on the packets as the input list of a front.
     ///
     /// The packets are borrowed mutably because the call rewrites their

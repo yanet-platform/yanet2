@@ -18,13 +18,16 @@
 //!   the execution-context pointer carries.
 //! - **call**: the dataplane calls a module's handler with non-null worker,
 //!   execution context and packet front of this call, the worker structure live
-//!   for the call; the context's configuration is set, its absolute fields are
-//!   derived, and its prepared buffer is allocated when the module declares a
-//!   prepared size. It calls the commit hook only for an allocated buffer,
-//!   after deriving the context's absolute fields, as the single writer of that
-//!   buffer. It derives the absolute fields of the object contexts a module
-//!   context links before those of the module context
-//!   (`config_gen_ectx_resolve_counters`,
+//!   for the call. The packet front and its lists are exclusive to this call,
+//!   including synchronous reborrows to C redirect. The worker stays opaque:
+//!   unrelated fields may change. Narrow TCB accessors read only its stable
+//!   index and time on demand, without borrowing the worker. The context's
+//!   configuration is set, its absolute fields are derived, and its prepared
+//!   buffer is allocated when the module declares a prepared size. It calls the
+//!   commit hook only for an allocated buffer, after deriving the context's
+//!   absolute fields, as the single writer of that buffer. It derives the
+//!   absolute fields of the object contexts a module context links before those
+//!   of the module context (`config_gen_ectx_resolve_counters`,
 //!   `lib/dataplane/config/gen_resolve.c`). The worker's index and time do not
 //!   change during a call: C sets the index at startup and the time at the
 //!   start of each round (`worker_round_prepare`,
@@ -48,7 +51,10 @@
 //!   per-worker state: a worker's handler writes its own slot or region,
 //!   through the handle in its prepared value, and no reference covers the slot
 //!   or region but the shared or exclusive borrows the handler takes through
-//!   that handle, never both kinds at once.
+//!   that handle, never both kinds at once. No context reassignment overlaps a
+//!   callback, even an idempotent pass. Prepared output is separately
+//!   allocated, written before publication and never borrowed as an initialized
+//!   value by its own prepare callback.
 //! - **publish**: C publishes a generation with a release store, workers load
 //!   it with acquire, and the commit pass (with the prepare step) completes
 //!   before the worker's first handler call of that generation. Besides a
@@ -85,6 +91,7 @@
 //! - **drain**: when a handler returns, its input is empty: every input packet
 //!   has been passed, dropped or routed to a device through the batch.
 
+mod attach;
 pub mod batch;
 pub mod cx;
 pub mod fields;

@@ -11,6 +11,7 @@ use core::{
 };
 
 use super::*;
+use crate::dp::attach::test_batch;
 
 /// An mbuf with the given offset and lengths over a buffer of the test,
 /// zeroed otherwise.
@@ -90,9 +91,11 @@ fn rust_pass_all(inputs: usize, outputs: usize, counts: [u64; 4]) -> (Vec<usize>
     let (input, output) = packets.split_at_mut(inputs);
     let mut front = front(input, output, counts);
 
-    // SAFETY: the front is this test's; the batch reads only its front,
-    // and the context and worker it is given are never read.
-    unsafe { Batch::new(NonNull::from(&mut front), NonNull::dangling(), NonNull::dangling()).pass_all() };
+    let ectx = bindings::module_ectx::default();
+    let mut worker = bindings::dp_worker::default();
+    // SAFETY: the lists and packets belong to this test. No pool or route is
+    // used.
+    unsafe { test_batch(&mut front, &ectx, &mut worker).pass_all() };
 
     observe(&front, &packets)
 }
@@ -1286,9 +1289,11 @@ fn test_segments_read_a_chained_frame_in_order() {
     // SAFETY: the front is this test's and the packet is linked and on no
     // list.
     unsafe { push(&raw mut front.input, &raw mut descriptor) };
-    // SAFETY: the front is this test's; the batch reads only its front, and
-    // the context and worker it is given are never read.
-    let mut batch = unsafe { Batch::new(NonNull::from(&mut front), NonNull::dangling(), NonNull::dangling()) };
+    let ectx = bindings::module_ectx::default();
+    let mut worker = bindings::dp_worker::default();
+    // SAFETY: the lists and packets belong to this test. No pool or route is
+    // used.
+    let mut batch = unsafe { test_batch(&mut front, &ectx, &mut worker) };
     let expected = (vec![vec![1; 6], vec![2; 5], vec![], vec![4; 3]], 14);
 
     let peeked = batch
@@ -1356,9 +1361,11 @@ fn test_transport_protocol_masks_the_unavailable_mark() {
         // SAFETY: the front is this test's and the packet is linked and on
         // no list.
         unsafe { push(&raw mut front.input, frame.link()) };
-        // SAFETY: the front is this test's; the batch reads only its front,
-        // and the context and worker it is given are never read.
-        let mut batch = unsafe { Batch::new(NonNull::from(&mut front), NonNull::dangling(), NonNull::dangling()) };
+        let ectx = bindings::module_ectx::default();
+        let mut worker = bindings::dp_worker::default();
+        // SAFETY: the lists and packets belong to this test. No pool or route
+        // is used.
+        let mut batch = unsafe { test_batch(&mut front, &ectx, &mut worker) };
 
         let peeked = batch
             .peek()
@@ -1407,9 +1414,11 @@ fn test_hash_and_fragment_flag_report_the_parsers() {
         // SAFETY: the front is this test's and the packet is linked and on
         // no list.
         unsafe { push(&raw mut front.input, frame.link()) };
-        // SAFETY: the front is this test's; the batch reads only its front,
-        // and the context and worker it is given are never read.
-        let mut batch = unsafe { Batch::new(NonNull::from(&mut front), NonNull::dangling(), NonNull::dangling()) };
+        let ectx = bindings::module_ectx::default();
+        let mut worker = bindings::dp_worker::default();
+        // SAFETY: the lists and packets belong to this test. No pool or route
+        // is used.
+        let mut batch = unsafe { test_batch(&mut front, &ectx, &mut worker) };
 
         let peeked = batch
             .peek()
@@ -1589,9 +1598,11 @@ fn test_peek_reads_without_taking() {
         // no list.
         unsafe { push(&raw mut front.input, frame.link()) };
     }
-    // SAFETY: the front is this test's; the batch reads only its front,
-    // and the context and worker it is given are never read.
-    let mut batch = unsafe { Batch::new(NonNull::from(&mut front), NonNull::dangling(), NonNull::dangling()) };
+    let ectx = bindings::module_ectx::default();
+    let mut worker = bindings::dp_worker::default();
+    // SAFETY: the lists and packets belong to this test. No pool or route is
+    // used.
+    let mut batch = unsafe { test_batch(&mut front, &ectx, &mut worker) };
 
     assert_eq!(
         vec![0, 1, 2],
