@@ -161,6 +161,31 @@ pub fn build6(owner: &ArenaOwner, rules: &[TestRule<Net6>]) -> Built<Tree<Tree6>
     .unwrap()
 }
 
+/// Builds the transport decoding of the selected rules, keeping their indices.
+pub fn build_any<N>(
+    owner: &ArenaOwner,
+    rules: &[TestRule<N>],
+    projection: &[bool],
+) -> Built<Tree<TreeAny>, ArenaOwner> {
+    let views = rules
+        .iter()
+        .map(|rule| (Lines::new(&rule.protos).unwrap(), Ports::new(&rule.ports).unwrap()))
+        .collect::<Vec<_>>();
+    let protos = views.iter().map(|view| Some(&view.0)).collect::<Vec<_>>();
+    let ports = views.iter().map(|view| Some(&view.1)).collect::<Vec<_>>();
+    let projection = projection
+        .iter()
+        .map(|&selected| selected.then_some(&()))
+        .collect::<Vec<_>>();
+    Builder::build(owner, "any", |scope| -> Result<_, Error> {
+        let proto = scope.compile(c"proto", &protos)?;
+        let port = scope.compile(c"port", &ports)?;
+        let transport = scope.join(c"transport", proto, port)?;
+        scope.decode(c"rules", transport, &projection)
+    })
+    .unwrap()
+}
+
 /// The protocols and the ports every tree is looked up at: the edges of
 /// every range of the rules, and the ends of the domains.
 pub fn edges<N>(rules: &[TestRule<N>]) -> (Vec<u8>, Vec<u16>) {

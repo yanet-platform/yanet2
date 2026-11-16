@@ -6,8 +6,8 @@
 //! (`lib/classify/query.h`). The tree keeps that promise by construction: a
 //! node is written only by a [`Scope`](crate::cp::Scope), together with the
 //! very nodes it was joined or decoded from, and its fields are private, so no
-//! lookup takes a class from module code and none checks one. Every read is a
-//! Rust port of the C one over the mirrored layouts.
+//! lookup takes a class from module code. Private table access checks indices
+//! in debug builds.
 
 use core::{
     convert::Infallible,
@@ -79,11 +79,6 @@ pub trait Node: Build + sealed::Sealed {
 /// dataplane worker hands a module.
 pub const BURST: usize = 32;
 
-// SAFETY (every read below): the classifier belongs to the configuration
-// published and frozen for 'g (`Resolve` contract) and was built whole by its
-// C build, together with the nodes of the classes it reads, whose classes its
-// dimensions were sized by.
-
 impl Node for Net4Attr {
     type Key = Addr4;
 
@@ -107,8 +102,7 @@ impl Node for PortAttr {
 
     #[inline(always)]
     fn class<'g>(&'g self, cx: &impl Resolve<'g>, port: u16) -> u32 {
-        // SAFETY: see above; the line spans the whole port domain.
-        unsafe { self.line.get(cx, u32::from(port)) }
+        self.line.get(cx, u32::from(port))
     }
 }
 
@@ -117,8 +111,7 @@ impl Node for LineAttr {
 
     #[inline(always)]
     fn class<'g>(&'g self, cx: &impl Resolve<'g>, value: u8) -> u32 {
-        // SAFETY: see above; the line spans the whole byte domain.
-        unsafe { self.line.get(cx, u32::from(value)) }
+        self.line.get(cx, u32::from(value))
     }
 }
 
@@ -181,9 +174,7 @@ impl<L: Node, R: Node> Join<L, R> {
     #[inline(always)]
     fn pair<'g>(&'g self, cx: &impl Resolve<'g>, left: u32, right: u32) -> u32 {
         let Joint { table } = &self.table;
-        // SAFETY: see above; the classes are of the stages the joint was
-        // joined from, below its counts of rows and columns.
-        unsafe { table.get(cx, left, right) }
+        table.get(cx, left, right)
     }
 }
 
@@ -227,37 +218,36 @@ impl<L: Node, R: Node> Rules<L, R> {
     /// The first rule of a pair of classes of the inputs.
     #[inline(always)]
     fn pair<'g>(&'g self, cx: &impl Resolve<'g>, left: u32, right: u32) -> Rule {
-        // SAFETY: see above; the classes are of the stages the table was
-        // joined from.
-        unsafe { self.table.rule(cx, left, right) }
+        self.table.rule(cx, left, right)
     }
 }
 
 impl RuleTable {
-    /// The first rule of a pair of classes.
-    ///
-    /// # Safety
-    ///
-    /// The classes are of the stages the table was joined from: the class
-    /// map holds a row for each left class, and each row a rule for each
-    /// right class.
     #[inline(always)]
-    unsafe fn rule<'g>(&'g self, cx: &impl Resolve<'g>, left: u32, right: u32) -> Rule {
-        // SAFETY: the caller's contract, and the table is frozen for 'g.
-        Rule(unsafe { self.rows.get(cx, self.class_map.get(cx, left), right) })
+    fn rule<'g>(&'g self, cx: &impl Resolve<'g>, left: u32, right: u32) -> Rule {
+        // Keep the map lookup in the row argument to preserve optimized
+        // evaluation order.
+        Rule(self.rows.get(
+            cx,
+            {
+                let row = self.class_map.get(cx, left);
+                debug_assert!(
+                    row < self.class_count,
+                    "index {row} outside a table of {}",
+                    self.class_count
+                );
+                debug_assert!(right < self.h_dim, "index {right} outside a table of {}", self.h_dim);
+                row
+            },
+            right,
+        ))
     }
 }
 
 impl RuleMap {
-    /// The first rule of a class.
-    ///
-    /// # Safety
-    ///
-    /// The class is of the stage the map was decoded from, below its size.
     #[inline(always)]
-    unsafe fn rule<'g>(&'g self, cx: &impl Resolve<'g>, class: u32) -> Rule {
-        // SAFETY: the caller's contract, and the map is frozen for 'g.
-        Rule(unsafe { self.line.get(cx, class) })
+    fn rule<'g>(&'g self, cx: &impl Resolve<'g>, class: u32) -> Rule {
+        Rule(self.line.get(cx, class))
     }
 }
 
@@ -300,9 +290,7 @@ impl<N: Node> Decode<N> {
     /// The first rule of a class of the input.
     #[inline(always)]
     fn rule<'g>(&'g self, cx: &impl Resolve<'g>, class: u32) -> Rule {
-        // SAFETY: see above; the class is of the stage the map was decoded
-        // from.
-        unsafe { self.map.rule(cx, class) }
+        self.map.rule(cx, class)
     }
 }
 
@@ -564,5 +552,27 @@ mod tests {
         let mut burst = [Rule(7); 40];
         tree.lookup_burst(&view, &keys(), |&key| key, &mut burst);
         assert_eq!(expected, burst);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "index 2 outside a table of 2")]
+    fn test_rule_table_rejects_column_at_width() {
+        use crate::classify::RuleTable;
+
+        type C = bindings::rule_table;
+        let arena = BlockArena::new();
+        let addr = block(arena, size_of::<RuleTable>());
+        put(arena, addr + offset_of!(C, v_dim), 3u32);
+        put(arena, addr + offset_of!(C, h_dim), 2u32);
+        lay_line(arena, addr + offset_of!(C, class_map), &[1, 0, 1]);
+        lay_rows(arena, addr + offset_of!(C, rows), &[&[7, 8], &[9, 10]]);
+        put(arena, addr + offset_of!(C, class_count), 2u32);
+        // SAFETY: this initialized rule table has consistent compact geometry
+        // and remains frozen. Only the private accessor's column is invalid.
+        let view = unsafe { View::new(arena.root()) };
+        // SAFETY: the aligned block holds the initialized mirrored rule table.
+        let table = unsafe { &*arena.root().ptr::<RuleTable>(addr) };
+        table.rule(&view, 0, 2);
     }
 }
