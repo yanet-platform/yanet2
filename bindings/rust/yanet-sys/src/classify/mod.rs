@@ -10,7 +10,7 @@
 //! it reads. The dataplane looks a packet's fields up, for one packet or a
 //! burst of them, through Rust ports of the C lookups over those layouts, as
 //! the LPM's is: no call into C. Classes never leave the tree. Table indices
-//! are checked in debug builds and when checked lookups are enabled.
+//! are checked in debug builds.
 //!
 //! The compiles are C the shim compiles in, but the joins and the decode call
 //! the classification library's compiler (`lib/classify/compiler/helper.c`):
@@ -379,9 +379,7 @@ const _: fn(&bindings::value_table) -> (*mut bindings::memory_context, u32, u32,
 // built dimensions and offsets, not arbitrary caller-supplied metadata.
 #[inline(always)]
 fn check_index(index: u32, len: u32) {
-    if cfg!(any(debug_assertions, feature = "checked-lookups")) {
-        assert!(index < len, "index {index} outside a table of {len}");
-    }
+    debug_assert!(index < len, "index {index} outside a table of {len}");
 }
 
 #[deny(clippy::multiple_unsafe_ops_per_block)]
@@ -393,7 +391,7 @@ impl Line {
             .shm_root()
             .rel(ptr::from_ref(&self.values).addr(), self.values.offset());
         // SAFETY: the line's built length covers every class its node emits,
-        // checked above in checked builds.
+        // checked above in debug builds.
         let word = unsafe { values.add(index as usize) };
         // SAFETY: the selected word is initialized and frozen for the call.
         unsafe { word.read() }
@@ -410,13 +408,13 @@ impl Rows {
         let directory = &self.0;
         let slots: *const isize = root.rel(ptr::from_ref(directory).addr(), directory.offset());
         // SAFETY: the C-built directory has the supplied number of slots, and
-        // the tree selects a row inside it, checked above in checked builds.
+        // the tree selects a row inside it, checked above in debug builds.
         let slot = unsafe { slots.add(row as usize) };
         // SAFETY: the frozen slot holds initialized relative-offset bits.
         let offset = unsafe { slot.read() };
         let values: *const u32 = root.rel(slot.addr(), offset);
         // SAFETY: each built row has the supplied number of columns, and the
-        // tree's class is inside it, checked above in checked builds.
+        // tree's class is inside it, checked above in debug builds.
         let word = unsafe { values.add(column as usize) };
         // SAFETY: the selected word is initialized and frozen for the call.
         unsafe { word.read() }
@@ -888,7 +886,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(any(debug_assertions, feature = "checked-lookups"))]
+    #[cfg(debug_assertions)]
     #[should_panic(expected = "index 3 outside a table of 3")]
     fn test_line_rejects_index_at_length() {
         let (view, line) = line(&[17, 23, 31]);
@@ -896,7 +894,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(any(debug_assertions, feature = "checked-lookups"))]
+    #[cfg(debug_assertions)]
     #[should_panic(expected = "index 0 outside a table of 0")]
     fn test_empty_line_rejects_index_without_storage_access() {
         let arena = BlockArena::new();
@@ -909,7 +907,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(any(debug_assertions, feature = "checked-lookups"))]
+    #[cfg(debug_assertions)]
     #[should_panic(expected = "index 2 outside a table of 2")]
     fn test_table_rejects_row_at_height() {
         let (view, table) = table();
@@ -917,7 +915,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(any(debug_assertions, feature = "checked-lookups"))]
+    #[cfg(debug_assertions)]
     #[should_panic(expected = "index 3 outside a table of 3")]
     fn test_table_rejects_column_at_width() {
         let (view, table) = table();
@@ -925,7 +923,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(any(debug_assertions, feature = "checked-lookups"))]
+    #[cfg(debug_assertions)]
     #[should_panic(expected = "index 2 outside a table of 2")]
     fn test_rows_reject_mapped_class_at_compact_count() {
         use super::Rows;

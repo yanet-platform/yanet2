@@ -7,7 +7,7 @@
 //! node is written only by a [`Scope`](crate::cp::Scope), together with the
 //! very nodes it was joined or decoded from, and its fields are private, so no
 //! lookup takes a class from module code. Private table access checks indices
-//! in debug builds and when checked lookups are enabled.
+//! in debug builds.
 
 use core::{
     convert::Infallible,
