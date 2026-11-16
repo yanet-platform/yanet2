@@ -1,0 +1,50 @@
+name: pdump
+
+logging:
+  level: info
+
+gateways:
+  - name: numa0
+    endpoint: "[::1]:8080"
+
+register:
+  interval: 30s
+
+reconcile:
+  interval: 30s
+  initial_backoff: 500ms
+  max_backoff: 30s
+
+configs:
+  - name: ring-pdump-in
+    method: objects.ring.controlplane.ringpb.v1.RingService/CreateRing
+    file: /etc/yanet2/pdump.d/ring-in-default.yaml
+  - name: ring-pdump-out
+    method: objects.ring.controlplane.ringpb.v1.RingService/CreateRing
+    file: /etc/yanet2/pdump.d/ring-out-default.yaml
+  - name: pdump-in
+    method: modules.pdump.controlplane.pdumppb.v1.PdumpService/SetConfig
+    file: /etc/yanet2/pdump.d/capture-in-default.yaml
+  - name: pdump-out
+    method: modules.pdump.controlplane.pdumppb.v1.PdumpService/SetConfig
+    file: /etc/yanet2/pdump.d/capture-out-default.yaml
+
+functions:
+  - name: fn:pdump-in
+    ignore_pdump: false
+    chains:
+      - chain:
+          name: default
+          modules:
+            - type: pdump
+              name: pdump-in
+        weight: 1
+  - name: fn:pdump-out
+    ignore_pdump: false
+    chains:
+      - chain:
+          name: default
+          modules:
+            - type: pdump
+              name: pdump-out
+        weight: 1

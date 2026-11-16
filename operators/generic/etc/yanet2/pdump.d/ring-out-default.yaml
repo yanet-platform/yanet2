@@ -1,0 +1,4 @@
+name: ring-pdump-out
+capacity: 1048576
+publish_batch: 8
+allow_existing: true
