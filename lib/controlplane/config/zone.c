@@ -964,7 +964,6 @@ cp_config_update_devices(
 	struct cp_device *devices[],
 	yanet_error **err
 ) {
-	// TODO weight clamp
 	cp_config_lock(cp_config);
 
 	struct agent **owners = NULL;

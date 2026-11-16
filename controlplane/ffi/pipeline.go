@@ -119,6 +119,9 @@ func newFunctionConfig(config FunctionConfig) (*functionConfig, error) {
 			chainPtr,
 			C.uint64_t(chain.Weight),
 		) != 0 {
+			// The chain was never stored, so freeing the function
+			// config cannot reclaim it.
+			C.cp_chain_config_free(chainPtr)
 			C.cp_function_config_free(ptr)
 			return nil, fmt.Errorf("failed to create ffi function config")
 		}

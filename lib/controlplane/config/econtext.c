@@ -750,9 +750,34 @@ function_ectx_create(
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
 	struct memory_context *memory_context = &cp_config->ectx_memory_context;
 
+	// The accumulation is checked against the documented bound, which
+	// also keeps the sum from wrapping.
 	uint64_t weight_sum = 0;
 	for (uint64_t idx = 0; idx < cp_function->chain_count; ++idx) {
-		weight_sum += cp_function->chains[idx].weight;
+		uint64_t weight = cp_function->chains[idx].weight;
+		if (weight > YANET_MAX_WEIGHT_SUM - weight_sum) {
+			yanet_error_add(
+				err,
+				"chain weight sum of function '%s' exceeds the "
+				"maximum of %lu",
+				cp_function->name,
+				(uint64_t)YANET_MAX_WEIGHT_SUM
+			);
+			return NULL;
+		}
+		weight_sum += weight;
+	}
+
+	// The product and the header addition stay checked even with the
+	// bound in place, as pure arithmetic defense.
+	if (weight_sum > (SIZE_MAX - sizeof(struct function_ectx)) /
+				 sizeof(struct chain_ectx *)) {
+		yanet_error_add(
+			err,
+			"execution context size of function '%s' overflows",
+			cp_function->name
+		);
+		return NULL;
 	}
 
 	size_t ectx_size = sizeof(struct function_ectx) +
@@ -1138,9 +1163,36 @@ device_entry_ectx_create(
 	struct cp_config *cp_config = ADDR_OF(&new_config_gen->cp_config);
 	struct memory_context *memory_context = &cp_config->ectx_memory_context;
 
+	struct cp_device *cp_device = ADDR_OF(&device_ectx->cp_device);
+
+	// The accumulation is checked against the documented bound, which
+	// also keeps the sum from wrapping.
 	uint64_t weight_sum = 0;
 	for (uint64_t idx = 0; idx < cp_device_entry->pipeline_count; ++idx) {
-		weight_sum += cp_device_entry->pipelines[idx].weight;
+		uint64_t weight = cp_device_entry->pipelines[idx].weight;
+		if (weight > YANET_MAX_WEIGHT_SUM - weight_sum) {
+			yanet_error_add(
+				err,
+				"pipeline weight sum of device '%s' exceeds "
+				"the maximum of %lu",
+				cp_device->name,
+				(uint64_t)YANET_MAX_WEIGHT_SUM
+			);
+			return NULL;
+		}
+		weight_sum += weight;
+	}
+
+	// The product and the header addition stay checked even with the
+	// bound in place, as pure arithmetic defense.
+	if (weight_sum > (SIZE_MAX - sizeof(struct device_entry_ectx)) /
+				 sizeof(struct pipeline_ectx *)) {
+		yanet_error_add(
+			err,
+			"execution context size of device '%s' overflows",
+			cp_device->name
+		);
+		return NULL;
 	}
 
 	size_t ectx_size = sizeof(struct device_entry_ectx) +

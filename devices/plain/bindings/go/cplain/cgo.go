@@ -60,23 +60,35 @@ func NewDeviceConfig(
 	for idx, pipeline := range input {
 		cName := C.CString(pipeline.Name)
 		defer C.free(unsafe.Pointer(cName))
-		C.cp_device_plain_config_set_input_pipeline(
+		if C.cp_device_plain_config_set_input_pipeline(
 			cCfg,
 			C.uint64_t(idx),
 			cName,
 			C.uint64_t(pipeline.Weight),
-		)
+		) != 0 {
+			return nil, fmt.Errorf(
+				"failed to set input pipeline %q with weight %d",
+				pipeline.Name,
+				pipeline.Weight,
+			)
+		}
 	}
 
 	for idx, pipeline := range output {
 		cName := C.CString(pipeline.Name)
 		defer C.free(unsafe.Pointer(cName))
-		C.cp_device_plain_config_set_output_pipeline(
+		if C.cp_device_plain_config_set_output_pipeline(
 			cCfg,
 			C.uint64_t(idx),
 			cName,
 			C.uint64_t(pipeline.Weight),
-		)
+		) != 0 {
+			return nil, fmt.Errorf(
+				"failed to set output pipeline %q with weight %d",
+				pipeline.Name,
+				pipeline.Weight,
+			)
+		}
 	}
 
 	ptr := C.cp_device_plain_new((*C.struct_agent)(agent.AsRawPtr()), cCfg, &cErr)
