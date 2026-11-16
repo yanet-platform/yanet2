@@ -153,6 +153,10 @@ const ipProtoTCP uint16 = 6
 // low byte only keeps the declared protocol.
 const transportHeaderUnavailable uint16 = 0x100
 
+// ipProtoNone is the IPv6 No Next Header value: the extension chain ends
+// and no transport header follows.
+const ipProtoNone uint16 = 59
+
 // ipv6FragmentFrame builds an unpadded Ethernet frame carrying an IPv6
 // header, a Fragment extension header with the given next header, More
 // Fragments bit and 8-byte-unit offset, and the payload verbatim. No
@@ -320,4 +324,108 @@ func TestPacket_NonInitialFragmentHashPayloadIndependent(t *testing.T) {
 	_, _, _, thirdHash := third.fragmentMetadata()
 	assert.NotEqual(t, firstHash, thirdHash,
 		"fragment hash must depend on the flow addresses")
+}
+
+// ipv6ExtChainFrame builds an unpadded Ethernet frame carrying an IPv6
+// header and a Hop-by-Hop extension chain laid out the way the parser
+// walks it: stubs[0] sits at the payload start and every next stub sits
+// (1 + extension length) * 8 bytes after the previous one. The frame
+// holds exactly the declared payload length, and the bytes between stubs
+// stay zeroed padding that the walk never reads.
+func ipv6ExtChainFrame(t *testing.T, declaredPayloadLen int, stubs [][2]byte) []byte {
+	t.Helper()
+
+	frame := make([]byte, 14+40+declaredPayloadLen)
+	copy(frame[0:6], []byte{0x11, 0x22, 0x33, 0x44, 0x55, 0x66})
+	copy(frame[6:12], []byte{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff})
+	binary.BigEndian.PutUint16(frame[12:14], 0x86dd)
+	frame[14] = 0x60
+	binary.BigEndian.PutUint16(frame[18:20], uint16(declaredPayloadLen))
+	frame[20] = 0 // IPPROTO_HOPOPTS starts the chain
+	frame[21] = 64
+	copy(frame[22:38], net.ParseIP("2001:db8::1").To16())
+	copy(frame[38:54], net.ParseIP("2001:db8::2").To16())
+
+	offset := 54
+	for _, stub := range stubs {
+		require.Less(t, offset+1, len(frame),
+			"each stub must fit the frame: the walk reads it before advancing")
+		frame[offset] = stub[0]
+		frame[offset+1] = stub[1]
+		offset += (1 + int(stub[1])) * 8
+	}
+	return frame
+}
+
+// TestPacket_IPv6ExtChainAdvanceOverflowRejected verifies that a
+// Hop-by-Hop chain whose advances sum past 65535 bytes is rejected in
+// bounded time: the walk cursor cannot wrap back below the end of the
+// declared payload, so parsing terminates with an error instead of
+// walking the chain again from the wrapped offset.
+func TestPacket_IPv6ExtChainAdvanceOverflowRejected(t *testing.T) {
+	stubs := make([][2]byte, 32)
+	for idx := range stubs {
+		stubs[idx] = [2]byte{0, 255} // next Hop-by-Hop, 2048-byte advance
+	}
+	frame := ipv6ExtChainFrame(t, 65480, stubs)
+	require.Equal(t, 65534, len(frame))
+
+	pinner := runtime.Pinner{}
+	defer pinner.Unpin()
+	pinner.Pin(&frame[0])
+
+	_, err := NewPacketFromData(PacketData{Payload: frame})
+	require.Error(t, err,
+		"an extension chain advancing past 65535 bytes must be rejected")
+}
+
+// TestPacket_IPv6ExtChainCrossingSegmentRejected verifies that a
+// Hop-by-Hop chain advancing past the first segment is rejected instead
+// of reading header bytes beyond it: the walk dereferences
+// segment-relative pointers, so a chained frame cannot drive reads into
+// memory the segment does not hold.
+func TestPacket_IPv6ExtChainCrossingSegmentRejected(t *testing.T) {
+	frame := ipv6ExtChainFrame(t, 300, [][2]byte{{0, 31}}) // 256-byte advance
+	require.Equal(t, 354, len(frame))
+
+	_, err := NewPacketFromSegments(
+		[][]byte{frame[:200], frame[200:]},
+	)
+	require.Error(t, err,
+		"a chain advancing past the first segment must be rejected")
+}
+
+// TestPacket_IPv6ExtAdvancePastDeclaredPayloadRejected verifies that an
+// extension header whose advance runs past the declared payload length
+// is rejected: the walked region can never exceed the payload the frame
+// declares.
+func TestPacket_IPv6ExtAdvancePastDeclaredPayloadRejected(t *testing.T) {
+	frame := ipv6ExtChainFrame(t, 16, [][2]byte{{0, 255}})
+
+	pinner := runtime.Pinner{}
+	defer pinner.Unpin()
+	pinner.Pin(&frame[0])
+
+	_, err := NewPacketFromData(PacketData{Payload: frame})
+	require.Error(t, err,
+		"an advance past the declared payload length must be rejected")
+}
+
+// TestPacket_IPv6ShortExtChainAccepted verifies that a Hop-by-Hop chain
+// ending exactly at the declared payload length still parses: the final
+// next header is carried as the transport type.
+func TestPacket_IPv6ShortExtChainAccepted(t *testing.T) {
+	frame := ipv6ExtChainFrame(t, 16, [][2]byte{{0, 0}, {59, 0}})
+
+	pinner := runtime.Pinner{}
+	defer pinner.Unpin()
+	pinner.Pin(&frame[0])
+
+	packet, err := NewPacketFromData(PacketData{Payload: frame})
+	require.NoError(t, err, "a short valid extension chain must parse")
+	t.Cleanup(packet.Free)
+
+	_, _, transportType, _ := packet.fragmentMetadata()
+	assert.Equal(t, ipProtoNone, transportType,
+		"the chain's terminal next header is the transport type")
 }

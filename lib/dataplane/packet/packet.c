@@ -117,15 +117,22 @@ parse_ipv6_header(struct packet *packet, uint16_t *type, uint16_t *offset) {
 		return -1;
 	}
 
-	// walk through extensions
-	*offset += sizeof(struct rte_ipv6_hdr);
-	uint16_t max_offset = *offset + rte_be_to_cpu_16(ipv6_hdr->payload_len);
+	// Walk the extension chain with a 32-bit cursor. The end of the
+	// declared payload caps the total extension length, keeping the
+	// cursor under 40 + 2 * 65535 while each advance is at most 2048
+	// bytes, so no advance can wrap the cursor back into range and
+	// the terminal overshoot check below stays reachable on any input.
+	// Each header read is additionally bounded by the first segment's
+	// length, since the walk dereferences segment-relative pointers.
+	uint32_t walk = (uint32_t)*offset + sizeof(struct rte_ipv6_hdr);
+	uint32_t max_offset = walk + rte_be_to_cpu_16(ipv6_hdr->payload_len);
 	uint8_t ext_type = ipv6_hdr->proto;
-	while (*offset < max_offset) {
+	while (walk < max_offset) {
 		if (ext_type == IPPROTO_HOPOPTS ||
 		    ext_type == IPPROTO_ROUTING ||
 		    ext_type == IPPROTO_DSTOPTS) {
-			if (max_offset < *offset + 8) {
+			if (max_offset < walk + 8 ||
+			    rte_pktmbuf_data_len(mbuf) < walk + 8) {
 				return -1;
 			}
 
@@ -133,16 +140,17 @@ parse_ipv6_header(struct packet *packet, uint16_t *type, uint16_t *offset) {
 				rte_pktmbuf_mtod_offset(
 					mbuf,
 					struct yanet_ipv6_ext_2byte *,
-					*offset
+					walk
 				);
 
 			ext_type = ext->next_header;
-			*offset += (1 + ext->extension_length) * 8;
+			walk += (1 + ext->extension_length) * 8;
 
 			// FIXME: packet->network_flags |=
 			// NETWORK_FLAG_HAS_EXTENSION;
 		} else if (ext_type == IPPROTO_AH) {
-			if (max_offset < *offset + 8) {
+			if (max_offset < walk + 8 ||
+			    rte_pktmbuf_data_len(mbuf) < walk + 8) {
 				return -1;
 			}
 
@@ -150,15 +158,16 @@ parse_ipv6_header(struct packet *packet, uint16_t *type, uint16_t *offset) {
 				rte_pktmbuf_mtod_offset(
 					mbuf,
 					struct yanet_ipv6_ext_2byte *,
-					*offset
+					walk
 				);
 
 			ext_type = ext->next_header;
-			*offset += (2 + ext->extension_length) * 4;
+			walk += (2 + ext->extension_length) * 4;
 			// FIXME: packet->network_flags |=
 			// NETWORK_FLAG_HAS_EXTENSION;
 		} else if (ext_type == IPPROTO_FRAGMENT) {
-			if (max_offset < *offset + 8) {
+			if (max_offset < walk + 8 ||
+			    rte_pktmbuf_data_len(mbuf) < walk + 8) {
 				return -1;
 			}
 
@@ -166,7 +175,7 @@ parse_ipv6_header(struct packet *packet, uint16_t *type, uint16_t *offset) {
 				rte_pktmbuf_mtod_offset(
 					mbuf,
 					struct yanet_ipv6_ext_fragment *,
-					*offset
+					walk
 				);
 
 			if ((ext->offset_flag &
@@ -177,7 +186,7 @@ parse_ipv6_header(struct packet *packet, uint16_t *type, uint16_t *offset) {
 					RTE_IPV6_EHDR_FO_MASK;
 			}
 
-			*offset += RTE_IPV6_FRAG_HDR_SIZE;
+			walk += RTE_IPV6_FRAG_HDR_SIZE;
 
 			ext_type = ext->next_header;
 
@@ -197,9 +206,16 @@ parse_ipv6_header(struct packet *packet, uint16_t *type, uint16_t *offset) {
 		}
 	}
 
-	if (*offset > max_offset) {
+	if (walk > max_offset) {
 		return -1;
 	}
+
+	// The public cursor stays 16 bits wide, so a frame walked past
+	// 65535 bytes is rejected instead of written back truncated.
+	if (walk > UINT16_MAX) {
+		return -1;
+	}
+	*offset = (uint16_t)walk;
 
 	packet->hash = crc32(ipv6_hdr->src_addr, 16, packet->hash);
 	packet->hash = crc32(ipv6_hdr->dst_addr, 16, packet->hash);
