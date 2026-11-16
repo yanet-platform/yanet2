@@ -53,6 +53,7 @@ classify_join_test = executable(
   'classify_join_test',
   ['join.c', '../compiler/helper.c'],
   c_args: yanet_test_c_args + ['-DJOIN_TEST'],
+  link_args: ['-Wl,--wrap=malloc'],
   dependencies: [lib_common_dep, libdpdk_inc_dep],
   include_directories: yanet_rootdir,
 )

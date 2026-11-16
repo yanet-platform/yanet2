@@ -579,6 +579,7 @@ join_classes_grow(struct join_classes *classes) {
 	}
 	classes->items = items;
 	free(classes->slots);
+	classes->slots = NULL;
 	classes->slots = malloc((size_t)size * sizeof(struct join_slot));
 	if (classes->slots == NULL) {
 		return -1;

@@ -8,8 +8,25 @@
 #include "lib/classify/compiler/helper.h"
 #include "lib/classify/query.h"
 #include <assert.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+static volatile long malloc_fail_at = -1;
+static volatile long malloc_calls;
+
+void *
+__real_malloc(size_t size);
+void *
+__wrap_malloc(size_t size);
+
+void *
+__wrap_malloc(size_t size) {
+	if (malloc_fail_at >= 0 && malloc_calls++ == malloc_fail_at) {
+		return NULL;
+	}
+	return __real_malloc(size);
+}
 
 // Appends one explicitly enumerated group, leaving its class identifiers
 // intact.
@@ -446,6 +463,142 @@ run_coverage_map_test(void) {
 	join_arena_close(&arena);
 }
 
+// Verifies that class zero reaches the correct rule through later joins,
+// whether the first cell is covered or uncovered.
+static void
+check_zero_class_consumers(struct memory_context *ctx, bool covered) {
+	struct classifier a = {0}, b = {0}, joined = {0};
+	stage_init(&a, ctx, (uint32_t[]){0, 1}, 2);
+	stage_init(&b, ctx, (uint32_t[]){0, 1}, 2);
+	add_group(&a, (uint32_t[]){0}, 1);
+	add_group(&a, (uint32_t[]){1}, 1);
+	add_group(&b, (uint32_t[]){covered ? 0 : 1}, 1);
+	add_group(&b, (uint32_t[]){1}, 1);
+
+	struct value_table first;
+	assert(classify_join(ctx, "first", &a, &b, 2, &first, &joined) == 0);
+	uint32_t lhs[] = {0, 0, 1, 1}, rhs[] = {0, 1, 1, 1};
+	uint32_t suffix[] = {0, 0, 1, 0}, classes[4], results[4];
+	uint32_t expected[] = {
+		covered ? 0 : FILTER_RULE_INVALID,
+		covered ? FILTER_RULE_INVALID : 0,
+		1,
+		FILTER_RULE_INVALID
+	};
+	classify_joint_lookup(&first, lhs, rhs, classes, 4);
+	assert(classes[0] == 0);
+	struct classifier_rule dummy = {};
+	const struct classifier_rule *rules[] = {&dummy, &dummy};
+	struct vline decoder, coverage;
+	assert(classify_decode(ctx, "decode", &joined, rules, 2, &decoder) == 0
+	);
+	classify_resolve(&decoder, classes, results, 4);
+	assert(results[0] == expected[0] && results[1] == expected[1]);
+	assert(results[2] == 1 && results[3] == 1);
+	assert(classify_coverage_map(ctx, &joined, 2, NULL, &coverage) == 0);
+	assert((vline_get(&coverage, 0) != 0) == covered);
+
+	struct rule_table rules_joint = {0};
+	assert(classify_join_rules(
+		       ctx, "rules", &joined, &a, rules, 2, &rules_joint
+	       ) == 0);
+	classify_rule_table_lookup(&rules_joint, classes, suffix, results, 4);
+	assert(memcmp(results, expected, sizeof(expected)) == 0);
+	rule_table_free(&rules_joint);
+
+	for (int compact = 0; compact < 2; ++compact) {
+		struct classifier out = {0};
+		struct value_table table;
+		struct vline map;
+		uint32_t compact_classes[4];
+		const uint32_t *input = classes;
+		int rc;
+		if (compact) {
+			rc = classify_join_compact(
+				ctx,
+				"compact",
+				&joined,
+				&a,
+				2,
+				&coverage,
+				&table,
+				&out
+			);
+			classify_compact_classes(
+				&coverage, classes, compact_classes, 4
+			);
+			input = compact_classes;
+		} else {
+			rc = classify_join(
+				ctx, "final", &joined, &a, 2, &table, &out
+			);
+		}
+		assert(rc == 0);
+		assert(classify_decode(
+			       ctx, "final-decode", &out, rules, 2, &map
+		       ) == 0);
+		classify_combine(&table, &map, input, suffix, results, 4);
+		assert(memcmp(results, expected, sizeof(expected)) == 0);
+		vline_free(&map);
+		value_table_free(&table);
+		classifier_fini(&out, ctx, 2);
+	}
+	vline_free(&coverage);
+	vline_free(&decoder);
+	value_table_free(&first);
+	classifier_fini(&joined, ctx, 2);
+	classifier_fini(&b, ctx, 2);
+	classifier_fini(&a, ctx, 2);
+}
+
+static void
+run_zero_class_consumers_test(void) {
+	struct join_arena arena;
+	join_arena_open(&arena, 4 << 20);
+	check_zero_class_consumers(&arena.ctx, false);
+	check_zero_class_consumers(&arena.ctx, true);
+	join_arena_close(&arena);
+}
+
+// Verifies that injected heap-allocation failures release a partial join.
+static void
+run_join_heap_failure_cleanup_test(void) {
+	struct join_arena arena;
+	join_arena_open(&arena, 4 << 20);
+	struct memory_context *ctx = &arena.ctx;
+	struct classifier stage = {0};
+	stage_init(&stage, ctx, (uint32_t[]){0, 1}, 2);
+	add_group(&stage, (uint32_t[]){0}, 1);
+	add_group(&stage, (uint32_t[]){1}, 1);
+	size_t initial = block_allocator_free_size(&arena.allocator);
+	long allocations = 0;
+	for (long fail = -1; fail < allocations; ++fail) {
+		struct value_table table = {0};
+		struct classifier out = {0};
+		malloc_calls = 0;
+		malloc_fail_at = fail < 0 ? LONG_MAX : fail;
+		int rc = classify_join(
+			ctx, "heap-failure", &stage, &stage, 2, &table, &out
+		);
+		malloc_fail_at = -1;
+		if (fail < 0) {
+			allocations = malloc_calls;
+			assert(rc == 0 && allocations > 0);
+			assert(value_registry_capacity(&out.registry) == 3);
+			value_table_free(&table);
+			classifier_fini(&out, ctx, 2);
+		} else {
+			assert(rc == -1 && malloc_calls > fail);
+			assert(out.rule_groups == NULL);
+			assert(ADDR_OF(&out.registry.memory_context) == NULL);
+			assert(ADDR_OF(&table.memory_context) == NULL);
+		}
+		assert(block_allocator_free_size(&arena.allocator) == initial);
+	}
+	classifier_fini(&stage, ctx, 2);
+	join_arena_close(&arena);
+}
+
 // Verifies that a join failing in its arena leaves the stage zeroed, the
 // table released and the arena as it found it.
 static void
@@ -566,6 +719,8 @@ main(void) {
 	run_uncovered_classes_test();
 	run_failed_join_cleanup_test();
 	run_coverage_map_test();
+	run_zero_class_consumers_test();
+	run_join_heap_failure_cleanup_test();
 	run_join_failure_cleanup_test();
 	run_join_random_test();
 	puts("first-match/projection, duplicate rows, failed-build cleanup "
