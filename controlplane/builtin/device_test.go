@@ -88,6 +88,36 @@ func Test_Device_Delete_RemovesDevice(t *testing.T) {
 	require.Contains(t, names, "d0")
 }
 
+// Test_Device_DirectUpdate_RejectsOverBoundWeightSum verifies that a device
+// whose pipeline weights each pass the config setter but exceed the
+// documented bound in sum is rejected at execution-context sizing when the
+// update reaches the config layer through the direct FFI path.
+func Test_Device_DirectUpdate_RejectsOverBoundWeightSum(t *testing.T) {
+	harness := newDeviceHarness(t)
+
+	agent, err := harness.SharedMemory().AgentAttach("device-weight", 0, datasize.MB*4)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = agent.CleanUp() })
+
+	device, err := cplain.NewDeviceConfig(
+		agent,
+		"heavy",
+		[]cplain.Pipeline{
+			{Name: "p0", Weight: 40000},
+			{Name: "p1", Weight: 40000},
+		},
+		nil,
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = device.Free() })
+
+	require.ErrorContains(
+		t,
+		agent.UpdateDevices([]ffi.ShmDeviceConfig{device.AsFFIDevice()}),
+		"exceeds the maximum",
+	)
+}
+
 // Test_Device_Delete_RefusesTopologyDevice verifies that Delete refuses to
 // remove a predefined topology device and leaves the registry unchanged.
 func Test_Device_Delete_RefusesTopologyDevice(t *testing.T) {

@@ -20,6 +20,7 @@
 
 #include "lib/controlplane/config/cp_module.h"
 #include "lib/controlplane/config/cp_object.h"
+#include "lib/controlplane/config/defines.h"
 #include "lib/controlplane/config/reclaim.h"
 #include "lib/controlplane/config/zone.h"
 #include "lib/dataplane/config/zone.h"
@@ -774,6 +775,12 @@ cp_function_config_set_chain(
 	}
 
 	if (cp_function_config->chains[index].chain != NULL) {
+		return -1;
+	}
+
+	// Direct FFI callers bypass proto validation, so the bound is
+	// enforced here before any config update reaches the dataplane.
+	if (weight > YANET_MAX_WEIGHT_SUM) {
 		return -1;
 	}
 
@@ -1787,6 +1794,13 @@ cp_device_config_set_input_pipeline(
 	if (index >= device->input_pipelines->count) {
 		return -1;
 	}
+
+	// Direct FFI callers bypass proto validation, so the bound is
+	// enforced here before any config update reaches the dataplane.
+	if (weight > YANET_MAX_WEIGHT_SUM) {
+		return -1;
+	}
+
 	strtcpy(device->input_pipelines->pipelines[index].name,
 		name,
 		CP_PIPELINE_NAME_LEN);
@@ -1805,6 +1819,13 @@ cp_device_config_set_output_pipeline(
 	if (index >= device->output_pipelines->count) {
 		return -1;
 	}
+
+	// Direct FFI callers bypass proto validation, so the bound is
+	// enforced here before any config update reaches the dataplane.
+	if (weight > YANET_MAX_WEIGHT_SUM) {
+		return -1;
+	}
+
 	strtcpy(device->output_pipelines->pipelines[index].name,
 		name,
 		CP_PIPELINE_NAME_LEN);
