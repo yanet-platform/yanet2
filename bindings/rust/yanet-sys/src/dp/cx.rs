@@ -8,7 +8,10 @@ use core::{
     ptr::NonNull,
 };
 
-use yanet_shm::{resolve::Resolve, root::ShmRoot};
+use yanet_shm::{
+    resolve::{Graph, Resolve},
+    root::ShmRoot,
+};
 
 use crate::{
     bindings,
@@ -89,13 +92,11 @@ const DEVICE_ABSENT: u16 = u16::MAX;
 /// }
 /// ```
 pub struct Cx<'id, M: Module> {
-    root: ShmRoot,
+    graph: Graph<'id>,
     ectx: NonNull<bindings::module_ectx>,
     worker: NonNull<bindings::dp_worker>,
     config: &'id M::Config,
     prepared: &'id M::Prepared<'id>,
-    // Invariant brand: values of two different contexts never unify, so they cannot be mixed.
-    _brand: PhantomData<fn(&'id ()) -> &'id ()>,
     // Neither Send nor Sync on purpose, independent of the pointer fields.
     _local: PhantomData<*mut ()>,
 }
@@ -705,12 +706,12 @@ impl<'id, M: Module> Cx<'id, M> {
     ///
     /// # Safety
     ///
-    /// The root must cover the shared mapping; the execution context and
-    /// worker must be those of the running call; the configuration must be
-    /// the published one of this module, frozen for the call; the prepared
-    /// buffer must be the context's, holding the value the commit pass wrote
-    /// (or dangling for a zero-sized type), frozen and this worker's alone for
-    /// the call.
+    /// The root must retain mapping-wide raw-pointer provenance, never derived
+    /// from a Rust reference. The execution context and worker must be those
+    /// of the running call. The configuration must be this module's published
+    /// one, frozen for the call. The prepared buffer must be the context's,
+    /// holding the value the commit pass wrote (or dangling for a zero-sized
+    /// type), frozen and this worker's alone for the call.
     #[inline(always)]
     pub(crate) unsafe fn new(
         root: ShmRoot,
@@ -724,13 +725,17 @@ impl<'id, M: Module> Cx<'id, M> {
         // frozen and this worker's alone for the call (constructor
         // contract).
         let prepared = unsafe { prepared.as_ref() };
+        // SAFETY: the root covers the mapping of this call's published,
+        // frozen configuration (attach: mapping, frozen, reclaim). Only the
+        // runtime creates contexts, and the invariant brand bounds every
+        // shared-memory reference safe code receives to this call.
+        let graph = unsafe { Graph::new(root) };
         Self {
-            root,
+            graph,
             ectx,
             worker,
             config,
             prepared,
-            _brand: PhantomData,
             _local: PhantomData,
         }
     }
@@ -766,14 +771,10 @@ impl<'id, M: Module> Cx<'id, M> {
     }
 }
 
-// SAFETY: the context holds the root of the mapping its published, frozen
-// configuration lives in (attach: mapping, frozen, reclaim), and every `'id`
-// reference safe code holds comes from that configuration: contexts are
-// created only by the runtime and the brand is invariant.
-unsafe impl<'id, M: Module> Resolve<'id> for Cx<'id, M> {
+impl<'id, M: Module> Resolve<'id> for Cx<'id, M> {
     #[inline(always)]
-    fn shm_root(&self) -> ShmRoot {
-        self.root
+    fn graph(&self) -> Graph<'id> {
+        self.graph
     }
 }
 
@@ -784,11 +785,9 @@ unsafe impl<'id, M: Module> Resolve<'id> for Cx<'id, M> {
 /// module's commit handler stores resolved pointers in its prepared buffer.
 /// Neither `Send` nor `Sync`.
 pub struct CommitCx<'c, M: Module> {
-    root: ShmRoot,
+    graph: Graph<'c>,
     ectx: NonNull<bindings::module_ectx>,
     config: &'c M::Config,
-    // Invariant brand: values of two different contexts never unify, so they cannot be mixed.
-    _brand: PhantomData<fn(&'c ()) -> &'c ()>,
     // Neither Send nor Sync on purpose, independent of the pointer fields.
     _local: PhantomData<*mut ()>,
 }
@@ -798,17 +797,20 @@ impl<'c, M: Module> CommitCx<'c, M> {
     ///
     /// # Safety
     ///
-    /// As for the invocation context: the root covers the mapping, the
-    /// execution context is the one being committed, with its counter storage
-    /// derived, and the configuration is the published one of this module,
-    /// frozen for the pass.
+    /// As for the invocation context, including the root's mapping-wide raw
+    /// provenance. The execution context is the one being committed, with its
+    /// counter storage derived. The configuration is the published one of
+    /// this module, frozen for the pass.
     #[inline(always)]
     pub(crate) unsafe fn new(root: ShmRoot, ectx: NonNull<bindings::module_ectx>, config: &'c M::Config) -> Self {
+        // SAFETY: the context's mapping and published configuration stay
+        // frozen for this pass, as for the invocation context (constructor
+        // contract, attach: mapping, frozen, reclaim).
+        let graph = unsafe { Graph::new(root) };
         Self {
-            root,
+            graph,
             ectx,
             config,
-            _brand: PhantomData,
             _local: PhantomData,
         }
     }
@@ -835,11 +837,10 @@ impl<'c, M: Module> CommitCx<'c, M> {
     }
 }
 
-// SAFETY: as for the invocation context.
-unsafe impl<'c, M: Module> Resolve<'c> for CommitCx<'c, M> {
+impl<'c, M: Module> Resolve<'c> for CommitCx<'c, M> {
     #[inline(always)]
-    fn shm_root(&self) -> ShmRoot {
-        self.root
+    fn graph(&self) -> Graph<'c> {
+        self.graph
     }
 }
 
@@ -849,11 +850,9 @@ unsafe impl<'c, M: Module> Resolve<'c> for CommitCx<'c, M> {
 /// context's worker to the object's prepare step, and resolves the object's
 /// counters. Neither `Send` nor `Sync`.
 pub struct ObjectCommitCx<'c, O: Object> {
-    root: ShmRoot,
+    graph: Graph<'c>,
     ectx: NonNull<bindings::object_ectx>,
     config: &'c O::Config,
-    // Invariant brand: values of two different contexts never unify, so they cannot be mixed.
-    _brand: PhantomData<fn(&'c ()) -> &'c ()>,
     // Neither Send nor Sync on purpose, independent of the pointer fields.
     _local: PhantomData<*mut ()>,
 }
@@ -863,17 +862,20 @@ impl<'c, O: Object> ObjectCommitCx<'c, O> {
     ///
     /// # Safety
     ///
-    /// The root covers the mapping, the execution context is the one being
-    /// committed, and the configuration is the published one of the object
-    /// being committed, frozen for the pass but for its atomics and mutex
-    /// payloads.
+    /// The root retains mapping-wide raw-pointer provenance, never derived
+    /// from a Rust reference. The execution context is the one being committed.
+    /// The configuration is the published one of this object, frozen for the
+    /// pass except for its atomics and guarded mutex payloads.
     #[inline(always)]
     pub(crate) unsafe fn new(root: ShmRoot, ectx: NonNull<bindings::object_ectx>, config: &'c O::Config) -> Self {
+        // SAFETY: the root covers this object's published configuration,
+        // frozen except for its atomics and guarded mutex payloads for the
+        // invariant pass lifetime (constructor contract, attach: frozen).
+        let graph = unsafe { Graph::new(root) };
         Self {
-            root,
+            graph,
             ectx,
             config,
-            _brand: PhantomData,
             _local: PhantomData,
         }
     }
@@ -894,11 +896,10 @@ impl<'c, O: Object> ObjectCommitCx<'c, O> {
     }
 }
 
-// SAFETY: as for the module's commit context.
-unsafe impl<'c, O: Object> Resolve<'c> for ObjectCommitCx<'c, O> {
+impl<'c, O: Object> Resolve<'c> for ObjectCommitCx<'c, O> {
     #[inline(always)]
-    fn shm_root(&self) -> ShmRoot {
-        self.root
+    fn graph(&self) -> Graph<'c> {
+        self.graph
     }
 }
 
@@ -1024,7 +1025,7 @@ impl<T: CounterLayout> Counter<T> {
         // registry, whose storage of this context holds the counter's
         // aligned values next to each other, as many as the layout's, the
         // size it was registered with.
-        let slot = unsafe { counter_value(cx.root, cx.ectx, self.id()) };
+        let slot = unsafe { counter_value(cx.graph.root(), cx.ectx, self.id()) };
         // SAFETY: TCB direct cells. The resolved initialized values belong to
         // this worker for the call. Overlapping bound views also use cells.
         T::add(unsafe { counter_cells::<T>(slot) }, value);
@@ -1055,7 +1056,7 @@ impl<T: CounterLayout> Counter<T> {
     #[inline(always)]
     pub fn resolve<'c, M: Module>(&'c self, cx: &CommitCx<'c, M>) -> CounterRef<'c, T> {
         // SAFETY: as for adding, for the pass instead of the call.
-        let value = unsafe { counter_value(cx.root, cx.ectx, self.id()) };
+        let value = unsafe { counter_value(cx.graph.root(), cx.ectx, self.id()) };
         CounterRef {
             // SAFETY: the value lies in the counter storage block, not at
             // address zero.
@@ -1135,7 +1136,7 @@ where
         // module and an id of it, whose storage of this context holds the
         // counter's aligned values next to each other, as many as the
         // layout's, the size it was registered with.
-        let slot = unsafe { tagged_counter_value(cx.root, cx.ectx, self.registry(), self.id()) };
+        let slot = unsafe { tagged_counter_value(cx.graph.root(), cx.ectx, self.registry(), self.id()) };
         // SAFETY: TCB tagged direct cells. The resolved initialized values
         // belong to this worker for the call, with only compatible cell
         // aliases.
@@ -1154,7 +1155,7 @@ where
         M: Module,
     {
         // SAFETY: as for adding, for the pass instead of the call.
-        let value = unsafe { tagged_counter_value(cx.root, cx.ectx, self.registry(), self.id()) };
+        let value = unsafe { tagged_counter_value(cx.graph.root(), cx.ectx, self.registry(), self.id()) };
         CounterRef {
             // SAFETY: the value lies in the counter storage block, not at
             // address zero.
@@ -1201,8 +1202,8 @@ where
             // configuration first. The table is a live block, not at address
             // zero.
             let table = unsafe {
-                let storage = tagged_counter_storage(cx.root, cx.ectx, self.registry());
-                NonNull::new_unchecked(counter_value_handles(cx.root, storage))
+                let storage = tagged_counter_storage(cx.graph.root(), cx.ectx, self.registry());
+                NonNull::new_unchecked(counter_value_handles(cx.graph.root(), storage))
             };
             (table, self.len())
         };
@@ -1280,7 +1281,7 @@ where
         // registry, whose storage holds the counter's aligned values next to
         // each other, as many as the layout's, the size it was registered
         // with.
-        let value = unsafe { object_counter_value(cx.root, cx.ectx, self.id()) };
+        let value = unsafe { object_counter_value(cx.graph.root(), cx.ectx, self.id()) };
         CounterRef {
             // SAFETY: the value lies in the counter storage block, not at
             // address zero.
@@ -1326,7 +1327,10 @@ fn device_target<'id, M: Module>(cx: &Cx<'id, M>, device: &'id Device, input: bo
             return None;
         }
         let abs_targets = (*ectx).abs_device_targets;
-        let table = cx.root.ptr::<bindings::module_device_target>(abs_targets.addr());
+        let table = cx
+            .graph
+            .root()
+            .ptr::<bindings::module_device_target>(abs_targets.addr());
         let target = table.add(device.index() as usize);
         if (*target).device_id == DEVICE_ABSENT {
             return None;
@@ -1346,7 +1350,7 @@ impl<O: Object> ObjectLink<O> {
     #[doc(alias = "object_link_get_address")]
     #[inline(always)]
     pub fn get<'id>(&'id self, cx: &impl ModuleCx<'id>) -> &'id O::Config {
-        let root = cx.shm_root();
+        let root = cx.graph().root();
         let object_ectx = linked_object_ectx(cx, self.index());
         // SAFETY: the object context is frozen and its absolute fields were
         // derived before the module's (attach: call, frozen); the object is
@@ -1373,7 +1377,7 @@ impl<O: Object> ObjectLink<O> {
             // SAFETY: a zero-sized value is read from any aligned address.
             return unsafe { NonNull::dangling().as_ref() };
         }
-        let root = cx.shm_root();
+        let root = cx.graph().root();
         let object_ectx = linked_object_ectx(cx, self.index());
         // SAFETY: as for the configuration; the object declares a prepared
         // size, so C allocated the buffer of every context of the object, and
@@ -1394,7 +1398,7 @@ impl<O: Object> ObjectLink<O> {
 /// context's worker.
 #[inline(always)]
 fn linked_object_ectx<'id>(cx: &impl ModuleCx<'id>, index: u64) -> *const bindings::object_ectx {
-    let root = cx.shm_root();
+    let root = cx.graph().root();
     let ectx = cx.module_ectx().as_ptr();
     // SAFETY: the module context is frozen with its absolute fields derived
     // (attach: frozen, publish); a built link index is below the link count,

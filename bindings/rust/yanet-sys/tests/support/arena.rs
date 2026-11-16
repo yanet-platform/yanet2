@@ -12,7 +12,10 @@ use core::{
     ptr::NonNull,
 };
 
-use yanet_shm::{resolve::Resolve, root::ShmRoot};
+use yanet_shm::{
+    resolve::{Graph, Resolve},
+    root::ShmRoot,
+};
 use yanet_sys::{
     bindings,
     cp::{BlockAddr, Built, Context, Header, Owner},
@@ -52,9 +55,7 @@ impl ArenaOwner {
         let base = unsafe { yanet_sys_test_arena_base(arena) };
         Self {
             arena,
-            // SAFETY: a raw pointer from C to the one region every block of
-            // the arena lies in.
-            root: unsafe { ShmRoot::from_mapping(NonNull::new(base).expect("an arena has a region")) },
+            root: ShmRoot::from_mapping(NonNull::new(base).expect("an arena has a region")),
         }
     }
 
@@ -79,12 +80,12 @@ impl ArenaOwner {
     }
 }
 
-// SAFETY: the root covers the arena's region, which holds every block of a
-// configuration, frozen once built: a test reads a configuration only after
-// its build, and releases none it reads.
-unsafe impl<'g> Resolve<'g> for ArenaOwner {
-    fn shm_root(&self) -> ShmRoot {
-        self.root
+impl<'g> Resolve<'g> for ArenaOwner {
+    fn graph(&self) -> Graph<'g> {
+        // SAFETY: the root retains raw provenance over the whole arena.
+        // Tests resolve only completed, frozen configurations and release
+        // none while their references are in use.
+        unsafe { Graph::new(self.root) }
     }
 }
 

@@ -14,8 +14,9 @@ use super::addr::{BlockAddr, Context, Header};
 ///
 /// # Safety
 ///
-/// The builder trusts every method: [`Owner::root`] must cover every block
-/// [`Owner::alloc`] and [`Owner::alloc_in`] return; both return blocks owned
+/// The builder trusts every method: [`Owner::root`] must retain raw-pointer
+/// provenance over every block [`Owner::alloc`] and [`Owner::alloc_in`] return,
+/// never derived from a Rust reference. Both return blocks owned
 /// by the caller until freed, aligned to the smaller of 64 and the size
 /// rounded up to a power of two, and a block of 128 bytes or more to
 /// [`LINE_BLOCK_ALIGN`], as the C block allocator aligns them; the C-facing

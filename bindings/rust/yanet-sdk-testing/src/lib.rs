@@ -15,13 +15,15 @@ use alloc::alloc::{alloc, handle_alloc_error};
 use core::{
     alloc::Layout,
     cell::Cell,
-    marker::PhantomData,
     ptr::{self, NonNull},
     sync::atomic::AtomicPtr,
 };
 use std::sync::Mutex;
 
-use yanet_shm::{resolve::Resolve, root::ShmRoot};
+use yanet_shm::{
+    resolve::{Graph, Resolve},
+    root::ShmRoot,
+};
 
 /// Bytes of the region an arena carves its blocks from; the pages are
 /// touched only when a test writes them.
@@ -106,19 +108,14 @@ impl BlockArena {
 
     /// Root of this arena: its region's base.
     pub fn root(&'static self) -> ShmRoot {
-        // SAFETY: the base is a pointer to the one allocation the arena's
-        // blocks lie in, never freed; it is not derived from a reference, so
-        // its provenance covers all of the region.
-        unsafe { ShmRoot::from_mapping(self.region) }
+        ShmRoot::from_mapping(self.region)
     }
 }
 
 /// A resolving context over a test root, as the runtimes' contexts are over
 /// the mapping.
 pub struct View<'g> {
-    root: ShmRoot,
-    // Invariant brand: values of two different contexts never unify, so they cannot be mixed.
-    _brand: PhantomData<fn(&'g ()) -> &'g ()>,
+    graph: Graph<'g>,
 }
 
 impl View<'_> {
@@ -126,17 +123,19 @@ impl View<'_> {
     ///
     /// # Safety
     ///
-    /// The [`Resolve`] contract: every `'g` reference passed to the view
-    /// belongs to a well-formed built graph, inside the memory the root
-    /// covers, and stays frozen for the view's lifetime.
+    /// The [`Graph::new`] contract: the root retains mapping-wide raw
+    /// provenance, and every `'g` reference passed to the view belongs to a
+    /// well-formed built graph inside it, frozen for the view's lifetime.
     pub unsafe fn new(root: ShmRoot) -> Self {
-        Self { root, _brand: PhantomData }
+        // SAFETY: the caller guarantees the graph token's contract.
+        let graph = unsafe { Graph::new(root) };
+        Self { graph }
     }
 }
 
-// SAFETY: forwarded to the caller that made the view.
-unsafe impl<'g> Resolve<'g> for View<'g> {
-    fn shm_root(&self) -> ShmRoot {
-        self.root
+impl<'g> Resolve<'g> for View<'g> {
+    #[inline(always)]
+    fn graph(&self) -> Graph<'g> {
+        self.graph
     }
 }

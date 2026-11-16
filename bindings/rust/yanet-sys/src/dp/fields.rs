@@ -583,7 +583,7 @@ impl<T: Copy + ShmLayout> PerWorker<T> {
     pub fn handle<'p>(&'p self, cx: &impl PrepareCx<'p>) -> Option<WorkerSlot<'p, T>> {
         let worker = cx.prepare_worker()?;
         Some(WorkerSlot {
-            slot: self.slot_at(cx.shm_root(), worker)?,
+            slot: self.slot_at(cx.graph().root(), worker)?,
             _brand: PhantomData,
         })
     }
@@ -998,7 +998,7 @@ impl<T: Copy + ShmLayout> PerWorkerSlice<T> {
     pub fn handle<'p>(&'p self, cx: &impl PrepareCx<'p>) -> Option<WorkerSlice<'p, T>> {
         let worker = cx.prepare_worker()?;
         Some(WorkerSlice {
-            region: self.region_at(cx.shm_root(), worker)?,
+            region: self.region_at(cx.graph().root(), worker)?,
             len: self.len(),
             _brand: PhantomData,
         })

@@ -51,9 +51,7 @@ unsafe extern "C" fn handle<M: Module>(
             NonNull::new_unchecked(front),
         )
     };
-    // SAFETY: the context lies inside the shared mapping and its pointer
-    // has mapping-wide provenance (attach: call, mapping).
-    let root = unsafe { ShmRoot::from_mapping(ectx.cast()) };
+    let root = ShmRoot::from_mapping(ectx.cast());
     // SAFETY: the context is frozen once handed to the worker and its
     // absolute fields were derived before release (attach: call, frozen,
     // publish).
@@ -98,8 +96,7 @@ unsafe extern "C" fn commit_ectx<M: Module>(ectx: *mut bindings::module_ectx, cp
     // SAFETY: the caller passes a non-null context inside the mapping with
     // mapping-wide provenance (attach: call, mapping).
     let ectx = unsafe { NonNull::new_unchecked(ectx) };
-    // SAFETY: as above.
-    let root = unsafe { ShmRoot::from_mapping(ectx.cast()) };
+    let root = ShmRoot::from_mapping(ectx.cast());
     // SAFETY: the context is frozen except for the prepared buffer, which
     // the single commit pass owns until release to the worker, and the pass
     // runs only for a context whose buffer is allocated (attach: call,
@@ -222,7 +219,7 @@ unsafe extern "C" fn commit_object_ectx<O: Object>(
     }
     // SAFETY: the caller passes a non-null context inside the mapping with
     // mapping-wide provenance (attach: call, mapping).
-    let root = unsafe { ShmRoot::from_mapping(NonNull::new_unchecked(ectx).cast()) };
+    let root = ShmRoot::from_mapping(unsafe { NonNull::new_unchecked(ectx) }.cast());
     // SAFETY: the context is frozen except for the prepared buffer, which the
     // single commit pass owns, and the pass runs only for a context whose
     // buffer is allocated (attach: call, frozen, publish).

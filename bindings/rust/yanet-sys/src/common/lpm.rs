@@ -142,11 +142,11 @@ impl<const K: usize> Lpm<K> {
         if self.is_empty() {
             return None;
         }
-        let root = cx.shm_root();
+        let root = cx.graph().root();
         let directory_slot = core::ptr::from_ref(&self.pages).addr();
         let directory: *const isize = root.rel(directory_slot, self.pages.offset());
         // SAFETY: the LPM belongs to a published graph frozen for 'g
-        // (`Resolve` contract), and a built table that is not empty has a
+        // (graph token contract), and a built table that is not empty has a
         // non-null directory whose first entry is an offset word, aligned.
         let first_chunk = unsafe { directory.read() };
         // The offset is read as integer bits and never as a pointer.
