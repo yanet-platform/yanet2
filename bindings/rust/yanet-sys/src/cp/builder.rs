@@ -894,7 +894,7 @@ pub struct CounterRegistrar<'b, T, W: Owner> {
     memory: &'b MemoryContext<'b, W>,
     header: Header,
     tag: &'b str,
-    // The registry the first counter made or found, zero before it.
+    // The registry explicitly ensured or found by the first counter.
     registry: u64,
     len: u64,
     _brand: Brand<'b>,
@@ -1618,6 +1618,23 @@ where
     T: CounterLayout,
     W: Owner,
 {
+    /// Creates the tagged registry if absent, even when no counters follow.
+    ///
+    /// An empty registry participates in C's counter linking across config
+    /// replacements, preserving omitted counters for their retention period.
+    /// Calling this again finds the same registry and registers no counter.
+    /// Without this call, an empty registrar still creates no registry.
+    ///
+    /// # Errors
+    ///
+    /// The owner refuses to create the registry.
+    pub fn ensure_registry(&mut self) -> Result<(), BuildError<W::Error>> {
+        // SAFETY: the header is initialised and unpublished for this build.
+        self.registry =
+            unsafe { self.memory.owner.ensure_counter_registry(self.header, self.tag) }.map_err(BuildError::Owner)?;
+        Ok(())
+    }
+
     /// Registers a counter of the given name in the registry, of as many
     /// values as the layout holds, and returns its id: the next one for a new
     /// name, the one it took for a name given before.

@@ -686,6 +686,35 @@ fn c_name<const N: usize>(name: &str) -> Result<[u8; N], Error> {
     Ok(bytes)
 }
 
+/// Finds or creates a tagged registry without registering a counter.
+///
+/// # Safety
+///
+/// The header is a module header initialised by the owner and unpublished.
+unsafe fn counter_registry(
+    owner: &Agent,
+    header: Header,
+    tag: &str,
+) -> Result<(*mut bindings::counter_registry, u64), Error> {
+    let tag = c_name::<{ COUNTER_TAG_VALUE_LEN as usize }>(tag)?;
+    let (mut registry, mut chain) = (0, ptr::null_mut());
+    // SAFETY: the header is initialised (caller contract), the tag is NUL
+    // terminated and the out-parameters are valid.
+    let counters = unsafe {
+        bindings::cp_module_counter_registry(
+            header_at::<bindings::cp_module>(owner, header),
+            tag.as_ptr().cast::<c_char>(),
+            &raw mut registry,
+            &raw mut chain,
+        )
+    };
+    if counters.is_null() {
+        // SAFETY: the chain C wrote, if any, is ours alone.
+        return Err(unsafe { from_c_chain(chain) });
+    }
+    Ok((counters, registry))
+}
+
 // SAFETY: the root is the mapping's, which covers every block (constructor
 // contract); the blocks come from C's memory contexts, which align them as
 // the contract asks and own them until returned. The routines called from
@@ -811,6 +840,11 @@ unsafe impl Owner for Agent {
         Ok(id)
     }
 
+    unsafe fn ensure_counter_registry(&self, header: Header, tag: &str) -> Result<u64, Error> {
+        // SAFETY: the header is initialised and unpublished (caller contract).
+        unsafe { counter_registry(self, header, tag) }.map(|(_, registry)| registry)
+    }
+
     unsafe fn register_counter_in(
         &self,
         header: Header,
@@ -818,23 +852,10 @@ unsafe impl Owner for Agent {
         name: &str,
         size: u64,
     ) -> Result<(u64, u64), Error> {
-        let tag = c_name::<{ COUNTER_TAG_VALUE_LEN as usize }>(tag)?;
         let name = c_name::<{ COUNTER_NAME_LEN as usize }>(name)?;
-        let (mut registry, mut chain) = (0, ptr::null_mut());
-        // SAFETY: the header is initialised (caller contract); the tag is NUL
-        // terminated and the out-parameters are valid.
-        let counters = unsafe {
-            bindings::cp_module_counter_registry(
-                header_at::<bindings::cp_module>(self, header),
-                tag.as_ptr().cast::<c_char>(),
-                &raw mut registry,
-                &raw mut chain,
-            )
-        };
-        if counters.is_null() {
-            // SAFETY: the chain C wrote, if any, is ours alone.
-            return Err(unsafe { from_c_chain(chain) });
-        }
+        // SAFETY: the header is initialised and unpublished (caller contract).
+        let (counters, registry) = unsafe { counter_registry(self, header, tag) }?;
+        let mut chain = ptr::null_mut();
         // SAFETY: the registry is one of the header's, initialised and kept
         // in place until the header is finalised; the name is NUL terminated
         // and the out-parameter points at a null chain.

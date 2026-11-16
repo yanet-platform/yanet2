@@ -168,8 +168,14 @@ impl Tally {
     /// the counters by parity: a registry order and a counter order other than
     /// the fields', and one name in two registries. The counters picked by id
     /// are those a registrar registers last in the registry `lanes` as
-    /// `wide`, `narrow` and `wide` again: two counters, ids 0 and 1.
-    pub fn build(agent: &Agent, name: &str, word: u64) -> Result<Built<yanet_sdk_fixture::Tally, Agent>, Error> {
+    /// `wide`, `narrow` and `wide` again: two counters, ids 0 and 1. When
+    /// `with_lanes` is zero, that registry is created without active counters.
+    pub fn build(
+        agent: &Agent,
+        name: &str,
+        word: u64,
+        with_lanes: u8,
+    ) -> Result<Built<yanet_sdk_fixture::Tally, Agent>, Error> {
         Builder::<yanet_sdk_fixture::Tally>::build::<Error, _>(agent, name, |scope| {
             let tagged_held = scope.counter_in("routes", "even")?;
             let held = scope.counter("held")?;
@@ -182,8 +188,11 @@ impl Tally {
             let parity = scope.counter("parity")?;
             let running = scope.counter("running")?;
             let mut lanes = scope.counters_in("lanes")?;
-            for name in ["wide", "narrow", "wide"] {
-                lanes.counter(name)?;
+            lanes.ensure_registry()?;
+            if with_lanes != 0 {
+                for name in ["wide", "narrow", "wide"] {
+                    lanes.counter(name)?;
+                }
             }
             Ok(TallyConfigParts {
                 word,

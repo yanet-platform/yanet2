@@ -64,7 +64,7 @@ func Test_NewConfig_NameWithNUL_IsInvalidArgument(t *testing.T) {
 		build func(*ffi.Agent) error
 	}{
 		{name: "tally", build: func(agent *ffi.Agent) error {
-			_, err := cfixture.NewTallyConfig(agent, "con\x00fig", 7)
+			_, err := cfixture.NewTallyConfig(agent, "con\x00fig", 7, true)
 			return err
 		}},
 		{name: "fib", build: func(agent *ffi.Agent) error {

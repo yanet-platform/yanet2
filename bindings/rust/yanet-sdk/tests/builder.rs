@@ -1195,6 +1195,59 @@ fn test_build_writes_an_empty_registrar_without_counters() {
     owner.assert_released();
 }
 
+/// Explicit creation keeps an empty registry without consuming a counter id.
+#[test]
+fn test_build_ensures_a_registry_without_registering_a_counter() {
+    for names in [&[][..], &["deny", "allow", "deny"][..]] {
+        let owner = owner();
+        let mut ids = Vec::new();
+        let built = build::<ByRuleModule>(&owner, |b| {
+            let route = b.counter_in("routes", "allow")?;
+            let mut rules = b.counters_in("rules")?;
+            rules.ensure_registry()?;
+            rules.ensure_registry()?;
+            for name in names {
+                ids.push(rules.counter(name)?);
+            }
+            Ok(ByRuleParts { route, rules })
+        })
+        .expect("built");
+
+        let (config, _) = body::<ByRuleModule>(&owner, &built);
+        assert_eq!(
+            vec!["routes".to_string(), "rules".to_string()],
+            owner.counter_registries()
+        );
+        assert_eq!(1, config.rules.registry());
+        if names.is_empty() {
+            assert!(config.rules.is_empty());
+            assert_eq!(vec![1], owner.counter_sizes());
+        } else {
+            assert_eq!(vec![0, 1, 0], ids);
+            assert_eq!(2, config.rules.len());
+        }
+        release::<ByRuleModule>(&owner, built);
+        owner.assert_released();
+    }
+}
+
+/// A refused registry creation returns the header and earlier registrations.
+#[test]
+fn test_build_releases_everything_when_ensuring_a_registry_fails() {
+    let owner = owner();
+    owner.fail_after(Call::Registration, 1);
+    let err = build::<ByRuleModule>(&owner, |b| {
+        let route = b.counter_in("routes", "allow")?;
+        let mut rules = b.counters_in("rules")?;
+        rules.ensure_registry()?;
+        Ok(ByRuleParts { route, rules })
+    })
+    .expect_err("refused registry");
+
+    assert_eq!(BuildError::Owner(TestError::Registration), err);
+    owner.assert_released();
+}
+
 /// verifies that a registrar refuses a counter its registry numbers past the
 /// next id, after a counter registered amid its own other than through it, and
 /// the build returns everything it took.
