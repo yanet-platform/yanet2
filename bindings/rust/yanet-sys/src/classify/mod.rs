@@ -395,20 +395,18 @@ impl Line {
 
 impl Rows {
     #[inline(always)]
-    fn get<'g>(&'g self, cx: &impl Resolve<'g>, rows: u32, columns: u32, row: u32, column: u32) -> u32 {
-        debug_assert!(row < rows, "index {row} outside a table of {rows}");
-        debug_assert!(column < columns, "index {column} outside a table of {columns}");
+    fn get<'g>(&'g self, cx: &impl Resolve<'g>, row: u32, column: u32) -> u32 {
         let Self(directory) = self;
         let root = cx.shm_root();
         let slots: *const isize = root.rel(ptr::from_ref(directory).addr(), directory.offset());
-        // SAFETY: the C-built directory has the supplied number of slots, and
-        // the tree selects a row inside it, checked above in debug builds.
+        // SAFETY: the C-built directory spans every row its owner can select.
+        // The owner checks its row bound in debug builds.
         let slot = unsafe { slots.add(row as usize) };
         // SAFETY: the frozen slot holds initialized relative-offset bits.
         let offset = unsafe { slot.read() };
         let values: *const u32 = root.rel(slot.addr(), offset);
-        // SAFETY: each built row has the supplied number of columns, and the
-        // tree's class is inside it, checked above in debug builds.
+        // SAFETY: each built row spans every column its owner can select.
+        // The owner checks its column bound in debug builds.
         let word = unsafe { values.add(column as usize) };
         // SAFETY: the selected word is initialized and frozen for the call.
         unsafe { word.read() }
@@ -418,7 +416,9 @@ impl Rows {
 impl Table {
     #[inline(always)]
     fn get<'g>(&'g self, cx: &impl Resolve<'g>, row: u32, column: u32) -> u32 {
-        self.values.get(cx, self.v_dim, self.h_dim, row, column)
+        debug_assert!(row < self.v_dim, "index {row} outside a table of {}", self.v_dim);
+        debug_assert!(column < self.h_dim, "index {column} outside a table of {}", self.h_dim);
+        self.values.get(cx, row, column)
     }
 }
 
@@ -914,26 +914,6 @@ mod tests {
     fn test_table_rejects_column_at_width() {
         let (view, table) = table();
         table.get(&view, 1, 3);
-    }
-
-    #[test]
-    #[cfg(debug_assertions)]
-    #[should_panic(expected = "index 2 outside a table of 2")]
-    fn test_rows_reject_mapped_class_at_compact_count() {
-        use super::Rows;
-
-        let arena = BlockArena::new();
-        let directory = block(arena, size_of::<Rows>());
-        lay_rows(arena, directory, &[&[7, 8, 9], &[10, 11, 12]]);
-        let map = block(arena, size_of::<Line>());
-        lay_line(arena, map, &[1, 0, 2]);
-        // These are independent valid blocks, not a malformed published tree.
-        // The invalid compact class is supplied only to the private accessor.
-        // SAFETY: both initialized graphs are frozen within the same arena.
-        let view = unsafe { View::new(arena.root()) };
-        // SAFETY: the aligned blocks hold the initialized mirrored records.
-        let (rows, map) = unsafe { (&*arena.root().ptr::<Rows>(directory), &*arena.root().ptr::<Line>(map)) };
-        rows.get(&view, 2, 3, map.get(&view, 2), 0);
     }
 
     #[test]

@@ -225,10 +225,22 @@ impl<L: Node, R: Node> Rules<L, R> {
 impl RuleTable {
     #[inline(always)]
     fn rule<'g>(&'g self, cx: &impl Resolve<'g>, left: u32, right: u32) -> Rule {
-        Rule(
-            self.rows
-                .get(cx, self.class_count, self.h_dim, self.class_map.get(cx, left), right),
-        )
+        // Keep the map lookup in the row argument to preserve optimized
+        // evaluation order.
+        Rule(self.rows.get(
+            cx,
+            {
+                let row = self.class_map.get(cx, left);
+                debug_assert!(
+                    row < self.class_count,
+                    "index {row} outside a table of {}",
+                    self.class_count
+                );
+                debug_assert!(right < self.h_dim, "index {right} outside a table of {}", self.h_dim);
+                row
+            },
+            right,
+        ))
     }
 }
 
@@ -540,5 +552,27 @@ mod tests {
         let mut burst = [Rule(7); 40];
         tree.lookup_burst(&view, &keys(), |&key| key, &mut burst);
         assert_eq!(expected, burst);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "index 2 outside a table of 2")]
+    fn test_rule_table_rejects_column_at_width() {
+        use crate::classify::RuleTable;
+
+        type C = bindings::rule_table;
+        let arena = BlockArena::new();
+        let addr = block(arena, size_of::<RuleTable>());
+        put(arena, addr + offset_of!(C, v_dim), 3u32);
+        put(arena, addr + offset_of!(C, h_dim), 2u32);
+        lay_line(arena, addr + offset_of!(C, class_map), &[1, 0, 1]);
+        lay_rows(arena, addr + offset_of!(C, rows), &[&[7, 8], &[9, 10]]);
+        put(arena, addr + offset_of!(C, class_count), 2u32);
+        // SAFETY: this initialized rule table has consistent compact geometry
+        // and remains frozen. Only the private accessor's column is invalid.
+        let view = unsafe { View::new(arena.root()) };
+        // SAFETY: the aligned block holds the initialized mirrored rule table.
+        let table = unsafe { &*arena.root().ptr::<RuleTable>(addr) };
+        table.rule(&view, 0, 2);
     }
 }
