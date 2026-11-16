@@ -2023,9 +2023,13 @@ func Test_Gateway_HTTPProxy_AuthorizesEveryBackendKind(t *testing.T) {
 	}
 }
 
-// Test_Gateway_HTTPProxy_KeepsLoopbackWhenItsNamesAreTakenOver verifies that
-// the gateway's own services stay reachable over HTTP after such a takeover.
-func Test_Gateway_HTTPProxy_KeepsLoopbackWhenItsNamesAreTakenOver(t *testing.T) {
+// Test_Gateway_HTTPProxy_KeepsLoopbackWhenTakeoverIsRejected verifies that
+// the gateway's own services stay reachable over gRPC and HTTP when an
+// external registration attempts to take their names over.
+//
+// Every such registration is rejected: a name's hosting kind is fixed at
+// registration, so the loopback entries keep serving both surfaces.
+func Test_Gateway_HTTPProxy_KeepsLoopbackWhenTakeoverIsRejected(t *testing.T) {
 	t.Parallel()
 
 	httpListener := NewTestListener(t)
@@ -2049,8 +2053,12 @@ func Test_Gateway_HTTPProxy_KeepsLoopbackWhenItsNamesAreTakenOver(t *testing.T) 
 		_, err := client.Register(t.Context(), &ynpb.RegisterRequest{
 			Backend: &ynpb.BackendDesc{Name: service, Endpoint: foreignEndpoint},
 		}, grpc.WaitForReady(true))
-		require.NoError(t, err)
+		require.Equal(t, codes.PermissionDenied, status.Code(err), "takeover of %s must be rejected", service)
 	}
+
+	response, err := client.ListServices(t.Context(), &ynpb.ListServicesRequest{})
+	require.NoError(t, err, "the gateway service must keep serving after rejected takeovers")
+	require.NotEmpty(t, response.GetServices())
 
 	httpClient := &http.Client{Timeout: 5 * time.Second}
 	url := "http://" + httpAddress + "/api" + ynpb.Gateway_ListServices_FullMethodName

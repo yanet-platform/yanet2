@@ -186,7 +186,9 @@ func (m *InProcessServiceRunner) register(listener *bufconn.Listener) error {
 	}
 
 	for _, name := range names {
-		m.registry.RegisterBackend(name, b, BackendKindInProcess)
+		if _, err := m.registry.RegisterBackend(name, b, BackendKindInProcess); err != nil {
+			return fmt.Errorf("failed to register in-process service %q: %w", name, err)
+		}
 		m.log.Info("registered service in registry",
 			zap.String("service", name),
 			zap.Stringer("kind", BackendKindInProcess),

@@ -2,6 +2,7 @@ package gateway_test
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -9,9 +10,12 @@ import (
 	"github.com/siderolabs/grpc-proxy/proxy"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/connectivity"
+	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/controlplane/gateway"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
@@ -76,16 +80,20 @@ func Test_BackendRegistry_PreservesMonotonicTimestamp(t *testing.T) {
 			registry := gateway.NewBackendRegistry()
 			t.Cleanup(func() { require.NoError(t, registry.Close()) })
 			backend := &fakeBackend{endpoint: "127.0.0.1:9000"}
-			registry.RegisterBackend("svc.Foo", backend, gateway.BackendKindExternal)
+			mustRegister(t, registry, "svc.Foo", backend, gateway.BackendKindExternal)
 			switch tc {
 			case "same-endpoint registration":
 				redundant := &fakeBackend{endpoint: backend.Endpoint()}
-				require.Equal(t, gateway.RegistrationRenewed, registry.RegisterBackend("svc.Foo", redundant, gateway.BackendKindExternal))
+				status, err := registry.RegisterBackend("svc.Foo", redundant, gateway.BackendKindExternal)
+				require.NoError(t, err)
+				require.Equal(t, gateway.RegistrationRenewed, status)
 			case "renewal":
 				require.True(t, registry.Renew("svc.Foo", backend.Endpoint()))
 			case "replacement":
 				replacement := &fakeBackend{endpoint: "127.0.0.1:9001"}
-				require.Equal(t, gateway.RegistrationUpdated, registry.RegisterBackend("svc.Foo", replacement, gateway.BackendKindExternal))
+				status, err := registry.RegisterBackend("svc.Foo", replacement, gateway.BackendKindExternal)
+				require.NoError(t, err)
+				require.Equal(t, gateway.RegistrationUpdated, status)
 			}
 			seen := getBackendEntry(t, registry, "svc.Foo").LastSeenAt()
 			// The timestamp must retain a monotonic reading for elapsed-time expiry.
@@ -101,7 +109,7 @@ func Test_BackendRegistry_EvictStaleStrictCutoff(t *testing.T) {
 		t.Run(tc, func(t *testing.T) {
 			registry := gateway.NewBackendRegistry()
 			t.Cleanup(func() { require.NoError(t, registry.Close()) })
-			registry.RegisterBackend("svc.Foo", &fakeBackend{endpoint: "127.0.0.1:9000"}, gateway.BackendKindExternal)
+			mustRegister(t, registry, "svc.Foo", &fakeBackend{endpoint: "127.0.0.1:9000"}, gateway.BackendKindExternal)
 			cutoff := getBackendEntry(t, registry, "svc.Foo").LastSeenAt()
 			if tc == "wall-only cutoff" {
 				cutoff = cutoff.UTC()
@@ -127,11 +135,19 @@ func getBackendEntry(t *testing.T, registry *gateway.BackendRegistry, service st
 	return &gateway.BackendEntry{}
 }
 
+// mustRegister registers the backend and fails the test on rejection.
+func mustRegister(t *testing.T, registry *gateway.BackendRegistry, service string, backend gateway.Backend, kind gateway.BackendKind) {
+	t.Helper()
+	_, err := registry.RegisterBackend(service, backend, kind)
+	require.NoError(t, err)
+}
+
 func TestBackendRegistry_FirstRegistration(t *testing.T) {
 	reg := gateway.NewBackendRegistry()
 	b := &fakeBackend{endpoint: "127.0.0.1:9000"}
 
-	status := reg.RegisterBackend("svc.Foo", b, gateway.BackendKindExternal)
+	status, err := reg.RegisterBackend("svc.Foo", b, gateway.BackendKindExternal)
+	require.NoError(t, err)
 
 	require.Equal(t, gateway.RegistrationRegistered, status)
 	require.False(t, b.Closed())
@@ -143,13 +159,14 @@ func TestBackendRegistry_FirstRegistration(t *testing.T) {
 func TestBackendRegistry_SameEndpointRenews(t *testing.T) {
 	reg := gateway.NewBackendRegistry()
 	original := &fakeBackend{endpoint: "127.0.0.1:9000"}
-	reg.RegisterBackend("svc.Foo", original, gateway.BackendKindExternal)
+	mustRegister(t, reg, "svc.Foo", original, gateway.BackendKindExternal)
 
 	// Re-register with a different object but the same endpoint and a claimed
 	// kind change.
 	second := &fakeBackend{endpoint: "127.0.0.1:9000"}
 
-	status := reg.RegisterBackend("svc.Foo", second, gateway.BackendKindInProcess)
+	status, err := reg.RegisterBackend("svc.Foo", second, gateway.BackendKindInProcess)
+	require.NoError(t, err)
 
 	require.Equal(t, gateway.RegistrationRenewed, status)
 
@@ -166,17 +183,59 @@ func TestBackendRegistry_SameEndpointRenews(t *testing.T) {
 	require.Equal(t, gateway.BackendKindExternal, entry.Kind())
 }
 
+// Test_BackendRegistry_RegisterBackend_RejectsKindMismatch verifies that a
+// registration claiming a hosting kind different from the existing entry
+// fails and changes nothing.
+//
+// The entry keeps its backend, endpoint and kind, and the rejected backend
+// stays open: ownership of it never passed to the registry.
+func Test_BackendRegistry_RegisterBackend_RejectsKindMismatch(t *testing.T) {
+	cases := []struct {
+		name    string
+		initial gateway.BackendKind
+		claim   gateway.BackendKind
+	}{
+		{name: "builtin replaced by external claim", initial: gateway.BackendKindBuiltin, claim: gateway.BackendKindExternal},
+		{name: "in-process replaced by external claim", initial: gateway.BackendKindInProcess, claim: gateway.BackendKindExternal},
+		{name: "external replaced by builtin claim", initial: gateway.BackendKindExternal, claim: gateway.BackendKindBuiltin},
+		{name: "external replaced by in-process claim", initial: gateway.BackendKindExternal, claim: gateway.BackendKindInProcess},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reg := gateway.NewBackendRegistry()
+			t.Cleanup(func() { _ = reg.Close() })
+
+			original := &fakeBackend{endpoint: "127.0.0.1:9000"}
+			mustRegister(t, reg, "svc.Foo", original, tc.initial)
+
+			rejected := &fakeBackend{endpoint: "127.0.0.1:9001"}
+			_, err := reg.RegisterBackend("svc.Foo", rejected, tc.claim)
+			require.ErrorIs(t, err, gateway.ErrBackendKindMismatch)
+
+			entry := getBackendEntry(t, reg, "svc.Foo")
+			require.Equal(t, original, entry.GetBackend())
+			require.Equal(t, "127.0.0.1:9000", entry.Endpoint())
+			require.Equal(t, tc.initial, entry.Kind())
+
+			require.False(t, rejected.Closed(), "rejected backend stays with its caller")
+			require.False(t, original.Closed(), "a rejection never displaces the existing backend")
+		})
+	}
+}
+
 // TestBackendRegistry_DifferentEndpointUpdates verifies that a registration
 // at a changed endpoint replaces the entry and closes the now-unreferenced
 // previous backend exactly once.
 func TestBackendRegistry_DifferentEndpointUpdates(t *testing.T) {
 	reg := gateway.NewBackendRegistry()
 	prev := &fakeBackend{endpoint: "127.0.0.1:9000"}
-	reg.RegisterBackend("svc.Foo", prev, gateway.BackendKindExternal)
+	mustRegister(t, reg, "svc.Foo", prev, gateway.BackendKindExternal)
 
 	next := &fakeBackend{endpoint: "127.0.0.1:9001"}
 
-	status := reg.RegisterBackend("svc.Foo", next, gateway.BackendKindExternal)
+	status, err := reg.RegisterBackend("svc.Foo", next, gateway.BackendKindExternal)
+	require.NoError(t, err)
 
 	require.Equal(t, gateway.RegistrationUpdated, status)
 
@@ -205,7 +264,8 @@ func TestBackendRegistry_FreshNameSucceedsForEveryKind(t *testing.T) {
 			reg := gateway.NewBackendRegistry()
 			b := &fakeBackend{endpoint: "127.0.0.1:9000"}
 
-			regStatus := reg.RegisterBackend("svc.Foo", b, kind)
+			regStatus, err := reg.RegisterBackend("svc.Foo", b, kind)
+			require.NoError(t, err)
 
 			require.Equal(t, gateway.RegistrationRegistered, regStatus)
 			require.False(t, b.Closed())
@@ -224,11 +284,12 @@ func TestBackendRegistry_FreshNameSucceedsForEveryKind(t *testing.T) {
 func TestBackendRegistry_DisplacingOneOfSeveralSharedNamesKeepsBackendOpen(t *testing.T) {
 	reg := gateway.NewBackendRegistry()
 	shared := &fakeBackend{endpoint: "127.0.0.1:8080"}
-	reg.RegisterBackend("svc.A", shared, gateway.BackendKindBuiltin)
-	reg.RegisterBackend("svc.B", shared, gateway.BackendKindBuiltin)
+	mustRegister(t, reg, "svc.A", shared, gateway.BackendKindBuiltin)
+	mustRegister(t, reg, "svc.B", shared, gateway.BackendKindBuiltin)
 
 	other := &fakeBackend{endpoint: "127.0.0.1:9999"}
-	status := reg.RegisterBackend("svc.A", other, gateway.BackendKindExternal)
+	status, err := reg.RegisterBackend("svc.A", other, gateway.BackendKindBuiltin)
+	require.NoError(t, err)
 
 	require.Equal(t, gateway.RegistrationUpdated, status)
 	require.False(t, shared.Closed(), "the shared backend must not be closed")
@@ -247,15 +308,16 @@ func TestBackendRegistry_DisplacingOneOfSeveralSharedNamesKeepsBackendOpen(t *te
 func TestBackendRegistry_DisplacingLastSharedNameClosesBackend(t *testing.T) {
 	reg := gateway.NewBackendRegistry()
 	shared := &fakeBackend{endpoint: "127.0.0.1:8080"}
-	reg.RegisterBackend("svc.A", shared, gateway.BackendKindBuiltin)
-	reg.RegisterBackend("svc.B", shared, gateway.BackendKindBuiltin)
+	mustRegister(t, reg, "svc.A", shared, gateway.BackendKindBuiltin)
+	mustRegister(t, reg, "svc.B", shared, gateway.BackendKindBuiltin)
 
 	otherA := &fakeBackend{endpoint: "127.0.0.1:9998"}
-	reg.RegisterBackend("svc.A", otherA, gateway.BackendKindExternal)
+	mustRegister(t, reg, "svc.A", otherA, gateway.BackendKindBuiltin)
 	require.False(t, shared.Closed(), "the shared backend must remain open while svc.B references it")
 
 	otherB := &fakeBackend{endpoint: "127.0.0.1:9999"}
-	status := reg.RegisterBackend("svc.B", otherB, gateway.BackendKindExternal)
+	status, err := reg.RegisterBackend("svc.B", otherB, gateway.BackendKindBuiltin)
+	require.NoError(t, err)
 
 	require.Equal(t, gateway.RegistrationUpdated, status)
 	require.Equal(t, 1, shared.CloseCount(), "the last-referenced backend must be closed exactly once")
@@ -276,10 +338,11 @@ func TestBackendRegistry_DisplacingLastSharedNameClosesBackend(t *testing.T) {
 func TestBackendRegistry_RenewingWithASharedBackendKeepsItOpen(t *testing.T) {
 	reg := gateway.NewBackendRegistry()
 	shared := &fakeBackend{endpoint: "127.0.0.1:8080"}
-	reg.RegisterBackend("svc.A", shared, gateway.BackendKindBuiltin)
-	reg.RegisterBackend("svc.B", shared, gateway.BackendKindBuiltin)
+	mustRegister(t, reg, "svc.A", shared, gateway.BackendKindBuiltin)
+	mustRegister(t, reg, "svc.B", shared, gateway.BackendKindBuiltin)
 
-	status := reg.RegisterBackend("svc.A", shared, gateway.BackendKindBuiltin)
+	status, err := reg.RegisterBackend("svc.A", shared, gateway.BackendKindBuiltin)
+	require.NoError(t, err)
 
 	require.Equal(t, gateway.RegistrationRenewed, status)
 	require.False(t, shared.Closed(), "the shared backend must not be closed")
@@ -296,8 +359,8 @@ func TestBackendRegistry_Close(t *testing.T) {
 	bA := &fakeBackend{endpoint: "127.0.0.1:9000"}
 	bB := &fakeBackend{endpoint: "127.0.0.1:9001"}
 
-	reg.RegisterBackend("svc.A", bA, gateway.BackendKindExternal)
-	reg.RegisterBackend("svc.B", bB, gateway.BackendKindExternal)
+	mustRegister(t, reg, "svc.A", bA, gateway.BackendKindExternal)
+	mustRegister(t, reg, "svc.B", bB, gateway.BackendKindExternal)
 
 	err := reg.Close()
 	require.NoError(t, err)
@@ -315,8 +378,8 @@ func TestBackendRegistry_CloseSharedBackendOnce(t *testing.T) {
 
 	// Register the same backend instance under two different service names,
 	// simulating the shared loopback backend used by built-in services.
-	reg.RegisterBackend("svc.A", shared, gateway.BackendKindBuiltin)
-	reg.RegisterBackend("svc.B", shared, gateway.BackendKindBuiltin)
+	mustRegister(t, reg, "svc.A", shared, gateway.BackendKindBuiltin)
+	mustRegister(t, reg, "svc.B", shared, gateway.BackendKindBuiltin)
 
 	err := reg.Close()
 	require.NoError(t, err)
@@ -332,7 +395,7 @@ func TestBackendRegistry_CloseSharedBackendOnce(t *testing.T) {
 func TestBackendRegistry_Renew(t *testing.T) {
 	reg := gateway.NewBackendRegistry()
 	b := &fakeBackend{endpoint: "127.0.0.1:9000"}
-	reg.RegisterBackend("svc.Foo", b, gateway.BackendKindExternal)
+	mustRegister(t, reg, "svc.Foo", b, gateway.BackendKindExternal)
 
 	before := getBackendEntry(t, reg, "svc.Foo").LastSeenAt()
 
@@ -355,7 +418,7 @@ func TestBackendRegistry_Renew(t *testing.T) {
 func TestBackendRegistry_LeaseReleaseIsIdempotent(t *testing.T) {
 	reg := gateway.NewBackendRegistry()
 	b := &fakeBackend{endpoint: "127.0.0.1:9000"}
-	reg.RegisterBackend("svc.Foo", b, gateway.BackendKindExternal)
+	mustRegister(t, reg, "svc.Foo", b, gateway.BackendKindExternal)
 
 	_, release, ok := reg.GetBackend("svc.Foo")
 	require.True(t, ok)
@@ -404,7 +467,7 @@ func TestBackendRegistry_ConcurrentRace(t *testing.T) {
 		go func() {
 			defer func() { done <- struct{}{} }()
 			b := &fakeBackend{endpoint: "127.0.0.1:9000"}
-			reg.RegisterBackend("svc.Race", b, gateway.BackendKindExternal)
+			mustRegister(t, reg, "svc.Race", b, gateway.BackendKindExternal)
 			reg.Renew("svc.Race", "127.0.0.1:9000")
 			if _, release, ok := reg.GetBackend("svc.Race"); ok {
 				release()
@@ -426,9 +489,9 @@ func TestBackendRegistry_KindIsPreserved(t *testing.T) {
 	inProc := &fakeBackend{endpoint: "127.0.0.1:9001"}
 	ext := &fakeBackend{endpoint: "127.0.0.1:9002"}
 
-	reg.RegisterBackend("svc.Builtin", builtin, gateway.BackendKindBuiltin)
-	reg.RegisterBackend("svc.InProcess", inProc, gateway.BackendKindInProcess)
-	reg.RegisterBackend("svc.External", ext, gateway.BackendKindExternal)
+	mustRegister(t, reg, "svc.Builtin", builtin, gateway.BackendKindBuiltin)
+	mustRegister(t, reg, "svc.InProcess", inProc, gateway.BackendKindInProcess)
+	mustRegister(t, reg, "svc.External", ext, gateway.BackendKindExternal)
 
 	entries := reg.ListBackends()
 	kinds := map[string]gateway.BackendKind{}
@@ -459,7 +522,7 @@ func TestBackendRegistry_RenewKindIsImmutable(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			reg := gateway.NewBackendRegistry()
 			b := &fakeBackend{endpoint: "127.0.0.1:9000"}
-			reg.RegisterBackend("svc.Foo", b, tc.initial)
+			mustRegister(t, reg, "svc.Foo", b, tc.initial)
 
 			ok := reg.Renew("svc.Foo", "127.0.0.1:9000")
 			require.True(t, ok, "Renew must report success even though the kind claim has no effect")
@@ -476,7 +539,7 @@ func TestBackendRegistry_RenewKindIsImmutable(t *testing.T) {
 func TestBackendRegistry_EvictStaleRemovesExternal(t *testing.T) {
 	reg := gateway.NewBackendRegistry()
 	b := &fakeBackend{endpoint: "127.0.0.1:9000"}
-	reg.RegisterBackend("svc.Foo", b, gateway.BackendKindExternal)
+	mustRegister(t, reg, "svc.Foo", b, gateway.BackendKindExternal)
 
 	evicted := reg.EvictStale(time.Now().UTC().Add(time.Hour))
 
@@ -497,8 +560,8 @@ func TestBackendRegistry_EvictStaleSparesNonExternal(t *testing.T) {
 	reg := gateway.NewBackendRegistry()
 	builtin := &fakeBackend{endpoint: "127.0.0.1:9000"}
 	inProc := &fakeBackend{endpoint: "127.0.0.1:9001"}
-	reg.RegisterBackend("svc.Builtin", builtin, gateway.BackendKindBuiltin)
-	reg.RegisterBackend("svc.InProcess", inProc, gateway.BackendKindInProcess)
+	mustRegister(t, reg, "svc.Builtin", builtin, gateway.BackendKindBuiltin)
+	mustRegister(t, reg, "svc.InProcess", inProc, gateway.BackendKindInProcess)
 
 	evicted := reg.EvictStale(time.Now().UTC().Add(time.Hour))
 
@@ -515,11 +578,11 @@ func TestBackendRegistry_EvictStaleSparesNonExternal(t *testing.T) {
 func TestBackendRegistry_EvictStaleSparesSharedBackend(t *testing.T) {
 	reg := gateway.NewBackendRegistry()
 	shared := &fakeBackend{endpoint: "127.0.0.1:9000"}
-	reg.RegisterBackend("svc.A", shared, gateway.BackendKindBuiltin)
-	reg.RegisterBackend("svc.B", shared, gateway.BackendKindBuiltin)
+	mustRegister(t, reg, "svc.A", shared, gateway.BackendKindBuiltin)
+	mustRegister(t, reg, "svc.B", shared, gateway.BackendKindBuiltin)
 
 	ext := &fakeBackend{endpoint: "127.0.0.1:9001"}
-	reg.RegisterBackend("svc.External", ext, gateway.BackendKindExternal)
+	mustRegister(t, reg, "svc.External", ext, gateway.BackendKindExternal)
 
 	evicted := reg.EvictStale(time.Now().UTC().Add(time.Hour))
 
@@ -545,7 +608,7 @@ func TestBackendRegistry_LeaseSurvivesConcurrentEviction(t *testing.T) {
 
 	reg := gateway.NewBackendRegistry()
 	b := &fakeBackend{endpoint: "127.0.0.1:9000"}
-	reg.RegisterBackend("svc.Foo", b, gateway.BackendKindExternal)
+	mustRegister(t, reg, "svc.Foo", b, gateway.BackendKindExternal)
 
 	backend, release, ok := reg.GetBackend("svc.Foo")
 	require.True(t, ok)
@@ -585,7 +648,7 @@ func TestBackendRegistry_ReRegisterAfterEvictionLeavesNewBackendUsable(t *testin
 
 	reg := gateway.NewBackendRegistry()
 	old := &fakeBackend{endpoint: "127.0.0.1:9000"}
-	reg.RegisterBackend("svc.Foo", old, gateway.BackendKindExternal)
+	mustRegister(t, reg, "svc.Foo", old, gateway.BackendKindExternal)
 
 	// Simulate a call that obtained the backend just before the sweeper
 	// runs.
@@ -599,7 +662,8 @@ func TestBackendRegistry_ReRegisterAfterEvictionLeavesNewBackendUsable(t *testin
 	// A fresh registration under the same service name, using a distinct
 	// connection, lands before the old lease is released.
 	next := &fakeBackend{endpoint: "127.0.0.1:9001"}
-	status := reg.RegisterBackend("svc.Foo", next, gateway.BackendKindExternal)
+	status, err := reg.RegisterBackend("svc.Foo", next, gateway.BackendKindExternal)
+	require.NoError(t, err)
 	require.Equal(t, gateway.RegistrationRegistered, status)
 
 	nextBackend, nextRelease, ok := reg.GetBackend("svc.Foo")
@@ -622,7 +686,7 @@ func TestBackendRegistry_ReRegisterAfterEvictionLeavesNewBackendUsable(t *testin
 func TestBackendRegistry_RenewSavesFromEviction(t *testing.T) {
 	reg := gateway.NewBackendRegistry()
 	b := &fakeBackend{endpoint: "127.0.0.1:9000"}
-	reg.RegisterBackend("svc.Foo", b, gateway.BackendKindExternal)
+	mustRegister(t, reg, "svc.Foo", b, gateway.BackendKindExternal)
 
 	before := getBackendEntry(t, reg, "svc.Foo").LastSeenAt()
 	// Sleep briefly so Renew's timestamp is distinguishable from registration.
@@ -650,7 +714,7 @@ func TestBackendRegistry_RenewSavesFromEviction(t *testing.T) {
 func TestBackendRegistry_EvictStaleCutoffOlderThanAllEntriesRemovesNothing(t *testing.T) {
 	reg := gateway.NewBackendRegistry()
 	b := &fakeBackend{endpoint: "127.0.0.1:9000"}
-	reg.RegisterBackend("svc.Foo", b, gateway.BackendKindExternal)
+	mustRegister(t, reg, "svc.Foo", b, gateway.BackendKindExternal)
 
 	evicted := reg.EvictStale(time.Now().UTC().Add(-time.Hour))
 
@@ -670,7 +734,7 @@ func TestBackendRegistry_EvictStaleCutoffOlderThanAllEntriesRemovesNothing(t *te
 func TestBackendRegistry_RenewCannotArmSweeperAgainstSharedBackend(t *testing.T) {
 	reg := gateway.NewBackendRegistry()
 	shared := &fakeBackend{endpoint: "127.0.0.1:8080"}
-	reg.RegisterBackend("controlplane.ynpb.v1.Gateway", shared, gateway.BackendKindBuiltin)
+	mustRegister(t, reg, "controlplane.ynpb.v1.Gateway", shared, gateway.BackendKindBuiltin)
 
 	ok := reg.Renew("controlplane.ynpb.v1.Gateway", "127.0.0.1:8080")
 	require.True(t, ok)
@@ -694,7 +758,7 @@ func TestBackendRegistry_RenewCannotArmSweeperAgainstSharedBackend(t *testing.T)
 func TestBackendRegistry_RenewCannotExemptExternalFromEviction(t *testing.T) {
 	reg := gateway.NewBackendRegistry()
 	b := &fakeBackend{endpoint: "127.0.0.1:9000"}
-	reg.RegisterBackend("svc.Foo", b, gateway.BackendKindExternal)
+	mustRegister(t, reg, "svc.Foo", b, gateway.BackendKindExternal)
 
 	ok := reg.Renew("svc.Foo", "127.0.0.1:9000")
 	require.True(t, ok)
@@ -727,4 +791,105 @@ func Test_GatewayService_Register_AlwaysExternal(t *testing.T) {
 
 	entry := getBackendEntry(t, reg, "svc.Test")
 	require.Equal(t, gateway.BackendKindExternal, entry.Kind())
+}
+
+// stubAuthorizer records every permission it is asked about and answers
+// with its configured error.
+type stubAuthorizer struct {
+	err     error
+	methods []string
+}
+
+func (m *stubAuthorizer) Authorize(_ context.Context, _ *core.Principal, fullMethod string) error {
+	m.methods = append(m.methods, fullMethod)
+	return m.err
+}
+
+// Test_GatewayService_Register_RejectsInProcessName verifies that an
+// external registration cannot take the name of an in-process entry.
+//
+// The entry keeps resolving to its original backend, which stays open.
+func Test_GatewayService_Register_RejectsInProcessName(t *testing.T) {
+	reg := gateway.NewBackendRegistry()
+	t.Cleanup(func() { _ = reg.Close() })
+	original := &fakeBackend{endpoint: "127.0.0.1:9000"}
+	mustRegister(t, reg, "svc.Foo", original, gateway.BackendKindInProcess)
+
+	svc := gateway.NewGatewayService(reg)
+	_, err := svc.Register(t.Context(), &ynpb.RegisterRequest{
+		Backend: &ynpb.BackendDesc{Name: "svc.Foo", Endpoint: "127.0.0.1:9001"},
+	})
+	require.Equal(t, codes.PermissionDenied, status.Code(err))
+
+	entry := getBackendEntry(t, reg, "svc.Foo")
+	require.Equal(t, original, entry.GetBackend())
+	require.False(t, original.Closed())
+}
+
+// Test_GatewayService_Register_UnixEndpointRequiresPermission verifies
+// that a unix-socket endpoint is registered only when the authorizer
+// grants the unsafe-endpoint permission, while a TCP endpoint never
+// consults it.
+func Test_GatewayService_Register_UnixEndpointRequiresPermission(t *testing.T) {
+	cases := []struct {
+		name        string
+		endpoint    string
+		authorizer  *stubAuthorizer
+		wantCode    codes.Code
+		wantQueried bool
+	}{
+		{
+			name:        "unix endpoint rejected without the grant",
+			endpoint:    "/tmp/svc.sock",
+			authorizer:  &stubAuthorizer{err: errors.New("denied")},
+			wantCode:    codes.PermissionDenied,
+			wantQueried: true,
+		},
+		{
+			name:        "unix endpoint allowed with the grant",
+			endpoint:    "/tmp/svc.sock",
+			authorizer:  &stubAuthorizer{},
+			wantCode:    codes.OK,
+			wantQueried: true,
+		},
+		{
+			name:        "tcp endpoint needs no grant",
+			endpoint:    "127.0.0.1:9000",
+			authorizer:  &stubAuthorizer{err: errors.New("denied")},
+			wantCode:    codes.OK,
+			wantQueried: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reg := gateway.NewBackendRegistry()
+			t.Cleanup(func() { _ = reg.Close() })
+			svc := gateway.NewGatewayService(reg, gateway.WithGatewayServiceAuthorizer(tc.authorizer))
+
+			_, err := svc.Register(t.Context(), &ynpb.RegisterRequest{
+				Backend: &ynpb.BackendDesc{Name: "svc.Foo", Endpoint: tc.endpoint},
+			})
+			require.Equal(t, tc.wantCode, status.Code(err))
+
+			require.Equal(t, tc.wantQueried, len(tc.authorizer.methods) > 0)
+			if tc.wantQueried {
+				require.Contains(t, tc.authorizer.methods[0], "UnsafeEndpoint")
+			}
+		})
+	}
+}
+
+// Test_GatewayService_Register_UnixEndpointOpenWithoutAuthorizer verifies
+// that a service built without an authorizer keeps every endpoint form
+// open, as before the gate existed.
+func Test_GatewayService_Register_UnixEndpointOpenWithoutAuthorizer(t *testing.T) {
+	reg := gateway.NewBackendRegistry()
+	t.Cleanup(func() { _ = reg.Close() })
+	svc := gateway.NewGatewayService(reg)
+
+	_, err := svc.Register(t.Context(), &ynpb.RegisterRequest{
+		Backend: &ynpb.BackendDesc{Name: "svc.Foo", Endpoint: "/tmp/svc.sock"},
+	})
+	require.NoError(t, err)
 }
