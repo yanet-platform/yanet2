@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "yanet_build_config.h" // MBUF_MAX_SIZE
+
 static size_t refused_device_allocation_size;
 static unsigned refused_device_allocations;
 
@@ -129,23 +131,32 @@ test_numeric_field_rejects_invalid_values(const struct numeric_field *field) {
 
 static void
 test_numeric_field_maximum_values(void) {
-	const char yaml[] = "dataplane:\n"
-			    "  dpdk_memory: 18446744073709551615\n"
-			    "  packet_recirc_limit: 256\n"
-			    "  instances:\n"
-			    "    - numa_id: 65535\n"
-			    "      dp_memory: 18446744073709551615\n"
-			    "      cp_memory: 18446744073709551615\n"
-			    "  devices:\n"
-			    "    - mtu: 4294967295\n"
-			    "      max_lro_packet_size: 18446744073709551615\n"
-			    "      rss_hash: 18446744073709551615\n"
-			    "      workers:\n"
-			    "        - core_id: 65535\n"
-			    "          instance_id: 65535\n"
-			    "          rx_queue_len: 65535\n"
-			    "          tx_queue_len: 65535\n"
-			    "          num_mbufs: 4294967295\n";
+	// max_lro_packet_size tops out at the RX pool's mbuf element size
+	// rather than at a scalar-type limit.
+	char yaml[512];
+	int length = snprintf(
+		yaml,
+		sizeof(yaml),
+		"dataplane:\n"
+		"  dpdk_memory: 18446744073709551615\n"
+		"  packet_recirc_limit: 256\n"
+		"  instances:\n"
+		"    - numa_id: 65535\n"
+		"      dp_memory: 18446744073709551615\n"
+		"      cp_memory: 18446744073709551615\n"
+		"  devices:\n"
+		"    - mtu: 4294967295\n"
+		"      max_lro_packet_size: %d\n"
+		"      rss_hash: 18446744073709551615\n"
+		"      workers:\n"
+		"        - core_id: 65535\n"
+		"          instance_id: 65535\n"
+		"          rx_queue_len: 65535\n"
+		"          tx_queue_len: 65535\n"
+		"          num_mbufs: 4294967295\n",
+		MBUF_MAX_SIZE
+	);
+	assert(length >= 0 && (size_t)length < sizeof(yaml));
 
 	struct dataplane_config *config = NULL;
 	int rc = parse_yaml(yaml, &config);
@@ -159,7 +170,7 @@ test_numeric_field_maximum_values(void) {
 	assert(config->instances[0].cp_memory == UINT64_MAX);
 	assert(config->device_count == 1);
 	assert(config->devices[0].mtu == UINT32_MAX);
-	assert(config->devices[0].max_lro_packet_size == UINT64_MAX);
+	assert(config->devices[0].max_lro_packet_size == MBUF_MAX_SIZE);
 	assert(config->devices[0].rss_hash == UINT64_MAX);
 	assert(config->devices[0].worker_count == 1);
 	assert(config->devices[0].workers[0].core_id == UINT16_MAX);
@@ -219,6 +230,18 @@ test_packet_recirc_limit_default_and_bounds(void) {
 
 static void
 test_numeric_field_ranges(void) {
+	// One above the RX pool's mbuf element size, the parse-time bound
+	// for max_lro_packet_size, is not a compile-time string.
+	char max_lro_overflow[24];
+	int overflow_length = snprintf(
+		max_lro_overflow,
+		sizeof(max_lro_overflow),
+		"%d",
+		MBUF_MAX_SIZE + 1
+	);
+	assert(overflow_length >= 0 &&
+	       (size_t)overflow_length < sizeof(max_lro_overflow));
+
 	const struct numeric_field fields[] = {
 		{"dataplane:\n  dpdk_memory: %s\n", "18446744073709551616"},
 		{"dataplane:\n  instances:\n    - numa_id: %s\n", "65536"},
@@ -229,6 +252,8 @@ test_numeric_field_ranges(void) {
 		{"dataplane:\n  devices:\n    - mtu: %s\n", "4294967296"},
 		{"dataplane:\n  devices:\n    - max_lro_packet_size: %s\n",
 		 "18446744073709551616"},
+		{"dataplane:\n  devices:\n    - max_lro_packet_size: %s\n",
+		 max_lro_overflow},
 		{"dataplane:\n  devices:\n    - rss_hash: %s\n",
 		 "18446744073709551616"},
 		{"dataplane:\n  devices:\n    - workers:\n        - core_id: "

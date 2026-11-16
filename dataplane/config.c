@@ -6,6 +6,8 @@
 #include <stdlib.h>
 #include <yaml.h>
 
+#include "yanet_build_config.h" // MBUF_MAX_SIZE
+
 #include "common/strutils.h"
 #include "lib/dataplane/packet/packet.h"
 #include "lib/dataplane/worker/rx_service.h"
@@ -951,12 +953,15 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 				state = state_device;
 				break;
 			case state_device_max_lro_packet_size:
+				// The RX pool carves each mbuf at
+				// MBUF_MAX_SIZE, so no LRO packet may
+				// exceed one element.
 				if (parse_unsigned(
 					    "devices.max_lro_packet_size",
 					    start,
 					    scalar_length,
 					    0,
-					    UINT64_MAX,
+					    MBUF_MAX_SIZE,
 					    &device->max_lro_packet_size
 				    ) != 0) {
 					goto error;
