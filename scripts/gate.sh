@@ -279,7 +279,10 @@ matching '(\.rs$|(^|/)Cargo\.(toml|lock)$|^\.rustfmt\.toml$|^\.cargo/|\.proto$)'
 # The SDK layer runs on the paths rust-sdk.yml lists: the C headers, packet
 # sources and build configuration that feed its bindings and shims, and the
 # workflow itself.
-matching '(^bindings/rust/|^\.rustfmt\.toml$|^\.cargo/config\.toml$|^(common|lib)/.*\.h$|^lib/dataplane/packet/.*\.c$|^subprojects/dpdk$|(^|/)meson\.build$|^meson_options\.txt$|^\.github/workflows/rust-sdk\.yml$)' >/dev/null && gate_sdk
+#
+# It also runs on the agent API headers the bindings include and the
+# classifier helper the SDK tests compile, which the workflow does not list.
+matching '(^bindings/rust/|^\.rustfmt\.toml$|^\.cargo/config\.toml$|^(api|common|lib)/.*\.h$|^lib/dataplane/packet/.*\.c$|^lib/classify/compiler/helper\.c$|^subprojects/dpdk$|(^|/)meson\.build$|^meson_options\.txt$|^\.github/workflows/rust-sdk\.yml$)' >/dev/null && gate_sdk
 matching '(^|/)web/|^package(-lock)?\.json$' >/dev/null && gate_web
 matching '\.proto$' >/dev/null && step proto-lint make --no-print-directory proto-lint
 [ -n "$(git rev-list "$base"..HEAD)" ] && step commitlint lint/commit/commitlint.sh --range "$base..HEAD"
