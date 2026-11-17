@@ -226,23 +226,28 @@ pub type Lpm6 = Lpm<16>;
 /// }
 /// ```
 ///
-/// Sealed to the arrays and the addresses: a key type of a module looks up by
-/// the address or the array it holds.
+/// A key type of a module may implement it; the walk takes the octets as the
+/// key gives them, so a key in host order looks up another range:
 ///
-/// ```compile_fail,E0277
-/// use yanet_sys::common::lpm::LpmKey;
+/// ```
+/// use yanet_shm::resolve::Resolve;
+/// use yanet_sys::common::lpm::{Lpm4, LpmKey};
 ///
-/// struct Mine;
+/// struct Destination([u8; 4]);
 ///
-/// impl LpmKey<4> for Mine {
+/// impl LpmKey<4> for Destination {
 ///     type Octets = [u8; 4];
 ///
 ///     fn into_octets(self) -> [u8; 4] {
-///         [0; 4]
+///         self.0
 ///     }
 /// }
+///
+/// fn route<'g>(routes: &'g Lpm4, cx: &impl Resolve<'g>, dst: Destination) -> Option<u32> {
+///     routes.lookup(cx, dst)
+/// }
 /// ```
-pub trait LpmKey<const K: usize>: sealed::Sealed {
+pub trait LpmKey<const K: usize> {
     /// The octets as the key holds them: an array reference stays a
     /// reference, so the walk reads the bytes it reaches where they are.
     type Octets: Borrow<[u8; K]>;
@@ -286,20 +291,6 @@ impl LpmKey<16> for Ipv6Addr {
     fn into_octets(self) -> [u8; 16] {
         self.octets()
     }
-}
-
-mod sealed {
-    use core::net::{Ipv4Addr, Ipv6Addr};
-
-    pub trait Sealed {}
-
-    impl<const K: usize> Sealed for [u8; K] {}
-
-    impl<const K: usize> Sealed for &[u8; K] {}
-
-    impl Sealed for Ipv4Addr {}
-
-    impl Sealed for Ipv6Addr {}
 }
 
 const FLAG: u64 = bindings::LPM_VALUE_FLAG as u64;
