@@ -279,3 +279,37 @@ Empty tagged fields and missing registries do not reference their storage
 table. A zero-sized prepared value does not read a missing prepared buffer.
 The `dp` benchmark's harness group also covers whole-front passing and reads
 of stable worker fields.
+
+## Safe builder tests
+
+With the `cp` feature, `yanet-sdk-testing` provides a safe configuration
+lifecycle over an arena without C memory:
+
+```rust
+let owner = TestOwner::new();
+let built = build(&owner)?;
+owner.read_module(&built, |cx, config| {
+    assert_eq!(config.rules.as_slice(&cx).len(), 3);
+});
+owner.release(built);
+owner.assert_released();
+```
+
+Use `read` for a `BuiltObject` and `read_module` for a module's `Built`.
+Both check that the handle belongs to this owner and is still live before
+accessing its body. The callback brands its body and resolving context
+together. Neither can escape or mix with another read. Release consumes the
+handle, so it cannot overlap a read.
+
+Replace `unsafe { TestOwner::new() }` with `TestOwner::new()`. Move body reads
+and graph resolution into these callbacks instead of calling `config`,
+constructing a raw `ModuleConfig` reference or using `View::new`. Replace
+`destroy` with `owner.release(built)`. The low-level methods remain available
+but are hidden from documentation.
+
+Custom `Owner` implementations must declare `C_MEMORY`. Set it to true only
+when initialized headers carry real C memory contexts. `TestOwner` sets it
+to false. Nonempty LPMs and hash indexes and all classifier construction are
+refused with `Refusal::NoCMemory` (`YANET_ERROR_FAILED_PRECONDITION`) rather
+than entering C. Empty LPMs and indexes still work without C. Tests requiring
+real C objects use a C-capable owner and the native fixture harness.

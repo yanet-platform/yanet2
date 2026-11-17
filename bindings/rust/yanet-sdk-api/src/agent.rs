@@ -706,6 +706,8 @@ unsafe fn counter_registry(
 // context in the header over the agent's memory. The worker count is the
 // dataplane's, which C fixes when it starts the instance.
 unsafe impl Owner for Agent {
+    const C_MEMORY: bool = true;
+
     type Error = Error;
 
     fn root(&self) -> ShmRoot {

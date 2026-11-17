@@ -467,8 +467,7 @@ mod doctests {
     /// #     }
     /// # }
     /// # fn main() {
-    /// // SAFETY: no C object is built.
-    /// let owner = unsafe { TestOwner::new() };
+    /// let owner = TestOwner::new();
     /// Builder::<Outer>::build::<BuildError<TestError>, _>(&owner, "outer", |outer| {
     ///     let block = outer.boxed::<u64>(1)?;
     ///     Builder::<Inner>::build::<BuildError<TestError>, _>(&owner, "inner", |_| Ok(block))?;
@@ -495,8 +494,7 @@ mod doctests {
     /// #     }
     /// # }
     /// # fn main() {
-    /// // SAFETY: no C object is built.
-    /// let owner = unsafe { TestOwner::new() };
+    /// let owner = TestOwner::new();
     /// let mut leaked = None;
     /// Builder::<Mine>::build::<BuildError<TestError>, _>(&owner, "mine", |scope| {
     ///     leaked = Some(scope.boxed::<u64>(1)?);
@@ -571,8 +569,7 @@ mod doctests {
     /// #     }
     /// # }
     /// # fn main() {
-    /// // SAFETY: no C object is built.
-    /// let owner = unsafe { TestOwner::new() };
+    /// let owner = TestOwner::new();
     /// Builder::<Mine>::build::<BuildError<TestError>, _>(&owner, "mine", |scope| scope.boxed::<()>(())).unwrap();
     /// # }
     /// ```

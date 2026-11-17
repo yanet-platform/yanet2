@@ -105,6 +105,8 @@ impl core::error::Error for Never {}
 // the C block allocator; a header gets a live memory context over the arena,
 // and the routines that free do not panic.
 unsafe impl Owner for ArenaOwner {
+    const C_MEMORY: bool = true;
+
     type Error = Never;
 
     fn root(&self) -> ShmRoot {

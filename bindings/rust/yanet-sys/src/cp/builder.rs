@@ -146,6 +146,9 @@ mod kind {
 ///
 /// A whole value has all its fields initialized; padding may remain
 /// uninitialized and must never be read as data.
+///
+/// A write that opens a C memory context must first check [`Owner::C_MEMORY`]
+/// and refuse an owner without it with [`Refusal::NoCMemory`].
 pub unsafe trait Build: ShmLayout {
     /// What the author supplies for a value of this type inside a build of an
     /// owner.
@@ -604,6 +607,9 @@ unsafe impl<const K: usize> Build for Lpm<K> {
             unsafe { root.ptr::<u8>(addr).write_bytes(0, size_of::<Lpm<K>>()) };
             return Ok(());
         }
+        if !W::C_MEMORY {
+            return Err(Refusal::NoCMemory);
+        }
         let lpm = root.ptr::<bindings::lpm>(addr);
         // SAFETY: the table lies in a block of the build (caller contract),
         // and the context is the header's, which the owner set up for C.
@@ -741,6 +747,9 @@ unsafe impl<K: HashIndexKey> Build for HashIndex<K> {
             // one: no context to close and a NULL slice.
             unsafe { root.ptr::<u8>(addr).write_bytes(0, size_of::<Self>()) };
             return Ok(());
+        }
+        if !W::C_MEMORY {
+            return Err(Refusal::NoCMemory);
         }
         let len = slots_for(records).ok_or(Refusal::BlockTooLarge)?;
         let size = len
@@ -1864,10 +1873,13 @@ impl<M, W> Built<M, W> {
 impl<M: Module, W: Owner> Built<M, W> {
     /// Releases the configuration with everything it owns.
     ///
+    /// Prefer `Agent::release` or `TestOwner::release`.
+    ///
     /// # Safety
     ///
     /// The owner is the one that built it, and nothing references the
     /// configuration any longer.
+    #[doc(hidden)]
     pub unsafe fn destroy(self, owner: &W) {
         let memory = MemoryContext::new(owner, self.header);
         let body = self.header.get() + ModuleConfig::<M::Config>::BODY_OFFSET;
@@ -1922,9 +1934,12 @@ impl<O: Object, W: Owner> BuiltObject<O, W> {
     /// its state changes only through the types that allow a shared change,
     /// as atomics and mutexes.
     ///
+    /// Prefer `Agent::read` or `TestOwner::read`.
+    ///
     /// # Safety
     ///
     /// The owner's memory is the one the object was built in.
+    #[doc(hidden)]
     pub unsafe fn config<'a>(&'a self, owner: &'a W) -> &'a O::Config {
         let body = self.header.get() + ObjectConfig::<O::Config>::BODY_OFFSET;
         // SAFETY: the body was written whole by the build and is not released
@@ -1935,10 +1950,13 @@ impl<O: Object, W: Owner> BuiltObject<O, W> {
 
     /// Releases the object with everything it owns.
     ///
+    /// Prefer `Agent::release_object` or `TestOwner::release`.
+    ///
     /// # Safety
     ///
     /// The owner is the one that built it, and nothing references the object
     /// any longer.
+    #[doc(hidden)]
     pub unsafe fn destroy(self, owner: &W) {
         let memory = MemoryContext::new(owner, self.header);
         let body = self.header.get() + ObjectConfig::<O::Config>::BODY_OFFSET;

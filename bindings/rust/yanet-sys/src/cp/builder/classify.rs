@@ -118,6 +118,9 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
         left: Branch<'b, L, W>,
         right: Branch<'b, R, W>,
     ) -> Result<Branch<'b, Join<L, R>, W>, E> {
+        if !W::C_MEMORY {
+            return Err(refused::<W, E>(Refusal::NoCMemory));
+        }
         same_ruleset(&[left.stage.rules as usize, right.stage.rules as usize]).map_err(refused::<W, E>)?;
         let memory = self.memory;
         let (Branch { value: left, stage: left_stage }, Branch { value: right, stage: right_stage }) = (left, right);
@@ -166,6 +169,9 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
         right: Branch<'b, R, W>,
         rules: &[Option<&P>],
     ) -> Result<Owned<'b, Rules<L, R>, W>, E> {
+        if !W::C_MEMORY {
+            return Err(refused::<W, E>(Refusal::NoCMemory));
+        }
         same_ruleset(&[left.stage.rules as usize, right.stage.rules as usize, rules.len()]).map_err(refused::<W, E>)?;
         let memory = self.memory;
         let (Branch { value: left, stage: left_stage }, Branch { value: right, stage: right_stage }) = (left, right);
@@ -213,6 +219,9 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
         input: Branch<'b, N, W>,
         rules: &[Option<&P>],
     ) -> Result<Owned<'b, Decode<N>, W>, E> {
+        if !W::C_MEMORY {
+            return Err(refused::<W, E>(Refusal::NoCMemory));
+        }
         same_ruleset(&[input.stage.rules as usize, rules.len()]).map_err(refused::<W, E>)?;
         let memory = self.memory;
         let Branch { value: input, stage } = input;
@@ -248,6 +257,9 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
     /// The rules are more than C counts, or the memory is exhausted; nothing
     /// of the compile is left allocated.
     pub fn compile<A: Attribute>(self, name: &CStr, rules: &[Option<&A>]) -> Result<Branch<'b, A::Classifier, W>, E> {
+        if !W::C_MEMORY {
+            return Err(refused::<W, E>(Refusal::NoCMemory));
+        }
         let count = rule_count(rules.len()).map_err(refused::<W, E>)?;
         self.staged(count, |memory, stage, classifier| {
             // SAFETY: a rule slot is a nullable pointer to a view the

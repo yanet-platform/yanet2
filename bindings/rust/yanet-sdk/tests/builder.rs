@@ -19,10 +19,7 @@ use yanet_sdk::{
     ObjectBuilder, ObjectCommitCx, ObjectCounter, ObjectLink, OwnedSlice, PerWorker, PerWorkerSlice, Refusal,
     Registered, ShmBox, ShmLayout, ShmSlice, TaggedCounter, TaggedCounters, Traffic, Verdict,
 };
-use yanet_sdk_testing::{
-    View,
-    cp::{Call, LiveHeaders, TestError, TestOwner},
-};
+use yanet_sdk_testing::cp::{Call, LiveHeaders, TestCx, TestError, TestOwner};
 use yanet_sys::{
     bindings::{COUNTER_TAG_VALUE_LEN, CP_MODULE_NAME_LEN, CP_OBJECT_NAME_LEN},
     common::LINE_BLOCK_ALIGN,
@@ -279,10 +276,7 @@ type IndexesModule = Fixture<Indexes>;
 
 /// An owner of an empty arena.
 fn owner() -> TestOwner {
-    // SAFETY: no build of this file opens a C object: its only tables are
-    // built from no ranges and its only indexes from no records, which leaves
-    // them empty.
-    unsafe { TestOwner::new() }
+    TestOwner::new()
 }
 
 type Failure = BuildError<TestError>;
@@ -366,26 +360,6 @@ fn build_policy(owner: &TestOwner, rules: &[(u64, &[u64])]) -> Result<Built<Poli
     build::<PolicyModule>(owner, |b| policy(b, rules))
 }
 
-/// The body of a built configuration, resolved through a view of the owner's
-/// arena.
-///
-/// The references live no longer than the borrow of the built configuration,
-/// so releasing it while they live does not compile.
-fn body<'a, M: Module>(owner: &'a TestOwner, built: &'a Built<M, TestOwner>) -> (&'a M::Config, View<'a>) {
-    // SAFETY: a configuration the builder handed over, frozen for the test;
-    // the view resolves through the root of the arena it lives in.
-    unsafe {
-        let config = &*owner.root().ptr::<ModuleConfig<M::Config>>(built.header().get());
-        (config.body(), View::new(owner.root()))
-    }
-}
-
-/// Releases a configuration of a module built in the given owner.
-fn release<M: Module>(owner: &TestOwner, built: Built<M, TestOwner>) {
-    // SAFETY: handed over by the builder, unreferenced, released once.
-    unsafe { built.destroy(owner) };
-}
-
 /// verifies that tables built from no ranges allocate nothing, find nothing
 /// and are released without C.
 #[test]
@@ -394,19 +368,20 @@ fn test_build_leaves_tables_of_no_ranges_empty_and_unallocated() {
 
     let built = build::<TablesModule>(&owner, |_| Ok(TablesParts { v4: &[], v6: &[] })).expect("built");
 
-    let (config, view) = body::<TablesModule>(&owner, &built);
-    assert_eq!(
-        (true, true, None, None),
-        (
-            config.v4.is_empty(),
-            config.v6.is_empty(),
-            config.v4.lookup(&view, [10, 0, 0, 1]),
-            config.v6.lookup(&view, [0xfd; 16])
-        )
-    );
-    // Only the root block.
-    assert_eq!(1, owner.live_blocks());
-    release::<TablesModule>(&owner, built);
+    owner.read_module(&built, |view, config| {
+        assert_eq!(
+            (true, true, None, None),
+            (
+                config.v4.is_empty(),
+                config.v6.is_empty(),
+                config.v4.lookup(&view, [10, 0, 0, 1]),
+                config.v6.lookup(&view, [0xfd; 16])
+            )
+        );
+        // Only the root block.
+        assert_eq!(1, owner.live_blocks());
+    });
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -419,17 +394,18 @@ fn test_build_leaves_indexes_of_no_records_empty_and_unallocated() {
     let built =
         build::<IndexesModule>(&owner, |_| Ok(IndexesParts { v4: (&[]).into(), v6: (&[]).into() })).expect("built");
 
-    let (config, view) = body::<IndexesModule>(&owner, &built);
-    assert_eq!(
-        (None, None),
-        (
-            config.v4.resolve(&view).get(Ipv4Addr::UNSPECIFIED),
-            config.v6.resolve(&view).get(Ipv6Addr::UNSPECIFIED)
-        )
-    );
-    // Only the root block.
-    assert_eq!(1, owner.live_blocks());
-    release::<IndexesModule>(&owner, built);
+    owner.read_module(&built, |view, config| {
+        assert_eq!(
+            (None, None),
+            (
+                config.v4.resolve(&view).get(Ipv4Addr::UNSPECIFIED),
+                config.v6.resolve(&view).get(Ipv6Addr::UNSPECIFIED)
+            )
+        );
+        // Only the root block.
+        assert_eq!(1, owner.live_blocks());
+    });
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -439,29 +415,30 @@ fn test_build_writes_nested_slices_and_a_box() {
 
     let built = build_policy(&owner, &[(1, &[80, 443]), (2, &[]), (3, &[53])]).expect("built");
 
-    let (config, view) = body::<PolicyModule>(&owner, &built);
-    let rules: Vec<_> = config
-        .rules
-        .as_slice(&view)
-        .iter()
-        .map(|rule| (rule.id, rule.ports.as_slice(&view).to_vec()))
-        .collect();
-    let default = config.default.get(&view);
-    assert_eq!(
-        (
-            vec![(1, vec![80, 443]), (2, vec![]), (3, vec![53])],
-            (0, 0),
-            [1, 2, 3, 4],
-            0xa5
-        ),
-        (
-            rules,
-            (default.id, default.ports.len()),
-            config.flags,
-            config.mask.load(Ordering::Relaxed)
-        )
-    );
-    release::<PolicyModule>(&owner, built);
+    owner.read_module(&built, |view, config| {
+        let rules: Vec<_> = config
+            .rules
+            .as_slice(&view)
+            .iter()
+            .map(|rule| (rule.id, rule.ports.as_slice(&view).to_vec()))
+            .collect();
+        let default = config.default.get(&view);
+        assert_eq!(
+            (
+                vec![(1, vec![80, 443]), (2, vec![]), (3, vec![53])],
+                (0, 0),
+                [1, 2, 3, 4],
+                0xa5
+            ),
+            (
+                rules,
+                (default.id, default.ports.len()),
+                config.flags,
+                config.mask.load(Ordering::Relaxed)
+            )
+        );
+    });
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -476,14 +453,15 @@ fn test_build_writes_an_unlocked_mutex_with_plain_state() {
     })
     .expect("built");
 
-    let (config, _) = body::<LockedModule>(&owner, &built);
-    assert_eq!(
-        Counts { packets: 7, bytes: 448 },
-        *config.state.try_lock().expect("free")
-    );
-    locked::add(config);
-    assert_eq!(Counts { packets: 8, bytes: 512 }, *config.state.lock());
-    release::<LockedModule>(&owner, built);
+    owner.read_module(&built, |_, config| {
+        assert_eq!(
+            Counts { packets: 7, bytes: 448 },
+            *config.state.try_lock().expect("free")
+        );
+        locked::add(config);
+        assert_eq!(Counts { packets: 8, bytes: 512 }, *config.state.lock());
+    });
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -503,22 +481,23 @@ fn test_build_padded_root_mutex_and_slice_use_only_typed_fields() {
         })
     })
     .expect("built");
-    let (config, view) = body::<Fixture<PaddedRoot>>(&owner, &built);
-    assert_eq!((1, 2), (config.tag, config.tail));
-    assert_eq!(
-        [Padded { narrow: 0, wide: 17 }, Padded { narrow: 1, wide: 18 }],
-        config.items.as_slice(&view)
-    );
-    {
-        let mut state = config.state.lock();
-        assert_eq!(Padded { narrow: 7, wide: 11 }, *state);
-        state.narrow += 1;
-        state.wide += 2;
-    }
-    assert_eq!(Padded { narrow: 8, wide: 13 }, *config.state.lock());
-    assert_eq!(16, size_of::<Padded>());
-    assert_eq!(24, size_of::<yanet_sdk::Mutex<Padded>>());
-    release::<Fixture<PaddedRoot>>(&owner, built);
+    owner.read_module(&built, |view, config| {
+        assert_eq!((1, 2), (config.tag, config.tail));
+        assert_eq!(
+            [Padded { narrow: 0, wide: 17 }, Padded { narrow: 1, wide: 18 }],
+            config.items.as_slice(&view)
+        );
+        {
+            let mut state = config.state.lock();
+            assert_eq!(Padded { narrow: 7, wide: 11 }, *state);
+            state.narrow += 1;
+            state.wide += 2;
+        }
+        assert_eq!(Padded { narrow: 8, wide: 13 }, *config.state.lock());
+        assert_eq!(16, size_of::<Padded>());
+        assert_eq!(24, size_of::<yanet_sdk::Mutex<Padded>>());
+    });
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -540,13 +519,14 @@ fn test_build_holds_standard_addresses_as_their_octets() {
         })
     })
     .expect("built");
-    let (config, view) = body::<Fixture<Addresses>>(&owner, &built);
-    assert_eq!((7, v4, v6), (config.tag, config.v4, config.v6));
-    assert_eq!(hosts, config.hosts.as_slice(&view));
-    // No byte pads an address: the first lies right after the tag and the
-    // second right after the first.
-    assert_eq!((1, 5), (offset_of!(Addresses, v4), offset_of!(Addresses, v6)));
-    release::<Fixture<Addresses>>(&owner, built);
+    owner.read_module(&built, |view, config| {
+        assert_eq!((7, v4, v6), (config.tag, config.v4, config.v6));
+        assert_eq!(hosts, config.hosts.as_slice(&view));
+        // No byte pads an address: the first lies right after the tag and the
+        // second right after the first.
+        assert_eq!((1, 5), (offset_of!(Addresses, v4), offset_of!(Addresses, v6)));
+    });
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -565,10 +545,11 @@ fn test_build_padded_worker_slots_and_regions_use_typed_copies() {
         })
     })
     .expect("built");
-    let (config, _) = body::<Fixture<PaddedWorkers>>(&owner, &built);
-    assert_eq!(vec![initial; 3], slot_values(&owner, &config.slots));
-    assert_eq!(vec![vec![initial; 2]; 3], region_values(&owner, &config.regions));
-    release::<Fixture<PaddedWorkers>>(&owner, built);
+    owner.read_module(&built, |_, config| {
+        assert_eq!(vec![initial; 3], slot_values(&owner, &config.slots));
+        assert_eq!(vec![vec![initial; 2]; 3], region_values(&owner, &config.regions));
+    });
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -620,11 +601,12 @@ fn test_build_leaves_an_empty_slice_null_and_unallocated() {
 
     let built = build::<WordsModule>(&owner, |b| b.slice(0, |_| Ok(0))).expect("built");
 
-    let (config, view) = body::<WordsModule>(&owner, &built);
-    assert_eq!((0, 0, 0), (config.offset(), config.len(), config.as_slice(&view).len()));
-    // Only the root block.
-    assert_eq!(1, owner.live_blocks());
-    release::<WordsModule>(&owner, built);
+    owner.read_module(&built, |view, config| {
+        assert_eq!((0, 0, 0), (config.offset(), config.len(), config.as_slice(&view).len()));
+        // Only the root block.
+        assert_eq!(1, owner.live_blocks());
+    });
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -636,7 +618,7 @@ fn test_destroy_releases_nested_blocks() {
     // rules.
     assert_eq!(5, owner.live_blocks());
 
-    release::<PolicyModule>(&owner, built);
+    owner.release(built);
 
     owner.assert_released();
 }
@@ -663,7 +645,7 @@ fn sweep_limits<M: Module>(
 
         match build_with(&owner) {
             Ok(built) => {
-                release::<M>(&owner, built);
+                owner.release(built);
                 owner.assert_released();
                 return limit;
             }
@@ -728,7 +710,7 @@ fn test_build_accepts_a_name_that_fills_its_c_field() {
     let name = "x".repeat(CP_MODULE_NAME_LEN as usize - 1);
     let built = Builder::<PolicyModule>::build::<Failure, _>(&owner, &name, |b| policy(b, &[])).expect("built");
 
-    release(&owner, built);
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -894,7 +876,7 @@ fn test_build_frees_a_block_dropped_unused_at_once() {
 
     // The root block and the one slice the configuration owns.
     assert_eq!(2, owner.live_blocks());
-    release::<WordsModule>(&owner, built);
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -912,17 +894,18 @@ fn test_derive_expansion_is_hygienic_for_field_names() {
     })
     .expect("built");
 
-    let (config, view) = body::<HygieneModule>(&owner, &built);
-    assert_eq!(
-        (1, 2, 3, 4),
-        (config.__addr, config.__root, config.__parts, *config.__f0.get(&view))
-    );
-    release::<HygieneModule>(&owner, built);
+    owner.read_module(&built, |view, config| {
+        assert_eq!(
+            (1, 2, 3, 4),
+            (config.__addr, config.__root, config.__parts, *config.__f0.get(&view))
+        );
+    });
+    owner.release(built);
     owner.assert_released();
 }
 
 /// A rule's id and its ports, read through the view.
-fn id_ports<'a>(rule: &'a Rule, view: &View<'a>) -> (u64, Vec<u64>) {
+fn id_ports<'a>(rule: &'a Rule, view: &TestCx<'a>) -> (u64, Vec<u64>) {
     (rule.id, rule.ports.as_slice(view).to_vec())
 }
 
@@ -932,26 +915,27 @@ fn test_build_writes_and_releases_a_generic_struct() {
 
     let built = build_node(&owner).expect("built");
 
-    let (config, view) = body::<NodeModule>(&owner, &built);
-    let tail: Vec<_> = config
-        .tail
-        .as_slice(&view)
-        .iter()
-        .map(|rule| id_ports(rule, &view))
-        .collect();
-    assert_eq!(
-        (
-            (1, vec![80]),
-            vec![(2, vec![53]), (3, vec![53])],
-            [(4, vec![443]), (5, vec![])]
-        ),
-        (
-            id_ports(config.head.get(&view), &view),
-            tail,
-            [id_ports(&config.fixed[0], &view), id_ports(&config.fixed[1], &view)]
-        )
-    );
-    release::<NodeModule>(&owner, built);
+    owner.read_module(&built, |view, config| {
+        let tail: Vec<_> = config
+            .tail
+            .as_slice(&view)
+            .iter()
+            .map(|rule| id_ports(rule, &view))
+            .collect();
+        assert_eq!(
+            (
+                (1, vec![80]),
+                vec![(2, vec![53]), (3, vec![53])],
+                [(4, vec![443]), (5, vec![])]
+            ),
+            (
+                id_ports(config.head.get(&view), &view),
+                tail,
+                [id_ports(&config.fixed[0], &view), id_ports(&config.fixed[1], &view)]
+            )
+        );
+    });
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -1030,15 +1014,16 @@ fn test_build_registers_each_counter_with_the_size_of_its_layout() {
     })
     .expect("built");
 
-    let (config, _) = body::<CountedModule>(&owner, &built);
-    assert_eq!(
-        ((0, 1, 2), vec![1, 2, 6]),
-        (
-            (config.hits.id(), config.traffic.id(), config.lanes.id()),
-            owner.counter_sizes()
-        )
-    );
-    release::<CountedModule>(&owner, built);
+    owner.read_module(&built, |_, config| {
+        assert_eq!(
+            ((0, 1, 2), vec![1, 2, 6]),
+            (
+                (config.hits.id(), config.traffic.id(), config.lanes.id()),
+                owner.counter_sizes()
+            )
+        );
+    });
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -1062,15 +1047,16 @@ fn test_build_writes_each_tagged_counter_with_the_registry_of_its_tag() {
 
     let built = build::<TaggedModule>(&owner, |b| tagged(b, "rules")).expect("built");
 
-    let (config, _) = body::<TaggedModule>(&owner, &built);
-    assert_eq!(
-        ((0, 1, 0), vec!["rules".to_string(), "routes".to_string()]),
-        (
-            (config.rule.registry(), config.route.registry(), config.again.registry()),
-            owner.counter_registries()
-        )
-    );
-    release::<TaggedModule>(&owner, built);
+    owner.read_module(&built, |_, config| {
+        assert_eq!(
+            ((0, 1, 0), vec!["rules".to_string(), "routes".to_string()]),
+            (
+                (config.rule.registry(), config.route.registry(), config.again.registry()),
+                owner.counter_registries()
+            )
+        );
+    });
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -1082,15 +1068,16 @@ fn test_build_registers_each_tagged_counter_with_the_size_of_its_layout() {
 
     let built = build::<TaggedModule>(&owner, |b| tagged(b, "rules")).expect("built");
 
-    let (config, _) = body::<TaggedModule>(&owner, &built);
-    assert_eq!(
-        ((0, 0, 1), vec![1, 2, 1, 1]),
-        (
-            (config.rule.id(), config.route.id(), config.again.id()),
-            owner.counter_sizes()
-        )
-    );
-    release::<TaggedModule>(&owner, built);
+    owner.read_module(&built, |_, config| {
+        assert_eq!(
+            ((0, 0, 1), vec![1, 2, 1, 1]),
+            (
+                (config.rule.id(), config.route.id(), config.again.id()),
+                owner.counter_sizes()
+            )
+        );
+    });
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -1153,12 +1140,13 @@ fn test_build_writes_tagged_counters_with_their_registry_and_count() {
 
     let built = build::<ByRuleModule>(&owner, |b| by_rule(b, &["deny", "allow", "deny"], &mut ids)).expect("built");
 
-    let (config, _) = body::<ByRuleModule>(&owner, &built);
-    assert_eq!(
-        (vec![0, 1, 0], 1, 2),
-        (ids, config.rules.registry(), config.rules.len())
-    );
-    release::<ByRuleModule>(&owner, built);
+    owner.read_module(&built, |_, config| {
+        assert_eq!(
+            (vec![0, 1, 0], 1, 2),
+            (ids, config.rules.registry(), config.rules.len())
+        );
+    });
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -1171,7 +1159,7 @@ fn test_build_registers_each_counter_of_a_registrar_with_the_size_of_its_layout(
     let built = build::<ByRuleModule>(&owner, |b| by_rule(b, &["deny", "allow"], &mut Vec::new())).expect("built");
 
     assert_eq!(vec![1, 2, 2], owner.counter_sizes());
-    release::<ByRuleModule>(&owner, built);
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -1183,15 +1171,16 @@ fn test_build_writes_an_empty_registrar_without_counters() {
 
     let built = build::<ByRuleModule>(&owner, |b| by_rule(b, &[], &mut Vec::new())).expect("built");
 
-    let (config, _) = body::<ByRuleModule>(&owner, &built);
-    assert_eq!(
-        ((0, true), vec!["routes".to_string()]),
-        (
-            (config.rules.registry(), config.rules.is_empty()),
-            owner.counter_registries()
-        )
-    );
-    release::<ByRuleModule>(&owner, built);
+    owner.read_module(&built, |_, config| {
+        assert_eq!(
+            ((0, true), vec!["routes".to_string()]),
+            (
+                (config.rules.registry(), config.rules.is_empty()),
+                owner.counter_registries()
+            )
+        );
+    });
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -1213,20 +1202,21 @@ fn test_build_ensures_a_registry_without_registering_a_counter() {
         })
         .expect("built");
 
-        let (config, _) = body::<ByRuleModule>(&owner, &built);
-        assert_eq!(
-            vec!["routes".to_string(), "rules".to_string()],
-            owner.counter_registries()
-        );
-        assert_eq!(1, config.rules.registry());
-        if names.is_empty() {
-            assert!(config.rules.is_empty());
-            assert_eq!(vec![1], owner.counter_sizes());
-        } else {
-            assert_eq!(vec![0, 1, 0], ids);
-            assert_eq!(2, config.rules.len());
-        }
-        release::<ByRuleModule>(&owner, built);
+        owner.read_module(&built, |_, config| {
+            assert_eq!(
+                vec!["routes".to_string(), "rules".to_string()],
+                owner.counter_registries()
+            );
+            assert_eq!(1, config.rules.registry());
+            if names.is_empty() {
+                assert!(config.rules.is_empty());
+                assert_eq!(vec![1], owner.counter_sizes());
+            } else {
+                assert_eq!(vec![0, 1, 0], ids);
+                assert_eq!(2, config.rules.len());
+            }
+        });
+        owner.release(built);
         owner.assert_released();
     }
 }
@@ -1322,7 +1312,7 @@ fn test_build_registers_a_counter_tag_that_fills_its_c_field() {
     let built = build::<TaggedModule>(&owner, |b| tagged(b, &tag)).expect("built");
 
     assert_eq!(Some(tag), owner.counter_registries().pop());
-    release::<TaggedModule>(&owner, built);
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -1337,15 +1327,16 @@ fn test_build_writes_an_array_of_edges() {
     })
     .expect("built");
 
-    let (config, view) = body::<LanesModule>(&owner, &built);
-    assert_eq!(
-        (vec![1, 2], vec![3]),
-        (
-            config.lanes[0].as_slice(&view).to_vec(),
-            config.lanes[1].as_slice(&view).to_vec()
-        )
-    );
-    release::<LanesModule>(&owner, built);
+    owner.read_module(&built, |view, config| {
+        assert_eq!(
+            (vec![1, 2], vec![3]),
+            (
+                config.lanes[0].as_slice(&view).to_vec(),
+                config.lanes[1].as_slice(&view).to_vec()
+            )
+        );
+    });
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -1368,36 +1359,37 @@ fn test_build_writes_every_word_of_a_faulty_config_when_none_is_refused() {
     // One past the last word, which proves the sweep reached every one.
     let built = build::<FaultyModule>(&owner, |b| faulty(b, FAULTY_WORDS)).expect("built");
 
-    let (config, view) = body::<FaultyModule>(&owner, &built);
-    // The device takes the first id, then each entry's counter in the order
-    // the closure makes them.
-    assert_eq!(
-        ((0, vec![1, 2, 3], vec![4, 5], 6), (1, vec![2, 3, 4], vec![5, 6])),
-        (
+    owner.read_module(&built, |view, config| {
+        // The device takes the first id, then each entry's counter in the order
+        // the closure makes them.
+        assert_eq!(
+            ((0, vec![1, 2, 3], vec![4, 5], 6), (1, vec![2, 3, 4], vec![5, 6])),
             (
-                config.boxed.get(&view).word.0,
-                config
-                    .entries
-                    .as_slice(&view)
-                    .iter()
-                    .map(|entry| entry.word.0)
-                    .collect::<Vec<_>>(),
-                config.pair.iter().map(|entry| entry.word.0).collect::<Vec<_>>(),
-                config.gate.0
-            ),
-            (
-                config.boxed.get(&view).counter.id(),
-                config
-                    .entries
-                    .as_slice(&view)
-                    .iter()
-                    .map(|entry| entry.counter.id())
-                    .collect::<Vec<_>>(),
-                config.pair.iter().map(|entry| entry.counter.id()).collect::<Vec<_>>()
+                (
+                    config.boxed.get(&view).word.0,
+                    config
+                        .entries
+                        .as_slice(&view)
+                        .iter()
+                        .map(|entry| entry.word.0)
+                        .collect::<Vec<_>>(),
+                    config.pair.iter().map(|entry| entry.word.0).collect::<Vec<_>>(),
+                    config.gate.0
+                ),
+                (
+                    config.boxed.get(&view).counter.id(),
+                    config
+                        .entries
+                        .as_slice(&view)
+                        .iter()
+                        .map(|entry| entry.counter.id())
+                        .collect::<Vec<_>>(),
+                    config.pair.iter().map(|entry| entry.counter.id()).collect::<Vec<_>>()
+                )
             )
-        )
-    );
-    release::<FaultyModule>(&owner, built);
+        );
+    });
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -1421,12 +1413,6 @@ fn build_policy_object(
     ObjectBuilder::<PolicyState>::build(owner, "state0", |b| policy(b, rules))
 }
 
-/// Releases an object built in the given owner.
-fn release_object<O: Object>(owner: &TestOwner, built: BuiltObject<O, TestOwner>) {
-    // SAFETY: handed over by the builder, unreferenced, released once.
-    unsafe { built.destroy(owner) };
-}
-
 #[test]
 fn test_object_build_refuses_invalid_names_before_allocating() {
     let overlong = "x".repeat(CP_OBJECT_NAME_LEN as usize);
@@ -1446,7 +1432,7 @@ fn test_object_build_accepts_a_name_that_fills_its_c_field() {
     let name = "x".repeat(CP_OBJECT_NAME_LEN as usize - 1);
     let built = ObjectBuilder::<PolicyState>::build::<Failure, _>(&owner, &name, |b| policy(b, &[])).expect("built");
 
-    release_object(&owner, built);
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -1456,20 +1442,19 @@ fn test_object_build_writes_nested_slices_and_a_box() {
 
     let built = build_policy_object(&owner, &[(1, &[80, 443]), (2, &[])]).expect("built");
 
-    // SAFETY: the object was built in this owner's memory; the view resolves
-    // through the root of the arena it lives in, frozen for the test.
-    let (config, view) = unsafe { (built.config(&owner), View::new(owner.root())) };
-    let rules: Vec<_> = config
-        .rules
-        .as_slice(&view)
-        .iter()
-        .map(|rule| (rule.id, rule.ports.as_slice(&view).to_vec()))
-        .collect();
-    assert_eq!(
-        (vec![(1, vec![80, 443]), (2, vec![])], 0, 0xa5),
-        (rules, config.default.get(&view).id, config.mask.load(Ordering::Relaxed))
-    );
-    release_object(&owner, built);
+    owner.read(&built, |view, config| {
+        let rules: Vec<_> = config
+            .rules
+            .as_slice(&view)
+            .iter()
+            .map(|rule| (rule.id, rule.ports.as_slice(&view).to_vec()))
+            .collect();
+        assert_eq!(
+            (vec![(1, vec![80, 443]), (2, vec![])], 0, 0xa5),
+            (rules, config.default.get(&view).id, config.mask.load(Ordering::Relaxed))
+        );
+    });
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -1480,7 +1465,7 @@ fn test_object_build_initialises_an_object_header() {
     let built = build_policy_object(&owner, &[(1, &[80])]).expect("built");
 
     assert_eq!(LiveHeaders { modules: 0, objects: 1 }, owner.live_headers());
-    release_object(&owner, built);
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -1489,7 +1474,7 @@ fn test_object_destroy_releases_nested_blocks_and_the_object_header() {
     let owner = owner();
     let built = build_policy_object(&owner, &[(1, &[80, 443]), (2, &[]), (3, &[53])]).expect("built");
 
-    release_object(&owner, built);
+    owner.release(built);
 
     owner.assert_released();
 }
@@ -1502,7 +1487,7 @@ fn test_object_build_releases_everything_when_memory_runs_out_at_each_allocation
             let result = build_policy_object(&owner, &[(1, &[80, 443]), (2, &[]), (3, &[53])]);
             let fits = match result {
                 Ok(built) => {
-                    release_object(&owner, built);
+                    owner.release(built);
                     true
                 }
                 Err(err) => {
@@ -1632,10 +1617,9 @@ fn build_held_object(owner: &TestOwner, last: &str) -> Result<BuiltObject<HeldSt
 
 /// The ids the object's counters were written with.
 fn held_ids(owner: &TestOwner, built: &BuiltObject<HeldState, TestOwner>) -> (u64, u64, u64) {
-    // SAFETY: the object was built in this owner's memory and is not
-    // released while the borrow lives.
-    let config = unsafe { built.config(owner) };
-    (config.held.id(), config.traffic.id(), config.last.id())
+    owner.read(built, |_, config| {
+        (config.held.id(), config.traffic.id(), config.last.id())
+    })
 }
 
 /// verifies that an object's counters are registered with as many values as
@@ -1651,7 +1635,7 @@ fn test_object_build_registers_each_counter_with_the_objects_registry() {
         ((0, 1, 0), vec![1, 2, 1]),
         (held_ids(&owner, &built), owner.counter_sizes())
     );
-    release_object(&owner, built);
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -1676,9 +1660,9 @@ fn test_object_build_numbers_its_counters_apart_from_others() {
         ((0, 1, 2), (0, 1, 2)),
         (held_ids(&owner, &first), held_ids(&owner, &second))
     );
-    release_object(&owner, second);
-    release_object(&owner, first);
-    release::<CountedModule>(&owner, module);
+    owner.release(second);
+    owner.release(first);
+    owner.release(module);
     owner.assert_released();
 }
 
@@ -1759,18 +1743,19 @@ fn test_build_links_each_object_by_type_and_name() {
 
     let built = build::<LinkedModule>(&owner, |b| linked(b, ["state0", "state1"])).expect("built");
 
-    let (config, _) = body::<LinkedModule>(&owner, &built);
-    assert_eq!(
-        (
-            (0, 1),
-            vec![
-                ("policy_state".to_string(), "state0".to_string()),
-                ("policy_state".to_string(), "state1".to_string())
-            ]
-        ),
-        ((config.primary.index(), config.backup.index()), owner.object_links())
-    );
-    release::<LinkedModule>(&owner, built);
+    owner.read_module(&built, |_, config| {
+        assert_eq!(
+            (
+                (0, 1),
+                vec![
+                    ("policy_state".to_string(), "state0".to_string()),
+                    ("policy_state".to_string(), "state1".to_string())
+                ]
+            ),
+            ((config.primary.index(), config.backup.index()), owner.object_links())
+        );
+    });
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -1817,7 +1802,7 @@ fn test_build_links_an_object_name_that_fills_its_c_field() {
     let built = build::<LinkedModule>(&owner, |b| linked(b, ["state0", &name])).expect("built");
 
     assert_eq!(Some(name), owner.object_links().pop().map(|(_, name)| name));
-    release::<LinkedModule>(&owner, built);
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -1829,15 +1814,16 @@ fn test_build_links_the_same_object_twice_at_one_index() {
 
     let built = build::<LinkedModule>(&owner, |b| linked(b, ["state0", "state0"])).expect("built");
 
-    let (config, _) = body::<LinkedModule>(&owner, &built);
-    assert_eq!(
-        ((0, 0), 1),
-        (
-            (config.primary.index(), config.backup.index()),
-            owner.object_links().len()
-        )
-    );
-    release::<LinkedModule>(&owner, built);
+    owner.read_module(&built, |_, config| {
+        assert_eq!(
+            ((0, 0), 1),
+            (
+                (config.primary.index(), config.backup.index()),
+                owner.object_links().len()
+            )
+        );
+    });
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -1881,9 +1867,10 @@ fn test_build_links_one_name_under_two_types_at_distinct_indexes() {
 
     let built = build_mixed(&owner);
 
-    let (config, _) = body::<MixedModule>(&owner, &built);
-    assert_eq!((0, 1), (config.policy.index(), config.other.index()));
-    release::<MixedModule>(&owner, built);
+    owner.read_module(&built, |_, config| {
+        assert_eq!((0, 1), (config.policy.index(), config.other.index()));
+    });
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -1895,9 +1882,10 @@ fn test_build_numbers_object_links_apart_from_counters() {
 
     let built = build_mixed(&owner);
 
-    let (config, _) = body::<MixedModule>(&owner, &built);
-    assert_eq!((0, 0), (config.hits.id(), config.policy.index()));
-    release::<MixedModule>(&owner, built);
+    owner.read_module(&built, |_, config| {
+        assert_eq!((0, 0), (config.hits.id(), config.policy.index()));
+    });
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -2010,16 +1998,17 @@ fn test_per_worker_build_writes_the_initial_value_into_a_slot_per_worker() {
 
     let built = build_budgets(&owner).expect("built");
 
-    let (config, _) = body::<BudgetsModule>(&owner, &built);
-    assert_eq!(
-        (3, 3, vec![BUDGET; 3]),
-        (
-            config.word,
-            config.budgets.worker_count(),
-            slot_values(&owner, &config.budgets)
-        )
-    );
-    release::<BudgetsModule>(&owner, built);
+    owner.read_module(&built, |_, config| {
+        assert_eq!(
+            (3, 3, vec![BUDGET; 3]),
+            (
+                config.word,
+                config.budgets.worker_count(),
+                slot_values(&owner, &config.budgets)
+            )
+        );
+    });
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -2029,10 +2018,11 @@ fn test_per_worker_slots_start_on_a_128_byte_line_with_a_stride_of_128_bytes() {
 
     let built = build_budgets(&owner).expect("built");
 
-    let (config, _) = body::<BudgetsModule>(&owner, &built);
-    let addrs = slot_addrs(&config.budgets);
-    assert_eq!((0, 128), (addrs[0] % 128, PerWorker::<Budget>::STRIDE));
-    release::<BudgetsModule>(&owner, built);
+    owner.read_module(&built, |_, config| {
+        let addrs = slot_addrs(&config.budgets);
+        assert_eq!((0, 128), (addrs[0] % 128, PerWorker::<Budget>::STRIDE));
+    });
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -2042,9 +2032,10 @@ fn test_per_worker_slots_share_no_128_byte_line_with_each_other_or_outside() {
 
     let built = build::<WideModule>(&owner, |b| b.per_worker(Wide { words: [5; 9] })).expect("built");
 
-    let (config, _) = body::<WideModule>(&owner, &built);
-    assert!(own_lines::<Wide>(slot_block(config), 4));
-    release::<WideModule>(&owner, built);
+    owner.read_module(&built, |_, config| {
+        assert!(own_lines::<Wide>(slot_block(config), 4));
+    });
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -2116,18 +2107,19 @@ fn test_per_worker_nested_in_owned_blocks_is_released_through_its_parents() {
     })
     .expect("built");
 
-    let (config, view) = body::<LaneSetModule>(&owner, &built);
-    let lanes = config.lanes.as_slice(&view);
-    // The root block, the lanes, the spare lane and three slot blocks.
-    assert_eq!(
-        (6, vec![BUDGET; 3], vec![BUDGET; 3]),
-        (
-            owner.live_blocks(),
-            slot_values(&owner, &lanes[1].budgets),
-            slot_values(&owner, &config.spare.get(&view).budgets)
-        )
-    );
-    release::<LaneSetModule>(&owner, built);
+    owner.read_module(&built, |view, config| {
+        let lanes = config.lanes.as_slice(&view);
+        // The root block, the lanes, the spare lane and three slot blocks.
+        assert_eq!(
+            (6, vec![BUDGET; 3], vec![BUDGET; 3]),
+            (
+                owner.live_blocks(),
+                slot_values(&owner, &lanes[1].budgets),
+                slot_values(&owner, &config.spare.get(&view).budgets)
+            )
+        );
+    });
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -2137,16 +2129,17 @@ fn test_per_worker_build_without_workers_leaves_the_field_null_and_unallocated()
 
     let built = build_budgets(&owner).expect("built");
 
-    let (config, _) = body::<BudgetsModule>(&owner, &built);
-    assert_eq!(
-        (0, 0, 1),
-        (
-            config.budgets.offset(),
-            config.budgets.worker_count(),
-            owner.live_blocks()
-        )
-    );
-    release::<BudgetsModule>(&owner, built);
+    owner.read_module(&built, |_, config| {
+        assert_eq!(
+            (0, 0, 1),
+            (
+                config.budgets.offset(),
+                config.budgets.worker_count(),
+                owner.live_blocks()
+            )
+        );
+    });
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -2159,7 +2152,7 @@ fn test_per_worker_module_build_sizes_the_slots_by_the_owners_workers() {
 
     let size = PerWorker::<Budget>::block_size(5).expect("block size");
     assert!(owner.live_block_sizes().contains(&size));
-    release::<BudgetsModule>(&owner, built);
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -2178,8 +2171,7 @@ fn test_per_worker_object_build_sizes_the_slots_by_the_owners_workers() {
 
     let size = PerWorker::<Budget>::block_size(5).expect("block size");
     assert!(owner.live_block_sizes().contains(&size));
-    // SAFETY: handed over by the builder, unreferenced, released once.
-    unsafe { built.destroy(&owner) };
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -2238,11 +2230,10 @@ fn test_per_worker_object_build_writes_the_slots_and_releases_them() {
     })
     .expect("built");
 
-    // SAFETY: the object was built in this owner's memory.
-    let config = unsafe { built.config(&owner) };
-    assert_eq!(vec![BUDGET; 2], slot_values(&owner, &config.budgets));
-    // SAFETY: handed over by the builder, unreferenced, released once.
-    unsafe { built.destroy(&owner) };
+    owner.read(&built, |_, config| {
+        assert_eq!(vec![BUDGET; 2], slot_values(&owner, &config.budgets));
+    });
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -2323,17 +2314,18 @@ fn test_per_worker_slice_build_writes_the_initial_value_into_a_region_per_worker
 
     let built = build_flows(&owner, 5).expect("built");
 
-    let (config, _) = body::<FlowsModule>(&owner, &built);
-    assert_eq!(
-        (3, 3, 5, vec![vec![BUDGET; 5]; 3]),
-        (
-            config.word,
-            config.table.worker_count(),
-            config.table.len(),
-            region_values(&owner, &config.table)
-        )
-    );
-    release::<FlowsModule>(&owner, built);
+    owner.read_module(&built, |_, config| {
+        assert_eq!(
+            (3, 3, 5, vec![vec![BUDGET; 5]; 3]),
+            (
+                config.word,
+                config.table.worker_count(),
+                config.table.len(),
+                region_values(&owner, &config.table)
+            )
+        );
+    });
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -2353,7 +2345,7 @@ fn test_per_worker_slice_build_allocates_a_block_per_region_and_the_table() {
     expected.sort_unstable();
     // Five budgets of 24 bytes fill one 128-byte line, and the slack.
     assert_eq!((128 + line_slack(), expected), (region, sizes));
-    release::<FlowsModule>(&owner, built);
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -2397,10 +2389,11 @@ fn test_per_worker_slice_regions_start_on_and_keep_to_their_own_128_byte_lines()
 
     let built = build_flows(&owner, 11).expect("built");
 
-    let (config, _) = body::<FlowsModule>(&owner, &built);
-    let blocks = region_blocks(&owner, &config.table);
-    assert!(blocks.iter().all(|&block| region_owns_its_lines::<Budget>(block, 11)));
-    release::<FlowsModule>(&owner, built);
+    owner.read_module(&built, |_, config| {
+        let blocks = region_blocks(&owner, &config.table);
+        assert!(blocks.iter().all(|&block| region_owns_its_lines::<Budget>(block, 11)));
+    });
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -2410,12 +2403,13 @@ fn test_per_worker_slice_region_blocks_do_not_overlap() {
 
     let built = build_flows(&owner, 11).expect("built");
 
-    let (config, _) = body::<FlowsModule>(&owner, &built);
-    let size = PerWorkerSlice::<Budget>::region_block(11).expect("region size");
-    let mut blocks = region_blocks(&owner, &config.table);
-    blocks.sort_unstable();
-    assert!(blocks.windows(2).all(|pair| pair[0] + size <= pair[1]), "{blocks:x?}");
-    release::<FlowsModule>(&owner, built);
+    owner.read_module(&built, |_, config| {
+        let size = PerWorkerSlice::<Budget>::region_block(11).expect("region size");
+        let mut blocks = region_blocks(&owner, &config.table);
+        blocks.sort_unstable();
+        assert!(blocks.windows(2).all(|pair| pair[0] + size <= pair[1]), "{blocks:x?}");
+    });
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -2423,26 +2417,27 @@ fn test_per_worker_slice_region_blocks_do_not_overlap() {
 fn test_per_worker_slice_write_to_one_region_leaves_the_others_unchanged() {
     let owner = owner_of_workers(3);
     let built = build_flows(&owner, 5).expect("built");
-    let (config, _) = body::<FlowsModule>(&owner, &built);
-    let first = PerWorkerSlice::<Budget>::first_element(region_blocks(&owner, &config.table)[1]);
-    let changed = Budget { tokens: 1, last: 2, spent: 3 };
+    owner.read_module(&built, |_, config| {
+        let first = PerWorkerSlice::<Budget>::first_element(region_blocks(&owner, &config.table)[1]);
+        let changed = Budget { tokens: 1, last: 2, spent: 3 };
 
-    for idx in 0..5 {
-        // SAFETY: the values of worker 1's region, aligned, which nothing
-        // else reads or writes while the test writes.
-        unsafe {
-            owner
-                .root()
-                .ptr::<Budget>(first + idx * size_of::<Budget>())
-                .write(changed)
-        };
-    }
+        for idx in 0..5 {
+            // SAFETY: the values of worker 1's region, aligned, which nothing
+            // else reads or writes while the test writes.
+            unsafe {
+                owner
+                    .root()
+                    .ptr::<Budget>(first + idx * size_of::<Budget>())
+                    .write(changed)
+            };
+        }
 
-    assert_eq!(
-        vec![vec![BUDGET; 5], vec![changed; 5], vec![BUDGET; 5]],
-        region_values(&owner, &config.table)
-    );
-    release::<FlowsModule>(&owner, built);
+        assert_eq!(
+            vec![vec![BUDGET; 5], vec![changed; 5], vec![BUDGET; 5]],
+            region_values(&owner, &config.table)
+        );
+    });
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -2474,17 +2469,18 @@ fn test_per_worker_slice_build_of_no_values_leaves_the_field_null_and_unallocate
 
     let built = build_flows(&owner, 0).expect("built");
 
-    let (config, _) = body::<FlowsModule>(&owner, &built);
-    assert_eq!(
-        (0, 3, 0, 1),
-        (
-            config.table.offset(),
-            config.table.worker_count(),
-            config.table.len(),
-            owner.live_blocks()
-        )
-    );
-    release::<FlowsModule>(&owner, built);
+    owner.read_module(&built, |_, config| {
+        assert_eq!(
+            (0, 3, 0, 1),
+            (
+                config.table.offset(),
+                config.table.worker_count(),
+                config.table.len(),
+                owner.live_blocks()
+            )
+        );
+    });
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -2497,17 +2493,18 @@ fn test_per_worker_slice_build_without_workers_leaves_the_field_null_and_unalloc
 
     let built = build_flows(&owner, 5).expect("built");
 
-    let (config, _) = body::<FlowsModule>(&owner, &built);
-    assert_eq!(
-        (0, 0, 0, 1),
-        (
-            config.table.offset(),
-            config.table.worker_count(),
-            config.table.len(),
-            owner.live_blocks()
-        )
-    );
-    release::<FlowsModule>(&owner, built);
+    owner.read_module(&built, |_, config| {
+        assert_eq!(
+            (0, 0, 0, 1),
+            (
+                config.table.offset(),
+                config.table.worker_count(),
+                config.table.len(),
+                owner.live_blocks()
+            )
+        );
+    });
+    owner.release(built);
     owner.assert_released();
 }
 
@@ -2611,10 +2608,109 @@ fn test_per_worker_slice_object_build_writes_the_regions_and_releases_them() {
     })
     .expect("built");
 
-    // SAFETY: the object was built in this owner's memory.
-    let config = unsafe { built.config(&owner) };
-    assert_eq!(vec![vec![BUDGET; 3]; 2], region_values(&owner, &config.table));
-    // SAFETY: handed over by the builder, unreferenced, released once.
-    unsafe { built.destroy(&owner) };
+    owner.read(&built, |_, config| {
+        assert_eq!(vec![vec![BUDGET; 3]; 2], region_values(&owner, &config.table));
+    });
+    owner.release(built);
     owner.assert_released();
+}
+
+#[test]
+fn no_c_memory_refuses_lpm_hash_index_and_classify() {
+    let owner = TestOwner::new();
+    let ranges = [yanet_sdk::LpmRange { from: [0; 4], to: [255; 4], value: 1 }];
+    let err = build::<Fixture<Lpm4>>(&owner, |_| Ok(&ranges)).expect_err("LPM needs C memory");
+    assert_eq!(BuildError::Refused(Refusal::NoCMemory), err);
+    owner.assert_released();
+
+    let records = [(Ipv4Addr::LOCALHOST, 0)];
+    let err =
+        build::<Fixture<HashIndex<Ipv4Addr>>>(&owner, |_| Ok((&records).into())).expect_err("index needs C memory");
+    assert_eq!(BuildError::Refused(Refusal::NoCMemory), err);
+    owner.assert_released();
+
+    let mut records = records.into_iter();
+    let err = build::<Fixture<HashIndex<Ipv4Addr>>>(&owner, |_| Ok(HashIndex::builder(&mut records)))
+        .expect_err("iterator index needs C memory");
+    assert_eq!(BuildError::Refused(Refusal::NoCMemory), err);
+    owner.assert_released();
+
+    let err = build::<Fixture<u64>>(&owner, |b| {
+        let _branch = b.compile::<yanet_sdk::Nets4<'_>>(c"empty", &[])?;
+        Ok(0)
+    })
+    .expect_err("even an empty classifier needs C memory");
+    assert_eq!(BuildError::Refused(Refusal::NoCMemory), err);
+    owner.assert_released();
+    assert_eq!(
+        yanet_sys::bindings::yanet_error_kind_YANET_ERROR_FAILED_PRECONDITION,
+        Refusal::NoCMemory.kind()
+    );
+    assert_eq!(
+        "the owner has no C memory for an embedded C object",
+        Refusal::NoCMemory.to_string()
+    );
+}
+
+#[test]
+fn read_module_sees_the_built_body() {
+    let owner = TestOwner::new();
+    let built = build_policy(&owner, &[(7, &[53, 443])]).expect("built");
+    let ports = owner.read_module(&built, |cx, config| {
+        let rules = config.rules.as_slice(&cx);
+        assert_eq!(7, rules[0].id);
+        rules[0].ports.as_slice(&cx).to_vec()
+    });
+    assert_eq!(vec![53, 443], ports);
+    owner.release(built);
+    owner.assert_released();
+}
+
+#[test]
+fn reads_of_another_owners_config_and_object_panic() {
+    use core::panic::AssertUnwindSafe;
+    use std::panic::catch_unwind;
+
+    let owner = TestOwner::new();
+    let other = TestOwner::new();
+    let module = build_policy(&owner, &[(1, &[80])]).expect("built module");
+    let object = build_policy_object(&owner, &[(2, &[443])]).expect("built object");
+
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| {
+            other.read_module(&module, |_, _| ());
+        }))
+        .is_err()
+    );
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| {
+            other.read(&object, |_, _| ());
+        }))
+        .is_err()
+    );
+
+    owner.read_module(&module, |cx, config| assert_eq!(1, config.rules.as_slice(&cx)[0].id));
+    owner.read(&object, |cx, config| assert_eq!(2, config.rules.as_slice(&cx)[0].id));
+    other.assert_released();
+    owner.release(object);
+    owner.release(module);
+    owner.assert_released();
+}
+
+#[test]
+#[should_panic(expected = "not live in this test owner")]
+fn release_of_another_owners_config_panics() {
+    let owner = TestOwner::new();
+    let other = TestOwner::new();
+    let built = build_policy(&owner, &[]).expect("built");
+    other.release(built);
+}
+
+#[test]
+#[should_panic(expected = "not live in this test owner")]
+fn release_of_another_owners_object_panics() {
+    let owner = TestOwner::new();
+    let other = TestOwner::new();
+    let built = build_policy_object(&owner, &[]).expect("built");
+    other.release(built);
 }

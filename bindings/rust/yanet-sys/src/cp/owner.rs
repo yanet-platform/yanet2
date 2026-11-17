@@ -30,10 +30,11 @@ use super::addr::{BlockAddr, Context, Header};
 /// [`Owner::init_object_header`] must not panic either: the root block is not
 /// yet guarded when they run.
 ///
-/// [`Owner::init_header`] and [`Owner::init_object_header`] must leave a live
-/// C memory context in the header, over memory of this owner, as
-/// `cp_module_init` and `cp_object_init` do: an embedded C object opens its
-/// own context under it. A refused initialisation leaves nothing to finalise.
+/// When [`Owner::C_MEMORY`] is true, [`Owner::init_header`] and
+/// [`Owner::init_object_header`] must leave a live C memory context in the
+/// header, over memory of this owner, as `cp_module_init` and `cp_object_init`
+/// do. Embedded C objects require this capability before opening their own
+/// context. A refused initialisation leaves nothing to finalise.
 ///
 /// `Owner::worker_count` must be the number of workers of the dataplane the
 /// configurations are published to, fixed for the life of the shared memory:
@@ -45,6 +46,12 @@ use super::addr::{BlockAddr, Context, Header};
 /// promised to take concurrent calls; an owner may rely on that, and being
 /// `Sync` alone does not say it.
 pub unsafe trait Owner: 'static {
+    /// Whether initialized headers carry a live C memory context.
+    ///
+    /// Owners without one refuse embedded C objects with
+    /// [`super::Refusal::NoCMemory`].
+    const C_MEMORY: bool;
+
     /// The failure of a C routine.
     type Error: Error;
 
