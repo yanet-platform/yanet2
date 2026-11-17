@@ -63,6 +63,47 @@ dataplane_ut_begin_round(struct dataplane_ut *ut, size_t worker_idx) {
 	return result;
 }
 
+// Run only the due-entry sweep of a worker round.
+//
+// Prepares the round like dataplane_ut_begin_round, then moves entries
+// whose deadline is due at the installed mock time onto the ready list
+// without running anything: the ordinary round's force-poll cannot mask
+// the sweep's own movement, so a test observes which entries the
+// deadline predicate dispatches. The not-due entries return to the home
+// list; the round state matches begin_round afterwards, so the same
+// stage-sequence rules apply to a following run_stage.
+int
+dataplane_ut_arm_due(struct dataplane_ut *ut, size_t worker_idx) {
+	if (worker_idx >= ut->dp_config->worker_count) {
+		return -EINVAL;
+	}
+	pthread_mutex_lock(dp_config_external_round_lock(ut->dp_config));
+	struct dp_worker **workers = ADDR_OF(&ut->dp_config->workers);
+	struct dp_worker *worker = ADDR_OF(workers + worker_idx);
+	struct worker_round round =
+		worker_round_prepare(worker, ut->mock_time_ns);
+	int result = -ENOENT;
+	ut->stage_rounds[worker_idx] = (struct dataplane_ut_stage_round){0};
+	if (round.config_gen_ectx != NULL) {
+		ut->stage_rounds[worker_idx] =
+			(struct dataplane_ut_stage_round){
+				.generation = round.cp_config_gen->gen,
+				.iteration = *worker->iterations,
+			};
+		struct config_gen_ectx *context = round.config_gen_ectx;
+		struct rlist untouched;
+		rlist_init(&untouched);
+		rlist_concat(&untouched, &context->entry_list);
+		worker_pipeline_round_arm_due(
+			context, &untouched, worker->current_time
+		);
+		rlist_concat(&context->entry_list, &untouched);
+		result = 0;
+	}
+	pthread_mutex_unlock(dp_config_external_round_lock(ut->dp_config));
+	return result;
+}
+
 int
 dataplane_ut_run_stage(
 	struct dataplane_ut *ut,
@@ -91,6 +132,15 @@ dataplane_ut_run_stage(
 	struct device_entry_ectx *entry = stage->output
 						  ? device->abs_output_pipelines
 						  : device->abs_input_pipelines;
+	// An entry the caller already queued onto the ready list — by an
+	// arm-due sweep or a route — must not run twice: this direct
+	// invocation replaces its queued run, so dequeue it back home
+	// before the process-ready drain below reaches it again.
+	if (entry->schedule_list == device_entry_schedule_ready) {
+		rlist_remove(&entry->schedule_node);
+		rlist_add(&context->entry_list, &entry->schedule_node);
+		entry->schedule_list = device_entry_schedule_home;
+	}
 	struct packet_front *front = &entry->schedule;
 	struct packet *packet;
 	while ((packet = packet_list_pop(input)) != NULL) {

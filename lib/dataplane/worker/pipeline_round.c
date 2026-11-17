@@ -10,6 +10,7 @@
 #include "lib/dataplane/packet/packet.h"
 #include "lib/dataplane/pipeline/econtext.h"
 #include "lib/dataplane/pipeline/pipeline.h"
+#include "lib/dataplane/pipeline/schedule.h"
 
 static inline void
 counter_add_packets_bytes(
@@ -80,6 +81,40 @@ worker_entry_terminal_egress(
 	}
 }
 
+// Runs only when the cached earliest deadline is due, so an idle round
+// pays one comparison; see pipeline_round.h for the full contract.
+void
+worker_pipeline_round_arm_due(
+	struct config_gen_ectx *config_gen_ectx,
+	struct rlist *untouched,
+	uint64_t current_time_ns
+) {
+	if (current_time_ns < config_gen_ectx->nearest_deadline_ns) {
+		return;
+	}
+
+	uint64_t nearest = DEVICE_ENTRY_DEADLINE_NEVER;
+	struct rlist *node = rlist_first(untouched);
+	while (node != untouched) {
+		struct rlist *next = node->next;
+		struct device_entry_ectx *device_entry_ectx = container_of(
+			node, struct device_entry_ectx, schedule_node
+		);
+
+		if (device_entry_ectx->deadline_ns <= current_time_ns) {
+			device_entry_ectx_move_ready(
+				config_gen_ectx, device_entry_ectx
+			);
+		} else if (device_entry_ectx->deadline_ns < nearest) {
+			nearest = device_entry_ectx->deadline_ns;
+		}
+
+		node = next;
+	}
+
+	config_gen_ectx->nearest_deadline_ns = nearest;
+}
+
 void
 worker_pipeline_round(
 	struct dp_worker *dp_worker,
@@ -101,6 +136,10 @@ worker_pipeline_round(
 	struct rlist untouched;
 	rlist_init(&untouched);
 	rlist_concat(&untouched, &config_gen_ectx->entry_list);
+
+	worker_pipeline_round_arm_due(
+		config_gen_ectx, &untouched, dp_worker->current_time
+	);
 
 	worker_pipeline_round_process_ready(
 		dp_worker, config_gen_ectx, packet_front

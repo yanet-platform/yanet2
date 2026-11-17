@@ -45,6 +45,27 @@ worker_counters_test = executable(
 )
 test('worker_counters', worker_counters_test, suite: 'dataplane_ut')
 
+if not dataplane_only
+  entry_deadline_test = executable(
+    'entry_deadline_test',
+    ['entry_deadline_test.c'],
+    c_args: ['-DYANET_DATAPLANE_UT_CONTROLPLANE'],
+    dependencies: [
+      lib_dataplane_ut_dep,
+      lib_logging_dep,
+      lib_dev_plain_dp_dep,
+      lib_dev_plain_api_dep,
+      lib_agent_cp_dep,
+      lib_errors_dep,
+      lib_packet_dp_dep,
+      libdpdk_test_dep,
+    ],
+    include_directories: yanet_rootdir,
+    export_dynamic: true,
+  )
+  test('entry_deadline', entry_deadline_test, suite: 'dataplane_ut')
+endif
+
 subdir('loader_plugin')
 
 loader_test = executable(

@@ -24,9 +24,10 @@ device_entry_ectx_count_recirc_drop(
 //
 // Must run on the owning worker before any packet is scheduled. Every
 // entry is linked onto the home list, each device's input entry
-// before its output one. After the first build the lists are
-// permanent state and preparation does nothing: the round itself
-// drains the home list onto its untouched list and works entries
+// before its output one, and armed with deadline zero so the whole
+// generation fires once right after it applies. After the first build
+// the lists are permanent state and preparation does nothing: the round
+// itself drains the home list onto its untouched list and works entries
 // back home.
 static inline void
 config_gen_ectx_schedules_prepare(struct config_gen_ectx *config_gen_ectx) {
@@ -36,6 +37,7 @@ config_gen_ectx_schedules_prepare(struct config_gen_ectx *config_gen_ectx) {
 
 	rlist_init(&config_gen_ectx->entry_list);
 	rlist_init(&config_gen_ectx->ready_list);
+	config_gen_ectx->nearest_deadline_ns = 0;
 
 	for (uint64_t idx = 0; idx < config_gen_ectx->device_count; ++idx) {
 		struct device_ectx *device_ectx =
@@ -50,6 +52,7 @@ config_gen_ectx_schedules_prepare(struct config_gen_ectx *config_gen_ectx) {
 		);
 		device_ectx->abs_input_pipelines->schedule_list =
 			device_entry_schedule_home;
+		device_ectx->abs_input_pipelines->deadline_ns = 0;
 
 		rlist_add(
 			&config_gen_ectx->entry_list,
@@ -57,9 +60,31 @@ config_gen_ectx_schedules_prepare(struct config_gen_ectx *config_gen_ectx) {
 		);
 		device_ectx->abs_output_pipelines->schedule_list =
 			device_entry_schedule_home;
+		device_ectx->abs_output_pipelines->deadline_ns = 0;
 	}
 
 	config_gen_ectx->schedules_ready = 1;
+}
+
+// Move an entry that is not queued onto the tail of the ready list.
+//
+// The list-move half of scheduling, shared by the packet path and the
+// due-entry sweep: an entry anywhere but ready — home, or already
+// drained onto the round's untouched list — moves to the tail of
+// ready; an entry already queued stays where it is.
+static inline void
+device_entry_ectx_move_ready(
+	struct config_gen_ectx *config_gen_ectx,
+	struct device_entry_ectx *device_entry_ectx
+) {
+	if (device_entry_ectx->schedule_list != device_entry_schedule_ready) {
+		rlist_remove(&device_entry_ectx->schedule_node);
+		rlist_add(
+			&config_gen_ectx->ready_list,
+			&device_entry_ectx->schedule_node
+		);
+		device_entry_ectx->schedule_list = device_entry_schedule_ready;
+	}
 }
 
 // Schedule a packet onto a device entry's input list, moving the entry
@@ -78,16 +103,41 @@ device_entry_ectx_schedule(
 	struct device_entry_ectx *device_entry_ectx,
 	struct packet *packet
 ) {
-	if (device_entry_ectx->schedule_list != device_entry_schedule_ready) {
-		rlist_remove(&device_entry_ectx->schedule_node);
-		rlist_add(
-			&config_gen_ectx->ready_list,
-			&device_entry_ectx->schedule_node
-		);
-		device_entry_ectx->schedule_list = device_entry_schedule_ready;
-	}
+	device_entry_ectx_move_ready(config_gen_ectx, device_entry_ectx);
 
 	packet_front_input(&device_entry_ectx->schedule, packet);
+}
+
+// Arm an entry's time-driven invocation.
+//
+// The deadline only decreases — a later arm never postpones an earlier
+// one — and the generation's cached earliest deadline follows the same
+// rule, so both are plain stores on the owning worker. An arm at or
+// below the current time leaves the entry due for the next sweep.
+static inline void
+device_entry_ectx_arm(
+	struct config_gen_ectx *config_gen_ectx,
+	struct device_entry_ectx *device_entry_ectx,
+	uint64_t deadline_ns
+) {
+	if (deadline_ns < device_entry_ectx->deadline_ns) {
+		device_entry_ectx->deadline_ns = deadline_ns;
+	}
+	if (deadline_ns < config_gen_ectx->nearest_deadline_ns) {
+		config_gen_ectx->nearest_deadline_ns = deadline_ns;
+	}
+}
+
+// The device entry whose pipeline the module currently executes in.
+//
+// Valid only inside the module's own handler invocation; NULL between
+// invocations, so a caller outside a round has no entry to arm and
+// must handle the NULL itself.
+static inline struct device_entry_ectx *
+module_ectx_current_entry(struct module_ectx *module_ectx) {
+	struct config_gen_ectx *config_gen_ectx =
+		module_ectx->abs_config_gen_ectx;
+	return config_gen_ectx == NULL ? NULL : config_gen_ectx->current_entry;
 }
 
 // Route a packet to a target device's input entry, counting it as

@@ -24,6 +24,10 @@ struct dp_config;
 
 struct device_entry_ectx;
 
+// The sentinel deadline of an entry with no time-driven invocation armed:
+// set on every invocation and lowered only by an arm.
+#define DEVICE_ENTRY_DEADLINE_NEVER UINT64_MAX
+
 // One routing target of a module device, joining the generation-global
 // device id with the target device's entries so the packet hot path
 // routes with a single table load.
@@ -353,6 +357,14 @@ enum device_entry_schedule_state {
 struct device_entry_ectx {
 	device_handler handler;
 
+	// The entry's next time-driven invocation, in nanoseconds.
+	//
+	// The owning worker's business only, like the schedule lists: built
+	// to zero at the first worklist build (so the entry fires once right
+	// after the generation applies), reset to the never sentinel before
+	// each invocation, and lowered — never raised — by every arm.
+	uint64_t deadline_ns;
+
 	// Worker-side worklist membership and round dispatch.
 	//
 	// The node links this entry into one of the generation's two
@@ -536,6 +548,20 @@ struct config_gen_ectx {
 	// between rounds. Shares the link contract of the home list.
 	struct rlist ready_list;
 	uint8_t schedules_ready;
+
+	// The earliest armed deadline over the generation's entries.
+	//
+	// The owning worker's business only, lowered by every arm and
+	// recomputed by the due-entry sweep; a stale-low value costs one
+	// extra sweep that finds nothing due.
+	uint64_t nearest_deadline_ns;
+	// The device entry the worker is currently dispatching.
+	//
+	// Set around each entry invocation and restored afterwards, so a
+	// module handler reaches the entry it executes under — and the entry
+	// it may arm — through its generation context. NULL between
+	// invocations.
+	struct device_entry_ectx *current_entry;
 
 	// Offset pointer to an array of per-slot offset pointers to the
 	// devices, mirroring the tail below.
