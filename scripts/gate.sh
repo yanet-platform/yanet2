@@ -196,11 +196,12 @@ gate_rust() {
 # The Rust SDK workspace (bindings/rust), as rust-sdk.yml checks it on this
 # machine's architecture.
 #
-# The bindings crate reads the C flags of this checkout's own build/ and the
-# DPDK headers, and cargo finds the workspace's config from the working
-# directory, so every step runs there.
+# The bindings crate reads the DPDK headers and the C flags of a build
+# directory, set to this checkout's own build/ whatever the environment names;
+# cargo finds the workspace's config from the working directory, so every step
+# runs there.
 gate_sdk() {
-	local toolchain target sdk=(env -C bindings/rust) packet=$scratch/yanet-packet
+	local toolchain target sdk=(env -C bindings/rust YANET_BUILD_DIR="$root/build") packet=$scratch/yanet-packet
 	if [ ! -f subprojects/dpdk/meson.build ] || [ ! -d build ] || [ -L build ]; then
 		fail sdk "the SDK bindings read the DPDK sources and this checkout's own build/; run 'git submodule update --init && meson setup build' (AGENTS.md, Worktrees)"
 		return 1
@@ -259,9 +260,10 @@ if [ "$c" = 1 ] || matching '(\.go$|^go\.(mod|sum)$|\.proto$)' >/dev/null; then 
 # The SDK workspace is not a member of the root one; as in CI, only its own
 # layer checks it.
 matching '(\.rs$|(^|/)Cargo\.(toml|lock)$|^\.rustfmt\.toml$|^\.cargo/|\.proto$)' | grep -qv '^bindings/rust/' && gate_rust
-# The C headers, packet sources and build configuration feed the SDK's
-# bindings and shims, as the paths of rust-sdk.yml list them.
-matching '(^bindings/rust/|^\.rustfmt\.toml$|^\.cargo/config\.toml$|^(common|lib)/.*\.h$|^lib/dataplane/packet/.*\.c$|^subprojects/dpdk$|(^|/)meson\.build$|^meson_options\.txt$)' >/dev/null && gate_sdk
+# The SDK layer runs on the paths rust-sdk.yml lists: the C headers, packet
+# sources and build configuration that feed its bindings and shims, and the
+# workflow itself.
+matching '(^bindings/rust/|^\.rustfmt\.toml$|^\.cargo/config\.toml$|^(common|lib)/.*\.h$|^lib/dataplane/packet/.*\.c$|^subprojects/dpdk$|(^|/)meson\.build$|^meson_options\.txt$|^\.github/workflows/rust-sdk\.yml$)' >/dev/null && gate_sdk
 matching '(^|/)web/|^package(-lock)?\.json$' >/dev/null && gate_web
 matching '\.proto$' >/dev/null && step proto-lint make --no-print-directory proto-lint
 [ -n "$(git rev-list "$base"..HEAD)" ] && step commitlint lint/commit/commitlint.sh --range "$base..HEAD"
