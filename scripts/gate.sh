@@ -229,8 +229,9 @@ gate_sdk() {
 	# The packet crate is meant to move to a repository of its own; rust-sdk.yml
 	# checks that by building a copy outside the workspace.
 	#
-	# Its manifest takes nothing from the workspace, and built alone the crate
-	# gets only the dependency features it enables itself, as the copy does.
+	# Its manifest takes nothing from the workspace or from outside its
+	# directory, and built alone the crate gets only the dependency features it
+	# enables itself, as the copy does.
 	# CI also runs that check on any edit of its workflow; the commands here are
 	# a copy and do not follow such an edit.
 	matching '^(bindings/rust/yanet-packet/|\.github/workflows/rust-sdk\.yml$)' >/dev/null || return 0
@@ -247,10 +248,12 @@ gate_sdk() {
 	fi
 }
 
-# Lists the manifest keys that lean on a workspace: an inherited key, a
-# workspace named by path, or a dependency, patch or replacement by path.
+# Lists the manifest keys that lean on a workspace or on files outside the
+# crate: an inherited key, a workspace named by path, a dependency, patch or
+# replacement by path, or a build script or target outside its directory.
 standalone_manifest() {
 	python3 - "$1" <<'EOF'
+import os
 import sys
 import tomllib
 
@@ -273,6 +276,10 @@ def by_path(table, keys):
             found.append(".".join(keys + [name, "path"]))
 
 
+def outside(path):
+    return isinstance(path, str) and (os.path.isabs(path) or os.path.normpath(path).split(os.sep)[0] == "..")
+
+
 inherited({k: v for k, v in manifest.items() if k != "package"}, [])
 inherited({k: v for k, v in manifest.get("package", {}).items() if k != "metadata"}, ["package"])
 if "workspace" in manifest.get("package", {}):
@@ -286,6 +293,14 @@ for target, spec in manifest.get("target", {}).items():
 for source, patches in manifest.get("patch", {}).items():
     by_path(patches, ["patch", source])
 by_path(manifest.get("replace", {}), ["replace"])
+if outside(manifest.get("package", {}).get("build")):
+    found.append("package.build")
+if outside(manifest.get("lib", {}).get("path")):
+    found.append("lib.path")
+for kind in ("bin", "test", "bench", "example"):
+    for target in manifest.get(kind, []):
+        if outside(target.get("path")):
+            found.append(f"{kind}.{target.get('name', '')}.path")
 for key in found:
     print(f"{sys.argv[1]}: {key}")
 sys.exit(1 if found else 0)
