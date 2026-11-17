@@ -80,7 +80,7 @@ fn fold(sum: u64) -> u16 {
 
 /// The complement of a folded sum, kept as all-ones where it would be zero.
 ///
-/// A zero UDP checksum means no checksum (RFC 768); TCP keeps the same rule.
+/// A zero UDP checksum means no checksum (RFC 768).
 #[inline]
 fn no_zero(sum: u16) -> u16 {
     if sum == 0xffff { sum } else { !sum }

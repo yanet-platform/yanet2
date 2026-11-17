@@ -1118,19 +1118,32 @@ fn test_edit_keeps_a_udp_checksum_up_to_the_udp_length() {
 }
 
 /// verifies that an edit whose transport sum comes out all ones stores the
-/// checksum as all ones, for TCP as the header mutations do and for UDP,
-/// where zero would mean no checksum.
+/// checksum as zero for TCP, as a full computation does, and as all ones for
+/// UDP, where zero would mean no checksum.
 #[test]
-fn test_edit_stores_an_all_ones_checksum_as_all_ones() {
+fn test_edit_stores_an_all_ones_sum_as_the_transport_takes_it() {
     let payload = [0x21; 16];
-    // Each case: the frame, the payload offset, the checksum offset, and how
-    // much the edit adds to the lengths the checksum covers: the pseudo
-    // header's, and for UDP the UDP length too.
+    // The growth the checksum sees is the pseudo header's length, and for
+    // UDP the UDP length too.
     let cases = [
-        ("tcp", sealed_ipv4(&[], 6, 0, &tcp_with(&[], &payload), 0), 54, 50, 2),
-        ("udp", sealed_ipv4(&[], 17, 0, &udp_with(&payload), 0), 42, 40, 4),
+        (
+            "tcp",
+            sealed_ipv4(&[], 6, 0, &tcp_with(&[], &payload), 0),
+            54,
+            50,
+            2,
+            [0, 0],
+        ),
+        (
+            "udp",
+            sealed_ipv4(&[], 17, 0, &udp_with(&payload), 0),
+            42,
+            40,
+            4,
+            [0xff, 0xff],
+        ),
     ];
-    for (case, bytes, at, checksum, grown) in cases {
+    for (case, bytes, at, checksum, grown, stored) in cases {
         // The old sum, the lengths' growth, and the inserted word that makes
         // the whole all ones.
         let mut sum = u32::from(!u16::from_be_bytes([bytes[checksum], bytes[checksum + 1]])) + grown;
@@ -1145,7 +1158,7 @@ fn test_edit_stores_an_all_ones_checksum_as_all_ones() {
             .insert(at, 2, |gap| gap.copy_from_slice(&word.to_be_bytes()));
 
         assert_eq!(Ok(()), inserted, "{case}");
-        assert_eq!([0xff, 0xff], frame.frame()[checksum..checksum + 2], "{case}");
+        assert_eq!(stored, frame.frame()[checksum..checksum + 2], "{case}");
         assert_eq!(
             None,
             inconsistency(frame.frame(), frame.offsets(), 0, 0, true),

@@ -1093,6 +1093,90 @@ mod tests {
         assert_eq!(before, segment);
     }
 
+    /// An option edit, fixed for a regression or drawn by the property test.
+    ///
+    /// The padding shifts the options to every alignment against the
+    /// checksum words.
+    #[derive(Debug)]
+    struct Edit {
+        pad: usize,
+        mss: u16,
+        value: u32,
+        echo: u32,
+        shift: u32,
+        remove: bool,
+        syn: bool,
+        payload: Vec<u8>,
+    }
+
+    /// Edits the options of a segment in place and checks the checksum, the
+    /// unknown option and the clamped MSS it leaves.
+    fn check_edit(edit: Edit) -> Result<(), proptest::test_runner::TestCaseError> {
+        let Edit {
+            pad,
+            mss,
+            value,
+            echo,
+            shift,
+            remove,
+            syn,
+            payload,
+        } = edit;
+        let mut area = vec![KIND_NOP; pad];
+        area.extend_from_slice(&[KIND_MSS, 4, 0x05, 0xb4, 34, 3, 0xab]);
+        area.extend_from_slice(&[KIND_TIMESTAMPS, 10, 0, 0, 0, 1, 0, 0, 0, 2]);
+        area.extend_from_slice(&[KIND_SACK, 10, 0, 0, 0, 3, 0, 0, 0, 4]);
+        area.resize(area.len().next_multiple_of(4), KIND_EOL);
+        let flags = if syn { 0x12 } else { 0x10 };
+        let mut segment = segment(flags, &area, &payload);
+        let mut tcp = TcpPacketMut::parse(&mut segment).expect("the segment parses");
+
+        tcp.mutate()
+            .expect("the options are usable")
+            .set_ack(value)
+            .clamp_mss(mss)
+            .edit_options(|option| match option.option() {
+                TcpOption::Timestamps(_) => {
+                    option.set_timestamps(Timestamps { value, echo });
+                }
+                TcpOption::Sack(_) if remove => option.remove(),
+                TcpOption::Sack(_) => {
+                    option.map_sack(|block| block.wrapping_add(shift));
+                }
+                _ => {}
+            })
+            .finish();
+
+        let mut filled = segment.clone();
+        TcpHeader::fill_checksum_ipv4(&mut filled, SRC, DST).expect("the segment holds a header");
+        proptest::prop_assert_eq!(&filled[16..18], &segment[16..18]);
+        let unknown = TcpOption::Other { kind: 34, data: &[0xab] };
+        let kept = options(&segment[20..20 + area.len()]).any(|option| option == Ok(unknown));
+        proptest::prop_assert!(kept);
+        let clamped = if syn { mss.min(1460) } else { 1460 };
+        let offered = options(&segment[20..20 + area.len()]).any(|option| option == Ok(TcpOption::Mss(clamped)));
+        proptest::prop_assert!(offered);
+        Ok(())
+    }
+
+    /// verifies that an option edit whose checksum sums to all-ones stores
+    /// the checksum a full recompute fills.
+    #[test]
+    fn test_tcp_mutation_edit_options_stores_zero_for_all_ones_sum() {
+        let edit = Edit {
+            pad: 0,
+            mss: 0,
+            value: 2537939924,
+            echo: 2319159249,
+            shift: 0,
+            remove: true,
+            syn: false,
+            payload: vec![166, 124, 72, 192, 24],
+        };
+
+        check_edit(edit).unwrap();
+    }
+
     proptest::proptest! {
         #![proptest_config(crate::testing::config())]
 
@@ -1109,40 +1193,7 @@ mod tests {
             syn in proptest::bool::ANY,
             payload in proptest::collection::vec(proptest::num::u8::ANY, 0..9),
         ) {
-            let mut area = vec![KIND_NOP; pad];
-            area.extend_from_slice(&[KIND_MSS, 4, 0x05, 0xb4, 34, 3, 0xab]);
-            area.extend_from_slice(&[KIND_TIMESTAMPS, 10, 0, 0, 0, 1, 0, 0, 0, 2]);
-            area.extend_from_slice(&[KIND_SACK, 10, 0, 0, 0, 3, 0, 0, 0, 4]);
-            area.resize(area.len().next_multiple_of(4), KIND_EOL);
-            let flags = if syn { 0x12 } else { 0x10 };
-            let mut segment = segment(flags, &area, &payload);
-            let mut tcp = TcpPacketMut::parse(&mut segment).expect("the segment parses");
-
-            tcp.mutate()
-                .expect("the options are usable")
-                .set_ack(value)
-                .clamp_mss(mss)
-                .edit_options(|option| match option.option() {
-                    TcpOption::Timestamps(_) => {
-                        option.set_timestamps(Timestamps { value, echo });
-                    }
-                    TcpOption::Sack(_) if remove => option.remove(),
-                    TcpOption::Sack(_) => {
-                        option.map_sack(|block| block.wrapping_add(shift));
-                    }
-                    _ => {}
-                })
-                .finish();
-
-            let mut filled = segment.clone();
-            TcpHeader::fill_checksum_ipv4(&mut filled, SRC, DST).expect("the segment holds a header");
-            proptest::prop_assert_eq!(&filled[16..18], &segment[16..18]);
-            let unknown = TcpOption::Other { kind: 34, data: &[0xab] };
-            let kept = options(&segment[20..20 + area.len()]).any(|option| option == Ok(unknown));
-            proptest::prop_assert!(kept);
-            let clamped = if syn { mss.min(1460) } else { 1460 };
-            let offered = options(&segment[20..20 + area.len()]).any(|option| option == Ok(TcpOption::Mss(clamped)));
-            proptest::prop_assert!(offered);
+            check_edit(Edit { pad, mss, value, echo, shift, remove, syn, payload })?;
         }
     }
 
