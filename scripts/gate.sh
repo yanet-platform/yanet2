@@ -199,32 +199,39 @@ gate_rust() {
 # cargo finds the workspace's config from the working directory, so every step
 # runs there.
 gate_sdk() {
-	local toolchain target sdk=(env -C bindings/rust YANET_BUILD_DIR="$root/build")
+	local toolchain stable target sdk=(env -C bindings/rust YANET_BUILD_DIR="$root/build")
 	if [ ! -f subprojects/dpdk/meson.build ] || [ ! -d build ] || [ -L build ]; then
 		fail sdk "the SDK bindings read the DPDK sources and this checkout's own build/; run 'git submodule update --init && meson setup build' (AGENTS.md, Worktrees)"
 		return 1
 	fi
+	# The toolchains rust-sdk.yml pins: the nightly of its formatter and the
+	# stable of every other job, which a newer local one would not match.
 	toolchain=$(sed -n 's/^ *toolchain: *\(nightly-[0-9-]*\).*/\1/p' .github/workflows/rust-sdk.yml | head -n 1)
+	stable=$(sed -n 's/^ *- uses: dtolnay\/rust-toolchain@[0-9a-f]* # \([0-9][0-9.]*\)$/\1/p' .github/workflows/rust-sdk.yml | head -n 1)
+	if [ "$list" != 1 ] && ! rustup run "$stable" cargo-clippy --version >/dev/null 2>&1; then
+		fail sdk "Rust $stable with clippy is not installed; run 'rustup toolchain install $stable -c clippy -t $(uname -m)-unknown-none'"
+		return 1
+	fi
 	step sdk-fmt "${sdk[@]}" cargo "+$toolchain" fmt -- --check || return 1
 	if command -v cargo-shear >/dev/null; then
-		step sdk-shear "${sdk[@]}" cargo shear --deny-warnings --locked || return 1
+		step sdk-shear "${sdk[@]}" cargo "+$stable" shear --deny-warnings --locked || return 1
 	else
 		skipped+=("cargo-shear (not installed)")
 	fi
-	step sdk-clippy "${sdk[@]}" CARGO_BUILD_WARNINGS=deny cargo clippy --workspace --all-targets --locked --keep-going || return 1
-	step sdk-clippy-plugin "${sdk[@]}" CARGO_BUILD_WARNINGS=deny cargo clippy --profile plugin -p yanet-sdk-fixture --features plugin --examples --locked --keep-going || return 1
-	step sdk-clippy-deps "${sdk[@]}" cargo clippy --workspace --lib --locked -- -D unused_crate_dependencies || return 1
-	step sdk-doc "${sdk[@]}" RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --locked --features yanet-sdk-testing/cp || return 1
+	step sdk-clippy "${sdk[@]}" CARGO_BUILD_WARNINGS=deny cargo "+$stable" clippy --workspace --all-targets --locked --keep-going || return 1
+	step sdk-clippy-plugin "${sdk[@]}" CARGO_BUILD_WARNINGS=deny cargo "+$stable" clippy --profile plugin -p yanet-sdk-fixture --features plugin --examples --locked --keep-going || return 1
+	step sdk-clippy-deps "${sdk[@]}" cargo "+$stable" clippy --workspace --lib --locked -- -D unused_crate_dependencies || return 1
+	step sdk-doc "${sdk[@]}" RUSTDOCFLAGS='-D warnings' cargo "+$stable" doc --workspace --no-deps --locked --features yanet-sdk-testing/cp || return 1
 	target="$(uname -m)-unknown-none"
-	if rustup target list --installed 2>/dev/null | grep -qx "$target"; then
-		step sdk-no-std "${sdk[@]}" cargo check --locked --target "$target" -p yanet-shm -p yanet-sys -p yanet-sdk -p yanet-sdk-plugin -p yanet-packet || return 1
+	if rustup target list --installed --toolchain "$stable" 2>/dev/null | grep -qx "$target"; then
+		step sdk-no-std "${sdk[@]}" cargo "+$stable" check --locked --target "$target" -p yanet-shm -p yanet-sys -p yanet-sdk -p yanet-sdk-plugin -p yanet-packet || return 1
 	else
 		skipped+=("sdk-no-std ($target not installed)")
 	fi
-	step sdk-test "${sdk[@]}" PROPTEST_CASES=200 PROPTEST_RNG_SEED=19567271 cargo test --workspace --locked || return 1
-	step sdk-test-release "${sdk[@]}" cargo test -p yanet-sys --release --locked || return 1
-	step sdk-bench "${sdk[@]}" cargo test -p yanet-sys --bench dp --bench lookup --locked || return 1
-	step sdk-bench-release "${sdk[@]}" cargo test -p yanet-sys --release --bench lookup --locked || return 1
+	step sdk-test "${sdk[@]}" PROPTEST_CASES=200 PROPTEST_RNG_SEED=19567271 cargo "+$stable" test --workspace --locked || return 1
+	step sdk-test-release "${sdk[@]}" cargo "+$stable" test -p yanet-sys --release --locked || return 1
+	step sdk-bench "${sdk[@]}" cargo "+$stable" test -p yanet-sys --bench dp --bench lookup --locked || return 1
+	step sdk-bench-release "${sdk[@]}" cargo "+$stable" test -p yanet-sys --release --bench lookup --locked || return 1
 
 	# The packet crate is meant to move to a repository of its own; rust-sdk.yml
 	# checks that by building a copy outside the workspace.
@@ -240,9 +247,9 @@ gate_sdk() {
 	else
 		skipped+=("sdk-packet-manifest (python3 without tomllib)")
 	fi
-	step sdk-packet-test "${sdk[@]}" cargo test -p yanet-packet --locked || return 1
-	if rustup target list --installed 2>/dev/null | grep -qx "$target"; then
-		step sdk-packet-no-std "${sdk[@]}" cargo check -p yanet-packet --locked --target "$target"
+	step sdk-packet-test "${sdk[@]}" cargo "+$stable" test -p yanet-packet --locked || return 1
+	if rustup target list --installed --toolchain "$stable" 2>/dev/null | grep -qx "$target"; then
+		step sdk-packet-no-std "${sdk[@]}" cargo "+$stable" check -p yanet-packet --locked --target "$target"
 	else
 		skipped+=("sdk-packet-no-std ($target not installed)")
 	fi
