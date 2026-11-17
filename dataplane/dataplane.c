@@ -1021,9 +1021,16 @@ dataplane_init(
 			struct dp_port_counters *pc =
 				port_counters + device_idx;
 
-			device->xstat_count = rte_eth_xstats_get_names(
+			int count = rte_eth_xstats_get_names(
 				device->port_id, NULL, 0
 			);
+			if (count < 0) {
+				LOG(ERROR,
+				    "failed to query xstat count for port %u",
+				    device->port_id);
+				return -1;
+			}
+			device->xstat_count = count;
 
 			pc->port_id = device->port_id;
 			strtcpy(pc->port_name,
@@ -1044,9 +1051,15 @@ dataplane_init(
 			}
 
 			struct rte_eth_xstat_name names[device->xstat_count];
-			rte_eth_xstats_get_names(
+			count = rte_eth_xstats_get_names(
 				device->port_id, names, device->xstat_count
 			);
+			if (count < 0) {
+				LOG(ERROR,
+				    "failed to query xstat names for port %u",
+				    device->port_id);
+				return -1;
+			}
 			for (uint32_t xstat_idx = 0;
 			     xstat_idx < device->xstat_count;
 			     ++xstat_idx) {
