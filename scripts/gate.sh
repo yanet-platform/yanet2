@@ -234,7 +234,11 @@ gate_sdk() {
 	# CI also runs that check on any edit of its workflow; the commands here are
 	# a copy and do not follow such an edit.
 	matching '^(bindings/rust/yanet-packet/|\.github/workflows/rust-sdk\.yml$)' >/dev/null || return 0
-	step sdk-packet-manifest standalone_manifest bindings/rust/yanet-packet/Cargo.toml || return 1
+	if python3 -c 'import tomllib' 2>/dev/null; then
+		step sdk-packet-manifest standalone_manifest bindings/rust/yanet-packet/Cargo.toml || return 1
+	else
+		skipped+=("sdk-packet-manifest (python3 without tomllib)")
+	fi
 	step sdk-packet-test "${sdk[@]}" cargo test -p yanet-packet --locked || return 1
 	if rustup target list --installed 2>/dev/null | grep -qx "$target"; then
 		step sdk-packet-no-std "${sdk[@]}" cargo check -p yanet-packet --locked --target "$target"
@@ -243,20 +247,49 @@ gate_sdk() {
 	fi
 }
 
-# Lists the manifest lines that lean on a workspace: an inherited key, a
-# workspace named by path, or a dependency or patch by path.
+# Lists the manifest keys that lean on a workspace: an inherited key, a
+# workspace named by path, or a dependency, patch or replacement by path.
 standalone_manifest() {
-	awk '
-		/^[[:space:]]*#/ { next }
-		/^[[:space:]]*\[/ { section = $0; next }
-		/workspace[[:space:]]*=[[:space:]]*true/ ||
-		(section ~ /^[[:space:]]*\[[[:space:]]*package[[:space:]]*\]/ && /^[[:space:]]*workspace[[:space:]]*=/) ||
-		(section ~ /dependencies|patch/ && /(^|[{,.[:space:]])path[[:space:]]*=/) {
-			print FILENAME ":" FNR ": " $0
-			found = 1
-		}
-		END { exit found }
-	' "$1"
+	python3 - "$1" <<'EOF'
+import sys
+import tomllib
+
+with open(sys.argv[1], "rb") as manifest_file:
+    manifest = tomllib.load(manifest_file)
+found = []
+
+
+def inherited(table, keys):
+    for key, value in table.items():
+        if key == "workspace" and value is True:
+            found.append(".".join(keys + [key]))
+        elif isinstance(value, dict):
+            inherited(value, keys + [key])
+
+
+def by_path(table, keys):
+    for name, spec in table.items():
+        if isinstance(spec, dict) and "path" in spec:
+            found.append(".".join(keys + [name, "path"]))
+
+
+inherited({k: v for k, v in manifest.items() if k != "package"}, [])
+inherited({k: v for k, v in manifest.get("package", {}).items() if k != "metadata"}, ["package"])
+if "workspace" in manifest.get("package", {}):
+    found.append("package.workspace")
+kinds = ("dependencies", "dev-dependencies", "build-dependencies")
+for kind in kinds:
+    by_path(manifest.get(kind, {}), [kind])
+for target, spec in manifest.get("target", {}).items():
+    for kind in kinds:
+        by_path(spec.get(kind, {}), ["target", target, kind])
+for source, patches in manifest.get("patch", {}).items():
+    by_path(patches, ["patch", source])
+by_path(manifest.get("replace", {}), ["replace"])
+for key in found:
+    print(f"{sys.argv[1]}: {key}")
+sys.exit(1 if found else 0)
+EOF
 }
 
 gate_web() {
