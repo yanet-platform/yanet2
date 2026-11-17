@@ -45,8 +45,9 @@ impl LpmAt {
     }
 }
 
-/// Lays an LPM at `lpm` out as the C insert lays it out: one
-/// directory entry, one chunk, three pages in use. `10.0.0.0/16` maps to 5
+/// Lays an LPM out at an address as the C insert lays it out.
+///
+/// One directory entry, one chunk, three pages in use. `10.0.0.0/16` maps to 5
 /// on page 1, `10.1.0.0/16` reaches page 2, whose every slot maps to 9;
 /// every other slot is the invalid mark.
 fn fill_lpm(arena: &'static BlockArena, lpm: usize) -> LpmAt {
@@ -69,7 +70,7 @@ fn fill_lpm(arena: &'static BlockArena, lpm: usize) -> LpmAt {
     at
 }
 
-/// A hand-built LPM of keys of `K` bytes and the view that resolves it.
+/// A hand-built LPM of the requested key width and the view that resolves it.
 ///
 /// Its pages end every key on a leaf within three bytes, so they make a table
 /// of any key of three bytes or more.
