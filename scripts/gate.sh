@@ -231,7 +231,9 @@ gate_sdk() {
 	#
 	# Its manifest takes nothing from the workspace, and built alone the crate
 	# gets only the dependency features it enables itself, as the copy does.
-	matching '^bindings/rust/yanet-packet/' >/dev/null || return 0
+	# CI also runs that check on any edit of its workflow; the commands here are
+	# a copy and do not follow such an edit.
+	matching '^(bindings/rust/yanet-packet/|\.github/workflows/rust-sdk\.yml$)' >/dev/null || return 0
 	step sdk-packet-manifest standalone_manifest bindings/rust/yanet-packet/Cargo.toml || return 1
 	step sdk-packet-test "${sdk[@]}" cargo test -p yanet-packet --locked || return 1
 	if rustup target list --installed 2>/dev/null | grep -qx "$target"; then
