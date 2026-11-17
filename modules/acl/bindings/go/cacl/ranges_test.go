@@ -11,6 +11,13 @@ import (
 
 var wholePorts = filter.PortRanges{{From: 0, To: 65535}}
 
+// tcpSyn and greWhole spell the mixed alternatives of one rule: TCP
+// restricted to its SYN flag byte, GRE left whole.
+var (
+	tcpSyn   = filter.NewProtoRange(6, filter.ExactSubtype(0x02))
+	greWhole = filter.NewProtoRange(47, filter.AnySubtype())
+)
+
 // TestSplitProtoRanges pins the byte split of the authored 16 bit
 // protocol ranges: the high byte spans for the shared core, the low
 // byte sub-spans clamped at the protocol edges for the transport
@@ -45,13 +52,23 @@ func TestSplitProtoRanges(t *testing.T) {
 		{From: 0x80, To: 0xff},
 	}, split.ICMPTypes)
 
+	// The plain ranges stay in the authored 16 bit encoding: the
+	// protos 1..3 span is whole at both edges, the 6..17 span trims
+	// both constrained edge protocols down to 7..16, and the two
+	// single protocol spans with a constrained low edge keep none.
+	assert.Equal(t, filter.ProtoRanges{
+		{From: 1 << 8, To: 3<<8 | 0xff},
+		{From: 7 << 8, To: 16<<8 | 0xff},
+	}, split.Plain)
+
 	assert.False(t, split.WholeL4)
 }
 
 // TestRulePathMembership pins the family path routing of one rule:
-// the plain path owns the whole byte rules with whole ports and the
-// fragment constrained ones, and every protocol path takes the
-// remaining rules that can match a packet of its protocol.
+// the plain path takes the whole byte alternatives of a rule with
+// whole ports and the fragment constrained ones, and every protocol
+// path takes the rules that can match a packet of its protocol and
+// are not fully owned by the plain path.
 func TestRulePathMembership(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -83,12 +100,14 @@ func TestRulePathMembership(t *testing.T) {
 			want:   cacl.PathFlags{},
 		},
 		{
-			name: "mixed_udp_zero_and_tcp_whole_is_udp_and_tcp",
+			name: "mixed_udp_zero_and_tcp_whole_keeps_plain",
 			protos: filter.ProtoRanges{
 				{From: 17 << 8, To: 17 << 8},
 				filter.NewProtoRange(6, filter.AnySubtype()),
 			},
-			want: cacl.PathFlags{TCP: true, UDP: true},
+			want: cacl.PathFlags{
+				Plain: true, TCP: true, UDP: true,
+			},
 		},
 		{
 			name:     "icmp_partial_ports_stays_out",
@@ -107,12 +126,54 @@ func TestRulePathMembership(t *testing.T) {
 			want:   cacl.PathFlags{ICMP: true},
 		},
 		{
-			name: "mixed_whole_icmp_and_partial_udp_is_icmp_and_udp",
+			name: "mixed_whole_icmp_and_partial_udp_keeps_plain",
 			protos: filter.ProtoRanges{
 				{From: 1 << 8, To: 1<<8 | 0xff},
 				{From: 17 << 8, To: 17<<8 | 0x7f},
 			},
-			want: cacl.PathFlags{UDP: true, ICMP: true},
+			want: cacl.PathFlags{
+				Plain: true, UDP: true, ICMP: true,
+			},
+		},
+		{
+			// A transport byte restriction keeps its protocols out
+			// of the plain path alone: the whole byte GRE
+			// alternative of the same rule keeps matching the
+			// packets without the byte through the plain ranges.
+			name: "mixed_tcp_syn_and_gre_is_plain_and_tcp",
+			protos: filter.ProtoRanges{
+				tcpSyn,
+				greWhole,
+			},
+			want: cacl.PathFlags{Plain: true, TCP: true},
+		},
+		{
+			name: "mixed_tcp_syn_and_tcp_whole_is_plain_and_tcp",
+			protos: filter.ProtoRanges{
+				tcpSyn,
+				filter.NewProtoRange(6, filter.AnySubtype()),
+			},
+			want: cacl.PathFlags{Plain: true, TCP: true},
+		},
+		{
+			name: "mixed_icmp_type_and_gre_is_plain_and_icmp",
+			protos: filter.ProtoRanges{
+				filter.NewProtoRange(1, filter.ExactSubtype(8)),
+				greWhole,
+			},
+			want: cacl.PathFlags{Plain: true, ICMP: true},
+		},
+		{
+			// A port restriction keeps the packets without ports
+			// out of the whole rule: the plain path has no port
+			// leaf, so only the tcp path of the rule survives it.
+			name: "mixed_tcp_syn_and_gre_partial_ports_is_tcp",
+			protos: filter.ProtoRanges{
+				tcpSyn,
+				greWhole,
+			},
+			srcPorts: filter.PortRanges{{From: 100, To: 200}},
+			want:     cacl.PathFlags{TCP: true},
 		},
 		{
 			name:     "fragment_constrained_whole_byte_is_plain",

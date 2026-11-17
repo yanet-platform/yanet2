@@ -67,6 +67,17 @@ struct acl_classifier_frag {
 };
 
 /*
+ * Leaf classifier of the plain path: the protocol intervals of the
+ * plain projection, kept in the authored 16 bit encoding with the IP
+ * protocol number in the high byte - the packets without a transport
+ * specific byte resolve at the zero subtype, so the line spans the
+ * whole encoded domain.
+ */
+struct acl_classifier_plain {
+	struct classify_attr_line ipproto_attr;
+};
+
+/*
  * L2 classifier of the rules without networks: the device attribute
  * alone, so a network-less rule matches every packet of its devices
  * regardless of the protocol family.
@@ -140,6 +151,9 @@ struct acl_filter_l2 {
 };
 
 struct acl_filter_ip4 {
+	// The core classes joined with the plain path protocol classes:
+	// the mid classes the root joint takes its left side from.
+	struct value_table plain_proto_joint;
 	struct value_table root_joint;
 	struct vline rule_map;
 };
@@ -166,6 +180,9 @@ struct acl_filter_ip4_icmp {
 };
 
 struct acl_filter_ip6 {
+	// The core classes joined with the plain path protocol classes:
+	// the mid classes the root joint takes its left side from.
+	struct value_table plain_proto_joint;
 	struct value_table root_joint;
 	struct vline rule_map;
 };
@@ -199,11 +216,13 @@ struct acl_module_config {
 	struct acl_classifier_l2 classifier_l2;
 	struct acl_classifier_core4 classifier_core4;
 	struct acl_classifier_frag classifier_frag4;
+	struct acl_classifier_plain classifier_plain4;
 	struct acl_classifier_ports classifier_ports4;
 	struct acl_classifier_tcp classifier_tcp4;
 	struct acl_classifier_icmp classifier_icmp4;
 	struct acl_classifier_core6 classifier_core6;
 	struct acl_classifier_frag classifier_frag6;
+	struct acl_classifier_plain classifier_plain6;
 	struct acl_classifier_ports classifier_ports6;
 	struct acl_classifier_tcp classifier_tcp6;
 	struct acl_classifier_icmp classifier_icmp6;

@@ -60,6 +60,14 @@ struct acl_rule {
 	struct classify_line_ranges tcp_flags_ranges;
 	struct classify_line_ranges icmp_type_ranges;
 
+	// The derived plain path protocol intervals, kept in the authored
+	// 16 bit encoding: the whole byte spans of the protocols whose
+	// packets resolve without a transport specific byte, the fragments
+	// included. The plain family filter discriminates through them
+	// alone - one alternative of a rule restricting a transport byte
+	// keeps no span here, so it never matches a packet without one.
+	struct classify_line_ranges plain_ipproto_ranges;
+
 	// The family path membership decided alongside the interval
 	// split: the plain path takes the rules matching the packets
 	// without a transport header (fragments of a whole transport

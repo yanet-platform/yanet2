@@ -99,6 +99,32 @@ acl_lookup_ipproto(
 }
 
 /*
+ * The plain path protocol value of the packet: the IP protocol number
+ * of the authored 16 bit encoding, carried in the high byte with the
+ * zero subtype below it - the packets without a transport specific
+ * byte resolve at the zero subtype.
+ *
+ * The protocol is read out of the transport header type the parser
+ * declares: later fragments carry it with the header-unavailable tag
+ * set in the upper bits, and the low byte keeps the declared
+ * protocol, so the tag is masked away exactly as in the core lookup.
+ */
+static inline void
+acl_lookup_plain_ipproto(
+	const struct classify_attr_line *attr,
+	const struct packet **packets,
+	uint32_t *results,
+	uint32_t count
+) {
+	for (uint32_t idx = 0; idx < count; ++idx) {
+		results[idx] = vline_get(
+			(struct vline *)&attr->line,
+			(packets[idx]->transport_header.type & 0xff) << 8
+		);
+	}
+}
+
+/*
  * The TCP flags byte of the packet. The path selection guarantees the
  * packets of the batch carry a TCP transport header at offset zero -
  * the flags byte sits after the ports and the sequence and
@@ -472,6 +498,26 @@ acl_classify_frag(
 					 : ACL_CLASSIFY_MAX_BATCH;
 		acl_lookup_ipfrag(
 			&cls->frag_attr, packets + off, classes + off, count
+		);
+	}
+}
+
+// The plain path protocol leaf of a family batch: the protocol value
+// of every packet resolved through the whole encoded domain line.
+static inline void
+acl_classify_plain(
+	const struct acl_classifier_plain *cls,
+	const struct packet **packets,
+	uint32_t *classes,
+	uint32_t packet_count
+) {
+	for (uint32_t off = 0; off < packet_count;
+	     off += ACL_CLASSIFY_MAX_BATCH) {
+		uint32_t count = packet_count - off < ACL_CLASSIFY_MAX_BATCH
+					 ? packet_count - off
+					 : ACL_CLASSIFY_MAX_BATCH;
+		acl_lookup_plain_ipproto(
+			&cls->ipproto_attr, packets + off, classes + off, count
 		);
 	}
 }

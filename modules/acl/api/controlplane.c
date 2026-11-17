@@ -48,6 +48,7 @@ acl_module_config_destroy(struct cp_module *cp_module) {
 	memset(&config->filter_l2, 0, sizeof(config->filter_l2));
 
 	value_table_free(&config->filter_ip4.root_joint);
+	value_table_free(&config->filter_ip4.plain_proto_joint);
 	vline_free(&config->filter_ip4.rule_map);
 	memset(&config->filter_ip4, 0, sizeof(config->filter_ip4));
 
@@ -63,6 +64,7 @@ acl_module_config_destroy(struct cp_module *cp_module) {
 	memset(&config->filter_ip4_icmp, 0, sizeof(config->filter_ip4_icmp));
 
 	value_table_free(&config->filter_ip6.root_joint);
+	value_table_free(&config->filter_ip6.plain_proto_joint);
 	vline_free(&config->filter_ip6.rule_map);
 	memset(&config->filter_ip6, 0, sizeof(config->filter_ip6));
 
@@ -96,6 +98,12 @@ acl_module_config_destroy(struct cp_module *cp_module) {
 	);
 	memset(&config->classifier_frag4, 0, sizeof(config->classifier_frag4));
 
+	classify_attr_line_free(
+		memory_context, &config->classifier_plain4.ipproto_attr
+	);
+	memset(&config->classifier_plain4, 0, sizeof(config->classifier_plain4)
+	);
+
 	struct acl_classifier_ports *ports4 = &config->classifier_ports4;
 	classify_attr_port_free(memory_context, &ports4->src_attr);
 	classify_attr_port_free(memory_context, &ports4->dst_attr);
@@ -127,6 +135,12 @@ acl_module_config_destroy(struct cp_module *cp_module) {
 		memory_context, &config->classifier_frag6.frag_attr
 	);
 	memset(&config->classifier_frag6, 0, sizeof(config->classifier_frag6));
+
+	classify_attr_line_free(
+		memory_context, &config->classifier_plain6.ipproto_attr
+	);
+	memset(&config->classifier_plain6, 0, sizeof(config->classifier_plain6)
+	);
 
 	struct acl_classifier_ports *ports6 = &config->classifier_ports6;
 	classify_attr_port_free(memory_context, &ports6->src_attr);
@@ -206,12 +220,16 @@ acl_module_config_init(
 	memset(&config->classifier_l2, 0, sizeof(config->classifier_l2));
 	memset(&config->classifier_core4, 0, sizeof(config->classifier_core4));
 	memset(&config->classifier_frag4, 0, sizeof(config->classifier_frag4));
+	memset(&config->classifier_plain4, 0, sizeof(config->classifier_plain4)
+	);
 	memset(&config->classifier_ports4, 0, sizeof(config->classifier_ports4)
 	);
 	memset(&config->classifier_tcp4, 0, sizeof(config->classifier_tcp4));
 	memset(&config->classifier_icmp4, 0, sizeof(config->classifier_icmp4));
 	memset(&config->classifier_core6, 0, sizeof(config->classifier_core6));
 	memset(&config->classifier_frag6, 0, sizeof(config->classifier_frag6));
+	memset(&config->classifier_plain6, 0, sizeof(config->classifier_plain6)
+	);
 	memset(&config->classifier_ports6, 0, sizeof(config->classifier_ports6)
 	);
 	memset(&config->classifier_tcp6, 0, sizeof(config->classifier_tcp6));
@@ -436,6 +454,25 @@ CLASSIFY_LINE_COMPILE(
 	struct classify_attr_line,
 	0x100,
 	acl_rule_get_icmp_type_ranges
+)
+static inline void
+acl_rule_get_plain_ipproto_ranges(
+	const struct classifier_rule *rule, struct classify_line_ranges *ranges
+) {
+	const struct acl_rule *acl_rule =
+		container_of(rule, struct acl_rule, rule);
+	*ranges = acl_rule->plain_ipproto_ranges;
+}
+
+// The plain path protocol leaf keeps the authored 16 bit encoding -
+// the IP protocol number in the high byte, the whole transport byte
+// span below it - so its line spans the whole encoded domain and the
+// packets without a transport byte resolve at the zero subtype.
+CLASSIFY_LINE_COMPILE(
+	acl_plain_ipproto,
+	struct classify_attr_line,
+	0x10000,
+	acl_rule_get_plain_ipproto_ranges
 )
 static inline void
 acl_rule_get_src_port_ranges(
@@ -739,6 +776,8 @@ acl_module_build_ip4_classifier(
 	struct classifier stage_nets = {0};
 	struct classifier stage_mid = {0};
 	struct classifier stage_ipproto = {0};
+	struct classifier stage_plain_ipproto = {0};
+	struct classifier stage_plain_mid = {0};
 	struct classifier stage_frag = {0};
 
 	int rc = -1;
@@ -825,14 +864,38 @@ acl_module_build_ip4_classifier(
 		goto error;
 	}
 
-	// The plain family filter: the fragment suffix compiles over the
-	// plain projection, and the family root joint joins its classes
-	// onto the core classes - the derivation resolves the plain
-	// projection out of the joined classes.
+	// The plain family filter: the whole byte protocol leaf and the
+	// fragment suffix compile over the plain projection. The leaf
+	// joins the core classes first - a rule of the projection whose
+	// plain intervals leave the packet's protocol out keeps no group
+	// at the leaf, so the join skips it - and the family root joint
+	// joins the fragment classes onto the mid classes; the derivation
+	// resolves the plain projection out of the joined classes.
 	project_acl_rules(
 		acl_rules, acl_rule_count, rule_ptrs, check_acl_rule_plain
 	);
 
+	if (classify_acl_plain_ipproto_compile(
+		    memory_context,
+		    "ip4:plain_ipproto",
+		    rule_ptrs,
+		    acl_rule_count,
+		    &config->classifier_plain4.ipproto_attr,
+		    &stage_plain_ipproto
+	    )) {
+		goto error;
+	}
+	if (classify_join(
+		    memory_context,
+		    "ip4:plain_proto_joint",
+		    core_stage,
+		    &stage_plain_ipproto,
+		    acl_rule_count,
+		    &config->filter_ip4.plain_proto_joint,
+		    &stage_plain_mid
+	    )) {
+		goto error;
+	}
 	if (classify_acl_ipfrag_compile(
 		    memory_context,
 		    "ip4:ipfrag",
@@ -846,7 +909,7 @@ acl_module_build_ip4_classifier(
 	if (classify_join(
 		    memory_context,
 		    "ip4:root_joint",
-		    core_stage,
+		    &stage_plain_mid,
 		    &stage_frag,
 		    acl_rule_count,
 		    &config->filter_ip4.root_joint,
@@ -864,6 +927,8 @@ error:
 	classifier_fini(&stage_nets, memory_context, acl_rule_count);
 	classifier_fini(&stage_mid, memory_context, acl_rule_count);
 	classifier_fini(&stage_ipproto, memory_context, acl_rule_count);
+	classifier_fini(&stage_plain_ipproto, memory_context, acl_rule_count);
+	classifier_fini(&stage_plain_mid, memory_context, acl_rule_count);
 	classifier_fini(&stage_frag, memory_context, acl_rule_count);
 	free(rule_ptrs);
 	return rc;
@@ -938,6 +1003,8 @@ acl_module_build_ip6_classifier(
 	struct classifier stage_nets = {0};
 	struct classifier stage_mid = {0};
 	struct classifier stage_ipproto = {0};
+	struct classifier stage_plain_ipproto = {0};
+	struct classifier stage_plain_mid = {0};
 	struct classifier stage_frag = {0};
 
 	int rc = -1;
@@ -1024,14 +1091,38 @@ acl_module_build_ip6_classifier(
 		goto error;
 	}
 
-	// The plain family filter: the fragment suffix compiles over the
-	// plain projection, and the family root joint joins its classes
-	// onto the core classes - the derivation resolves the plain
-	// projection out of the joined classes.
+	// The plain family filter: the whole byte protocol leaf and the
+	// fragment suffix compile over the plain projection. The leaf
+	// joins the core classes first - a rule of the projection whose
+	// plain intervals leave the packet's protocol out keeps no group
+	// at the leaf, so the join skips it - and the family root joint
+	// joins the fragment classes onto the mid classes; the derivation
+	// resolves the plain projection out of the joined classes.
 	project_acl_rules(
 		acl_rules, acl_rule_count, rule_ptrs, check_acl_rule_plain
 	);
 
+	if (classify_acl_plain_ipproto_compile(
+		    memory_context,
+		    "ip6:plain_ipproto",
+		    rule_ptrs,
+		    acl_rule_count,
+		    &config->classifier_plain6.ipproto_attr,
+		    &stage_plain_ipproto
+	    )) {
+		goto error;
+	}
+	if (classify_join(
+		    memory_context,
+		    "ip6:plain_proto_joint",
+		    core_stage,
+		    &stage_plain_ipproto,
+		    acl_rule_count,
+		    &config->filter_ip6.plain_proto_joint,
+		    &stage_plain_mid
+	    )) {
+		goto error;
+	}
 	if (classify_acl_ipfrag_compile(
 		    memory_context,
 		    "ip6:ipfrag",
@@ -1045,7 +1136,7 @@ acl_module_build_ip6_classifier(
 	if (classify_join(
 		    memory_context,
 		    "ip6:root_joint",
-		    core_stage,
+		    &stage_plain_mid,
 		    &stage_frag,
 		    acl_rule_count,
 		    &config->filter_ip6.root_joint,
@@ -1063,6 +1154,8 @@ error:
 	classifier_fini(&stage_nets, memory_context, acl_rule_count);
 	classifier_fini(&stage_mid, memory_context, acl_rule_count);
 	classifier_fini(&stage_ipproto, memory_context, acl_rule_count);
+	classifier_fini(&stage_plain_ipproto, memory_context, acl_rule_count);
+	classifier_fini(&stage_plain_mid, memory_context, acl_rule_count);
 	classifier_fini(&stage_frag, memory_context, acl_rule_count);
 	free(rule_ptrs);
 	return rc;
