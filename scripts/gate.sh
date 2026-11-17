@@ -59,10 +59,8 @@ changed=$({
 matching() { printf '%s\n' "$changed" | grep -E "$1"; }
 present() { matching "$1" | while IFS= read -r f; do [ -f "$f" ] && printf '%s\n' "$f"; done; }
 
-# The step log and any copy a check builds outside the checkout.
-scratch=$(mktemp -d) || exit 2
-trap 'rm -rf "$scratch"' EXIT
-log=$scratch/log
+log=$(mktemp)
+trap 'rm -f "$log"' EXIT
 failed=0
 passed=()
 skipped=()
@@ -201,7 +199,7 @@ gate_rust() {
 # cargo finds the workspace's config from the working directory, so every step
 # runs there.
 gate_sdk() {
-	local toolchain target sdk=(env -C bindings/rust YANET_BUILD_DIR="$root/build") packet=$scratch/yanet-packet
+	local toolchain target sdk=(env -C bindings/rust YANET_BUILD_DIR="$root/build")
 	if [ ! -f subprojects/dpdk/meson.build ] || [ ! -d build ] || [ -L build ]; then
 		fail sdk "the SDK bindings read the DPDK sources and this checkout's own build/; run 'git submodule update --init && meson setup build' (AGENTS.md, Worktrees)"
 		return 1
@@ -228,19 +226,35 @@ gate_sdk() {
 	step sdk-bench "${sdk[@]}" cargo test -p yanet-sys --bench dp --bench lookup --locked || return 1
 	step sdk-bench-release "${sdk[@]}" cargo test -p yanet-sys --release --bench lookup --locked || return 1
 
-	# The packet crate must build as its own repository would, from a copy
-	# outside the workspace.
+	# The packet crate is meant to move to a repository of its own; rust-sdk.yml
+	# checks that by building a copy outside the workspace.
+	#
+	# Its manifest takes nothing from the workspace, and built alone the crate
+	# gets only the dependency features it enables itself, as the copy does.
 	matching '^bindings/rust/yanet-packet/' >/dev/null || return 0
-	if [ "$list" != 1 ] && ! cp -r bindings/rust/yanet-packet "$packet"; then
-		fail sdk-packet "cannot copy the packet crate to $packet"
-		return 1
-	fi
-	step sdk-packet-test env -C "$packet" cargo test || return 1
+	step sdk-packet-manifest standalone_manifest bindings/rust/yanet-packet/Cargo.toml || return 1
+	step sdk-packet-test "${sdk[@]}" cargo test -p yanet-packet --locked || return 1
 	if rustup target list --installed 2>/dev/null | grep -qx "$target"; then
-		step sdk-packet-no-std env -C "$packet" cargo check --target "$target"
+		step sdk-packet-no-std "${sdk[@]}" cargo check -p yanet-packet --locked --target "$target"
 	else
 		skipped+=("sdk-packet-no-std ($target not installed)")
 	fi
+}
+
+# Lists the manifest lines that lean on a workspace: an inherited key, a
+# workspace named by path, or a dependency or patch by path.
+standalone_manifest() {
+	awk '
+		/^[[:space:]]*#/ { next }
+		/^[[:space:]]*\[/ { section = $0; next }
+		/workspace[[:space:]]*=[[:space:]]*true/ ||
+		(section ~ /^[[:space:]]*\[[[:space:]]*package[[:space:]]*\]/ && /^[[:space:]]*workspace[[:space:]]*=/) ||
+		(section ~ /dependencies|patch/ && /(^|[{,.[:space:]])path[[:space:]]*=/) {
+			print FILENAME ":" FNR ": " $0
+			found = 1
+		}
+		END { exit found }
+	' "$1"
 }
 
 gate_web() {
