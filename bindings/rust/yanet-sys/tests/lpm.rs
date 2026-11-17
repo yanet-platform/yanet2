@@ -2,10 +2,16 @@
 //!
 //! The LPM is laid out by hand as the C insert lays it out.
 
-use core::mem::{offset_of, size_of};
+use core::{
+    mem::{offset_of, size_of},
+    net::{Ipv4Addr, Ipv6Addr},
+};
 
 use yanet_sdk_testing::{BlockArena, View};
-use yanet_sys::{bindings, common::lpm::Lpm4};
+use yanet_sys::{
+    bindings,
+    common::lpm::{Lpm, Lpm4, Lpm6},
+};
 
 fn write(arena: &'static BlockArena, addr: usize, value: u64) {
     // SAFETY: a word of a live block of the arena; nothing references it.
@@ -39,7 +45,7 @@ impl LpmAt {
     }
 }
 
-/// Lays an IPv4 LPM at `lpm` out as the C insert lays it out: one
+/// Lays an LPM at `lpm` out as the C insert lays it out: one
 /// directory entry, one chunk, three pages in use. `10.0.0.0/16` maps to 5
 /// on page 1, `10.1.0.0/16` reaches page 2, whose every slot maps to 9;
 /// every other slot is the invalid mark.
@@ -63,19 +69,59 @@ fn fill_lpm(arena: &'static BlockArena, lpm: usize) -> LpmAt {
     at
 }
 
+/// A hand-built LPM of keys of `K` bytes and the view that resolves it.
+///
+/// Its pages end every key on a leaf within three bytes, so they make a table
+/// of any key of three bytes or more.
+fn hand_built<const K: usize>(arena: &'static BlockArena) -> (View<'static>, &'static Lpm<K>) {
+    let addr = arena.alloc(size_of::<Lpm<K>>()).as_ptr().addr();
+    fill_lpm(arena, addr);
+    // SAFETY: the LPM is laid out as C lays it out and stays frozen for the
+    // test.
+    unsafe { (View::new(arena.root()), &*arena.root().ptr::<Lpm<K>>(addr)) }
+}
+
 /// verifies that the lookup walks a hand-built LPM's pages to the leaf of
 /// each key, or to none.
 #[test]
 fn test_lpm_lookup_walks_pages() {
-    let arena = BlockArena::new();
-    let addr = arena.alloc(size_of::<Lpm4>()).as_ptr().addr();
-    fill_lpm(arena, addr);
-
-    // SAFETY: the LPM is laid out as C lays it out and stays frozen for the
-    // test.
-    let (view, lpm) = unsafe { (View::new(arena.root()), &*arena.root().ptr::<Lpm4>(addr)) };
+    let (view, lpm) = hand_built::<4>(BlockArena::new());
     assert_eq!(
         [Some(5), Some(9), None, None],
-        [[10, 0, 7, 7], [10, 1, 3, 4], [11, 0, 0, 0], [10, 2, 0, 0]].map(|key| lpm.lookup(&view, &key))
+        [[10, 0, 7, 7], [10, 1, 3, 4], [11, 0, 0, 0], [10, 2, 0, 0]]
+            .each_ref()
+            .map(|key| lpm.lookup(&view, key))
     );
+}
+
+#[test]
+fn test_lpm4_lookup_by_address_finds_what_its_octets_find() {
+    let (view, lpm): (_, &Lpm4) = hand_built(BlockArena::new());
+    let keys = [
+        Ipv4Addr::new(10, 0, 7, 7),
+        Ipv4Addr::new(10, 1, 3, 4),
+        Ipv4Addr::new(11, 0, 0, 0),
+        Ipv4Addr::new(10, 2, 0, 0),
+    ];
+
+    let by_octets = keys.map(|key| lpm.lookup(&view, key.octets()));
+    // The keys reach both leaves and both misses.
+    assert_eq!([Some(5), Some(9), None, None], by_octets);
+    assert_eq!(by_octets, keys.map(|key| lpm.lookup(&view, key)));
+}
+
+#[test]
+fn test_lpm6_lookup_by_address_finds_what_its_octets_find() {
+    let (view, lpm): (_, &Lpm6) = hand_built(BlockArena::new());
+    let keys = [
+        Ipv6Addr::new(0x0a00, 0x0707, 0, 0, 0, 0, 0, 1),
+        Ipv6Addr::new(0x0a01, 0x0304, 0, 0, 0, 0, 0, 1),
+        Ipv6Addr::new(0x0b00, 0, 0, 0, 0, 0, 0, 0),
+        Ipv6Addr::new(0x0a02, 0, 0, 0, 0, 0, 0, 0),
+    ];
+
+    let by_octets = keys.map(|key| lpm.lookup(&view, key.octets()));
+    // The keys reach both leaves and both misses.
+    assert_eq!([Some(5), Some(9), None, None], by_octets);
+    assert_eq!(by_octets, keys.map(|key| lpm.lookup(&view, key)));
 }
