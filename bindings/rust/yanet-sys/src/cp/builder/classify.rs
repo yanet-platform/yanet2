@@ -57,7 +57,7 @@ impl<W: Owner> Drop for Stage<'_, W> {
         unsafe {
             bindings::yanet_sys_classify_stage_free(
                 root.ptr(self.addr),
-                root.ptr(self.memory.context.get()),
+                root.ptr(self.memory.live.context().get()),
                 self.rules,
             );
             self.memory.free(self.addr, size_of::<bindings::classifier>());
@@ -284,7 +284,7 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
         let root = memory.root();
         // SAFETY: the block is ours, of the size of one `T`.
         unsafe { root.ptr::<u8>(addr).write_bytes(0, size_of::<T>()) };
-        if write(root.ptr(memory.context.get()), root.ptr(addr)) != 0 {
+        if write(root.ptr(memory.live.context().get()), root.ptr(addr)) != 0 {
             // SAFETY: the block is ours, and the failed routine left nothing
             // in it.
             unsafe { memory.free(addr, size_of::<T>()) };
@@ -334,7 +334,7 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
                 // a zeroed one, in the build's context, which is live; its
                 // block is ours.
                 unsafe {
-                    bindings::yanet_sys_classify_stage_free(stage, root.ptr(memory.context.get()), rules);
+                    bindings::yanet_sys_classify_stage_free(stage, root.ptr(memory.live.context().get()), rules);
                     memory.free(addr, size_of::<bindings::classifier>());
                 }
                 Err(err)

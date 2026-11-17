@@ -183,30 +183,19 @@ pub unsafe trait Build: ShmLayout {
 /// configuration come from and release returns them to.
 #[doc(hidden)]
 pub struct MemoryContext<'o, W: Owner> {
-    owner: &'o W,
-    context: Context,
-    /// Keeps the context, and every scope and block that refers to it, on
-    /// one thread.
-    ///
-    /// What it protects is the per-header C state, the memory context and
-    /// the registries, which the owner's `Sync` does not promise to take
-    /// concurrent calls.
-    _local: PhantomData<*const ()>,
+    live: LiveContext<'o, W>,
 }
 
 impl<'o, W: Owner> MemoryContext<'o, W> {
-    /// The context the module header embeds, which the owner has initialised.
     fn new<K: Kind>(header: &'o Live<'_, W, K>) -> Self {
         Self {
-            owner: header.owner(),
-            context: header.header().context(),
-            _local: PhantomData,
+            live: LiveContext::new(header.owner(), header.header().context()),
         }
     }
 
     /// Provenance root of the context's memory.
     pub fn root(&self) -> ShmRoot {
-        self.owner.root()
+        self.live.owner().root()
     }
 
     /// Returns a block of the given payload size.
@@ -216,20 +205,15 @@ impl<'o, W: Owner> MemoryContext<'o, W> {
     /// The block was allocated from this context with that size and is not
     /// referenced any longer.
     pub unsafe fn free(&self, addr: usize, size: usize) {
-        let context = self.live_context();
         // SAFETY: the live context is this header's and the caller supplies
         // its unreferenced block with the original size, once.
-        let block = unsafe { Freed::in_context(&context, BlockAddr::new(addr), size) };
+        let block = unsafe { Freed::in_context(&self.live, BlockAddr::new(addr), size) };
         W::free_in(block);
-    }
-
-    fn live_context(&self) -> LiveContext<'_, W> {
-        LiveContext::new(self.owner, self.context)
     }
 
     /// Allocates a block of the given payload size.
     fn alloc(&self, size: usize) -> Option<usize> {
-        W::alloc_in(&self.live_context(), size).map(BlockAddr::get)
+        W::alloc_in(&self.live, size).map(BlockAddr::get)
     }
 }
 
@@ -611,7 +595,7 @@ unsafe impl<const K: usize> Build for Lpm<K> {
         // SAFETY: the table lies in a block of the build (caller contract),
         // and the context is the header's, which the owner set up for C.
         let initialised = unsafe {
-            let context = root.ptr::<bindings::memory_context>(memory.context.get());
+            let context = root.ptr::<bindings::memory_context>(memory.live.context().get());
             bindings::yanet_sys_common_lpm_init(lpm, context, c"lpm".as_ptr()) == 0
         };
         // SAFETY: an initialised table takes ranges of the key size.
@@ -758,7 +742,7 @@ unsafe impl<K: HashIndexKey> Build for HashIndex<K> {
         // the build (caller contract), and the parent is the header's, which
         // the owner set up for C.
         unsafe {
-            let parent = root.ptr::<bindings::memory_context>(memory.context.get());
+            let parent = root.ptr::<bindings::memory_context>(memory.live.context().get());
             bindings::yanet_sys_common_memory_context_init_from(context, parent, c"hash_index".as_ptr());
         }
         let mut unlinked = Unlinked {
@@ -1001,7 +985,9 @@ impl<T> fmt::Debug for Registered<'_, T> {
 
 impl<W: Owner> fmt::Debug for MemoryContext<'_, W> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        f.debug_struct("MemoryContext").field("context", &self.context).finish()
+        f.debug_struct("MemoryContext")
+            .field("context", &self.live.context())
+            .finish()
     }
 }
 
@@ -1268,7 +1254,7 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
     /// The block of the slots is larger than the allocator's largest, or the
     /// memory is exhausted.
     pub fn per_worker<T: Copy + ShmLayout>(self, init: T) -> Result<OwnedSlots<'b, T, W>, E> {
-        let workers = self.memory.owner.worker_count();
+        let workers = self.memory.live.owner().worker_count();
         if workers == 0 {
             return Ok(self.owned_slots(0, 0));
         }
@@ -1305,7 +1291,7 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
     /// refused before anything is allocated, or the memory is exhausted; the
     /// blocks allocated so far are returned.
     pub fn per_worker_slice<T: Copy + ShmLayout>(self, len: usize, init: T) -> Result<OwnedRegions<'b, T, W>, E> {
-        let workers = self.memory.owner.worker_count();
+        let workers = self.memory.live.owner().worker_count();
         let max = bindings::MEMORY_BLOCK_ALLOCATOR_MAX_SIZE as usize;
         let region = PerWorkerSlice::<T>::region_block(len)
             .filter(|&size| size <= max)

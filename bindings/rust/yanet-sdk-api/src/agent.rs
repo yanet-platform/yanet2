@@ -287,15 +287,17 @@ impl Agent {
         name: &str,
         f: impl for<'g> FnOnce(PublishedCx<'g>, &'g M::Config) -> R,
     ) -> Result<R, Error> {
-        let module_type = c_name::<{ CP_MODULE_TYPE_LEN as usize }>(M::NAME)?;
-        let module_name = c_name::<{ CP_MODULE_NAME_LEN as usize }>(name)?;
+        let mut c_module_type = [0; CP_MODULE_TYPE_LEN as usize];
+        write_c_name(M::NAME, &mut c_module_type)?;
+        let mut c_module_name = [0; CP_MODULE_NAME_LEN as usize];
+        write_c_name(name, &mut c_module_name)?;
         let pin = GenerationPin::acquire(self);
         // SAFETY: the generation is pinned, and the names are NUL terminated.
         let module = unsafe {
             bindings::cp_config_gen_lookup_module(
                 pin.generation,
-                module_type.as_ptr().cast::<c_char>(),
-                module_name.as_ptr().cast::<c_char>(),
+                c_module_type.as_ptr().cast::<c_char>(),
+                c_module_name.as_ptr().cast::<c_char>(),
             )
         };
         let Some(module) = NonNull::new(module) else {
@@ -615,7 +617,8 @@ pub unsafe fn handle_at<B: Releasable>(raw: NonNull<B::Raw>) -> Result<B, Error>
     // SAFETY: the type name field lies in the initialised header (caller
     // contract); C wrote it whole.
     let field = unsafe { slice::from_raw_parts(root.ptr::<u8>(raw.addr().get() + B::TYPE_FIELD), B::TYPE_LEN) };
-    if CStr::from_bytes_until_nul(field).map(CStr::to_bytes) != Ok(B::TYPE_NAME.as_bytes()) {
+    let expected = B::TYPE_NAME.as_bytes();
+    if expected.contains(&0) || field.get(expected.len()) != Some(&0) || !field.starts_with(expected) {
         return Err(Error::new(
             ErrorKind::InvalidArgument,
             "the handle is of another module or object type",
@@ -665,12 +668,18 @@ pub unsafe fn release_at<B: Releasable>(raw: NonNull<B::Raw>) -> Result<(), Reta
     Ok(())
 }
 
-/// A name as the NUL terminated bytes of a C field of `N` bytes.
-fn c_name<const N: usize>(name: &str) -> Result<[u8; N], Error> {
-    names::validate_c_field(name, N).map_err(|err| Error::new(ErrorKind::InvalidArgument, &err.to_string()))?;
-    let mut bytes = [0; N];
-    bytes[..name.len()].copy_from_slice(name.as_bytes());
-    Ok(bytes)
+#[cold]
+fn invalid_name(err: names::NameError) -> Error {
+    Error::new(ErrorKind::InvalidArgument, &err.to_string())
+}
+
+/// Writes a name and its terminator into a fixed-size C field.
+#[inline]
+fn write_c_name<const N: usize>(name: &str, field: &mut [u8; N]) -> Result<(), Error> {
+    names::validate_c_field(name, N).map_err(invalid_name)?;
+    field[..name.len()].copy_from_slice(name.as_bytes());
+    field[name.len()] = 0;
+    Ok(())
 }
 
 /// Finds or creates a tagged registry without registering a counter.
@@ -678,14 +687,15 @@ fn counter_registry(
     header: &Live<'_, Agent, ModuleKind>,
     tag: &str,
 ) -> Result<(*mut bindings::counter_registry, u64), Error> {
-    let tag = c_name::<{ COUNTER_TAG_VALUE_LEN as usize }>(tag)?;
+    let mut c_tag = [0; COUNTER_TAG_VALUE_LEN as usize];
+    write_c_name(tag, &mut c_tag)?;
     let (mut registry, mut chain) = (0, ptr::null_mut());
     // SAFETY: the capability keeps its owner's unpublished module header
     // live. The tag is NUL terminated and the outputs are valid.
     let counters = unsafe {
         bindings::cp_module_counter_registry(
             header_at::<bindings::cp_module>(header.owner(), header.header()),
-            tag.as_ptr().cast::<c_char>(),
+            c_tag.as_ptr().cast::<c_char>(),
             &raw mut registry,
             &raw mut chain,
         )
@@ -723,6 +733,7 @@ unsafe impl Owner for Agent {
         self.block(unsafe { bindings::yanet_sys_common_memory_balloc(self.context(), size) })
     }
 
+    #[inline]
     fn free(block: Freed<'_, Self>) {
         let owner = block.owner();
         // SAFETY: the capability returns this owner's unreferenced root
@@ -732,6 +743,7 @@ unsafe impl Owner for Agent {
         };
     }
 
+    #[inline]
     fn alloc_in(context: &LiveContext<'_, Self>, size: usize) -> Option<BlockAddr> {
         let owner = context.owner();
         // SAFETY: the capability keeps this owner's header context live.
@@ -739,6 +751,7 @@ unsafe impl Owner for Agent {
             .block(unsafe { bindings::yanet_sys_common_memory_balloc(owner.root().ptr(context.context().get()), size) })
     }
 
+    #[inline]
     fn free_in(block: Freed<'_, Self, Context>) {
         let owner = block.owner();
         // SAFETY: the capability returns this unreferenced block once with
@@ -752,10 +765,13 @@ unsafe impl Owner for Agent {
         };
     }
 
+    #[inline]
     fn init_header(block: Fresh<'_, Self, ModuleKind>, module: &str, name: &str) -> Result<(), Error> {
         let owner = block.owner();
-        let module = c_name::<{ CP_MODULE_TYPE_LEN as usize }>(module)?;
-        let name = c_name::<{ CP_MODULE_NAME_LEN as usize }>(name)?;
+        let mut c_module = [0; CP_MODULE_TYPE_LEN as usize];
+        write_c_name(module, &mut c_module)?;
+        let mut c_name = [0; CP_MODULE_NAME_LEN as usize];
+        write_c_name(name, &mut c_name)?;
         let mut chain = ptr::null_mut();
         // SAFETY: the capability names this owner's fresh block large
         // enough for a module header. The names are NUL terminated and the
@@ -764,8 +780,8 @@ unsafe impl Owner for Agent {
             bindings::cp_module_init(
                 header_at::<bindings::cp_module>(owner, block.header()),
                 owner.agent.as_ptr(),
-                module.as_ptr().cast::<c_char>(),
-                name.as_ptr().cast::<c_char>(),
+                c_module.as_ptr().cast::<c_char>(),
+                c_name.as_ptr().cast::<c_char>(),
                 &raw mut chain,
             )
         } != 0
@@ -782,10 +798,13 @@ unsafe impl Owner for Agent {
         unsafe { bindings::cp_module_fini(header_at::<bindings::cp_module>(header.owner(), header.header())) };
     }
 
+    #[inline]
     fn init_object_header(block: Fresh<'_, Self, ObjectKind>, ty: &str, name: &str) -> Result<(), Error> {
         let owner = block.owner();
-        let ty = c_name::<{ CP_OBJECT_TYPE_LEN as usize }>(ty)?;
-        let name = c_name::<{ CP_OBJECT_NAME_LEN as usize }>(name)?;
+        let mut c_ty = [0; CP_OBJECT_TYPE_LEN as usize];
+        write_c_name(ty, &mut c_ty)?;
+        let mut c_name = [0; CP_OBJECT_NAME_LEN as usize];
+        write_c_name(name, &mut c_name)?;
         let mut chain = ptr::null_mut();
         // SAFETY: the capability names this owner's fresh block large
         // enough for an object header. The names are NUL terminated and the
@@ -794,8 +813,8 @@ unsafe impl Owner for Agent {
             bindings::cp_object_init(
                 header_at::<bindings::cp_object>(owner, block.header()),
                 owner.agent.as_ptr(),
-                ty.as_ptr().cast::<c_char>(),
-                name.as_ptr().cast::<c_char>(),
+                c_ty.as_ptr().cast::<c_char>(),
+                c_name.as_ptr().cast::<c_char>(),
                 &raw mut chain,
             )
         } != 0
@@ -812,15 +831,17 @@ unsafe impl Owner for Agent {
         unsafe { bindings::cp_object_fini(header_at::<bindings::cp_object>(header.owner(), header.header())) };
     }
 
+    #[inline]
     fn register_counter(header: &Live<'_, Self, ModuleKind>, name: &str, size: u64) -> Result<u64, Error> {
-        let name = c_name::<{ COUNTER_NAME_LEN as usize }>(name)?;
+        let mut c_name = [0; COUNTER_NAME_LEN as usize];
+        write_c_name(name, &mut c_name)?;
         let mut chain = ptr::null_mut();
         // SAFETY: the capability keeps this owner's unpublished module
         // registry live. The name is NUL terminated and the output is valid.
         let id = unsafe {
             bindings::counter_registry_register(
                 &raw mut (*header_at::<bindings::cp_module>(header.owner(), header.header())).counter_registry,
-                name.as_ptr().cast::<c_char>(),
+                c_name.as_ptr().cast::<c_char>(),
                 size,
                 &raw mut chain,
             )
@@ -832,23 +853,26 @@ unsafe impl Owner for Agent {
         Ok(id)
     }
 
+    #[inline]
     fn ensure_counter_registry(header: &Live<'_, Self, ModuleKind>, tag: &str) -> Result<u64, Error> {
         counter_registry(header, tag).map(|(_, registry)| registry)
     }
 
+    #[inline]
     fn register_counter_in(
         header: &Live<'_, Self, ModuleKind>,
         tag: &str,
         name: &str,
         size: u64,
     ) -> Result<(u64, u64), Error> {
-        let name = c_name::<{ COUNTER_NAME_LEN as usize }>(name)?;
+        let mut c_name = [0; COUNTER_NAME_LEN as usize];
+        write_c_name(name, &mut c_name)?;
         let (counters, registry) = counter_registry(header, tag)?;
         let mut chain = ptr::null_mut();
         // SAFETY: the capability keeps this owner's unpublished module
         // registry live. The name is NUL terminated and the output is valid.
         let id = unsafe {
-            bindings::counter_registry_register(counters, name.as_ptr().cast::<c_char>(), size, &raw mut chain)
+            bindings::counter_registry_register(counters, c_name.as_ptr().cast::<c_char>(), size, &raw mut chain)
         };
         if id == COUNTER_INVALID {
             // SAFETY: the chain C wrote, if any, is ours alone.
@@ -857,15 +881,17 @@ unsafe impl Owner for Agent {
         Ok((registry, id))
     }
 
+    #[inline]
     fn register_object_counter(header: &Live<'_, Self, ObjectKind>, name: &str, size: u64) -> Result<u64, Error> {
-        let name = c_name::<{ COUNTER_NAME_LEN as usize }>(name)?;
+        let mut c_name = [0; COUNTER_NAME_LEN as usize];
+        write_c_name(name, &mut c_name)?;
         let mut chain = ptr::null_mut();
         // SAFETY: the capability keeps this owner's unpublished object
         // registry live. The name is NUL terminated and the output is valid.
         let id = unsafe {
             bindings::counter_registry_register(
                 &raw mut (*header_at::<bindings::cp_object>(header.owner(), header.header())).counter_registry,
-                name.as_ptr().cast::<c_char>(),
+                c_name.as_ptr().cast::<c_char>(),
                 size,
                 &raw mut chain,
             )
@@ -877,15 +903,17 @@ unsafe impl Owner for Agent {
         Ok(id)
     }
 
+    #[inline]
     fn link_device(header: &Live<'_, Self, ModuleKind>, name: &str) -> Result<u64, Error> {
-        let name = c_name::<{ CP_DEVICE_NAME_LEN as usize }>(name)?;
+        let mut c_name = [0; CP_DEVICE_NAME_LEN as usize];
+        write_c_name(name, &mut c_name)?;
         let (mut index, mut chain) = (0, ptr::null_mut());
         // SAFETY: the capability keeps this owner's unpublished module
         // header live. The name is NUL terminated and the outputs are valid.
         if unsafe {
             bindings::cp_module_link_device(
                 header_at::<bindings::cp_module>(header.owner(), header.header()),
-                name.as_ptr().cast::<c_char>(),
+                c_name.as_ptr().cast::<c_char>(),
                 &raw mut index,
                 &raw mut chain,
             )
@@ -897,17 +925,20 @@ unsafe impl Owner for Agent {
         Ok(index)
     }
 
+    #[inline]
     fn link_object(header: &Live<'_, Self, ModuleKind>, ty: &str, name: &str) -> Result<u64, Error> {
-        let ty = c_name::<{ CP_OBJECT_TYPE_LEN as usize }>(ty)?;
-        let name = c_name::<{ CP_OBJECT_NAME_LEN as usize }>(name)?;
+        let mut c_ty = [0; CP_OBJECT_TYPE_LEN as usize];
+        write_c_name(ty, &mut c_ty)?;
+        let mut c_name = [0; CP_OBJECT_NAME_LEN as usize];
+        write_c_name(name, &mut c_name)?;
         let (mut index, mut chain) = (0, ptr::null_mut());
         // SAFETY: the capability keeps this owner's unpublished module
         // header live. The names are NUL terminated and the outputs are valid.
         if unsafe {
             bindings::cp_module_link_object(
                 header_at::<bindings::cp_module>(header.owner(), header.header()),
-                ty.as_ptr().cast::<c_char>(),
-                name.as_ptr().cast::<c_char>(),
+                c_ty.as_ptr().cast::<c_char>(),
+                c_name.as_ptr().cast::<c_char>(),
                 &raw mut index,
                 &raw mut chain,
             )
