@@ -19,8 +19,8 @@ const FLAG_BITS: u16 = 0x01ff;
 /// TCP fixed header (20 bytes, options excluded).
 ///
 /// The fields change through a mutation, which keeps the checksum valid and
-/// never stores it as zero, or stores the fields alone for a checksum filled
-/// over the pseudo header and the segment after it.
+/// stores the value a full computation gives, or stores the fields alone for
+/// a checksum filled over the pseudo header and the segment after it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, FromBytes, IntoBytes, KnownLayout, Immutable, Unaligned)]
 #[repr(C)]
 pub struct TcpHeader {
@@ -174,6 +174,20 @@ impl TcpHeader {
         }
     }
 
+    /// Adjusts the checksum by the changes a mutation or a resize accounted.
+    ///
+    /// A checksum that computes to zero is stored as zero, as a full
+    /// computation stores it (RFC 9293, section 3.1): TCP has no all-ones
+    /// rule. A receiver that adds the field into the sum accepts either
+    /// zero (RFC 1071), but receivers exist that compute the checksum anew
+    /// and compare it with the field (RFC 1624, section 5); a full
+    /// computation never gives all-ones, so they reject it.
+    #[doc(hidden)]
+    #[inline]
+    pub fn adjust_checksum(&mut self, mode: Adjusted) {
+        self.checksum = mutation::adjust(self.checksum, mode);
+    }
+
     /// Fills the checksum of the segment the bytes hold, its header, options
     /// and payload, over the IPv4 pseudo header.
     ///
@@ -310,12 +324,11 @@ impl<'a> TcpMutation<'a> {
         self
     }
 
-    /// Ends the mutation: adjusts the checksum once for every change, never
-    /// storing it as zero.
+    /// Ends the mutation: adjusts the checksum once for every change.
     #[inline]
     pub fn finish(self) -> &'a mut TcpHeader {
         let Self { header, mode, .. } = self;
-        header.checksum = mutation::adjust_no_zero(header.checksum, mode);
+        header.adjust_checksum(mode);
         header
     }
 }
@@ -572,16 +585,40 @@ mod tests {
         }
     }
 
+    /// verifies that a fill over a sum of all-ones stores its complement,
+    /// zero, over either family.
     #[test]
-    fn test_tcp_mutation_never_yields_zero_checksum() {
+    fn test_tcp_fill_checksum_stores_zero_for_all_ones_sum() {
+        let addrs = ([10; 16], [20; 16]);
+        for family in [Family::V4, Family::V6] {
+            let mut segment = [0u8; 20];
+            segment[12] = 0x50;
+            fill(&mut segment, family, addrs).unwrap();
+            // The urgent pointer set to the checksum makes the sum all-ones.
+            let urgent = [segment[16], segment[17]];
+            segment[18..20].copy_from_slice(&urgent);
+
+            fill(&mut segment, family, addrs).unwrap();
+
+            assert_eq!([0, 0], segment[16..18], "{family:?}");
+            assert!(
+                family.l4_is_valid(addrs.0, addrs.1, IPPROTO_TCP, &segment),
+                "{family:?}"
+            );
+        }
+    }
+
+    /// verifies that a mutation over a sum of all-ones stores zero, as a
+    /// full computation does, not all-ones.
+    #[test]
+    fn test_tcp_mutation_stores_zero_for_all_ones_sum() {
         let mut header = TcpHeader::read_from_bytes(&[0; 20]).unwrap();
-        // Inner sum all-ones would store zero; it must be stored as all-ones.
         header.checksum.set(0x0001);
         let header = header
             .mutate()
             .replace_ipv4_addr(Ipv4Addr::new(0, 0, 0, 0), Ipv4Addr::new(0, 0, 0, 1))
             .finish();
-        assert_eq!(0xffff, header.checksum());
+        assert_eq!(0, header.checksum());
     }
 
     /// TCP header fields as built and read back; the data offset follows the

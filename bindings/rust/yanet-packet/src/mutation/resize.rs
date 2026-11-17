@@ -13,8 +13,10 @@ use core::ops::Range;
 
 use zerocopy::byteorder::network_endian::U16;
 
-use super::{Adjusted, Sealed, adjust, adjust_no_zero, adjusted};
-use crate::{ETHERTYPE_IPV4, ETHERTYPE_IPV6, IPPROTO_TCP, IPPROTO_UDP, checksum};
+use super::{Adjusted, Sealed, adjust, adjusted};
+use crate::{
+    ETHERTYPE_IPV4, ETHERTYPE_IPV6, IPPROTO_TCP, IPPROTO_UDP, TcpHeader, UdpHeader, checksum, split_header_mut,
+};
 
 /// The longest TCP header: fifteen 32-bit words.
 const TCP_HEADER_MAX: usize = 60;
@@ -350,8 +352,7 @@ impl Layout {
                     shift_parity(&mut delta, &frame[at..covered], at - start);
                 }
                 edit.l4 = Some(L4 {
-                    start: start as u16,
-                    checksum: (start + transport.checksum()) as u16,
+                    transport,
                     delta,
                     gap_at: at as u16,
                     gap_len: len as u16,
@@ -449,8 +450,7 @@ impl Layout {
                     shift_parity(&mut delta, &frame[to..covered], to - start);
                 }
                 edit.l4 = Some(L4 {
-                    start: start as u16,
-                    checksum: (start + transport.checksum()) as u16,
+                    transport,
                     delta,
                     gap_at: 0,
                     gap_len: 0,
@@ -481,7 +481,8 @@ impl Layout {
     /// cannot hold.
     #[inline]
     pub fn plan_tcp_options(&self, frame: &[u8], len: usize) -> Result<(Edit, Range<usize>), Refused> {
-        let (Some(network), Some(Transport::Tcp { start, header, word6 })) = (self.network, self.transport) else {
+        let (Some(network), Some(transport @ Transport::Tcp { start, header, word6 })) = (self.network, self.transport)
+        else {
             return Err(Refused);
         };
         // The new options change what the checksum covers, so one that
@@ -519,8 +520,7 @@ impl Layout {
         replace(&mut delta, segment, resized(segment)?);
         sub_run(&mut delta, &frame[options.clone()], options.start - start);
         edit.l4 = Some(L4 {
-            start: start as u16,
-            checksum: (start + 16) as u16,
+            transport,
             delta,
             gap_at: options.start as u16,
             gap_len: len as u16,
@@ -537,15 +537,13 @@ struct Field {
     new: u16,
 }
 
-/// The transport checksum an edit changes: the transport header's frame
-/// offset, the checksum field's, the change, and the inserted bytes, whose
-/// sum joins the change once they are written (none for a remove).
+/// The transport checksum an edit adjusts once the bytes moved.
 ///
-/// Frame offsets fit 16 bits, as the frame's length does.
+/// The inserted bytes join the change only once they are written. Frame
+/// offsets fit 16 bits, as the frame's length does.
 #[derive(Debug)]
 struct L4 {
-    start: u16,
-    checksum: u16,
+    transport: Transport,
     delta: Adjusted,
     gap_at: u16,
     gap_len: u16,
@@ -625,13 +623,12 @@ impl Edit {
     /// included, which the frame holds by now.
     ///
     /// The old checksum stays the base of the new one, so a segment that
-    /// arrived damaged stays damaged (RFC 1624). An all-ones sum is stored
-    /// as all-ones, as the header mutations store it.
+    /// arrived damaged stays damaged (RFC 1624), and the header stores it as
+    /// its own mutation does.
     #[inline]
     pub fn write_transport_checksum(self, frame: &mut [u8]) {
         let Some(L4 {
-            start,
-            checksum,
+            transport,
             mut delta,
             gap_at,
             gap_len,
@@ -639,13 +636,27 @@ impl Edit {
         else {
             return;
         };
-        let (start, at) = (usize::from(start), usize::from(gap_at));
+        let (start, at) = (transport.start(), usize::from(gap_at));
         if gap_len > 0
             && let Some(bytes) = frame.get(at..at + usize::from(gap_len))
         {
             add_run(&mut delta, bytes, at - start);
         }
-        write_checksum(frame, usize::from(checksum), |checksum| adjust_no_zero(checksum, delta));
+        let Some(segment) = frame.get_mut(start..) else {
+            return;
+        };
+        match transport {
+            Transport::Tcp { .. } => {
+                if let Ok((header, _)) = split_header_mut::<TcpHeader>(segment) {
+                    header.adjust_checksum(delta);
+                }
+            }
+            Transport::Udp { .. } => {
+                if let Ok((header, _)) = split_header_mut::<UdpHeader>(segment) {
+                    header.adjust_checksum(delta);
+                }
+            }
+        }
     }
 }
 

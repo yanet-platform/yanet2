@@ -93,6 +93,19 @@ impl UdpHeader {
         self.checksum.get() == 0
     }
 
+    /// Adjusts the checksum by the changes a mutation or a resize accounted,
+    /// never storing it as zero, which would mean no checksum (RFC 768).
+    ///
+    /// A zero checksum, a datagram sent without one over IPv4 or a tunnel's
+    /// over IPv6 (RFC 6935), is left alone.
+    #[doc(hidden)]
+    #[inline]
+    pub fn adjust_checksum(&mut self, mode: Adjusted) {
+        if !self.has_no_checksum() {
+            self.checksum = mutation::adjust_no_zero(self.checksum, mode);
+        }
+    }
+
     /// Starts a mutation that keeps the checksum valid, if the datagram
     /// carries one.
     #[inline]
@@ -153,17 +166,11 @@ impl<'a> UdpMutation<'a> {
         self
     }
 
-    /// Ends the mutation: adjusts the checksum once for every change, never
-    /// storing it as zero.
-    ///
-    /// A zero checksum, a datagram sent without one over IPv4 or a tunnel's
-    /// over IPv6 (RFC 6935), is left alone.
+    /// Ends the mutation: adjusts the checksum once for every change.
     #[inline]
     pub fn finish(self) -> &'a mut UdpHeader {
         let Self { header, mode } = self;
-        if !header.has_no_checksum() {
-            header.checksum = mutation::adjust_no_zero(header.checksum, mode);
-        }
+        header.adjust_checksum(mode);
         header
     }
 }

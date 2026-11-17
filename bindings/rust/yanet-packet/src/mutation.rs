@@ -86,7 +86,8 @@ pub fn adjusted() -> Adjusted {
 
 /// The checksum after the changes the mode accounted, adjusted once.
 ///
-/// An all-ones sum is stored as zero, as the IPv4 and ICMP checksums take it.
+/// An all-ones sum is stored as zero, as the IPv4, ICMP and TCP checksums
+/// take it.
 #[inline]
 pub fn adjust(checksum: U16, mode: Adjusted) -> U16 {
     U16::from_bytes((!folded(checksum, mode)).to_ne_bytes())
@@ -95,7 +96,7 @@ pub fn adjust(checksum: U16, mode: Adjusted) -> U16 {
 /// Same as [`adjust`], but an all-ones sum is kept as all-ones.
 ///
 /// The checksum is never stored as zero, which in a UDP header means no
-/// checksum (RFC 768); TCP keeps the same rule.
+/// checksum (RFC 768).
 #[inline]
 pub fn adjust_no_zero(checksum: U16, mode: Adjusted) -> U16 {
     U16::from_bytes(no_zero(folded(checksum, mode)).to_ne_bytes())
