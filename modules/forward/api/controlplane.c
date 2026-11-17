@@ -197,6 +197,11 @@ fwd_rule_get_net6_dsts(
 	*nets = fwd_rule->dst_net6s;
 }
 
+/*
+ * The forward rule conditions are always spelled whole: the authoring
+ * api fills the wildcard of a condition its rule leaves out, so the
+ * compile never sees an empty one.
+ */
 CLASSIFY_DEVICE_COMPILE(fwd_device, fwd_rule_get_devices)
 CLASSIFY_LINE_COMPILE(
 	fwd_vlan, struct classify_attr_line, 4096, fwd_rule_get_vlan_ranges

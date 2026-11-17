@@ -223,7 +223,7 @@ filter_u16_commit_iterate(
 		struct filter_u16_ranges ranges;                               \
 		tag_compile->get_ranges(rule, &ranges);                        \
                                                                                \
-		return ranges.count == 0 ||                                    \
+		return ranges.count > 0 &&                                     \
 		       ranges.items[0].to - ranges.items[0].from == 65535;     \
 	}                                                                      \
                                                                                \

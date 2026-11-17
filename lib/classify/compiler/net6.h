@@ -129,13 +129,11 @@ net6_is_any(const struct net6 *net) {
 	return mask[0] == 0 && mask[1] == 0;
 }
 
-// A list without networks, or holding a network without a mask, covers
-// the whole address domain.
+// A list holding a network without a mask covers the whole address
+// domain; the empty list matches nothing - the whole domain coverage
+// must be spelled explicitly.
 static inline int
 net6s_is_any(const struct filter_net6s *nets) {
-	if (nets->count == 0) {
-		return 1;
-	}
 	for (uint32_t idx = 0; idx < nets->count; ++idx) {
 		if (net6_is_any(nets->items + idx)) {
 			return 1;
@@ -1146,24 +1144,12 @@ classify_compile_net6_rule_iter(
 	 * Every network of the rule resolves through the net index into
 	 * its range of combined regions, so the iteration replays the
 	 * values assigned to the networks of the list instead of walking
-	 * the crosses again. A list without networks covers the whole
-	 * domain and takes every region directly.
+	 * the crosses again. A list without networks matches no address
+	 * and replays no region - the whole domain coverage must be
+	 * spelled explicitly.
 	 */
 	struct filter_net6s nets;
 	net6_compile->get_net6s(rule, &nets);
-
-	if (nets.count == 0) {
-		for (uint32_t idx = 0; idx < net6_compile->region_count;
-		     ++idx) {
-			if (iter_cb_func(
-				    net6_compile->region_values + idx,
-				    cb_func_data
-			    ) < 0) {
-				return -1;
-			}
-		}
-		return 0;
-	}
 
 	for (uint32_t net_idx = 0; net_idx < nets.count; ++net_idx) {
 		struct net6 net6;

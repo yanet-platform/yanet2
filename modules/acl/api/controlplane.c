@@ -395,6 +395,14 @@ acl_rule_get_ipproto_ranges(
 	*ranges = acl_rule->ipproto_ranges;
 }
 
+/*
+ * Every value condition of the acl is spelled whole by the authoring
+ * layer: a rule that leaves a condition out matches no packet of it,
+ * and the any condition is the whole range authored explicitly. The
+ * device attribute keeps the empty list as its any condition: the
+ * device identifier domain is machine local, so no explicit spelling
+ * of the whole device set exists.
+ */
 CLASSIFY_DEVICE_COMPILE(acl_device, acl_rule_get_devices)
 CLASSIFY_NET4_COMPILE(acl_net4_src, acl_rule_get_net4_srcs)
 CLASSIFY_NET4_COMPILE(acl_net4_dst, acl_rule_get_net4_dsts)
@@ -425,6 +433,15 @@ acl_rule_get_icmp_type_ranges(
 	*ranges = acl_rule->icmp_type_ranges;
 }
 
+static inline void
+acl_rule_get_icmp6_type_ranges(
+	const struct classifier_rule *rule, struct classify_line_ranges *ranges
+) {
+	const struct acl_rule *acl_rule =
+		container_of(rule, struct acl_rule, rule);
+	*ranges = acl_rule->icmp6_type_ranges;
+}
+
 CLASSIFY_LINE_COMPILE(
 	acl_tcp_flags,
 	struct classify_attr_line,
@@ -436,6 +453,12 @@ CLASSIFY_LINE_COMPILE(
 	struct classify_attr_line,
 	0x100,
 	acl_rule_get_icmp_type_ranges
+)
+CLASSIFY_LINE_COMPILE(
+	acl_icmp6_type,
+	struct classify_attr_line,
+	0x100,
+	acl_rule_get_icmp6_type_ranges
 )
 static inline void
 acl_rule_get_src_port_ranges(
@@ -510,22 +533,6 @@ acl_rule_ptrs_project(
 	return rule_ptrs;
 }
 
-static int
-check_acl_rule_l2(const struct acl_rule *acl_rule) {
-	return !acl_rule->src_net6s.count && !acl_rule->dst_net6s.count &&
-	       !acl_rule->src_net4s.count && !acl_rule->dst_net4s.count;
-}
-
-static int
-check_has_ip4(const struct acl_rule *acl_rule) {
-	return acl_rule->src_net4s.count && acl_rule->dst_net4s.count;
-}
-
-static int
-check_has_ip6(const struct acl_rule *acl_rule) {
-	return acl_rule->src_net6s.count && acl_rule->dst_net6s.count;
-}
-
 /*
  * The projection checks of the family paths: the control plane that
  * authors the rules decides the membership alongside the derived
@@ -549,13 +556,40 @@ check_acl_rule_udp(const struct acl_rule *acl_rule) {
 	return acl_rule->path_udp;
 }
 
-// A port side is vacuous when it carries no ranges at all or its
-// first range spans the whole u16 domain, matching the notion of any
-// the u16 compiler applies when it builds the groups.
+// A port side is vacuous when its first range spans the whole u16
+// domain, matching the notion of any the u16 compiler applies when it
+// builds the groups. An empty side matches nothing, so it always
+// counts as restricted.
 static bool
 acl_rule_port_side_any(const struct filter_port_ranges *ranges) {
-	return ranges->count == 0 ||
+	return ranges->count > 0 &&
 	       ranges->items[0].to - ranges->items[0].from == 65535;
+}
+
+/*
+ * The l2 projection takes the rules without network conditions: the
+ * networks, the ports and the protocols are not defined for a non-IP
+ * packet, so the l2 rule carries them absent and matches every packet
+ * of its devices regardless of the protocol family. The l2 classifier
+ * evaluates the device condition alone. A rule with authored network
+ * conditions - the explicit whole domain coverage included - resolves
+ * through the family filters instead, where an absent side keeps
+ * matching nothing.
+ */
+static int
+check_acl_rule_l2(const struct acl_rule *acl_rule) {
+	return !acl_rule->src_net4s.count && !acl_rule->dst_net4s.count &&
+	       !acl_rule->src_net6s.count && !acl_rule->dst_net6s.count;
+}
+
+static int
+check_has_ip4(const struct acl_rule *acl_rule) {
+	return acl_rule->src_net4s.count && acl_rule->dst_net4s.count;
+}
+
+static int
+check_has_ip6(const struct acl_rule *acl_rule) {
+	return acl_rule->src_net6s.count && acl_rule->dst_net6s.count;
 }
 
 // The ports pair compiles only over the rules that actually restrict
@@ -1123,6 +1157,9 @@ struct acl_path_filters_build {
 	// The family the paths belong to - "ip4" or "ip6" - prefixing the
 	// memory context names of the compile below.
 	const char *family;
+	// The ip6 side reads its own ICMP type leaf: the two protocols
+	// never share each other's types.
+	bool family6;
 	struct acl_classifier_ports *ports;
 	struct acl_classifier_tcp *tcp;
 	struct acl_classifier_icmp *icmp;
@@ -1373,14 +1410,23 @@ acl_module_build_paths(
 		}
 
 		acl_path_name(name, sizeof(name), build, "icmp_type");
-		if (classify_acl_icmp_type_compile(
-			    memory_context,
-			    name,
-			    rule_ptrs,
-			    acl_rule_count,
-			    &build->icmp->type_attr,
-			    &stage_type
-		    )) {
+		int icmp_rc = build->family6 ? classify_acl_icmp6_type_compile(
+						       memory_context,
+						       name,
+						       rule_ptrs,
+						       acl_rule_count,
+						       &build->icmp->type_attr,
+						       &stage_type
+					       )
+					     : classify_acl_icmp_type_compile(
+						       memory_context,
+						       name,
+						       rule_ptrs,
+						       acl_rule_count,
+						       &build->icmp->type_attr,
+						       &stage_type
+					       );
+		if (icmp_rc) {
 			free(rule_ptrs);
 			goto error;
 		}
@@ -1650,6 +1696,7 @@ acl_module_compile_rules(
 	{
 		struct acl_path_filters_build path4_build = {
 			.family = "ip4",
+			.family6 = false,
 			.ports = &config->classifier_ports4,
 			.tcp = &config->classifier_tcp4,
 			.icmp = &config->classifier_icmp4,
@@ -1692,6 +1739,7 @@ acl_module_compile_rules(
 	{
 		struct acl_path_filters_build path6_build = {
 			.family = "ip6",
+			.family6 = true,
 			.ports = &config->classifier_ports6,
 			.tcp = &config->classifier_tcp6,
 			.icmp = &config->classifier_icmp6,

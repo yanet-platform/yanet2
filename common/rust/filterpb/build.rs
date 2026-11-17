@@ -14,11 +14,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         .message_attribute(".common.filterpb.v1.ProtoRange", serialize_deserialize)
         .message_attribute(".common.filterpb.v1.VlanRange", serialize_deserialize)
         .message_attribute(".common.filterpb.v1.Fragment", serialize_deserialize)
+        .message_attribute(".common.filterpb.v1.ByteRange", serialize_deserialize)
         .field_attribute(".common.filterpb.v1.Device", null_as_default)
         .field_attribute(".common.filterpb.v1.PortRange", null_as_default)
         .field_attribute(".common.filterpb.v1.ProtoRange", null_as_default)
         .field_attribute(".common.filterpb.v1.VlanRange", null_as_default)
         .field_attribute(".common.filterpb.v1.Fragment", null_as_default)
+        .field_attribute(".common.filterpb.v1.ByteRange", null_as_default)
         .compile_protos(&["common/filterpb/v1/filter.proto"], &["../../.."])?;
 
     Ok(())

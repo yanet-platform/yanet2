@@ -140,6 +140,21 @@ classify_compile_net4_size(const void *compile) {
 	       net4_compile->value_table.v_dim;
 }
 
+// Reports whether the network list covers the whole address domain:
+// a list holding a network without a mask. The empty list matches
+// nothing - the whole domain coverage must be spelled explicitly.
+static inline int
+classify_net4s_any(const struct filter_net4s *nets) {
+	for (uint32_t idx = 0; idx < nets->count; ++idx) {
+		const struct net4 *net = nets->items + idx;
+		if (net->mask[0] == 0 && net->mask[1] == 0 &&
+		    net->mask[2] == 0 && net->mask[3] == 0) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
 static inline int
 classify_compile_net4_rule_is_any(
 	const void *compile, const struct classifier_rule *rule
@@ -149,9 +164,7 @@ classify_compile_net4_rule_is_any(
 	struct filter_net4s nets;
 	net4_compile->get_net4s(rule, &nets);
 
-	return nets.count == 0 ||
-	       (nets.items[0].mask[0] == 0 && nets.items[0].mask[1] == 0 &&
-		nets.items[0].mask[2] == 0 && nets.items[0].mask[3] == 0);
+	return classify_net4s_any(&nets);
 }
 
 static inline int

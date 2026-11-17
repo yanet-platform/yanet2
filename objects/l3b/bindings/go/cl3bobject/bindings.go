@@ -710,9 +710,16 @@ func (m *SourceFilterRule) cBuild(
 	pinner *runtime.Pinner,
 ) C.struct_l3b_source_filter_rule {
 	c := C.struct_l3b_source_filter_rule{}
+	// An omitted service port set is the wildcard of the virtual
+	// service grammar: the whole span is spelled here, so the compile
+	// never sees an empty one.
+	ports := m.PortRanges
+	if len(ports) == 0 {
+		ports = filter.PortRanges{{From: 0, To: 65535}}
+	}
 	filter.CBuildNet6s(&c.net6s, m.Net6s, pinner)
 	filter.CBuildNet4s(&c.net4s, m.Net4s, pinner)
-	filter.CBuildPortRanges(&c.port_ranges, m.PortRanges, pinner)
+	filter.CBuildPortRanges(&c.port_ranges, ports, pinner)
 	return c
 }
 

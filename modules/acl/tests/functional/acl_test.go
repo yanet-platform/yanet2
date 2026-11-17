@@ -382,6 +382,440 @@ func TestACL_NoMatch_Drop(t *testing.T) {
 	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_no_match", 1)
 }
 
+// TestACL_EmptyProtoRanges_MatchNothing verifies that a rule without
+// protocol ranges matches no packet: the any protocol condition is the
+// whole encoded range set explicitly, never the empty list.
+func TestACL_EmptyProtoRanges_MatchNothing(t *testing.T) {
+	eth := layers.Ethernet{
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	ip4 := layers.IPv4{
+		Version:  4,
+		TTL:      64,
+		Protocol: layers.IPProtocolUDP,
+		SrcIP:    net.ParseIP("192.0.2.1"),
+		DstIP:    net.ParseIP("10.0.0.1"),
+	}
+	udp := layers.UDP{SrcPort: 12345, DstPort: 80}
+	udp.SetNetworkLayerForChecksum(&ip4)
+
+	// Every condition except the protocol one would match the packet.
+	rules := []cacl.ACLRule{
+		allow4Rule(
+			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+			nil,
+		),
+	}
+	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &udp)
+
+	h, agent, backend := setupACLHarness(t, []string{"port0"})
+	applyACLRules(t, backend, "test", rules)
+	wireACLPipeline(t, agent, "port0", "test")
+
+	result, err := h.HandlePackets(pkt)
+	require.NoError(t, err)
+	require.Empty(t, result.Output, "packet must not match the empty protocol rule")
+	require.Len(t, result.Drop, 1, "packet must be dropped as a no-match")
+
+	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_no_match", 1)
+}
+
+// wholeRangeProto spans every protocol with every transport byte.
+var wholeRangeProto = filter.ProtoRanges{{From: 0, To: 0xffff}}
+
+// mustContiguous4 parses an IPv4 network, failing the test on an
+// invalid spelling.
+func mustContiguous4(s string) xnetip.Contiguous[xnetip.Network4] {
+	return xnetip.MustParseContiguous4(s)
+}
+
+// arpPacket builds an ARP packet: a non-IP packet only the l2 filter
+// can match.
+func arpPacket(t *testing.T) gopacket.Packet {
+	t.Helper()
+	eth := layers.Ethernet{
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("ff:ff:ff:ff:ff:ff")),
+		EthernetType: layers.EthernetTypeARP,
+	}
+	arp := layers.ARP{
+		AddrType:          layers.LinkTypeEthernet,
+		Protocol:          layers.EthernetTypeIPv4,
+		HwAddressSize:     6,
+		ProtAddressSize:   4,
+		Operation:         layers.ARPRequest,
+		SourceHwAddress:   xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+		SourceProtAddress: net.ParseIP("10.0.0.1").To4(),
+		DstHwAddress:      net.HardwareAddr{0, 0, 0, 0, 0, 0},
+		DstProtAddress:    net.ParseIP("10.0.0.2").To4(),
+	}
+	return xpacket.LayersToPacket(t, &eth, &arp)
+}
+
+// l2Rule leaves every packet field condition absent: the networks,
+// the ports and the protocols are not defined for a non-IP packet, so
+// their absence is the spelling of the l2 rule matching every packet
+// of its devices regardless of the protocol family.
+func l2Rule() cacl.ACLRule {
+	return cacl.ACLRule{
+		Actions:  []cacl.ACLAction{{Kind: cacl.ActionAllow}},
+		Devices:  filter.Devices{{Name: "port0"}},
+		Fragment: filter.FragmentAny,
+	}
+}
+
+// TestACL_AuthoredNetworks_StayOutOfL2 verifies that a rule with
+// authored network conditions - the explicit whole domain coverage
+// included - never lands in the l2 projection: an authored condition
+// is a defined one, so a non-IP packet matches nothing of the rule.
+func TestACL_AuthoredNetworks_StayOutOfL2(t *testing.T) {
+	restricted := l2Rule()
+	restricted.Src4s = []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4}
+	restricted.Dst4s = []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4}
+	restricted.SrcPortRanges = allPorts
+	restricted.DstPortRanges = allPorts
+	restricted.ProtoRanges = wholeRangeProto
+
+	h, agent, backend := setupACLHarness(t, []string{"port0"})
+	applyACLRules(t, backend, "test", []cacl.ACLRule{restricted})
+	wireACLPipeline(t, agent, "port0", "test")
+
+	result, err := h.HandlePackets(arpPacket(t))
+	require.NoError(t, err)
+	require.Empty(t, result.Output, "the network conditioned rule must not match the ARP packet")
+	require.Len(t, result.Drop, 1)
+
+	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_no_match", 1)
+}
+
+// TestACL_L2RuleMatchesNonIP verifies that a rule carrying every field
+// condition absent matches the non-IP packets through the l2 filter.
+func TestACL_L2RuleMatchesNonIP(t *testing.T) {
+	h, agent, backend := setupACLHarness(t, []string{"port0"})
+	applyACLRules(t, backend, "test", []cacl.ACLRule{l2Rule()})
+	wireACLPipeline(t, agent, "port0", "test")
+
+	result, err := h.HandlePackets(arpPacket(t))
+	require.NoError(t, err)
+	require.Len(t, result.Output, 1, "the l2 rule must match the ARP packet")
+	require.Empty(t, result.Drop)
+
+	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_action_allow", 1)
+}
+
+// TestACL_FragmentRuleIgnoresAbsentPorts verifies that a fragment
+// constrained rule matches a non-initial fragment even with the port
+// conditions absent: the ports and the transport specific byte are not
+// defined for a fragment, so their absence is ignored.
+func TestACL_FragmentRuleIgnoresAbsentPorts(t *testing.T) {
+	eth := layers.Ethernet{
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	ip4 := layers.IPv4{
+		Version:  4,
+		TTL:      64,
+		Protocol: layers.IPProtocolUDP,
+		SrcIP:    net.ParseIP("192.0.2.1"),
+		DstIP:    net.ParseIP("10.0.0.1"),
+	}
+	// A non-initial fragment: FragOffset=8, MF=0 - no transport
+	// header, just raw payload.
+	ip4.FragOffset = 8
+	payload := gopacket.Payload([]byte{0x00, 0x00, 0x00, 0x50, 0xAA, 0xBB, 0xCC, 0xDD})
+	pkt := serializeFragPacket(t, &eth, &ip4, payload)
+
+	rule := allow4Rule(
+		[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		[]xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		nil,
+	)
+	rule.SrcPortRanges = nil
+	rule.DstPortRanges = nil
+	rule.Fragment = filter.FragmentFrag
+
+	h, agent, backend := setupACLHarness(t, []string{"port0"})
+	applyACLRules(t, backend, "test", []cacl.ACLRule{rule})
+	wireACLPipeline(t, agent, "port0", "test")
+
+	result, err := h.HandlePackets(pkt)
+	require.NoError(t, err)
+	require.Len(t, result.Output, 1, "the fragment rule must match the non-initial fragment")
+	require.Empty(t, result.Drop)
+
+	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_action_allow", 1)
+}
+
+// TestACL_KindL4_AbsentPortsAreAny verifies the declared kind contract
+// end to end: an l4 rule with the source port condition absent treats
+// it as the wildcard, not as a match of nothing.
+func TestACL_KindL4_AbsentPortsAreAny(t *testing.T) {
+	eth := layers.Ethernet{
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	ip4 := layers.IPv4{
+		Version:  4,
+		TTL:      64,
+		Protocol: layers.IPProtocolUDP,
+		SrcIP:    net.ParseIP("192.0.2.1"),
+		DstIP:    net.ParseIP("10.0.0.1"),
+	}
+	udp := layers.UDP{SrcPort: 12345, DstPort: 53}
+	udp.SetNetworkLayerForChecksum(&ip4)
+	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &udp)
+
+	rule := allow4Rule(
+		[]xnetip.Contiguous[xnetip.Network4]{mustContiguous4("192.0.2.0/24")},
+		[]xnetip.Contiguous[xnetip.Network4]{mustContiguous4("10.0.0.0/8")},
+		udpProto,
+	)
+	// The declared kind spells the intent: the absent source port side
+	// and the absent transport byte are the wildcard.
+	rule.Kind = cacl.RuleKindL4
+	rule.SrcPortRanges = nil
+	require.NoError(t, cacl.ExpandRuleKind(&rule))
+
+	h, agent, backend := setupACLHarness(t, []string{"port0"})
+	applyACLRules(t, backend, "test", []cacl.ACLRule{rule})
+	wireACLPipeline(t, agent, "port0", "test")
+
+	result, err := h.HandlePackets(pkt)
+	require.NoError(t, err)
+	require.Len(t, result.Output, 1, "the absent port side of an l4 rule is the wildcard")
+	require.Empty(t, result.Drop)
+
+	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_action_allow", 1)
+}
+
+// TestACL_KindL3_MatchesAnyTransport verifies the l3 kind contract end
+// to end: the ports are not defined at the l3 layer, so a rule leaving
+// them out matches any port of its protocol - the UDP path included.
+func TestACL_KindL3_MatchesAnyTransport(t *testing.T) {
+	eth := layers.Ethernet{
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	ip4 := layers.IPv4{
+		Version:  4,
+		TTL:      64,
+		Protocol: layers.IPProtocolUDP,
+		SrcIP:    net.ParseIP("192.0.2.1"),
+		DstIP:    net.ParseIP("10.0.0.1"),
+	}
+	udp := layers.UDP{SrcPort: 12345, DstPort: 53}
+	udp.SetNetworkLayerForChecksum(&ip4)
+	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &udp)
+
+	rule := allow4Rule(
+		[]xnetip.Contiguous[xnetip.Network4]{mustContiguous4("192.0.2.0/24")},
+		[]xnetip.Contiguous[xnetip.Network4]{mustContiguous4("10.0.0.0/8")},
+		udpProto,
+	)
+	rule.Kind = cacl.RuleKindL3
+	rule.SrcPortRanges = nil
+	rule.DstPortRanges = nil
+	require.NoError(t, cacl.ExpandRuleKind(&rule))
+
+	h, agent, backend := setupACLHarness(t, []string{"port0"})
+	applyACLRules(t, backend, "test", []cacl.ACLRule{rule})
+	wireACLPipeline(t, agent, "port0", "test")
+
+	result, err := h.HandlePackets(pkt)
+	require.NoError(t, err)
+	require.Len(t, result.Output, 1, "the l3 rule must match the UDP packet")
+	require.Empty(t, result.Drop)
+
+	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_action_allow", 1)
+}
+
+// TestACL_IcmpTypesStayPerFamily verifies that the ICMP and the ICMPv6
+// type conditions never leak across the families: a dual-family rule
+// with the ICMP echo request type matches an ICMP echo and misses an
+// ICMPv6 packet of the very type ICMPv6 rules used to inherit.
+func TestACL_IcmpTypesStayPerFamily(t *testing.T) {
+	eth := layers.Ethernet{
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+		EthernetType: layers.EthernetTypeIPv6,
+	}
+	ip6 := layers.IPv6{
+		Version:    6,
+		NextHeader: layers.IPProtocolICMPv6,
+		HopLimit:   64,
+		SrcIP:      net.ParseIP("2001:db8::1"),
+		DstIP:      net.ParseIP("2001:db8::2"),
+	}
+	echoRequest6 := layers.ICMPv6{
+		TypeCode: layers.CreateICMPv6TypeCode(layers.ICMPv6TypeEchoRequest, 0),
+	}
+	echoRequest6.SetNetworkLayerForChecksum(&ip6)
+	pkt := xpacket.LayersToPacket(t, &eth, &ip6, &echoRequest6)
+
+	// A dual-family rule limiting the ICMP type to the echo request:
+	// the ICMPv6 side carries no type condition and must not inherit
+	// the ICMP one, so the ICMPv6 echo request misses the rule.
+	rules := []cacl.ACLRule{{
+		Actions:       []cacl.ACLAction{{Kind: cacl.ActionAllow}},
+		Devices:       filter.Devices{{Name: "port0"}},
+		Src4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Dst4s:         []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4},
+		Src6s:         []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+		Dst6s:         []xnetip.BiContiguous{filter.UnspecifiedIPv6},
+		SrcPortRanges: allPorts,
+		DstPortRanges: allPorts,
+		ProtoRanges:   icmp4Proto,
+	}}
+
+	h, agent, backend := setupACLHarness(t, []string{"port0"})
+	applyACLRules(t, backend, "test", rules)
+	wireACLPipeline(t, agent, "port0", "test")
+
+	result, err := h.HandlePackets(pkt)
+	require.NoError(t, err)
+	require.Empty(t, result.Output, "the ICMPv6 echo must not match the ICMP-typed rule")
+	require.Len(t, result.Drop, 1)
+}
+
+// TestACL_KindL2_MatchesNonIP verifies the declared l2 kind: the rule
+// carries every field condition absent and matches the non-IP packets.
+func TestACL_KindL2_MatchesNonIP(t *testing.T) {
+	rule := l2Rule()
+	rule.Kind = cacl.RuleKindL2
+
+	h, agent, backend := setupACLHarness(t, []string{"port0"})
+	applyACLRules(t, backend, "test", []cacl.ACLRule{rule})
+	wireACLPipeline(t, agent, "port0", "test")
+
+	result, err := h.HandlePackets(arpPacket(t))
+	require.NoError(t, err)
+	require.Len(t, result.Output, 1, "the l2 kind rule must match the ARP packet")
+	require.Empty(t, result.Drop)
+}
+
+// TestACL_Transports_TCPFlagsMatch verifies the transport protocol
+// spellings end to end: a rule with the TCP transport limited to the
+// SYN flag byte matches a SYN packet and misses an ACK-only one.
+func TestACL_Transports_TCPFlagsMatch(t *testing.T) {
+	base := func(flags uint8) (gopacket.Packet, error) {
+		eth := layers.Ethernet{
+			SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+			DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+			EthernetType: layers.EthernetTypeIPv4,
+		}
+		ip4 := layers.IPv4{
+			Version:  4,
+			TTL:      64,
+			Protocol: layers.IPProtocolTCP,
+			SrcIP:    net.ParseIP("192.0.2.1"),
+			DstIP:    net.ParseIP("10.0.0.1"),
+		}
+		tcp := layers.TCP{SrcPort: 12345, DstPort: 80, SYN: flags == 0x02, ACK: flags == 0x10}
+		tcp.SetNetworkLayerForChecksum(&ip4)
+		pkt := xpacket.LayersToPacket(t, &eth, &ip4, &tcp)
+		return pkt, nil
+	}
+
+	// The TCP transport with the SYN flag byte alone; the absent port
+	// sides of the l4 kind are the wildcard.
+	rules := []*aclpb.Rule{{
+		Kind:          aclpb.RuleKind_RULE_KIND_L4,
+		Actions:       []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}},
+		Devices:       []*filterpb.Device{{Name: "port0"}},
+		Sources4:      []*commonpb.IPv4Network{commonpb.NewIPv4NetworkFrom4(xnetip.MustParseNetwork4("192.0.2.0/24"))},
+		Destinations4: []*commonpb.IPv4Network{commonpb.NewIPv4NetworkFrom4(xnetip.MustParseNetwork4("10.0.0.0/8"))},
+		Transports: []*aclpb.Transport{{
+			Protocol: &aclpb.Transport_Tcp{Tcp: &aclpb.Tcp{
+				Flags: []*filterpb.ByteRange{{From: 0x02, To: 0x02}},
+			}},
+		}},
+	}}
+
+	h, agent, backend := setupACLHarness(t, []string{"port0"})
+	service := acl.NewACLService(backend)
+	_, err := service.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{Name: "test", Rules: rules})
+	require.NoError(t, err)
+	wireACLPipeline(t, agent, "port0", "test")
+
+	syn, err := base(0x02)
+	require.NoError(t, err)
+	result, err := h.HandlePackets(syn)
+	require.NoError(t, err)
+	require.Len(t, result.Output, 1, "the SYN packet must match the tcp transport rule")
+
+	ack, err := base(0x10)
+	require.NoError(t, err)
+	result, err = h.HandlePackets(ack)
+	require.NoError(t, err)
+	require.Empty(t, result.Output, "the ACK-only packet must not match the SYN-limited rule")
+	require.Len(t, result.Drop, 1)
+}
+
+// Test_ACLService_UpdateConfig_RejectsOutOfKindFields verifies the gRPC
+// boundary: a condition authored outside the declared kind is rejected
+// with InvalidArgument.
+func Test_ACLService_UpdateConfig_RejectsOutOfKindFields(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		rule *aclpb.Rule
+	}{
+		{
+			name: "l2 with networks",
+			rule: &aclpb.Rule{
+				Kind:    aclpb.RuleKind_RULE_KIND_L2,
+				Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}},
+				Devices: []*filterpb.Device{{Name: "port0"}},
+				Sources4: []*commonpb.IPv4Network{
+					commonpb.NewIPv4NetworkFrom4(
+						xnetip.MustParseNetwork4("0.0.0.0/0"),
+					),
+				},
+			},
+		},
+		{
+			name: "l3 with ports",
+			rule: &aclpb.Rule{
+				Kind:    aclpb.RuleKind_RULE_KIND_L3,
+				Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}},
+				Devices: []*filterpb.Device{{Name: "port0"}},
+				Sources4: []*commonpb.IPv4Network{
+					commonpb.NewIPv4NetworkFrom4(
+						xnetip.MustParseNetwork4("10.0.0.0/16"),
+					),
+				},
+				SrcPortRanges: []*filterpb.PortRange{{From: 80, To: 80}},
+			},
+		},
+		{
+			name: "ip rule without a network side",
+			rule: &aclpb.Rule{
+				Kind:    aclpb.RuleKind_RULE_KIND_L3,
+				Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}},
+				Devices: []*filterpb.Device{{Name: "port0"}},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, agent, backend := setupACLHarness(t, []string{"port0"})
+			service := acl.NewACLService(backend)
+
+			_, err := service.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+				Name:  "test",
+				Rules: []*aclpb.Rule{tc.rule},
+			})
+			require.Error(t, err)
+			require.Equal(t, codes.InvalidArgument, status.Code(err))
+			_ = agent
+		})
+	}
+}
+
 // Test_ACLService_UpdateConfig_ConcurrentCompiles verifies that two configs
 // compiled at the same time on one agent each publish their own verdict.
 func Test_ACLService_UpdateConfig_ConcurrentCompiles(t *testing.T) {

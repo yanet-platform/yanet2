@@ -53,6 +53,10 @@ l3b_rule_get_proto_ranges(
 
 CLASSIFY_NET4_COMPILE(l3b_net4_dst, l3b_rule_get_net4_dsts)
 CLASSIFY_NET6_COMPILE(l3b_net6_dst, l3b_rule_get_net6_dsts)
+/*
+ * The l3b protocol condition is always spelled whole: the authoring
+ * api fills the whole span of a service port set its rule leaves out.
+ */
 CLASSIFY_U16_RANGES_COMPILE(
 	l3b_proto, struct classify_attr_port, l3b_rule_get_proto_ranges
 )

@@ -162,6 +162,9 @@ main(void) {
 		{300, 400},
 		{0, 0},
 	};
+	// The explicit whole port range of the port unconstrained rule: an
+	// empty range set matches nothing.
+	struct filter_u16_span full_port_span = {0, 65535};
 
 	struct test_rule rules[3];
 	memset(rules, 0, sizeof(rules));
@@ -173,6 +176,8 @@ main(void) {
 	rules[0].addrs4.count = 1;
 	rules[0].addrs6.items = &addrs6[0];
 	rules[0].addrs6.count = 1;
+	rules[0].port_ranges.items = &full_port_span;
+	rules[0].port_ranges.count = 1;
 	rules[1].net4s.items = &hosts4[1];
 	rules[1].net4s.count = 1;
 	rules[1].net6s.items = &hosts6[1];
@@ -380,8 +385,8 @@ main(void) {
 	       ) == 0);
 
 	const uint8_t addrs6_probe[][NET6_LEN] = {
-		{0x2a, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
-		}, // rule 0
+		{0x2a, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, // rule
+									// 0
 		{0x2a, 0x0d, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
 		}, // rule 2
 		{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1

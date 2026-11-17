@@ -129,9 +129,8 @@ typedef void (*classify_line_get_ranges_func)(
 		memset(&ranges, 0, sizeof(ranges));                            \
 		tag_compile->get_ranges(rule, &ranges);                        \
                                                                                \
-		return ranges.count == 0 ||                                    \
-		       (ranges.items[0].from == 0 &&                           \
-			ranges.items[0].to >= domain_size - 1);                \
+		return ranges.count > 0 && ranges.items[0].from == 0 &&        \
+		       ranges.items[0].to >= domain_size - 1;                  \
 	}                                                                      \
                                                                                \
 	static inline int classify_compile_##tag##_rule_iter(                  \

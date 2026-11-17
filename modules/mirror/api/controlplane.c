@@ -182,6 +182,11 @@ mirror_rule_get_net6_dsts(
 	*nets = mirror_rule->dst_net6s;
 }
 
+/*
+ * The mirror rule conditions are always spelled whole: the authoring
+ * api fills the wildcard of a condition its rule leaves out, so the
+ * compile never sees an empty one.
+ */
 CLASSIFY_DEVICE_COMPILE(mirror_device, mirror_rule_get_devices)
 CLASSIFY_LINE_COMPILE(
 	mirror_vlan,

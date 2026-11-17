@@ -66,6 +66,12 @@ l3b_rule_get_port_ranges(
 		(const struct filter_u16_span *)source_rule->port_ranges.items;
 }
 
+/*
+ * The source filter protocol condition is always spelled whole: the
+ * authoring api fills the whole span of omitted service ports, while
+ * the missing-family networks never match and are pruned by the
+ * object build instead.
+ */
 CLASSIFY_NET4_COMPILE(l3b_net4_src, l3b_rule_get_net4_srcs)
 CLASSIFY_NET6_COMPILE(l3b_net6_src, l3b_rule_get_net6_srcs)
 CLASSIFY_U16_RANGES_COMPILE(

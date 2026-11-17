@@ -143,6 +143,8 @@ smoke_rule_get_dst_port_ranges(
 				smoke_rule->dst_port_ranges.items;
 }
 
+// Every condition of every rule is spelled whole: the compile reads an
+// empty condition as a match of nothing.
 CLASSIFY_DEVICE_COMPILE(smoke_device, smoke_rule_get_devices)
 CLASSIFY_LINE_COMPILE(
 	smoke_vlan, struct classify_attr_line, 4096, smoke_rule_get_vlan_ranges

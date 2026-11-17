@@ -217,12 +217,14 @@ static inline int
 classify_compile_net6_hash_rule_is_any(
 	const void *compile, const struct classifier_rule *rule
 ) {
-	const struct classify_compile_net6_hash *net6_compile = compile;
+	(void)compile;
+	(void)rule;
 
-	struct classify_net6_addrs addrs;
-	net6_compile->get_addrs(rule, &addrs);
-
-	return addrs.count == 0;
+	/*
+	 * The attribute has no wildcard value: an empty address set
+	 * matches nothing rather than everything.
+	 */
+	return 0;
 }
 
 static inline int
