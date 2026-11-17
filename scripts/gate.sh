@@ -194,9 +194,11 @@ gate_rust() {
 }
 
 # The Rust SDK workspace (bindings/rust), as rust-sdk.yml checks it on this
-# machine's architecture. The bindings crate reads the C flags of this
-# checkout's own build/ and the DPDK headers, and cargo finds the workspace's
-# config from the working directory, so every step runs there.
+# machine's architecture.
+#
+# The bindings crate reads the C flags of this checkout's own build/ and the
+# DPDK headers, and cargo finds the workspace's config from the working
+# directory, so every step runs there.
 gate_sdk() {
 	local toolchain target sdk=(env -C bindings/rust) packet=$scratch/yanet-packet
 	if [ ! -f subprojects/dpdk/meson.build ] || [ ! -d build ] || [ -L build ]; then
@@ -225,9 +227,8 @@ gate_sdk() {
 	step sdk-bench "${sdk[@]}" cargo test -p yanet-sys --bench dp --bench lookup --locked || return 1
 	step sdk-bench-release "${sdk[@]}" cargo test -p yanet-sys --release --bench lookup --locked || return 1
 
-	# The packet crate must build as its own repository would: a copy
-	# outside the workspace has no path dependency or workspace inheritance
-	# to lean on.
+	# The packet crate must build as its own repository would, from a copy
+	# outside the workspace.
 	matching '^bindings/rust/yanet-packet/' >/dev/null || return 0
 	if [ "$list" != 1 ] && ! cp -r bindings/rust/yanet-packet "$packet"; then
 		fail sdk-packet "cannot copy the packet crate to $packet"
