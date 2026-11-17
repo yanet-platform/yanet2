@@ -59,8 +59,10 @@ changed=$({
 matching() { printf '%s\n' "$changed" | grep -E "$1"; }
 present() { matching "$1" | while IFS= read -r f; do [ -f "$f" ] && printf '%s\n' "$f"; done; }
 
-log=$(mktemp)
-trap 'rm -f "$log"' EXIT
+# The step log and any copy a check builds outside the checkout.
+scratch=$(mktemp -d) || exit 2
+trap 'rm -rf "$scratch"' EXIT
+log=$scratch/log
 failed=0
 passed=()
 skipped=()
@@ -191,6 +193,54 @@ gate_rust() {
 	step cargo-test cargo test --workspace --locked
 }
 
+# The Rust SDK workspace (bindings/rust), as rust-sdk.yml checks it on this
+# machine's architecture. The bindings crate reads the C flags of this
+# checkout's own build/ and the DPDK headers, and cargo finds the workspace's
+# config from the working directory, so every step runs there.
+gate_sdk() {
+	local toolchain target sdk=(env -C bindings/rust) packet=$scratch/yanet-packet
+	if [ ! -f subprojects/dpdk/meson.build ] || [ ! -d build ] || [ -L build ]; then
+		fail sdk "the SDK bindings read the DPDK sources and this checkout's own build/; run 'git submodule update --init && meson setup build' (AGENTS.md, Worktrees)"
+		return 1
+	fi
+	toolchain=$(sed -n 's/^ *toolchain: *\(nightly-[0-9-]*\).*/\1/p' .github/workflows/rust-sdk.yml | head -n 1)
+	step sdk-fmt "${sdk[@]}" cargo "+$toolchain" fmt -- --check || return 1
+	if command -v cargo-shear >/dev/null; then
+		step sdk-shear "${sdk[@]}" cargo shear --deny-warnings --locked || return 1
+	else
+		skipped+=("cargo-shear (not installed)")
+	fi
+	step sdk-clippy "${sdk[@]}" CARGO_BUILD_WARNINGS=deny cargo clippy --workspace --all-targets --locked --keep-going || return 1
+	step sdk-clippy-plugin "${sdk[@]}" CARGO_BUILD_WARNINGS=deny cargo clippy --profile plugin -p yanet-sdk-fixture --features plugin --examples --locked --keep-going || return 1
+	step sdk-clippy-deps "${sdk[@]}" cargo clippy --workspace --lib --locked -- -D unused_crate_dependencies || return 1
+	step sdk-doc "${sdk[@]}" RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --locked --features yanet-sdk-testing/cp || return 1
+	target="$(uname -m)-unknown-none"
+	if rustup target list --installed 2>/dev/null | grep -qx "$target"; then
+		step sdk-no-std "${sdk[@]}" cargo check --locked --target "$target" -p yanet-shm -p yanet-sys -p yanet-sdk -p yanet-sdk-plugin -p yanet-packet || return 1
+	else
+		skipped+=("sdk-no-std ($target not installed)")
+	fi
+	step sdk-test "${sdk[@]}" PROPTEST_CASES=200 PROPTEST_RNG_SEED=19567271 cargo test --workspace --locked || return 1
+	step sdk-test-release "${sdk[@]}" cargo test -p yanet-sys --release --locked || return 1
+	step sdk-bench "${sdk[@]}" cargo test -p yanet-sys --bench dp --bench lookup --locked || return 1
+	step sdk-bench-release "${sdk[@]}" cargo test -p yanet-sys --release --bench lookup --locked || return 1
+
+	# The packet crate must build as its own repository would: a copy
+	# outside the workspace has no path dependency or workspace inheritance
+	# to lean on.
+	matching '^bindings/rust/yanet-packet/' >/dev/null || return 0
+	if [ "$list" != 1 ] && ! cp -r bindings/rust/yanet-packet "$packet"; then
+		fail sdk-packet "cannot copy the packet crate to $packet"
+		return 1
+	fi
+	step sdk-packet-test env -C "$packet" cargo test || return 1
+	if rustup target list --installed 2>/dev/null | grep -qx "$target"; then
+		step sdk-packet-no-std env -C "$packet" cargo check --target "$target"
+	else
+		skipped+=("sdk-packet-no-std ($target not installed)")
+	fi
+}
+
 gate_web() {
 	if [ ! -d node_modules ]; then
 		fail web "no node_modules/; run 'npm ci' at the repository root"
@@ -205,7 +255,10 @@ c=0
 matching '(\.[ch]$|(^|/)meson\.build$|^meson_options\.txt$|^ubsan-ignorelist\.txt$|^subprojects/|^scripts/(go_c(deps|go_flags)|check_link_deps)\.py$)' >/dev/null && c=1
 [ "$c" = 1 ] && gate_c
 if [ "$c" = 1 ] || matching '(\.go$|^go\.(mod|sum)$|\.proto$)' >/dev/null; then gate_go; fi
-matching '(\.rs$|(^|/)Cargo\.(toml|lock)$|^\.rustfmt\.toml$|^\.cargo/|\.proto$)' >/dev/null && gate_rust
+# The SDK workspace is not a member of the root one; as in CI, only its own
+# layer checks it.
+matching '(\.rs$|(^|/)Cargo\.(toml|lock)$|^\.rustfmt\.toml$|^\.cargo/|\.proto$)' | grep -qv '^bindings/rust/' && gate_rust
+matching '(^bindings/rust/|^\.rustfmt\.toml$|^\.cargo/)' >/dev/null && gate_sdk
 matching '(^|/)web/|^package(-lock)?\.json$' >/dev/null && gate_web
 matching '\.proto$' >/dev/null && step proto-lint make --no-print-directory proto-lint
 [ -n "$(git rev-list "$base"..HEAD)" ] && step commitlint lint/commit/commitlint.sh --range "$base..HEAD"
