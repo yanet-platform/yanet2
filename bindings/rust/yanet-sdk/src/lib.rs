@@ -181,7 +181,7 @@ pub use yanet_sys::{
     },
     common::{
         index::HashIndex,
-        lpm::{Lpm4, Lpm6, LpmRange},
+        lpm::{Lpm4, Lpm6, LpmKey, LpmRange},
     },
     cp::{
         BlockAddr, Branch, Build, BuildError, Builder, Built, BuiltObject, Context, CounterRegistrar, FfiRecord,

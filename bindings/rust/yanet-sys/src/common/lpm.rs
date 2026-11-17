@@ -6,7 +6,11 @@
 //! over a table the C routines of `common/` build: the configuration builder
 //! embeds one by calling them.
 
-use core::mem::{align_of, offset_of, size_of};
+use core::{
+    borrow::Borrow,
+    mem::{align_of, offset_of, size_of},
+    net::{Ipv4Addr, Ipv6Addr},
+};
 
 use yanet_shm::{
     opaque::Opaque,
@@ -137,7 +141,7 @@ impl<const K: usize> Lpm<K> {
     /// so a value inserted with bit 31 set reads back without it.
     #[doc(alias = "lpm_lookup")]
     #[inline(always)]
-    pub fn lookup<'g>(&'g self, cx: &impl Resolve<'g>, key: &[u8; K]) -> Option<u32> {
+    pub fn lookup<'g>(&'g self, cx: &impl Resolve<'g>, key: impl LpmKey<K>) -> Option<u32> {
         const { assert!(K >= 1 && K <= 16, "LPM keys are 1 to 16 bytes") };
         if self.is_empty() {
             return None;
@@ -152,7 +156,8 @@ impl<const K: usize> Lpm<K> {
         // The offset is read as integer bits and never as a pointer.
         let mut page: *const bindings::lpm_page = root.rel(directory.addr(), first_chunk);
         let mut word = u64::from(bindings::LPM_VALUE_INVALID);
-        for (hop, &byte) in key.iter().enumerate() {
+        let octets = key.into_octets();
+        for (hop, &byte) in octets.borrow().iter().enumerate() {
             // SAFETY: `page` is a page of this LPM (C built the child
             // offsets), so the slot is in bounds of its 256 slots.
             let slot = unsafe {
@@ -179,6 +184,126 @@ impl<const K: usize> Lpm<K> {
 pub type Lpm4 = Lpm<4>;
 /// IPv6 LPM.
 pub type Lpm6 = Lpm<16>;
+
+/// A key of an LPM table: its octets in network order, as many as the table's
+/// key width.
+///
+/// An array of that many bytes, by value or by reference, is a key, an IPv4
+/// address is a key of an IPv4 table and an IPv6 address of an IPv6 one, so an
+/// address read from a header is looked up as it is. A key of another width
+/// does not compile. A key type of a module may implement the trait; the walk
+/// takes the octets as the key gives them, so a key in host order looks up
+/// another range.
+///
+/// # Examples
+///
+/// ```
+/// // An address is a key of the table of its width.
+/// use core::net::Ipv4Addr;
+///
+/// use yanet_shm::resolve::Resolve;
+/// use yanet_sys::common::lpm::Lpm4;
+///
+/// fn route<'g>(routes: &'g Lpm4, cx: &impl Resolve<'g>, dst: Ipv4Addr) -> Option<u32> {
+///     routes.lookup(cx, dst)
+/// }
+/// ```
+///
+/// ```compile_fail,E0277
+/// // An address of another width is not.
+/// use core::net::Ipv6Addr;
+///
+/// use yanet_shm::resolve::Resolve;
+/// use yanet_sys::common::lpm::Lpm4;
+///
+/// fn route<'g>(routes: &'g Lpm4, cx: &impl Resolve<'g>, dst: Ipv6Addr) -> Option<u32> {
+///     routes.lookup(cx, dst)
+/// }
+/// ```
+///
+/// ```compile_fail,E0277
+/// // Nor is an array of another width.
+/// use yanet_shm::resolve::Resolve;
+/// use yanet_sys::common::lpm::Lpm6;
+///
+/// fn route<'g>(routes: &'g Lpm6, cx: &impl Resolve<'g>, dst: &[u8; 4]) -> Option<u32> {
+///     routes.lookup(cx, dst)
+/// }
+/// ```
+///
+/// ```
+/// // A key type of a module hands over its octets.
+/// use yanet_shm::resolve::Resolve;
+/// use yanet_sys::common::lpm::{Lpm4, LpmKey};
+///
+/// struct Destination([u8; 4]);
+///
+/// impl LpmKey<4> for Destination {
+///     type Octets = [u8; 4];
+///
+///     fn into_octets(self) -> [u8; 4] {
+///         self.0
+///     }
+/// }
+///
+/// fn route<'g>(routes: &'g Lpm4, cx: &impl Resolve<'g>, dst: Destination) -> Option<u32> {
+///     routes.lookup(cx, dst)
+/// }
+/// ```
+pub trait LpmKey<const K: usize> {
+    /// The octets as the key holds them: an array reference stays a
+    /// reference, so the walk reads the bytes it reaches where they are.
+    type Octets: Borrow<[u8; K]>;
+
+    /// The octets of the key, the first one selecting the slot of the first
+    /// page.
+    fn into_octets(self) -> Self::Octets;
+}
+
+impl<const K: usize> LpmKey<K> for [u8; K] {
+    type Octets = Self;
+
+    #[inline(always)]
+    fn into_octets(self) -> Self {
+        self
+    }
+}
+
+impl<'a, const K: usize> LpmKey<K> for &'a [u8; K] {
+    type Octets = &'a [u8; K];
+
+    #[inline(always)]
+    fn into_octets(self) -> &'a [u8; K] {
+        self
+    }
+}
+
+impl<'a, const K: usize> LpmKey<K> for &'a mut [u8; K] {
+    type Octets = &'a [u8; K];
+
+    #[inline(always)]
+    fn into_octets(self) -> &'a [u8; K] {
+        self
+    }
+}
+
+impl LpmKey<4> for Ipv4Addr {
+    type Octets = [u8; 4];
+
+    #[inline(always)]
+    fn into_octets(self) -> [u8; 4] {
+        self.octets()
+    }
+}
+
+impl LpmKey<16> for Ipv6Addr {
+    type Octets = [u8; 16];
+
+    #[inline(always)]
+    fn into_octets(self) -> [u8; 16] {
+        self.octets()
+    }
+}
 
 const FLAG: u64 = bindings::LPM_VALUE_FLAG as u64;
 

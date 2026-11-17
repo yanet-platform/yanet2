@@ -399,8 +399,14 @@ impl Module for Fib {
 /// frame selects.
 fn route_indexes<'id>(cx: &Cx<'id, Fib>, fib: &'id RouteFib, frame: &[u8]) -> Option<&'id [u64]> {
     let list = match frame.get(12..14)? {
-        [0x08, 0x00] => fib.lpm_v4.lookup(cx, frame.get(30..34)?.try_into().ok()?)?,
-        [0x86, 0xdd] => fib.lpm_v6.lookup(cx, frame.get(38..54)?.try_into().ok()?)?,
+        [0x08, 0x00] => {
+            let dst: &[u8; 4] = frame.get(30..)?.first_chunk()?;
+            fib.lpm_v4.lookup(cx, dst)?
+        }
+        [0x86, 0xdd] => {
+            let dst: &[u8; 16] = frame.get(38..)?.first_chunk()?;
+            fib.lpm_v6.lookup(cx, dst)?
+        }
         _ => return None,
     };
     let list = fib.route_lists.as_slice(cx).get(usize::try_from(list).ok()?)?;

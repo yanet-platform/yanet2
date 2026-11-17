@@ -400,8 +400,8 @@ fn test_build_leaves_tables_of_no_ranges_empty_and_unallocated() {
         (
             config.v4.is_empty(),
             config.v6.is_empty(),
-            config.v4.lookup(&view, &[10, 0, 0, 1]),
-            config.v6.lookup(&view, &[0xfd; 16])
+            config.v4.lookup(&view, [10, 0, 0, 1]),
+            config.v6.lookup(&view, [0xfd; 16])
         )
     );
     // Only the root block.
