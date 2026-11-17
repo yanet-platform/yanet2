@@ -275,6 +275,15 @@ impl<'a, const K: usize> LpmKey<K> for &'a [u8; K] {
     }
 }
 
+impl<'a, const K: usize> LpmKey<K> for &'a mut [u8; K] {
+    type Octets = &'a [u8; K];
+
+    #[inline(always)]
+    fn into_octets(self) -> &'a [u8; K] {
+        self
+    }
+}
+
 impl LpmKey<4> for Ipv4Addr {
     type Octets = [u8; 4];
 

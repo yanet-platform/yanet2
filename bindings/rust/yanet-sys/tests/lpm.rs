@@ -95,6 +95,16 @@ fn test_lpm_lookup_walks_pages() {
     );
 }
 
+/// verifies that a mutable array reference is a key, as a shared one is.
+#[test]
+fn test_lpm_lookup_by_mut_array_finds_what_a_shared_one_finds() {
+    let (view, lpm) = hand_built::<4>(BlockArena::new());
+    let mut keys = [[10, 0, 7, 7], [10, 1, 3, 4], [11, 0, 0, 0], [10, 2, 0, 0]];
+
+    let by_shared = keys.each_ref().map(|key| lpm.lookup(&view, key));
+    assert_eq!(by_shared, keys.each_mut().map(|key| lpm.lookup(&view, key)));
+}
+
 #[test]
 fn test_lpm4_lookup_by_address_finds_what_its_octets_find() {
     let (view, lpm): (_, &Lpm4) = hand_built(BlockArena::new());
