@@ -47,9 +47,9 @@ impl LpmAt {
 
 /// Lays an LPM out at an address as the C insert lays it out.
 ///
-/// One directory entry, one chunk, three pages in use. `10.0.0.0/16` maps to 5
-/// on page 1, `10.1.0.0/16` reaches page 2, whose every slot maps to 9;
-/// every other slot is the invalid mark.
+/// One directory entry, one chunk, three pages in use. Keys that start with
+/// bytes 10, 0 map to 5 on page 1, keys that start with 10, 1 reach page 2,
+/// whose every slot maps to 9; every other slot is the invalid mark.
 fn fill_lpm(arena: &'static BlockArena, lpm: usize) -> LpmAt {
     let at = LpmAt {
         directory: arena.alloc(8).as_ptr().addr(),
@@ -95,7 +95,6 @@ fn test_lpm_lookup_walks_pages() {
     );
 }
 
-/// verifies that a mutable array reference is a key, as a shared one is.
 #[test]
 fn test_lpm_lookup_by_mut_array_finds_what_a_shared_one_finds() {
     let (view, lpm) = hand_built::<4>(BlockArena::new());

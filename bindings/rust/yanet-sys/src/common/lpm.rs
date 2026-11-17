@@ -185,13 +185,20 @@ pub type Lpm4 = Lpm<4>;
 /// IPv6 LPM.
 pub type Lpm6 = Lpm<16>;
 
-/// A key of an [`Lpm`] of `K` bytes: its octets in network order.
+/// A key of an LPM table: its octets in network order, as many as the table's
+/// key width.
 ///
-/// An array of `K` bytes, by value or by reference, is a key of the table of
-/// its length, an [`Ipv4Addr`] a key of an [`Lpm4`] and an [`Ipv6Addr`] of an
-/// [`Lpm6`], so an address read from a header is looked up as it is:
+/// An array of that many bytes, by value or by reference, is a key, an IPv4
+/// address is a key of an IPv4 table and an IPv6 address of an IPv6 one, so an
+/// address read from a header is looked up as it is. A key of another width
+/// does not compile. A key type of a module may implement the trait; the walk
+/// takes the octets as the key gives them, so a key in host order looks up
+/// another range.
+///
+/// # Examples
 ///
 /// ```
+/// // An address is a key of the table of its width.
 /// use core::net::Ipv4Addr;
 ///
 /// use yanet_shm::resolve::Resolve;
@@ -202,9 +209,8 @@ pub type Lpm6 = Lpm<16>;
 /// }
 /// ```
 ///
-/// A key of another length does not compile, neither an address:
-///
 /// ```compile_fail,E0277
+/// // An address of another width is not.
 /// use core::net::Ipv6Addr;
 ///
 /// use yanet_shm::resolve::Resolve;
@@ -215,9 +221,8 @@ pub type Lpm6 = Lpm<16>;
 /// }
 /// ```
 ///
-/// nor an array:
-///
 /// ```compile_fail,E0277
+/// // Nor is an array of another width.
 /// use yanet_shm::resolve::Resolve;
 /// use yanet_sys::common::lpm::Lpm6;
 ///
@@ -226,10 +231,8 @@ pub type Lpm6 = Lpm<16>;
 /// }
 /// ```
 ///
-/// A key type of a module may implement it; the walk takes the octets as the
-/// key gives them, so a key in host order looks up another range:
-///
 /// ```
+/// // A key type of a module hands over its octets.
 /// use yanet_shm::resolve::Resolve;
 /// use yanet_sys::common::lpm::{Lpm4, LpmKey};
 ///
