@@ -259,7 +259,9 @@ if [ "$c" = 1 ] || matching '(\.go$|^go\.(mod|sum)$|\.proto$)' >/dev/null; then 
 # The SDK workspace is not a member of the root one; as in CI, only its own
 # layer checks it.
 matching '(\.rs$|(^|/)Cargo\.(toml|lock)$|^\.rustfmt\.toml$|^\.cargo/|\.proto$)' | grep -qv '^bindings/rust/' && gate_rust
-matching '(^bindings/rust/|^\.rustfmt\.toml$|^\.cargo/)' >/dev/null && gate_sdk
+# The C headers, packet sources and build configuration feed the SDK's
+# bindings and shims, as the paths of rust-sdk.yml list them.
+matching '(^bindings/rust/|^\.rustfmt\.toml$|^\.cargo/config\.toml$|^(common|lib)/.*\.h$|^lib/dataplane/packet/.*\.c$|^subprojects/dpdk$|(^|/)meson\.build$|^meson_options\.txt$)' >/dev/null && gate_sdk
 matching '(^|/)web/|^package(-lock)?\.json$' >/dev/null && gate_web
 matching '\.proto$' >/dev/null && step proto-lint make --no-print-directory proto-lint
 [ -n "$(git rev-list "$base"..HEAD)" ] && step commitlint lint/commit/commitlint.sh --range "$base..HEAD"
