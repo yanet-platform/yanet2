@@ -21,7 +21,10 @@ use yanet_shm::{
     root::ShmRoot,
 };
 use yanet_sys::{
-    cp::{BlockAddr, Built, BuiltObject, Context, Header, Owner},
+    cp::{
+        BlockAddr, Built, BuiltObject, Context, Freed, Fresh, Header, Live, LiveContext, ModuleKind, ObjectKind, Owner,
+        Retiring,
+    },
     dp::{Module, ModuleConfig, Object},
 };
 
@@ -435,61 +438,66 @@ unsafe impl Owner for TestOwner {
         self.take(None, size)
     }
 
-    unsafe fn free(&self, addr: BlockAddr, size: usize) {
-        self.give_back(None, addr, size);
+    fn free(block: Freed<'_, Self>) {
+        block.owner().give_back(None, block.addr(), block.size());
     }
 
-    unsafe fn alloc_in(&self, context: Context, size: usize) -> Option<BlockAddr> {
-        self.take(Some(context), size)
+    fn alloc_in(context: &LiveContext<'_, Self>, size: usize) -> Option<BlockAddr> {
+        context.owner().take(Some(context.context()), size)
     }
 
-    unsafe fn free_in(&self, context: Context, addr: BlockAddr, size: usize) {
-        self.give_back(Some(context), addr, size);
+    fn free_in(block: Freed<'_, Self, Context>) {
+        block
+            .owner()
+            .give_back(Some(block.context()), block.addr(), block.size());
     }
 
-    unsafe fn init_header(&self, header: Header, _module: &str, _name: &str) -> Result<(), TestError> {
-        self.init(header, HeaderKind::Module)
+    fn init_header(block: Fresh<'_, Self, ModuleKind>, _module: &str, _name: &str) -> Result<(), TestError> {
+        block.owner().init(block.header(), HeaderKind::Module)
     }
 
-    unsafe fn fini_header(&self, header: Header) {
-        self.fini(header, HeaderKind::Module);
+    fn fini_header(header: Retiring<'_, Self, ModuleKind>) {
+        header.owner().fini(header.header(), HeaderKind::Module);
     }
 
-    unsafe fn init_object_header(&self, header: Header, _ty: &str, _name: &str) -> Result<(), TestError> {
-        self.init(header, HeaderKind::Object)
+    fn init_object_header(block: Fresh<'_, Self, ObjectKind>, _ty: &str, _name: &str) -> Result<(), TestError> {
+        block.owner().init(block.header(), HeaderKind::Object)
     }
 
-    unsafe fn fini_object_header(&self, header: Header) {
-        self.fini(header, HeaderKind::Object);
+    fn fini_object_header(header: Retiring<'_, Self, ObjectKind>) {
+        header.owner().fini(header.header(), HeaderKind::Object);
     }
 
-    unsafe fn register_counter(&self, _header: Header, _name: &str, size: u64) -> Result<u64, TestError> {
-        self.counter_sizes.borrow_mut().push(size);
-        self.register()
+    fn register_counter(header: &Live<'_, Self, ModuleKind>, _name: &str, size: u64) -> Result<u64, TestError> {
+        let owner = header.owner();
+        owner.counter_sizes.borrow_mut().push(size);
+        owner.register()
     }
 
-    unsafe fn ensure_counter_registry(&self, header: Header, tag: &str) -> Result<u64, TestError> {
-        if self.fails(Call::Registration) {
+    fn ensure_counter_registry(header: &Live<'_, Self, ModuleKind>, tag: &str) -> Result<u64, TestError> {
+        let owner = header.owner();
+        if owner.fails(Call::Registration) {
             return Err(TestError::Registration);
         }
-        Ok(self.counter_registry(header, tag))
+        Ok(owner.counter_registry(header.header(), tag))
     }
 
-    unsafe fn register_counter_in(
-        &self,
-        header: Header,
+    fn register_counter_in(
+        header: &Live<'_, Self, ModuleKind>,
         tag: &str,
         name: &str,
         size: u64,
     ) -> Result<(u64, u64), TestError> {
-        let registry = self.counter_registry(header, tag);
-        self.counter_sizes.borrow_mut().push(size);
-        if self.fails(Call::Registration) {
+        let owner = header.owner();
+        let header = header.header();
+        let registry = owner.counter_registry(header, tag);
+        owner.counter_sizes.borrow_mut().push(size);
+        if owner.fails(Call::Registration) {
             return Err(TestError::Registration);
         }
         // The counters of a registry are numbered from zero, and a name met
         // before gets its id back, refused under another size.
-        let mut counters = self.tagged_counters.borrow_mut();
+        let mut counters = owner.tagged_counters.borrow_mut();
         let mut own = counters
             .iter()
             .filter(|counter| counter.0 == header && counter.1 == registry);
@@ -504,15 +512,17 @@ unsafe impl Owner for TestOwner {
         }
     }
 
-    unsafe fn register_object_counter(&self, header: Header, name: &str, size: u64) -> Result<u64, TestError> {
-        self.counter_sizes.borrow_mut().push(size);
-        if self.fails(Call::Registration) {
+    fn register_object_counter(header: &Live<'_, Self, ObjectKind>, name: &str, size: u64) -> Result<u64, TestError> {
+        let owner = header.owner();
+        let header = header.header();
+        owner.counter_sizes.borrow_mut().push(size);
+        if owner.fails(Call::Registration) {
             return Err(TestError::Registration);
         }
         // The counters of an object are numbered from zero, apart from the
         // modules' counters, and a name met before gets its id back, refused
         // under another size.
-        let mut counters = self.object_counters.borrow_mut();
+        let mut counters = owner.object_counters.borrow_mut();
         let mut own = counters.iter().filter(|counter| counter.0 == header);
         match own.clone().position(|counter| counter.1 == name) {
             Some(id) if own.nth(id).is_some_and(|counter| counter.2 == size) => Ok(id as u64),
@@ -525,15 +535,17 @@ unsafe impl Owner for TestOwner {
         }
     }
 
-    unsafe fn link_device(&self, _header: Header, _name: &str) -> Result<u64, TestError> {
-        self.register()
+    fn link_device(header: &Live<'_, Self, ModuleKind>, _name: &str) -> Result<u64, TestError> {
+        header.owner().register()
     }
 
-    unsafe fn link_object(&self, header: Header, ty: &str, name: &str) -> Result<u64, TestError> {
+    fn link_object(header: &Live<'_, Self, ModuleKind>, ty: &str, name: &str) -> Result<u64, TestError> {
+        let owner = header.owner();
+        let header = header.header();
         // The links of a header are numbered from zero, apart from its
         // counters and devices, and a pair linked before gets its index again
         // with no call that may fail, as `cp_module_link_object` does.
-        let mut links = self.object_links.borrow_mut();
+        let mut links = owner.object_links.borrow_mut();
         let own = links.iter().filter(|link| link.0 == header);
         if let Some(index) = own
             .clone()
@@ -542,7 +554,7 @@ unsafe impl Owner for TestOwner {
             return Ok(index as u64);
         }
         let index = own.count() as u64;
-        if self.fails(Call::Registration) {
+        if owner.fails(Call::Registration) {
             return Err(TestError::Registration);
         }
         links.push((header, ty.to_string(), name.to_string()));

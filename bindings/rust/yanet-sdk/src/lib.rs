@@ -184,9 +184,9 @@ pub use yanet_sys::{
         lpm::{Lpm4, Lpm6, LpmKey, LpmRange},
     },
     cp::{
-        BlockAddr, Branch, Build, BuildError, Builder, Built, BuiltObject, Context, CounterRegistrar, FfiRecord,
-        HashIndexParts, Header, Kind, ModuleKind, ObjectBuilder, ObjectKind, Owned, OwnedRegions, OwnedSlice,
-        OwnedSlots, Owner, Refusal, Registered, Scope,
+        BlockAddr, Branch, Build, BuildError, Builder, Built, BuiltObject, Context, CounterRegistrar, FfiRecord, Freed,
+        Fresh, HashIndexParts, Header, Kind, Live, LiveContext, ModuleKind, ObjectBuilder, ObjectKind, Owned,
+        OwnedRegions, OwnedSlice, OwnedSlots, Owner, Refusal, Registered, Retiring, Scope,
     },
     dp::{
         Batch, BoundCounter, CommitCx, Counter, CounterLayout, CounterRef, Cx, Device, DeviceRef, Gauge, Module,

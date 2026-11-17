@@ -280,6 +280,58 @@ table. A zero-sized prepared value does not read a missing prepared buffer.
 The `dp` benchmark's harness group also covers whole-front passing and reads
 of stable worker fields.
 
+## Custom configuration owners
+
+Module and object builders keep their existing APIs. Custom implementations of
+`yanet_sys::cp::Owner` migrate the thirteen formerly unsafe lifecycle and
+registration methods to safe associated functions. The trait itself remains
+unsafe: the implementation still guarantees raw provenance, allocation alignment,
+correct C operations and non-panicking finalization and freeing.
+`root`, `worker_count` and root `alloc` retain their `&self` receiver.
+
+Use the owner stored in each capability, not a separately selected instance.
+For example, the freeing seam changes from
+`unsafe fn free(&self, addr: BlockAddr, size: usize)` to
+`fn free(block: Freed<'_, Self>)`. The implementation obtains its actual owner
+from `block.owner()` and the original allocation from `block.addr()` and
+`block.size()`. Child freeing instead takes `Freed<'_, Self, Context>` and
+also obtains `block.context()`.
+
+The remaining signatures follow the operation's state and header kind:
+
+| Operation | Capability argument |
+|-----------|---------------------|
+| `init_header` / `init_object_header` | `Fresh<'_, Self, ModuleKind>` / `Fresh<'_, Self, ObjectKind>`, consumed |
+| `fini_header` / `fini_object_header` | `Retiring<'_, Self, ModuleKind>` / `Retiring<'_, Self, ObjectKind>`, consumed |
+| `alloc_in` | `&LiveContext<'_, Self>` |
+| `register_counter`, `ensure_counter_registry`, `register_counter_in`, `link_device`, `link_object` | `&Live<'_, Self, ModuleKind>` |
+| `register_object_counter` | `&Live<'_, Self, ObjectKind>` |
+
+Header capabilities expose `owner()` and `header()`; a live-context capability
+exposes `owner()` and `context()`. Keep each required unsafe C call and its safety
+justification inside the implementation. Safe dispatch does not make C calls safe
+or relax the `Build::write` and `Build::free` contracts.
+
+Before, a call such as
+`unsafe { owner.register_counter(header, "packets", 1) }` required the caller to
+justify that the raw header was an initialized, unpublished module belonging to
+that particular owner. Now `W::register_counter(&live, "packets", 1)` carries that
+state and the actual owner together. An object's live capability is rejected by
+the module operation, and there is no independent receiver on which to select a
+foreign owner of the same type.
+
+Capabilities are issued privately by the builder and remain thread-confined.
+Initialization, finalization and freeing consume non-copyable permissions, so
+safe callers cannot initialize twice, finalize twice, return a block twice or
+mix root and child freeing. Raw `Header`, `Context` and `BlockAddr` types and
+their address getters remain available, but constructing a raw address grants
+none of those permissions. The address-module rustdoc includes compile-fail
+examples and matching positive examples for these restrictions.
+
+Custom owners must still declare `C_MEMORY`. Set it to true only when initialized
+headers contain real C memory contexts. Arena-only owners keep it false and
+preserve the existing `Refusal::NoCMemory` behavior.
+
 ## Safe builder tests
 
 With the `cp` feature, `yanet-sdk-testing` provides a safe configuration

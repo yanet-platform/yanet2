@@ -18,7 +18,10 @@ use yanet_sys::{
         CP_OBJECT_NAME_LEN, CP_OBJECT_TYPE_LEN,
     },
     counters::COUNTER_INVALID,
-    cp::{BlockAddr, Built, BuiltObject, Context, Header, Owner, names},
+    cp::{
+        BlockAddr, Built, BuiltObject, Context, Freed, Fresh, Header, Live, LiveContext, ModuleKind, ObjectKind, Owner,
+        Retiring, names,
+    },
     dp::{Module, ModuleConfig, Object, ObjectConfig, ObjectLink},
 };
 
@@ -671,22 +674,17 @@ fn c_name<const N: usize>(name: &str) -> Result<[u8; N], Error> {
 }
 
 /// Finds or creates a tagged registry without registering a counter.
-///
-/// # Safety
-///
-/// The header is a module header initialised by the owner and unpublished.
-unsafe fn counter_registry(
-    owner: &Agent,
-    header: Header,
+fn counter_registry(
+    header: &Live<'_, Agent, ModuleKind>,
     tag: &str,
 ) -> Result<(*mut bindings::counter_registry, u64), Error> {
     let tag = c_name::<{ COUNTER_TAG_VALUE_LEN as usize }>(tag)?;
     let (mut registry, mut chain) = (0, ptr::null_mut());
-    // SAFETY: the header is initialised (caller contract), the tag is NUL
-    // terminated and the out-parameters are valid.
+    // SAFETY: the capability keeps its owner's unpublished module header
+    // live. The tag is NUL terminated and the outputs are valid.
     let counters = unsafe {
         bindings::cp_module_counter_registry(
-            header_at::<bindings::cp_module>(owner, header),
+            header_at::<bindings::cp_module>(header.owner(), header.header()),
             tag.as_ptr().cast::<c_char>(),
             &raw mut registry,
             &raw mut chain,
@@ -699,12 +697,12 @@ unsafe fn counter_registry(
     Ok((counters, registry))
 }
 
-// SAFETY: the root is the mapping's, which covers every block (constructor
-// contract); the blocks come from C's memory contexts, which align them as
-// the contract asks and own them until returned. The routines called from
-// `Drop` do not panic. `cp_module_init` and `cp_object_init` leave a live
-// context in the header over the agent's memory. The worker count is the
-// dataplane's, which C fixes when it starts the instance.
+// SAFETY: the mapping covers every aligned block from its C contexts.
+//
+// Token-bearing operations use their capability's owner and block or header.
+// Finalization does not panic, and initialization leaves a live C memory
+// context over the agent's memory without panicking. C fixes the dataplane
+// worker count when it starts the instance.
 unsafe impl Owner for Agent {
     const C_MEMORY: bool = true;
 
@@ -725,37 +723,47 @@ unsafe impl Owner for Agent {
         self.block(unsafe { bindings::yanet_sys_common_memory_balloc(self.context(), size) })
     }
 
-    unsafe fn free(&self, addr: BlockAddr, size: usize) {
-        // SAFETY: the block came from `alloc` of this context with this size
-        // (caller contract).
-        unsafe { bindings::yanet_sys_common_memory_bfree(self.context(), self.root().ptr(addr.get()), size) };
-    }
-
-    unsafe fn alloc_in(&self, context: Context, size: usize) -> Option<BlockAddr> {
-        // SAFETY: the context is that of an initialised header (caller
-        // contract).
-        self.block(unsafe { bindings::yanet_sys_common_memory_balloc(self.root().ptr(context.get()), size) })
-    }
-
-    unsafe fn free_in(&self, context: Context, addr: BlockAddr, size: usize) {
-        // SAFETY: the block came from `alloc_in` of this context with this
-        // size, and the context is initialised (caller contract).
+    fn free(block: Freed<'_, Self>) {
+        let owner = block.owner();
+        // SAFETY: the capability returns this owner's unreferenced root
+        // block once with its original allocation size.
         unsafe {
-            bindings::yanet_sys_common_memory_bfree(self.root().ptr(context.get()), self.root().ptr(addr.get()), size)
+            bindings::yanet_sys_common_memory_bfree(owner.context(), owner.root().ptr(block.addr().get()), block.size())
         };
     }
 
-    unsafe fn init_header(&self, header: Header, module: &str, name: &str) -> Result<(), Error> {
+    fn alloc_in(context: &LiveContext<'_, Self>, size: usize) -> Option<BlockAddr> {
+        let owner = context.owner();
+        // SAFETY: the capability keeps this owner's header context live.
+        owner
+            .block(unsafe { bindings::yanet_sys_common_memory_balloc(owner.root().ptr(context.context().get()), size) })
+    }
+
+    fn free_in(block: Freed<'_, Self, Context>) {
+        let owner = block.owner();
+        // SAFETY: the capability returns this unreferenced block once with
+        // its original size to the owner's live allocation context.
+        unsafe {
+            bindings::yanet_sys_common_memory_bfree(
+                owner.root().ptr(block.context().get()),
+                owner.root().ptr(block.addr().get()),
+                block.size(),
+            )
+        };
+    }
+
+    fn init_header(block: Fresh<'_, Self, ModuleKind>, module: &str, name: &str) -> Result<(), Error> {
+        let owner = block.owner();
         let module = c_name::<{ CP_MODULE_TYPE_LEN as usize }>(module)?;
         let name = c_name::<{ CP_MODULE_NAME_LEN as usize }>(name)?;
         let mut chain = ptr::null_mut();
-        // SAFETY: the header is a block of this agent large enough for it
-        // (caller contract), the names are NUL terminated and the
+        // SAFETY: the capability names this owner's fresh block large
+        // enough for a module header. The names are NUL terminated and the
         // out-parameter points at a null chain.
         if unsafe {
             bindings::cp_module_init(
-                header_at::<bindings::cp_module>(self, header),
-                self.agent.as_ptr(),
+                header_at::<bindings::cp_module>(owner, block.header()),
+                owner.agent.as_ptr(),
                 module.as_ptr().cast::<c_char>(),
                 name.as_ptr().cast::<c_char>(),
                 &raw mut chain,
@@ -768,23 +776,24 @@ unsafe impl Owner for Agent {
         Ok(())
     }
 
-    unsafe fn fini_header(&self, header: Header) {
-        // SAFETY: the header was initialised by `init_header` and is no
-        // longer referenced (caller contract).
-        unsafe { bindings::cp_module_fini(header_at::<bindings::cp_module>(self, header)) };
+    fn fini_header(header: Retiring<'_, Self, ModuleKind>) {
+        // SAFETY: the capability consumes this owner's unreferenced,
+        // initialized module header for one finalization.
+        unsafe { bindings::cp_module_fini(header_at::<bindings::cp_module>(header.owner(), header.header())) };
     }
 
-    unsafe fn init_object_header(&self, header: Header, ty: &str, name: &str) -> Result<(), Error> {
+    fn init_object_header(block: Fresh<'_, Self, ObjectKind>, ty: &str, name: &str) -> Result<(), Error> {
+        let owner = block.owner();
         let ty = c_name::<{ CP_OBJECT_TYPE_LEN as usize }>(ty)?;
         let name = c_name::<{ CP_OBJECT_NAME_LEN as usize }>(name)?;
         let mut chain = ptr::null_mut();
-        // SAFETY: the header is a block of this agent large enough for it
-        // (caller contract), the names are NUL terminated and the
+        // SAFETY: the capability names this owner's fresh block large
+        // enough for an object header. The names are NUL terminated and the
         // out-parameter points at a null chain.
         if unsafe {
             bindings::cp_object_init(
-                header_at::<bindings::cp_object>(self, header),
-                self.agent.as_ptr(),
+                header_at::<bindings::cp_object>(owner, block.header()),
+                owner.agent.as_ptr(),
                 ty.as_ptr().cast::<c_char>(),
                 name.as_ptr().cast::<c_char>(),
                 &raw mut chain,
@@ -797,21 +806,20 @@ unsafe impl Owner for Agent {
         Ok(())
     }
 
-    unsafe fn fini_object_header(&self, header: Header) {
-        // SAFETY: the header was initialised by `init_object_header` and is
-        // no longer referenced (caller contract).
-        unsafe { bindings::cp_object_fini(header_at::<bindings::cp_object>(self, header)) };
+    fn fini_object_header(header: Retiring<'_, Self, ObjectKind>) {
+        // SAFETY: the capability consumes this owner's unreferenced,
+        // initialized object header for one finalization.
+        unsafe { bindings::cp_object_fini(header_at::<bindings::cp_object>(header.owner(), header.header())) };
     }
 
-    unsafe fn register_counter(&self, header: Header, name: &str, size: u64) -> Result<u64, Error> {
+    fn register_counter(header: &Live<'_, Self, ModuleKind>, name: &str, size: u64) -> Result<u64, Error> {
         let name = c_name::<{ COUNTER_NAME_LEN as usize }>(name)?;
         let mut chain = ptr::null_mut();
-        // SAFETY: the header is initialised (caller contract), so its
-        // registry is; the name is NUL terminated and the out-parameter
-        // points at a null chain.
+        // SAFETY: the capability keeps this owner's unpublished module
+        // registry live. The name is NUL terminated and the output is valid.
         let id = unsafe {
             bindings::counter_registry_register(
-                &raw mut (*header_at::<bindings::cp_module>(self, header)).counter_registry,
+                &raw mut (*header_at::<bindings::cp_module>(header.owner(), header.header())).counter_registry,
                 name.as_ptr().cast::<c_char>(),
                 size,
                 &raw mut chain,
@@ -824,25 +832,21 @@ unsafe impl Owner for Agent {
         Ok(id)
     }
 
-    unsafe fn ensure_counter_registry(&self, header: Header, tag: &str) -> Result<u64, Error> {
-        // SAFETY: the header is initialised and unpublished (caller contract).
-        unsafe { counter_registry(self, header, tag) }.map(|(_, registry)| registry)
+    fn ensure_counter_registry(header: &Live<'_, Self, ModuleKind>, tag: &str) -> Result<u64, Error> {
+        counter_registry(header, tag).map(|(_, registry)| registry)
     }
 
-    unsafe fn register_counter_in(
-        &self,
-        header: Header,
+    fn register_counter_in(
+        header: &Live<'_, Self, ModuleKind>,
         tag: &str,
         name: &str,
         size: u64,
     ) -> Result<(u64, u64), Error> {
         let name = c_name::<{ COUNTER_NAME_LEN as usize }>(name)?;
-        // SAFETY: the header is initialised and unpublished (caller contract).
-        let (counters, registry) = unsafe { counter_registry(self, header, tag) }?;
+        let (counters, registry) = counter_registry(header, tag)?;
         let mut chain = ptr::null_mut();
-        // SAFETY: the registry is one of the header's, initialised and kept
-        // in place until the header is finalised; the name is NUL terminated
-        // and the out-parameter points at a null chain.
+        // SAFETY: the capability keeps this owner's unpublished module
+        // registry live. The name is NUL terminated and the output is valid.
         let id = unsafe {
             bindings::counter_registry_register(counters, name.as_ptr().cast::<c_char>(), size, &raw mut chain)
         };
@@ -853,15 +857,14 @@ unsafe impl Owner for Agent {
         Ok((registry, id))
     }
 
-    unsafe fn register_object_counter(&self, header: Header, name: &str, size: u64) -> Result<u64, Error> {
+    fn register_object_counter(header: &Live<'_, Self, ObjectKind>, name: &str, size: u64) -> Result<u64, Error> {
         let name = c_name::<{ COUNTER_NAME_LEN as usize }>(name)?;
         let mut chain = ptr::null_mut();
-        // SAFETY: the header is an initialised object header (caller
-        // contract), so its registry is; the name is NUL terminated and the
-        // out-parameter points at a null chain.
+        // SAFETY: the capability keeps this owner's unpublished object
+        // registry live. The name is NUL terminated and the output is valid.
         let id = unsafe {
             bindings::counter_registry_register(
-                &raw mut (*header_at::<bindings::cp_object>(self, header)).counter_registry,
+                &raw mut (*header_at::<bindings::cp_object>(header.owner(), header.header())).counter_registry,
                 name.as_ptr().cast::<c_char>(),
                 size,
                 &raw mut chain,
@@ -874,14 +877,14 @@ unsafe impl Owner for Agent {
         Ok(id)
     }
 
-    unsafe fn link_device(&self, header: Header, name: &str) -> Result<u64, Error> {
+    fn link_device(header: &Live<'_, Self, ModuleKind>, name: &str) -> Result<u64, Error> {
         let name = c_name::<{ CP_DEVICE_NAME_LEN as usize }>(name)?;
         let (mut index, mut chain) = (0, ptr::null_mut());
-        // SAFETY: the header is initialised (caller contract); the name is
-        // NUL terminated and the out-parameters are valid.
+        // SAFETY: the capability keeps this owner's unpublished module
+        // header live. The name is NUL terminated and the outputs are valid.
         if unsafe {
             bindings::cp_module_link_device(
-                header_at::<bindings::cp_module>(self, header),
+                header_at::<bindings::cp_module>(header.owner(), header.header()),
                 name.as_ptr().cast::<c_char>(),
                 &raw mut index,
                 &raw mut chain,
@@ -894,15 +897,15 @@ unsafe impl Owner for Agent {
         Ok(index)
     }
 
-    unsafe fn link_object(&self, header: Header, ty: &str, name: &str) -> Result<u64, Error> {
+    fn link_object(header: &Live<'_, Self, ModuleKind>, ty: &str, name: &str) -> Result<u64, Error> {
         let ty = c_name::<{ CP_OBJECT_TYPE_LEN as usize }>(ty)?;
         let name = c_name::<{ CP_OBJECT_NAME_LEN as usize }>(name)?;
         let (mut index, mut chain) = (0, ptr::null_mut());
-        // SAFETY: the header is initialised (caller contract); the names are
-        // NUL terminated and the out-parameters are valid.
+        // SAFETY: the capability keeps this owner's unpublished module
+        // header live. The names are NUL terminated and the outputs are valid.
         if unsafe {
             bindings::cp_module_link_object(
-                header_at::<bindings::cp_module>(self, header),
+                header_at::<bindings::cp_module>(header.owner(), header.header()),
                 ty.as_ptr().cast::<c_char>(),
                 name.as_ptr().cast::<c_char>(),
                 &raw mut index,

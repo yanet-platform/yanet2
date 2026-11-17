@@ -23,7 +23,7 @@ use yanet_sdk_testing::cp::{Call, LiveHeaders, TestCx, TestError, TestOwner};
 use yanet_sys::{
     bindings::{COUNTER_TAG_VALUE_LEN, CP_MODULE_NAME_LEN, CP_OBJECT_NAME_LEN},
     common::LINE_BLOCK_ALIGN,
-    cp::{BuildError, Builder, Built, Header, MemoryContext, Owner, Scope},
+    cp::{BuildError, Builder, Built, MemoryContext, Owner, Scope},
     dp::ModuleConfig,
 };
 
@@ -1692,26 +1692,6 @@ fn test_object_build_releases_everything_when_a_counter_fails_at_each_call() {
         assert_eq!(BuildError::Owner(TestError::Registration), err);
         owner.assert_released();
     }
-}
-
-/// verifies that the test owner records a header finalised as the other kind
-/// than it was initialised as, which a builder mixing the kinds would do.
-#[test]
-fn test_test_owner_records_a_header_finalised_as_the_other_kind() {
-    let owner = owner();
-    let block = owner.alloc(64).expect("block");
-    let header = Header::at(block);
-    // SAFETY: the block is the owner's and large enough for the test owner,
-    // which reads no header bytes.
-    unsafe { owner.init_header(header, "fixture", "config0") }.expect("header");
-
-    // SAFETY: the header is the owner's and unreferenced.
-    unsafe { owner.fini_object_header(header) };
-
-    assert_eq!(
-        vec!["a header finalised that is unknown, of the other kind or has live blocks"],
-        owner.violations()
-    );
 }
 
 /// A block of ports, then links to two policy objects: a refused link leaves
