@@ -62,22 +62,24 @@ mutations of the Go code fail these comparisons.
 ## Numbers
 
 In-process dataplane, two workers, AMD Ryzen AI MAX+ 395; `go test -bench` in `cpconfig`
-and `decap`, medians of five runs. Both columns deliver the workers' contexts on the
-publishing thread, as the C publish does for an in-process dataplane.
+and `decap`, medians of seven runs. Both columns deliver the workers' contexts on the
+publishing thread, as the C publish does for an in-process dataplane, and both leave the
+same bytes.
 
 | Operation | cgo | native |
 |---|---|---|
-| Build a decap configuration of 256 prefixes | 35.5 µs | 12.0 µs |
-| Build and publish it until every worker runs it | 45.0 µs | 23.6 µs |
-| Build and publish one blackhole configuration | 7.9 µs | 10.2 µs |
+| Build a decap configuration of 256 prefixes | 35.9 µs | 11.8 µs |
+| Build and publish it until every worker runs it | 45.8 µs | 19.8 µs |
+| Build and publish one blackhole configuration | 7.9 µs | 8.1 µs |
 
 - Building per item through cgo pays a call per prefix; native code pays none.
-- The blackhole publish is almost all shared work, so the cgo crossing is cheap next to
-  it. Timed phase by phase, most of the remaining difference is building the workers'
-  execution contexts, about 5 µs in C and 6 µs in Go.
+- About half of a C publish goes to the counter storages' tag sets: every storage of
+  every worker is found and registered under up to 16 fixed 160-byte tags, encoded,
+  sorted and hashed anew on each publish. Go writes the same tags, but encodes each path's
+  set once and remembers it, since the names along a path do not change.
 - Delivered by an assigner thread instead, as a real dataplane's workers take contexts
-  on their own cores, the native blackhole publish takes 14.4 µs.
-- Allocations per blackhole publish: 34 small objects, 560 bytes.
+  on their own cores, the native blackhole publish takes 11.2 µs.
+- Allocations per blackhole publish: 46 small objects, 624 bytes.
 
 ## Facts the port depends on
 

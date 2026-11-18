@@ -25,7 +25,7 @@ const (
 // BuildWorkerContexts builds the execution contexts of every worker for
 // a generation, as config_gen_ectxs_create does: a whole tree per worker,
 // device to module, whose counter storages continue those old has at the
-// same places.
+// same places. The caller holds the instance's configuration lock.
 func BuildWorkerContexts(gen, old *layout.CpConfigGen, workerCount uint64) (*shm.Ptr[layout.ConfigGenEctx], error) {
 	if workerCount == 0 {
 		return nil, fmt.Errorf("cannot build execution context for zero workers")
@@ -37,8 +37,10 @@ func BuildWorkerContexts(gen, old *layout.CpConfigGen, workerCount uint64) (*shm
 		return nil, fmt.Errorf("allocate per-worker contexts: %w", ErrNoMemory)
 	}
 	roots := unsafe.Slice((*shm.Ptr[layout.ConfigGenEctx])(block), workerCount)
+	tags := tagCacheOf(cp)
+	defer tags.EndBuild()
 	for worker := range workerCount {
-		m := &contextBuilder{gen: gen, old: old, cp: cp, dp: cp.DpConfig.Get(), worker: worker}
+		m := &contextBuilder{gen: gen, old: old, cp: cp, dp: cp.DpConfig.Get(), worker: worker, tags: tags}
 		root, err := m.root()
 		if err != nil {
 			for idx := range worker {
@@ -61,6 +63,8 @@ type contextBuilder struct {
 	worker uint64
 	// tree is the worker's root context being built.
 	tree *layout.ConfigGenEctx
+	// tags encodes the tags storages register under, once per path.
+	tags *tagCache
 }
 
 // alloc returns zeroed memory for a context.
@@ -88,12 +92,12 @@ func (m *contextBuilder) oldStorages() *layout.CpConfigCounterStorageRegistry {
 // spawn returns the worker's counter storage for a registry, continuing
 // the one registered under tags in the previous generation, and
 // registers it under tags in this one.
-func (m *contextBuilder) spawn(set tagSet, registry *layout.CounterRegistry) (*layout.CounterStorage, error) {
-	tags := set.Tags[:set.Count]
-	if err := normalizeTags(tags, false); err != nil {
+func (m *contextBuilder) spawn(pairs tagPairs, registry *layout.CounterRegistry) (*layout.CounterStorage, error) {
+	encoded, err := m.tags.Encode(pairs)
+	if err != nil {
 		return nil, err
 	}
-	hash := tagsHash(tags)
+	tags, hash := encoded.Tags[:encoded.Count], encoded.Hash
 	old := storageRegistryLookup(m.oldStorages(), tags, hash)
 	storage := spawnCounterStorage(&m.cp.CounterStorageMemoryContext, old, registry)
 	if storage == nil {

@@ -3,11 +3,12 @@
 package cpconfig
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"unsafe"
 
@@ -123,44 +124,6 @@ func spawnCounterStorage(context *layout.MemoryContext, old *layout.CounterStora
 	return storage
 }
 
-// normalizeTags sorts tags by key and refuses duplicate keys and, for a
-// tag set being registered, the values reserved for predicates.
-func normalizeTags(tags []layout.CounterTag, predicate bool) error {
-	if len(tags) > maxTagCount {
-		return fmt.Errorf("tag count exceeds max %d", maxTagCount)
-	}
-	for idx := range tags {
-		value := shm.Bytes(tags[idx].Value[:])
-		if !predicate && (len(value) == 0 || string(value) == "*") {
-			return fmt.Errorf("tag %q: value %q is reserved for predicates",
-				shm.String(tags[idx].Key[:]), shm.String(tags[idx].Value[:]),
-			)
-		}
-	}
-	slices.SortFunc(tags, func(left, right layout.CounterTag) int {
-		return bytes.Compare(shm.Bytes(left.Key[:]), shm.Bytes(right.Key[:]))
-	})
-	for idx := 0; idx+1 < len(tags); idx++ {
-		if bytes.Equal(shm.Bytes(tags[idx].Key[:]), shm.Bytes(tags[idx+1].Key[:])) {
-			return fmt.Errorf("duplicate key %q", shm.String(tags[idx].Key[:]))
-		}
-	}
-	return nil
-}
-
-// tagsHash hashes a normalised tag set: the count, then every key and
-// value in order.
-func tagsHash(tags []layout.CounterTag) uint32 {
-	var count [8]byte
-	binary.LittleEndian.PutUint64(count[:], uint64(len(tags)))
-	hash := fnv1a(count[:], 0)
-	for idx := range tags {
-		hash = fnv1a(shm.Bytes(tags[idx].Key[:]), uint32(hash))
-		hash = fnv1a(shm.Bytes(tags[idx].Value[:]), uint32(hash))
-	}
-	return uint32(hash)
-}
-
 func storageRegistryItems(registry *layout.CpConfigCounterStorageRegistry) []layout.CpCounterStorage {
 	items := registry.Items.Get()
 	if items == nil {
@@ -187,21 +150,14 @@ func storageRegistryInit(context *layout.MemoryContext, registry *layout.CpConfi
 }
 
 // storageRegistryIndex returns the index of the storage registered under
-// exactly the normalised tags of the hash, or hashIndexInvalid.
+// exactly the normalised tags of the hash, or hashIndexInvalid. Stored
+// tags are zero past their strings, as the set's are, so equal bytes are
+// equal tags.
 func storageRegistryIndex(registry *layout.CpConfigCounterStorageRegistry, tags []layout.CounterTag, hash uint32) uint32 {
 	items := storageRegistryItems(registry)
 	return hashIndexLookup(&registry.TagIndex, hash, func(value uint32) bool {
 		item := &items[value]
-		if item.TagCount != uint64(len(tags)) {
-			return false
-		}
-		for idx := range tags {
-			if !bytes.Equal(shm.Bytes(item.Tags[idx].Key[:]), shm.Bytes(tags[idx].Key[:])) ||
-				!bytes.Equal(shm.Bytes(item.Tags[idx].Value[:]), shm.Bytes(tags[idx].Value[:])) {
-				return false
-			}
-		}
-		return true
+		return item.TagCount == uint64(len(tags)) && slices.Equal(item.Tags[:len(tags)], tags)
 	})
 }
 
@@ -258,11 +214,18 @@ func storageRegistryLookup(registry *layout.CpConfigCounterStorageRegistry, tags
 	return storageRegistryItems(registry)[index].Storage.Get()
 }
 
-// tagSet is a tag set a storage registers under, held by value: building
-// it, normalising and hashing it allocate nothing, as on C's stack.
+// tagSet is the set of tags a counter storage registers under, kept
+// sorted by key as a registered set must be.
+//
+// Every key and value is held twice: as a Go string, so that sorting,
+// checking and hashing the set never search a fixed-size field for its
+// end, and encoded as the zero-padded tag shared memory stores, so that a
+// stored set matches it when their bytes are equal.
 type tagSet struct {
-	Tags  [maxTagCount]layout.CounterTag
-	Count int
+	Keys   [maxTagCount]string
+	Values [maxTagCount]string
+	Tags   [maxTagCount]layout.CounterTag
+	Count  int
 }
 
 // newTagSet returns the tag set of key and value pairs.
@@ -272,64 +235,211 @@ func newTagSet(pairs ...string) tagSet {
 	return m
 }
 
-// Add inserts the tags of key and value pairs in place, keeping the set
-// sorted by key as a registered set must be, so that normalising it only
-// confirms the order; a repeated key is left for normalising to refuse.
+// Add inserts the tags of key and value pairs in key order, each cut to
+// what its field keeps; a repeated key is left for Check to refuse.
 func (m *tagSet) Add(pairs ...string) {
 	for idx := 0; idx+1 < len(pairs); idx += 2 {
-		key := pairs[idx]
+		key := fitted(pairs[idx], len(layout.CounterTag{}.Key))
+		value := fitted(pairs[idx+1], len(layout.CounterTag{}.Value))
 		at := m.Count
-		for at > 0 && string(shm.Bytes(m.Tags[at-1].Key[:])) > key {
+		for at > 0 && m.Keys[at-1] > key {
 			at--
 		}
+		copy(m.Keys[at+1:m.Count+1], m.Keys[at:m.Count])
+		copy(m.Values[at+1:m.Count+1], m.Values[at:m.Count])
 		copy(m.Tags[at+1:m.Count+1], m.Tags[at:m.Count])
+		m.Keys[at], m.Values[at] = key, value
 		m.Tags[at] = layout.CounterTag{}
-		shm.CopyString(m.Tags[at].Key[:], key)
-		shm.CopyString(m.Tags[at].Value[:], pairs[idx+1])
+		copy(m.Tags[at].Key[:], key)
+		copy(m.Tags[at].Value[:], value)
 		m.Count++
 	}
 }
 
-// The tag sets the execution contexts register their storages under.
-
-func deviceTags(device string) tagSet {
-	return newTagSet("device", device, "kind", "device")
+// Check refuses a set with a repeated key, or with a value reserved for
+// the predicates readers select counters with.
+func (m *tagSet) Check() error {
+	for idx := range m.Count {
+		if m.Values[idx] == "" || m.Values[idx] == "*" {
+			return fmt.Errorf("tag %q: value %q is reserved for predicates", m.Keys[idx], m.Values[idx])
+		}
+		if idx > 0 && m.Keys[idx] == m.Keys[idx-1] {
+			return fmt.Errorf("duplicate key %q", m.Keys[idx])
+		}
+	}
+	return nil
 }
 
-func pipelineTags(device, pipeline string) tagSet {
-	return newTagSet("device", device, "pipeline", pipeline, "kind", "pipeline")
+// Hash hashes the set as C hashes a normalised one: the count, then every
+// key and value in order.
+func (m *tagSet) Hash() uint32 {
+	var count [8]byte
+	binary.LittleEndian.PutUint64(count[:], uint64(m.Count))
+	hash := fnv1a(count[:], 0)
+	for idx := range m.Count {
+		hash = fnv1a(m.Keys[idx], uint32(hash))
+		hash = fnv1a(m.Values[idx], uint32(hash))
+	}
+	return uint32(hash)
 }
 
-func functionTags(device, pipeline, function string) tagSet {
-	return newTagSet("device", device, "pipeline", pipeline, "function", function, "kind", "function")
+// fitted returns what of a string a C character field of size bytes
+// keeps: the bytes before any NUL, at most one short of the field.
+func fitted(value string, size int) string {
+	value, _, _ = strings.Cut(value, "\x00")
+	return value[:min(len(value), size-1)]
 }
 
-func chainTags(device, pipeline, function, chain string) tagSet {
-	return newTagSet("device", device, "pipeline", pipeline, "function", function, "chain", chain, "kind", "chain")
+// tagPairs names the tags a storage registers under: key and value pairs
+// in the order its path gives them.
+type tagPairs struct {
+	Pairs [2 * maxTagCount]string
+	Count int
 }
 
-func modulePathTags(device, pipeline, function, chain, moduleType, moduleName string) tagSet {
-	return newTagSet(
+func newTagPairs(pairs ...string) tagPairs {
+	var m tagPairs
+	m.Add(pairs...)
+	return m
+}
+
+// Add appends key and value pairs.
+func (m *tagPairs) Add(pairs ...string) {
+	m.Count += copy(m.Pairs[m.Count:], pairs)
+}
+
+// encodedTags is a checked tag set as a storage registry stores it: the
+// sorted, zero-padded tags and their hash.
+type encodedTags struct {
+	Tags  [maxTagCount]layout.CounterTag
+	Count int
+	Hash  uint32
+	// Build is the last build of its cache that used it.
+	Build uint64
+}
+
+// encodeTags checks and encodes the tags of pairs.
+func encodeTags(pairs tagPairs) (*encodedTags, error) {
+	set := newTagSet(pairs.Pairs[:pairs.Count]...)
+	if err := set.Check(); err != nil {
+		return nil, err
+	}
+	return &encodedTags{Tags: set.Tags, Count: set.Count, Hash: set.Hash()}, nil
+}
+
+// tagCache remembers the encoded tag sets of an instance's builds.
+//
+// The names along a path do not change, so neither does what they encode
+// to: a build reuses what earlier ones encoded, and every worker of a
+// build reuses what the first one did. Sets no longer used are forgotten
+// once they outnumber those the last build used.
+type tagCache struct {
+	entries map[string]*encodedTags
+	build   uint64
+	used    int
+	// key is the buffer a lookup key is written into.
+	key []byte
+}
+
+func newTagCache() *tagCache {
+	return &tagCache{entries: map[string]*encodedTags{}}
+}
+
+// Encode returns the encoded tags of pairs.
+func (m *tagCache) Encode(pairs tagPairs) (*encodedTags, error) {
+	m.key = m.key[:0]
+	for _, part := range pairs.Pairs[:pairs.Count] {
+		m.key = binary.AppendUvarint(m.key, uint64(len(part)))
+		m.key = append(m.key, part...)
+	}
+	tags, ok := m.entries[string(m.key)]
+	if !ok {
+		var err error
+		if tags, err = encodeTags(pairs); err != nil {
+			return nil, err
+		}
+		m.entries[string(m.key)] = tags
+	}
+	if tags.Build != m.build {
+		tags.Build = m.build
+		m.used++
+	}
+	return tags, nil
+}
+
+// EndBuild ends a build, forgetting the sets it did not use once they
+// outnumber those it did.
+func (m *tagCache) EndBuild() {
+	if len(m.entries) > 2*m.used {
+		for key, tags := range m.entries {
+			if tags.Build != m.build {
+				delete(m.entries, key)
+			}
+		}
+	}
+	m.build++
+	m.used = 0
+}
+
+// tagCaches holds a tag cache per instance. A cache serves one build at
+// a time: builds of an instance hold its configuration lock.
+var tagCaches = struct {
+	sync.Mutex
+	ByConfig map[*layout.CpConfig]*tagCache
+}{ByConfig: map[*layout.CpConfig]*tagCache{}}
+
+// tagCacheOf returns the tag cache of an instance.
+func tagCacheOf(cp *layout.CpConfig) *tagCache {
+	tagCaches.Lock()
+	defer tagCaches.Unlock()
+	cache, ok := tagCaches.ByConfig[cp]
+	if !ok {
+		cache = newTagCache()
+		tagCaches.ByConfig[cp] = cache
+	}
+	return cache
+}
+
+// The tags the execution contexts register their storages under.
+
+func deviceTags(device string) tagPairs {
+	return newTagPairs("device", device, "kind", "device")
+}
+
+func pipelineTags(device, pipeline string) tagPairs {
+	return newTagPairs("device", device, "pipeline", pipeline, "kind", "pipeline")
+}
+
+func functionTags(device, pipeline, function string) tagPairs {
+	return newTagPairs("device", device, "pipeline", pipeline, "function", function, "kind", "function")
+}
+
+func chainTags(device, pipeline, function, chain string) tagPairs {
+	return newTagPairs("device", device, "pipeline", pipeline, "function", function, "chain", chain, "kind", "chain")
+}
+
+func modulePathTags(device, pipeline, function, chain, moduleType, moduleName string) tagPairs {
+	return newTagPairs(
 		"device", device, "pipeline", pipeline, "function", function,
 		"chain", chain, "module_type", moduleType, "module_name", moduleName,
 	)
 }
 
-func moduleTags(path tagSet) tagSet {
+func moduleTags(path tagPairs) tagPairs {
 	path.Add("kind", "module")
 	return path
 }
 
-func runtimeTags(path tagSet, registryTag string) tagSet {
+func runtimeTags(path tagPairs, registryTag string) tagPairs {
 	path.Add("kind", "runtime", "config", registryTag)
 	return path
 }
 
-func objectLinkTags(path tagSet, objectType, objectName string) tagSet {
+func objectLinkTags(path tagPairs, objectType, objectName string) tagPairs {
 	path.Add("object_type", objectType, "object_name", objectName, "kind", "module_object_link")
 	return path
 }
 
-func objectTags(objectType, objectName string) tagSet {
-	return newTagSet("object_type", objectType, "object_name", objectName, "kind", "object")
+func objectTags(objectType, objectName string) tagPairs {
+	return newTagPairs("object_type", objectType, "object_name", objectName, "kind", "object")
 }
