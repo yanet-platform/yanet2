@@ -256,8 +256,8 @@ pdump_module_config_set_filter(
 	// dataplane interpreter trusts it, jump targets included.
 	//
 	// The loaded copy is dropped. It holds the instructions unchanged, so
-	// the converter's own array is the verified program, and shared
-	// memory keeps only that array: the dataplane builds its own
+	// the converter's own array is the verified program, and the
+	// configuration keeps only that array: the dataplane builds its own
 	// descriptor around it.
 	struct rte_bpf *bpf_on_heap = rte_bpf_load(params);
 	if (bpf_on_heap == NULL) {
@@ -280,7 +280,7 @@ pdump_module_config_set_filter(
 		return -1;
 	}
 	memcpy(ins, params->ins, ins_size);
-	free(params); // we do not need it anymore
+	free(params);
 
 	if (pdump_module_config_update_filter_str(module, filter) == -1) {
 		memory_bfree(&agent->memory_context, ins, ins_size);
@@ -291,7 +291,6 @@ pdump_module_config_set_filter(
 		return -1;
 	};
 
-	// Free the old program before setting the new one.
 	struct ebpf_insn *old_ins = ADDR_OF(&config->filter_ins);
 	if (old_ins != NULL) {
 		memory_bfree(

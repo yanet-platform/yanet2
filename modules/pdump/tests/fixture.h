@@ -79,16 +79,15 @@ pdump_test_gen_destroy(struct pdump_test_gen *gen);
 struct config_gen_ectx *
 pdump_test_gen_worker_ectx(struct pdump_test_gen *gen, uint64_t worker_idx);
 
+// Registry device the fixture's single placement executes on.
+#define PDUMP_TEST_FIXTURE_DEVICE_ID 9
+
 // One pdump capture harness: a fresh agent, a ring object, and a
 // hand-linked module_ectx resolving to it.
 //
 // Stands in for what the control plane and the ectx build normally wire up
 // for a published generation, since neither runs for a config built by
-// hand. module, filter_ins and gen are borrowed from the caller and must
-// outlive the fixture; pdump_test_fixture_destroy does not release them.
-// Registry device the fixture's single placement executes on.
-#define PDUMP_TEST_FIXTURE_DEVICE_ID 9
-
+// hand.
 struct pdump_test_fixture {
 	struct agent *agent;
 	struct cp_object *ring_object;

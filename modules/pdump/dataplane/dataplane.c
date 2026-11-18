@@ -280,10 +280,12 @@ pdump_resolve_prepared(
 		module_ectx->abs_counter_storage
 	);
 
-	// The descriptor rte_bpf_convert gives a classic filter, around the
-	// instructions the control plane verified. The interpreter reads
-	// nothing else: it runs on its own fixed stack, so the stack size the
-	// verifier derives stays zero, and the dataplane runs no JIT.
+	// Describe the verified instructions as DPDK describes a converted
+	// classic filter.
+	//
+	// The interpreter reads only the instructions and runs on its own
+	// fixed stack, so the descriptor leaves out the stack size the
+	// verifier derived; a JIT would need it.
 	result.bpf.prm.ins = filter_ins;
 	result.bpf.prm.nb_ins = config->filter_ins_count;
 	result.bpf.prm.prog_arg.type = RTE_BPF_ARG_PTR_MBUF;

@@ -21,8 +21,8 @@ struct pdump_module_config {
 	// The compiled filter: eBPF instructions in DPDK's encoding.
 	//
 	// The dataplane wraps them in its own interpreter descriptor per
-	// execution context, so shared memory holds no DPDK-private struct.
-	// NULL with a zero count while no filter is set.
+	// execution context, so the configuration holds no DPDK-private
+	// layout. NULL with a zero count while no filter is set.
 	struct ebpf_insn *filter_ins;
 	uint32_t filter_ins_count;
 	enum pdump_mode mode;
