@@ -102,44 +102,63 @@ func (m LineRange) Bounds() (uint32, uint32) {
 
 // groupRules returns the group of every rule, numbering the distinct
 // interval lists in the order they first appear, and the first rule of
-// every group; an absent rule has no group. The groups are found
-// through an open addressing table of group numbers, probed by the hash
-// the C compiles use.
+// every group; an absent rule has no group.
+//
+// The groups are found through an open addressing table of group numbers
+// plus one, zero marking a free slot, probed by the hash the C compiles
+// use. It grows with the groups, kept at most half full, so a ruleset of
+// many rules outside the projection or many equal ones costs a table of
+// its groups, not of its rules.
 func groupRules[S interval](count int, rule func(idx int) ([]S, bool)) ([]uint32, []uint32) {
 	groups := make([]uint32, count)
-	firsts := make([]uint32, 0, count)
-	slots := uint32(1)
-	for slots < uint32(count)*2 {
-		slots <<= 1
-	}
-	table := make([]uint32, slots)
-	for idx := range table {
-		table[idx] = InvalidGroup
-	}
+	var firsts, hashes []uint32
+	table := make([]uint32, 16)
 	for idx := range count {
 		spans, absent := rule(idx)
 		if absent {
 			groups[idx] = InvalidGroup
 			continue
 		}
-		slot := spansHash(spans) & (slots - 1)
-		for {
-			group := table[slot]
-			if group == InvalidGroup {
-				group = uint32(len(firsts))
-				table[slot] = group
-				firsts = append(firsts, uint32(idx))
-				groups[idx] = group
-				break
+		hash := spansHash(spans)
+		mask := uint32(len(table) - 1)
+		slot := hash & mask
+		for ; table[slot] != 0; slot = (slot + 1) & mask {
+			group := table[slot] - 1
+			if hashes[group] != hash {
+				continue
 			}
 			if first, _ := rule(int(firsts[group])); slices.Equal(first, spans) {
-				groups[idx] = group
 				break
 			}
-			slot = (slot + 1) & (slots - 1)
+		}
+		if table[slot] != 0 {
+			groups[idx] = table[slot] - 1
+			continue
+		}
+		groups[idx] = uint32(len(firsts))
+		firsts = append(firsts, uint32(idx))
+		hashes = append(hashes, hash)
+		table[slot] = uint32(len(firsts))
+		if 2*len(firsts) > len(table) {
+			table = groupTable(hashes, 2*len(table))
 		}
 	}
 	return groups, firsts
+}
+
+// groupTable places every group, by its hash, in a fresh table of size
+// slots.
+func groupTable(hashes []uint32, size int) []uint32 {
+	table := make([]uint32, size)
+	mask := uint32(size - 1)
+	for group, hash := range hashes {
+		slot := hash & mask
+		for table[slot] != 0 {
+			slot = (slot + 1) & mask
+		}
+		table[slot] = uint32(group) + 1
+	}
+	return table
 }
 
 // spansHash hashes an interval list as the C compiles do.

@@ -3,7 +3,6 @@
 package classify
 
 import (
-	"cmp"
 	"encoding/binary"
 	"fmt"
 	"net/netip"
@@ -44,6 +43,11 @@ func (m network) Bounds() (uint32, uint32) {
 	return m.From, m.To
 }
 
+// newNetwork returns the network of a masked first address and a length.
+func newNetwork(from uint32, bits uint8) network {
+	return network{From: from, To: from | uint32(uint64(1)<<(32-bits)-1), Bits: bits}
+}
+
 // CompileNet4 compiles the IPv4 network attribute of a ruleset to the
 // lookups and the stage classify_net4_compile produces.
 //
@@ -64,28 +68,38 @@ func CompileNet4(rules []Net4Rule) (*Net4, error) {
 		return netsOf(idx), rules[idx].Absent
 	})
 
-	var distinct []network
+	// A key packs the first address of a network, its length and its
+	// place in nets: the sorted keys sort the networks by first address,
+	// then length, and tell every place the distinct network it holds.
+	if len(nets) > placeMask {
+		return nil, fmt.Errorf("%d networks exceed %d", len(nets), placeMask)
+	}
+	var keys []uint64
 	for _, first := range firsts {
-		for _, net := range netsOf(int(first)) {
-			if net.Bits > 0 {
-				distinct = append(distinct, net)
+		for place := starts[first]; place < starts[first+1]; place++ {
+			if net := nets[place]; net.Bits > 0 {
+				keys = append(keys, uint64(net.From)<<32|uint64(net.Bits)<<24|uint64(place))
 			}
 		}
 	}
-	slices.SortFunc(distinct, func(left, right network) int {
-		return cmp.Or(cmp.Compare(left.From, right.From), cmp.Compare(left.Bits, right.Bits))
-	})
-	distinct = slices.Compact(distinct)
-	intervals := collectClasses(distinct)
-
-	// spanOf returns the intervals a network covers.
-	spanOf := func(net network) (int, int) {
-		first, _ := slices.BinarySearch(intervals.Starts, net.From)
-		end := len(intervals.Starts)
-		if net.To != ^uint32(0) {
-			end, _ = slices.BinarySearch(intervals.Starts, net.To+1)
+	slices.Sort(keys)
+	var distinct []network
+	distinctOf := make([]uint32, len(nets))
+	for _, key := range keys {
+		net := newNetwork(uint32(key>>32), uint8(key>>24))
+		if count := len(distinct); count == 0 || distinct[count-1] != net {
+			distinct = append(distinct, net)
 		}
-		return first, end
+		distinctOf[key&placeMask] = uint32(len(distinct) - 1)
+	}
+	intervals := collectClasses(distinct)
+	whole := intervalSpan{End: uint32(len(intervals.Starts))}
+	// spanAt returns the intervals the network at a place covers.
+	spanAt := func(place int) intervalSpan {
+		if nets[place].Bits == 0 {
+			return whole
+		}
+		return intervals.Spans[distinctOf[place]]
 	}
 
 	classValues := make([]uint32, intervals.ClassCount)
@@ -96,9 +110,9 @@ func CompileNet4(rules []Net4Rule) (*Net4, error) {
 			continue
 		}
 		regions.NewGeneration()
-		for _, net := range rule {
-			from, end := spanOf(net)
-			for idx := from; idx < end; idx++ {
+		for place := starts[first]; place < starts[first+1]; place++ {
+			span := spanAt(place)
+			for idx := span.First; idx < span.End; idx++ {
 				class := intervals.Classes[idx]
 				classValues[class] = regions.Touch(classValues[class])
 			}
@@ -117,9 +131,9 @@ func CompileNet4(rules []Net4Rule) (*Net4, error) {
 			}
 			return
 		}
-		for _, net := range rule {
-			from, end := spanOf(net)
-			for idx := from; idx < end; idx++ {
+		for place := starts[firsts[group]]; place < starts[firsts[group]+1]; place++ {
+			span := spanAt(place)
+			for idx := span.First; idx < span.End; idx++ {
 				builder.Reach(classValues[intervals.Classes[idx]])
 			}
 		}
@@ -154,10 +168,7 @@ func normalizeNet4Rules(rules []Net4Rule) ([]network, []int, error) {
 				return nil, nil, fmt.Errorf("rule %d: %s is not an IPv4 prefix", idx, prefix)
 			}
 			addr := prefix.Masked().Addr().As4()
-			from := binary.BigEndian.Uint32(addr[:])
-			bits := uint8(prefix.Bits())
-			to := from | uint32(uint64(1)<<(32-bits)-1)
-			nets = append(nets, network{From: from, To: to, Bits: bits})
+			nets = append(nets, newNetwork(binary.BigEndian.Uint32(addr[:]), uint8(prefix.Bits())))
 		}
 	}
 	starts = append(starts, len(nets))
@@ -170,12 +181,23 @@ func net4RuleIsAny(nets []network) bool {
 	return len(nets) == 0 || nets[0].Bits == 0
 }
 
+// placeMask masks the place of a network in a sort key.
+const placeMask = 1<<24 - 1
+
 // classIntervals is the address space cut into intervals, ascending,
-// each with the class it belongs to.
+// each with the class it belongs to, and the intervals every network
+// covers.
 type classIntervals struct {
 	Starts     []uint32
 	Classes    []uint32
 	ClassCount uint32
+	Spans      []intervalSpan
+}
+
+// intervalSpan is a run of intervals, from First up to End.
+type intervalSpan struct {
+	First uint32
+	End   uint32
 }
 
 // collectClasses cuts the address space by distinct networks sorted by
@@ -186,14 +208,18 @@ type classIntervals struct {
 // top, with the class each has emitted under; the class of a network is
 // numbered when it first emits an interval, and a network ending where
 // the one around it ends renews that one's class instead of stacking.
+// A network covers the intervals from its push up to its frame's pop.
 func collectClasses(nets []network) classIntervals {
 	const unnumbered = ^uint32(0)
 	type frame struct {
 		Class uint32
 		To    uint64
+		// Pending is where the networks the frame ends begin in pending.
+		Pending int
 	}
-	var collected classIntervals
+	collected := classIntervals{Spans: make([]intervalSpan, len(nets))}
 	stack := make([]frame, 0, 33)
+	var pending []uint32
 	position := uint64(0)
 	emit := func(to uint64) {
 		top := &stack[len(stack)-1]
@@ -205,33 +231,34 @@ func collectClasses(nets []network) classIntervals {
 		collected.Classes = append(collected.Classes, top.Class)
 		position = to + 1
 	}
-	push := func(to uint64) {
-		if len(stack) > 0 && stack[len(stack)-1].To == to {
-			stack[len(stack)-1].Class = unnumbered
-			return
+	pop := func() {
+		top := stack[len(stack)-1]
+		emit(top.To)
+		for _, net := range pending[top.Pending:] {
+			collected.Spans[net].End = uint32(len(collected.Starts))
 		}
-		stack = append(stack, frame{Class: unnumbered, To: to})
+		pending = pending[:top.Pending]
+		stack = stack[:len(stack)-1]
 	}
-	push(1<<32 - 1)
-	for _, net := range nets {
-		from := uint64(net.From)
-		for len(stack) > 0 {
-			top := stack[len(stack)-1]
-			if top.To < from {
-				emit(top.To)
-				stack = stack[:len(stack)-1]
-				continue
-			}
-			if position < from {
-				emit(from - 1)
-			}
-			break
+	stack = append(stack, frame{Class: unnumbered, To: 1<<32 - 1})
+	for idx, net := range nets {
+		from, to := uint64(net.From), uint64(net.To)
+		for stack[len(stack)-1].To < from {
+			pop()
 		}
-		push(uint64(net.To))
+		if position < from {
+			emit(from - 1)
+		}
+		collected.Spans[idx].First = uint32(len(collected.Starts))
+		if top := &stack[len(stack)-1]; top.To == to {
+			top.Class = unnumbered
+		} else {
+			stack = append(stack, frame{Class: unnumbered, To: to, Pending: len(pending)})
+		}
+		pending = append(pending, uint32(idx))
 	}
 	for len(stack) > 0 {
-		emit(stack[len(stack)-1].To)
-		stack = stack[:len(stack)-1]
+		pop()
 	}
 	return collected
 }
