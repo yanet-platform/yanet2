@@ -9,7 +9,6 @@ import (
 
 	"github.com/yanet-platform/yanet2/controlplane/native/internal/coracle"
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
-	"github.com/yanet-platform/yanet2/controlplane/native/zone"
 )
 
 // RunAssigner plays the dataplane's assigner thread for the in-process
@@ -45,20 +44,9 @@ func (m *Fixture) RunAssigner(t testing.TB) {
 	})
 }
 
-// AssignOnce delivers the next generation the instance publishes after
-// current to the workers, once, as the dataplane's assigner would; the
-// channel closes once it is delivered.
-func AssignOnce(instance *zone.Instance, current *layout.CpConfigGen) chan struct{} {
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for {
-			if gen := instance.Cp.CpConfigGen.Load(); gen != current {
-				coracle.AssignWorkerContexts(unsafe.Pointer(instance.Dp), unsafe.Pointer(gen))
-				return
-			}
-			runtime.Gosched()
-		}
-	}()
-	return done
+// Deliver hands a published generation's contexts to the workers of the
+// in-process dataplane under its round lock, as the C publish does for it
+// on its own thread.
+func Deliver(dp *layout.DpConfig, gen *layout.CpConfigGen) {
+	coracle.AssignWorkerContexts(unsafe.Pointer(dp), unsafe.Pointer(gen))
 }

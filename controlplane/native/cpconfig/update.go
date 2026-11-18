@@ -16,10 +16,34 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/native/zone"
 )
 
+// Deliver hands a published generation's contexts to the workers of a
+// dataplane that runs worker rounds on request, under its round lock.
+type Deliver func(dp *layout.DpConfig, gen *layout.CpConfigGen)
+
+// UpdateOption configures UpdateModules.
+type UpdateOption func(*updateOptions)
+
+type updateOptions struct {
+	Deliver Deliver
+}
+
+// WithDelivery makes an update deliver the workers' contexts itself, as C
+// does for an in-process dataplane that runs worker rounds on request,
+// instead of waiting for the dataplane's assigner to deliver them.
+func WithDelivery(deliver Deliver) UpdateOption {
+	return func(m *updateOptions) {
+		m.Deliver = deliver
+	}
+}
+
 // UpdateModules publishes a generation in which the module
 // configurations replace those of their types and names, as
 // cp_config_update_modules does, and returns once every worker runs it.
-func UpdateModules(instance *zone.Instance, modules []*layout.CpModule) error {
+func UpdateModules(instance *zone.Instance, modules []*layout.CpModule, options ...UpdateOption) error {
+	opts := &updateOptions{}
+	for _, option := range options {
+		option(opts)
+	}
 	cp, dp := instance.Cp, instance.Dp
 	lock := shm.LockPid(&cp.ConfigLock, int32(os.Getpid()))
 	defer lock.Unlock()
@@ -59,7 +83,7 @@ func UpdateModules(instance *zone.Instance, modules []*layout.CpModule) error {
 		}
 	}
 	releaseOwners(owners)
-	return install(cp, dp, gen, old)
+	return install(cp, dp, gen, old, opts.Deliver)
 }
 
 // holdOwners checks that every module's agent is still current and holds
@@ -106,7 +130,7 @@ func releaseOwners(owners []*layout.Agent) {
 
 // install builds the workers' contexts of a generation, publishes it,
 // waits until every worker runs it and retires the one it replaces.
-func install(cp *layout.CpConfig, dp *layout.DpConfig, gen, old *layout.CpConfigGen) error {
+func install(cp *layout.CpConfig, dp *layout.DpConfig, gen, old *layout.CpConfigGen, deliver Deliver) error {
 	roots, err := BuildWorkerContexts(gen, old, dp.WorkerCount)
 	if err != nil {
 		freeGeneration(cp, gen)
@@ -119,6 +143,9 @@ func install(cp *layout.CpConfig, dp *layout.DpConfig, gen, old *layout.CpConfig
 	cp.CpConfigGen.Store(gen)
 	shm.UnlockByte(&cp.GenLock.Locked)
 
+	if deliver != nil {
+		deliver(dp, gen)
+	}
 	waitForWorkers(dp, gen)
 	retire(cp, old)
 	return nil

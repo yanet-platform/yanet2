@@ -114,9 +114,9 @@ func Test_UpdateModules_MatchesC(t *testing.T) {
 				func() {
 					module, err := cpconfig.NewBlackhole(memory.owner, name)
 					require.NoError(t, err)
-					assigned := nativetest.AssignOnce(instance, instance.Cp.CpConfigGen.Get())
-					require.NoError(t, cpconfig.UpdateModules(instance, []*layout.CpModule{module}))
-					<-assigned
+					require.NoError(t, cpconfig.UpdateModules(instance, []*layout.CpModule{module},
+						cpconfig.WithDelivery(nativetest.Deliver),
+					))
 				},
 			)
 		})
@@ -125,7 +125,10 @@ func Test_UpdateModules_MatchesC(t *testing.T) {
 
 // Benchmark_UpdateModules_Blackhole measures building one blackhole
 // configuration and publishing it until every worker runs it, through
-// the cgo control plane and through the native one.
+// the cgo control plane and through the native one, both delivering the
+// workers' contexts on the publishing thread as the C publish does for an
+// in-process dataplane; the native publish is also measured with the
+// contexts delivered by an assigner thread, as a real dataplane's are.
 func Benchmark_UpdateModules_Blackhole(b *testing.B) {
 	b.Run("cgo", func(b *testing.B) {
 		memory := newPublishedFixture(b)
@@ -136,6 +139,16 @@ func Benchmark_UpdateModules_Blackhole(b *testing.B) {
 		}
 	})
 	b.Run("native", func(b *testing.B) {
+		memory := newPublishedFixture(b)
+		for b.Loop() {
+			module, err := cpconfig.NewBlackhole(memory.owner, "a")
+			require.NoError(b, err)
+			require.NoError(b, cpconfig.UpdateModules(memory.Instance(), []*layout.CpModule{module},
+				cpconfig.WithDelivery(nativetest.Deliver),
+			))
+		}
+	})
+	b.Run("native with an assigner thread", func(b *testing.B) {
 		memory := newPublishedFixture(b)
 		memory.RunAssigner(b)
 		for b.Loop() {

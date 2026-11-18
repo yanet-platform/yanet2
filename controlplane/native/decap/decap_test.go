@@ -235,7 +235,8 @@ func Benchmark_NewConfig(b *testing.B) {
 
 // Benchmark_UpdateModules_Decap measures building a decap configuration
 // of 256 prefixes and publishing it until every worker runs it, through
-// the cgo control plane and through the native one.
+// the cgo control plane and through the native one, both delivering the
+// workers' contexts on the publishing thread.
 func Benchmark_UpdateModules_Decap(b *testing.B) {
 	prefixes := benchmarkPrefixes()
 	b.Run("cgo", func(b *testing.B) {
@@ -251,11 +252,12 @@ func Benchmark_UpdateModules_Decap(b *testing.B) {
 	})
 	b.Run("native", func(b *testing.B) {
 		memory := newDecapFixture(b)
-		memory.RunAssigner(b)
 		for b.Loop() {
 			module, err := decap.NewConfig(memory.owner, "d", prefixes)
 			require.NoError(b, err)
-			require.NoError(b, cpconfig.UpdateModules(memory.Instance(), []*layout.CpModule{module}))
+			require.NoError(b, cpconfig.UpdateModules(memory.Instance(), []*layout.CpModule{module},
+				cpconfig.WithDelivery(nativetest.Deliver),
+			))
 		}
 	})
 }
