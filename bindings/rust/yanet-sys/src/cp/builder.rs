@@ -52,6 +52,10 @@ use crate::{
     },
 };
 
+mod capability;
+
+pub use capability::{Freed, Fresh, Live, LiveContext, Retiring};
+
 mod classify;
 
 pub use classify::Branch;
@@ -63,22 +67,14 @@ type Brand<'b> = PhantomData<fn(&'b ()) -> &'b ()>;
 /// scope registers.
 ///
 /// Sealed: the kinds are [`ModuleKind`] and [`ObjectKind`].
-pub trait Kind: kind::Sealed + 'static {
-    /// Initialises the header of a build of the type and name.
-    ///
-    /// # Safety
-    ///
-    /// As [`Owner::init_header`].
+pub trait Kind: kind::Sealed + Sized + 'static {
+    /// Initializes the header in a fresh block of this kind.
     #[doc(hidden)]
-    unsafe fn init<W: Owner>(owner: &W, header: Header, ty: &str, name: &str) -> Result<(), W::Error>;
+    fn init<W: Owner>(block: Fresh<'_, W, Self>, ty: &str, name: &str) -> Result<(), W::Error>;
 
-    /// Releases what [`Kind::init`] set up.
-    ///
-    /// # Safety
-    ///
-    /// As [`Owner::fini_header`].
+    /// Finalizes an unreferenced header of this kind.
     #[doc(hidden)]
-    unsafe fn fini<W: Owner>(owner: &W, header: Header);
+    fn fini<W: Owner>(header: Retiring<'_, W, Self>);
 }
 
 /// The kind of a module configuration: its header carries the module's
@@ -93,26 +89,22 @@ pub enum ModuleKind {}
 pub enum ObjectKind {}
 
 impl Kind for ModuleKind {
-    unsafe fn init<W: Owner>(owner: &W, header: Header, ty: &str, name: &str) -> Result<(), W::Error> {
-        // SAFETY: the caller's contract.
-        unsafe { owner.init_header(header, ty, name) }
+    fn init<W: Owner>(block: Fresh<'_, W, Self>, ty: &str, name: &str) -> Result<(), W::Error> {
+        W::init_header(block, ty, name)
     }
 
-    unsafe fn fini<W: Owner>(owner: &W, header: Header) {
-        // SAFETY: the caller's contract.
-        unsafe { owner.fini_header(header) }
+    fn fini<W: Owner>(header: Retiring<'_, W, Self>) {
+        W::fini_header(header)
     }
 }
 
 impl Kind for ObjectKind {
-    unsafe fn init<W: Owner>(owner: &W, header: Header, ty: &str, name: &str) -> Result<(), W::Error> {
-        // SAFETY: the caller's contract.
-        unsafe { owner.init_object_header(header, ty, name) }
+    fn init<W: Owner>(block: Fresh<'_, W, Self>, ty: &str, name: &str) -> Result<(), W::Error> {
+        W::init_object_header(block, ty, name)
     }
 
-    unsafe fn fini<W: Owner>(owner: &W, header: Header) {
-        // SAFETY: the caller's contract.
-        unsafe { owner.fini_object_header(header) }
+    fn fini<W: Owner>(header: Retiring<'_, W, Self>) {
+        W::fini_object_header(header)
     }
 }
 
@@ -146,6 +138,9 @@ mod kind {
 ///
 /// A whole value has all its fields initialized; padding may remain
 /// uninitialized and must never be read as data.
+///
+/// A write that opens a C memory context must first check [`Owner::C_MEMORY`]
+/// and refuse an owner without it with [`Refusal::NoCMemory`].
 pub unsafe trait Build: ShmLayout {
     /// What the author supplies for a value of this type inside a build of an
     /// owner.
@@ -188,30 +183,19 @@ pub unsafe trait Build: ShmLayout {
 /// configuration come from and release returns them to.
 #[doc(hidden)]
 pub struct MemoryContext<'o, W: Owner> {
-    owner: &'o W,
-    context: Context,
-    /// Keeps the context, and every scope and block that refers to it, on
-    /// one thread.
-    ///
-    /// What it protects is the per-header C state, the memory context and
-    /// the registries, which the owner's `Sync` does not promise to take
-    /// concurrent calls.
-    _local: PhantomData<*const ()>,
+    live: LiveContext<'o, W>,
 }
 
 impl<'o, W: Owner> MemoryContext<'o, W> {
-    /// The context the module header embeds, which the owner has initialised.
-    fn new(owner: &'o W, header: Header) -> Self {
+    fn new<K: Kind>(header: &'o Live<'_, W, K>) -> Self {
         Self {
-            owner,
-            context: header.context(),
-            _local: PhantomData,
+            live: LiveContext::new(header.owner(), header.header().context()),
         }
     }
 
     /// Provenance root of the context's memory.
     pub fn root(&self) -> ShmRoot {
-        self.owner.root()
+        self.live.owner().root()
     }
 
     /// Returns a block of the given payload size.
@@ -221,15 +205,15 @@ impl<'o, W: Owner> MemoryContext<'o, W> {
     /// The block was allocated from this context with that size and is not
     /// referenced any longer.
     pub unsafe fn free(&self, addr: usize, size: usize) {
-        // SAFETY: the context belongs to an initialised header and the block
-        // is its own (caller contract).
-        unsafe { self.owner.free_in(self.context, BlockAddr::new(addr), size) }
+        // SAFETY: the live context is this header's and the caller supplies
+        // its unreferenced block with the original size, once.
+        let block = unsafe { Freed::in_context(&self.live, BlockAddr::new(addr), size) };
+        W::free_in(block);
     }
 
     /// Allocates a block of the given payload size.
     fn alloc(&self, size: usize) -> Option<usize> {
-        // SAFETY: the header is initialised, so its context is.
-        unsafe { self.owner.alloc_in(self.context, size) }.map(BlockAddr::get)
+        W::alloc_in(&self.live, size).map(BlockAddr::get)
     }
 }
 
@@ -604,11 +588,14 @@ unsafe impl<const K: usize> Build for Lpm<K> {
             unsafe { root.ptr::<u8>(addr).write_bytes(0, size_of::<Lpm<K>>()) };
             return Ok(());
         }
+        if !W::C_MEMORY {
+            return Err(Refusal::NoCMemory);
+        }
         let lpm = root.ptr::<bindings::lpm>(addr);
         // SAFETY: the table lies in a block of the build (caller contract),
         // and the context is the header's, which the owner set up for C.
         let initialised = unsafe {
-            let context = root.ptr::<bindings::memory_context>(memory.context.get());
+            let context = root.ptr::<bindings::memory_context>(memory.live.context().get());
             bindings::yanet_sys_common_lpm_init(lpm, context, c"lpm".as_ptr()) == 0
         };
         // SAFETY: an initialised table takes ranges of the key size.
@@ -742,6 +729,9 @@ unsafe impl<K: HashIndexKey> Build for HashIndex<K> {
             unsafe { root.ptr::<u8>(addr).write_bytes(0, size_of::<Self>()) };
             return Ok(());
         }
+        if !W::C_MEMORY {
+            return Err(Refusal::NoCMemory);
+        }
         let len = slots_for(records).ok_or(Refusal::BlockTooLarge)?;
         let size = len
             .checked_mul(size_of::<Slot<K>>())
@@ -752,7 +742,7 @@ unsafe impl<K: HashIndexKey> Build for HashIndex<K> {
         // the build (caller contract), and the parent is the header's, which
         // the owner set up for C.
         unsafe {
-            let parent = root.ptr::<bindings::memory_context>(memory.context.get());
+            let parent = root.ptr::<bindings::memory_context>(memory.live.context().get());
             bindings::yanet_sys_common_memory_context_init_from(context, parent, c"hash_index".as_ptr());
         }
         let mut unlinked = Unlinked {
@@ -891,8 +881,7 @@ pub struct Registered<'b, T> {
 /// the registrar refuses to go on past one.
 #[must_use]
 pub struct CounterRegistrar<'b, T, W: Owner> {
-    memory: &'b MemoryContext<'b, W>,
-    header: Header,
+    live: &'b Live<'b, W, ModuleKind>,
     tag: &'b str,
     // The registry explicitly ensured or found by the first counter.
     registry: u64,
@@ -996,7 +985,9 @@ impl<T> fmt::Debug for Registered<'_, T> {
 
 impl<W: Owner> fmt::Debug for MemoryContext<'_, W> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        f.debug_struct("MemoryContext").field("context", &self.context).finish()
+        f.debug_struct("MemoryContext")
+            .field("context", &self.live.context())
+            .finish()
     }
 }
 
@@ -1159,11 +1150,10 @@ impl<T: Build, W: Owner> Drop for Partial<'_, T, W> {
 /// the SDK's own.
 pub struct Scope<'b, 'env: 'b, W: Owner, E = BuildError<<W as Owner>::Error>, K: Kind = ModuleKind> {
     memory: &'b MemoryContext<'b, W>,
-    header: Header,
+    live: &'b Live<'b, W, K>,
     _brand: Brand<'b>,
     _env: PhantomData<&'env mut &'env ()>,
     _error: PhantomData<fn() -> E>,
-    _kind: PhantomData<fn() -> K>,
 }
 
 impl<W: Owner, E, K: Kind> Clone for Scope<'_, '_, W, E, K> {
@@ -1176,7 +1166,7 @@ impl<W: Owner, E, K: Kind> Copy for Scope<'_, '_, W, E, K> {}
 
 impl<W: Owner, E, K: Kind> fmt::Debug for Scope<'_, '_, W, E, K> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        f.debug_struct("Scope").field("header", &self.header).finish()
+        f.debug_struct("Scope").field("header", &self.live.header()).finish()
     }
 }
 
@@ -1264,7 +1254,7 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
     /// The block of the slots is larger than the allocator's largest, or the
     /// memory is exhausted.
     pub fn per_worker<T: Copy + ShmLayout>(self, init: T) -> Result<OwnedSlots<'b, T, W>, E> {
-        let workers = self.memory.owner.worker_count();
+        let workers = self.memory.live.owner().worker_count();
         if workers == 0 {
             return Ok(self.owned_slots(0, 0));
         }
@@ -1301,7 +1291,7 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
     /// refused before anything is allocated, or the memory is exhausted; the
     /// blocks allocated so far are returned.
     pub fn per_worker_slice<T: Copy + ShmLayout>(self, len: usize, init: T) -> Result<OwnedRegions<'b, T, W>, E> {
-        let workers = self.memory.owner.worker_count();
+        let workers = self.memory.live.owner().worker_count();
         let max = bindings::MEMORY_BLOCK_ALLOCATOR_MAX_SIZE as usize;
         let region = PerWorkerSlice::<T>::region_block(len)
             .filter(|&size| size <= max)
@@ -1401,8 +1391,7 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E, ModuleKind
     /// before with another size.
     pub fn counter<T: CounterLayout>(self, name: &str) -> Result<Registered<'b, Counter<T>>, E> {
         let size = T::VALUES as u64;
-        // SAFETY: the header is initialised and not yet published.
-        let id = unsafe { self.memory.owner.register_counter(self.header, name, size) }.map_err(failed::<W, E>)?;
+        let id = W::register_counter(self.live, name, size).map_err(failed::<W, E>)?;
         Ok(Registered::new(id))
     }
 
@@ -1429,9 +1418,7 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E, ModuleKind
             return Err(refused::<W, E>(Refusal::InvalidName));
         }
         let size = T::VALUES as u64;
-        // SAFETY: the header is initialised and not yet published.
-        let (registry, id) =
-            unsafe { self.memory.owner.register_counter_in(self.header, tag, name, size) }.map_err(failed::<W, E>)?;
+        let (registry, id) = W::register_counter_in(self.live, tag, name, size).map_err(failed::<W, E>)?;
         Ok(Registered::tagged(registry, id))
     }
 
@@ -1456,8 +1443,7 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E, ModuleKind
             return Err(refused::<W, E>(Refusal::InvalidName));
         }
         Ok(CounterRegistrar {
-            memory: self.memory,
-            header: self.header,
+            live: self.live,
             tag,
             registry: 0,
             len: 0,
@@ -1472,8 +1458,7 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E, ModuleKind
     ///
     /// The owner refuses the device.
     pub fn device(self, name: &str) -> Result<Registered<'b, Device>, E> {
-        // SAFETY: the header is initialised and not yet published.
-        let index = unsafe { self.memory.owner.link_device(self.header, name) }.map_err(failed::<W, E>)?;
+        let index = W::link_device(self.live, name).map_err(failed::<W, E>)?;
         Ok(Registered::new(index))
     }
 
@@ -1495,8 +1480,7 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>> Scope<'b, '_, W, E, ModuleKind
         {
             return Err(refused::<W, E>(Refusal::InvalidName));
         }
-        // SAFETY: the header is initialised and not yet published.
-        let index = unsafe { self.memory.owner.link_object(self.header, O::TYPE, name) }.map_err(failed::<W, E>)?;
+        let index = W::link_object(self.live, O::TYPE, name).map_err(failed::<W, E>)?;
         Ok(Registered::new(index))
     }
 }
@@ -1524,10 +1508,7 @@ where
         T: CounterLayout,
     {
         let size = T::VALUES as u64;
-        // SAFETY: the header is an initialised object header, not yet
-        // published.
-        let id =
-            unsafe { self.memory.owner.register_object_counter(self.header, name, size) }.map_err(failed::<W, E>)?;
+        let id = W::register_object_counter(self.live, name, size).map_err(failed::<W, E>)?;
         Ok(Registered::new(id))
     }
 }
@@ -1629,9 +1610,7 @@ where
     ///
     /// The owner refuses to create the registry.
     pub fn ensure_registry(&mut self) -> Result<(), BuildError<W::Error>> {
-        // SAFETY: the header is initialised and unpublished for this build.
-        self.registry =
-            unsafe { self.memory.owner.ensure_counter_registry(self.header, self.tag) }.map_err(BuildError::Owner)?;
+        self.registry = W::ensure_counter_registry(self.live, self.tag).map_err(BuildError::Owner)?;
         Ok(())
     }
 
@@ -1647,10 +1626,7 @@ where
     /// other than through it.
     pub fn counter(&mut self, name: &str) -> Result<u64, BuildError<W::Error>> {
         let size = T::VALUES as u64;
-        // SAFETY: the header is initialised and not yet published: the
-        // registrar is of the build, which publishes nothing before it ends.
-        let (registry, id) = unsafe { self.memory.owner.register_counter_in(self.header, self.tag, name, size) }
-            .map_err(BuildError::Owner)?;
+        let (registry, id) = W::register_counter_in(self.live, self.tag, name, size).map_err(BuildError::Owner)?;
         if id > self.len {
             return Err(BuildError::Refused(Refusal::ForeignCounter));
         }
@@ -1789,37 +1765,23 @@ fn build_root<'env, K: Kind, C: Build, W: Owner, E: From<BuildError<W::Error>>>(
     body_offset: usize,
     f: impl for<'b> FnOnce(Scope<'b, 'env, W, E, K>) -> Result<C::Parts<'b, W>, E>,
 ) -> Result<Header, E> {
-    let block = owner.alloc(size).ok_or_else(|| refused::<W, E>(Refusal::OutOfMemory))?;
-    let header = Header::at(block);
-    // SAFETY: the block is ours and the header sits at its start; the block
-    // holds the header and the body, so it is large enough for the header.
-    if let Err(err) = unsafe { K::init(owner, header, ty, name) } {
-        // SAFETY: the block came from the owner's allocation with this size,
-        // and a refused header leaves nothing to finalise.
-        unsafe { owner.free(block, size) };
-        return Err(failed::<W, E>(err));
-    }
-    // The blocks of the closure's values are returned, or leaked, before this
-    // runs.
-    let release = Release::<W, K> {
-        owner,
-        header,
-        size,
-        _kind: PhantomData,
-    };
-    let memory = MemoryContext::new(owner, header);
+    let root = RootBlock::<W, K>::alloc(owner, size).ok_or_else(|| refused::<W, E>(Refusal::OutOfMemory))?;
+    K::init(root.fresh(), ty, name).map_err(failed::<W, E>)?;
+    let guard = LiveHeader { root };
+    let header = guard.header();
+    let live = guard.live();
+    let memory = MemoryContext::new(&live);
     let parts = f(Scope {
         memory: &memory,
-        header,
+        live: &live,
         _brand: PhantomData,
         _env: PhantomData,
         _error: PhantomData,
-        _kind: PhantomData,
     })?;
     // SAFETY: the body lies in the root block, aligned, and the blocks and
     // registrations in the parts are this build's by the brand.
     unsafe { C::write::<W>(parts, &memory, header.get() + body_offset) }.map_err(refused::<W, E>)?;
-    forget(release);
+    forget(guard);
     Ok(header)
 }
 
@@ -1864,19 +1826,24 @@ impl<M, W> Built<M, W> {
 impl<M: Module, W: Owner> Built<M, W> {
     /// Releases the configuration with everything it owns.
     ///
+    /// Prefer `Agent::release` or `TestOwner::release`.
+    ///
     /// # Safety
     ///
     /// The owner is the one that built it, and nothing references the
     /// configuration any longer.
+    #[doc(hidden)]
     pub unsafe fn destroy(self, owner: &W) {
-        let memory = MemoryContext::new(owner, self.header);
+        // SAFETY: the consumed handle names this owner's live, unreferenced
+        // module and its original root allocation (caller contract).
+        let guard =
+            unsafe { LiveHeader::<W, ModuleKind>::adopt(owner, self.header, size_of::<ModuleConfig<M::Config>>()) };
+        let live = guard.live();
+        let memory = MemoryContext::new(&live);
         let body = self.header.get() + ModuleConfig::<M::Config>::BODY_OFFSET;
         // SAFETY: the body was written whole by the build, and every block it
         // owns came from the header's context (caller contract).
         unsafe { M::Config::free::<W>(body, &memory) };
-        // SAFETY: every block the body owns is returned, and a block leaked
-        // during the build is never referenced.
-        unsafe { release_root::<W, ModuleKind>(owner, self.header, size_of::<ModuleConfig<M::Config>>()) }
     }
 }
 
@@ -1922,9 +1889,12 @@ impl<O: Object, W: Owner> BuiltObject<O, W> {
     /// its state changes only through the types that allow a shared change,
     /// as atomics and mutexes.
     ///
+    /// Prefer `Agent::read` or `TestOwner::read`.
+    ///
     /// # Safety
     ///
     /// The owner's memory is the one the object was built in.
+    #[doc(hidden)]
     pub unsafe fn config<'a>(&'a self, owner: &'a W) -> &'a O::Config {
         let body = self.header.get() + ObjectConfig::<O::Config>::BODY_OFFSET;
         // SAFETY: the body was written whole by the build and is not released
@@ -1935,52 +1905,92 @@ impl<O: Object, W: Owner> BuiltObject<O, W> {
 
     /// Releases the object with everything it owns.
     ///
+    /// Prefer `Agent::release_object` or `TestOwner::release`.
+    ///
     /// # Safety
     ///
     /// The owner is the one that built it, and nothing references the object
     /// any longer.
+    #[doc(hidden)]
     pub unsafe fn destroy(self, owner: &W) {
-        let memory = MemoryContext::new(owner, self.header);
+        // SAFETY: the consumed handle names this owner's live, unreferenced
+        // object and its original root allocation (caller contract).
+        let guard =
+            unsafe { LiveHeader::<W, ObjectKind>::adopt(owner, self.header, size_of::<ObjectConfig<O::Config>>()) };
+        let live = guard.live();
+        let memory = MemoryContext::new(&live);
         let body = self.header.get() + ObjectConfig::<O::Config>::BODY_OFFSET;
         // SAFETY: the body was written whole by the build, and every block it
         // owns came from the header's context (caller contract).
         unsafe { O::Config::free::<W>(body, &memory) };
-        // SAFETY: every block the body owns is returned, and a block leaked
-        // during the build is never referenced.
-        unsafe { release_root::<W, ObjectKind>(owner, self.header, size_of::<ObjectConfig<O::Config>>()) }
     }
 }
 
-/// Releases the header and root block of an unfinished build when dropped,
-/// also while unwinding.
-struct Release<'a, W: Owner, K: Kind> {
-    owner: &'a W,
-    header: Header,
+/// Owns a root allocation, before initialization or after finalization.
+struct RootBlock<'o, W: Owner, K: Kind> {
+    owner: &'o W,
+    addr: BlockAddr,
     size: usize,
-    _kind: PhantomData<fn() -> K>,
+    _kind: PhantomData<K>,
 }
 
-impl<W: Owner, K: Kind> Drop for Release<'_, W, K> {
-    fn drop(&mut self) {
-        // SAFETY: the blocks of the build's context are returned by the drops
-        // of the values that owned them, or leaked if forgotten, which C's
-        // finalisation allows; the root block is ours.
-        unsafe { release_root::<W, K>(self.owner, self.header, self.size) }
+impl<'o, W: Owner, K: Kind> RootBlock<'o, W, K> {
+    fn alloc(owner: &'o W, size: usize) -> Option<Self> {
+        owner.alloc(size).map(|addr| Self {
+            owner,
+            addr,
+            size,
+            _kind: PhantomData,
+        })
+    }
+
+    fn fresh(&self) -> Fresh<'_, W, K> {
+        Fresh::new(self.owner, self.addr)
     }
 }
 
-/// Finalises a header and returns its root block.
-///
-/// # Safety
-///
-/// The header is one of the kind, initialised by the owner at the start of a
-/// root block allocated with the given size, every block of its context is
-/// returned or never referenced again, and nothing references the header.
-unsafe fn release_root<W: Owner, K: Kind>(owner: &W, header: Header, size: usize) {
-    // SAFETY: guaranteed by the caller; the header is the start of the block.
-    unsafe {
-        K::fini(owner, header);
-        owner.free(BlockAddr::new(header.get()), size);
+impl<W: Owner, K: Kind> Drop for RootBlock<'_, W, K> {
+    fn drop(&mut self) {
+        W::free(Freed::root(self.owner, self.addr, self.size));
+    }
+}
+
+/// Finalizes a live header before its root allocation is returned.
+struct LiveHeader<'o, W: Owner, K: Kind> {
+    root: RootBlock<'o, W, K>,
+}
+
+impl<'o, W: Owner, K: Kind> LiveHeader<'o, W, K> {
+    /// Restores ownership at the raw handle-release boundary.
+    ///
+    /// # Safety
+    ///
+    /// The header is initialized by this owner, of this kind, at the start
+    /// of its allocation of this size. No references remain to its graph,
+    /// and this is its only owning guard.
+    unsafe fn adopt(owner: &'o W, header: Header, size: usize) -> Self {
+        Self {
+            root: RootBlock {
+                owner,
+                addr: BlockAddr::new(header.get()),
+                size,
+                _kind: PhantomData,
+            },
+        }
+    }
+
+    fn header(&self) -> Header {
+        Header::at(self.root.addr)
+    }
+
+    fn live(&self) -> Live<'_, W, K> {
+        Live::new(self.root.owner, self.header())
+    }
+}
+
+impl<W: Owner, K: Kind> Drop for LiveHeader<'_, W, K> {
+    fn drop(&mut self) {
+        K::fini(Retiring::new(self.root.owner, self.header()));
     }
 }
 

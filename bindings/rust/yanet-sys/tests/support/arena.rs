@@ -18,7 +18,7 @@ use yanet_shm::{
 };
 use yanet_sys::{
     bindings,
-    cp::{BlockAddr, Built, Context, Header, Owner},
+    cp::{BlockAddr, Built, Context, Freed, Fresh, Live, LiveContext, ModuleKind, ObjectKind, Owner, Retiring},
     dp::{Module, ModuleConfig},
 };
 
@@ -101,10 +101,14 @@ impl core::fmt::Display for Never {
 
 impl core::error::Error for Never {}
 
-// SAFETY: the root covers the arena, which every block comes from, aligned by
-// the C block allocator; a header gets a live memory context over the arena,
-// and the routines that free do not panic.
+// SAFETY: the root covers every aligned block in the C arena.
+//
+// Operations use the capability's owner and recorded allocation or header.
+// Initialized headers carry live C memory contexts over the arena. Freeing
+// does not panic, and finalization has no work for this leaked arena.
 unsafe impl Owner for ArenaOwner {
+    const C_MEMORY: bool = true;
+
     type Error = Never;
 
     fn root(&self) -> ShmRoot {
@@ -121,68 +125,86 @@ unsafe impl Owner for ArenaOwner {
         (!block.is_null()).then(|| BlockAddr::new(block.addr()))
     }
 
-    unsafe fn free(&self, addr: BlockAddr, size: usize) {
-        // SAFETY: a block of the arena's context of that size (caller
-        // contract).
+    fn free(block: Freed<'_, Self>) {
+        let owner = block.owner();
+        // SAFETY: the capability returns this owner's unreferenced root
+        // block once with its original allocation size.
         unsafe {
             bindings::yanet_sys_common_memory_bfree(
-                yanet_sys_test_arena_context(self.arena),
-                self.root.ptr(addr.get()),
-                size,
+                yanet_sys_test_arena_context(owner.arena),
+                owner.root.ptr(block.addr().get()),
+                block.size(),
             );
         }
     }
 
-    unsafe fn alloc_in(&self, context: Context, size: usize) -> Option<BlockAddr> {
-        // SAFETY: the context of a header this owner initialised (caller
-        // contract).
-        let block = unsafe { bindings::yanet_sys_common_memory_balloc(self.context(context), size) };
+    fn alloc_in(context: &LiveContext<'_, Self>, size: usize) -> Option<BlockAddr> {
+        let owner = context.owner();
+        // SAFETY: the capability keeps this owner's header context live.
+        let block = unsafe { bindings::yanet_sys_common_memory_balloc(owner.context(context.context()), size) };
         (!block.is_null()).then(|| BlockAddr::new(block.addr()))
     }
 
-    unsafe fn free_in(&self, context: Context, addr: BlockAddr, size: usize) {
-        // SAFETY: a block of that context and size (caller contract).
-        unsafe { bindings::yanet_sys_common_memory_bfree(self.context(context), self.root.ptr(addr.get()), size) };
+    fn free_in(block: Freed<'_, Self, Context>) {
+        let owner = block.owner();
+        // SAFETY: the capability returns this unreferenced block once with
+        // its original size to the owner's live allocation context.
+        unsafe {
+            bindings::yanet_sys_common_memory_bfree(
+                owner.context(block.context()),
+                owner.root.ptr(block.addr().get()),
+                block.size(),
+            )
+        };
     }
 
-    unsafe fn init_header(&self, header: Header, _module: &str, name: &str) -> Result<(), Never> {
+    fn init_header(block: Fresh<'_, Self, ModuleKind>, _module: &str, name: &str) -> Result<(), Never> {
+        let owner = block.owner();
         let name = CString::new(name).unwrap_or_else(|_| CString::from(c"classify test"));
-        // SAFETY: the header lies at the start of a block of the arena large
-        // enough for it (caller contract).
-        unsafe { yanet_sys_test_arena_init_context(self.arena, self.context(header.context()), name.as_ptr()) };
+        // SAFETY: the capability names this owner's fresh block large
+        // enough for a module header. The name is NUL terminated.
+        unsafe {
+            yanet_sys_test_arena_init_context(owner.arena, owner.context(block.header().context()), name.as_ptr())
+        };
         Ok(())
     }
 
-    unsafe fn fini_header(&self, _: Header) {}
+    fn fini_header(_: Retiring<'_, Self, ModuleKind>) {}
 
-    unsafe fn init_object_header(&self, header: Header, ty: &str, name: &str) -> Result<(), Never> {
-        // SAFETY: as for a module header.
-        unsafe { self.init_header(header, ty, name) }
+    fn init_object_header(block: Fresh<'_, Self, ObjectKind>, _ty: &str, name: &str) -> Result<(), Never> {
+        let owner = block.owner();
+        let name = CString::new(name).unwrap_or_else(|_| CString::from(c"classify test"));
+        // SAFETY: the capability names this owner's fresh block large
+        // enough for an object header. The name is NUL terminated.
+        unsafe {
+            yanet_sys_test_arena_init_context(owner.arena, owner.context(block.header().context()), name.as_ptr())
+        };
+        Ok(())
     }
 
-    unsafe fn fini_object_header(&self, _: Header) {}
+    fn fini_object_header(_: Retiring<'_, Self, ObjectKind>) {}
 
-    unsafe fn register_counter(&self, _: Header, _: &str, _: u64) -> Result<u64, Never> {
+    fn register_counter(_: &Live<'_, Self, ModuleKind>, _: &str, _: u64) -> Result<u64, Never> {
         Ok(0)
     }
 
-    unsafe fn ensure_counter_registry(&self, _: Header, _: &str) -> Result<u64, Never> {
+    fn ensure_counter_registry(_: &Live<'_, Self, ModuleKind>, _: &str) -> Result<u64, Never> {
         Ok(0)
     }
 
-    unsafe fn register_counter_in(&self, _: Header, _: &str, _: &str, _: u64) -> Result<(u64, u64), Never> {
+    fn register_counter_in(_: &Live<'_, Self, ModuleKind>, _: &str, _: &str, _: u64) -> Result<(u64, u64), Never> {
         Ok((0, 0))
     }
 
-    unsafe fn register_object_counter(&self, _: Header, _: &str, _: u64) -> Result<u64, Never> {
+    fn register_object_counter(_: &Live<'_, Self, ObjectKind>, _: &str, _: u64) -> Result<u64, Never> {
         Ok(0)
     }
 
-    unsafe fn link_device(&self, _: Header, _: &str) -> Result<u64, Never> {
+    fn link_device(_: &Live<'_, Self, ModuleKind>, _: &str) -> Result<u64, Never> {
         Ok(0)
     }
 
-    unsafe fn link_object(&self, _: Header, _: &str, _: &str) -> Result<u64, Never> {
+    fn link_object(_: &Live<'_, Self, ModuleKind>, _: &str, _: &str) -> Result<u64, Never> {
         Ok(0)
     }
 }

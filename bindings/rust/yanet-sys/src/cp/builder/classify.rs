@@ -57,7 +57,7 @@ impl<W: Owner> Drop for Stage<'_, W> {
         unsafe {
             bindings::yanet_sys_classify_stage_free(
                 root.ptr(self.addr),
-                root.ptr(self.memory.context.get()),
+                root.ptr(self.memory.live.context().get()),
                 self.rules,
             );
             self.memory.free(self.addr, size_of::<bindings::classifier>());
@@ -118,6 +118,9 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
         left: Branch<'b, L, W>,
         right: Branch<'b, R, W>,
     ) -> Result<Branch<'b, Join<L, R>, W>, E> {
+        if !W::C_MEMORY {
+            return Err(refused::<W, E>(Refusal::NoCMemory));
+        }
         same_ruleset(&[left.stage.rules as usize, right.stage.rules as usize]).map_err(refused::<W, E>)?;
         let memory = self.memory;
         let (Branch { value: left, stage: left_stage }, Branch { value: right, stage: right_stage }) = (left, right);
@@ -166,6 +169,9 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
         right: Branch<'b, R, W>,
         rules: &[Option<&P>],
     ) -> Result<Owned<'b, Rules<L, R>, W>, E> {
+        if !W::C_MEMORY {
+            return Err(refused::<W, E>(Refusal::NoCMemory));
+        }
         same_ruleset(&[left.stage.rules as usize, right.stage.rules as usize, rules.len()]).map_err(refused::<W, E>)?;
         let memory = self.memory;
         let (Branch { value: left, stage: left_stage }, Branch { value: right, stage: right_stage }) = (left, right);
@@ -213,6 +219,9 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
         input: Branch<'b, N, W>,
         rules: &[Option<&P>],
     ) -> Result<Owned<'b, Decode<N>, W>, E> {
+        if !W::C_MEMORY {
+            return Err(refused::<W, E>(Refusal::NoCMemory));
+        }
         same_ruleset(&[input.stage.rules as usize, rules.len()]).map_err(refused::<W, E>)?;
         let memory = self.memory;
         let Branch { value: input, stage } = input;
@@ -248,6 +257,9 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
     /// The rules are more than C counts, or the memory is exhausted; nothing
     /// of the compile is left allocated.
     pub fn compile<A: Attribute>(self, name: &CStr, rules: &[Option<&A>]) -> Result<Branch<'b, A::Classifier, W>, E> {
+        if !W::C_MEMORY {
+            return Err(refused::<W, E>(Refusal::NoCMemory));
+        }
         let count = rule_count(rules.len()).map_err(refused::<W, E>)?;
         self.staged(count, |memory, stage, classifier| {
             // SAFETY: a rule slot is a nullable pointer to a view the
@@ -272,7 +284,7 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
         let root = memory.root();
         // SAFETY: the block is ours, of the size of one `T`.
         unsafe { root.ptr::<u8>(addr).write_bytes(0, size_of::<T>()) };
-        if write(root.ptr(memory.context.get()), root.ptr(addr)) != 0 {
+        if write(root.ptr(memory.live.context().get()), root.ptr(addr)) != 0 {
             // SAFETY: the block is ours, and the failed routine left nothing
             // in it.
             unsafe { memory.free(addr, size_of::<T>()) };
@@ -322,7 +334,7 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
                 // a zeroed one, in the build's context, which is live; its
                 // block is ours.
                 unsafe {
-                    bindings::yanet_sys_classify_stage_free(stage, root.ptr(memory.context.get()), rules);
+                    bindings::yanet_sys_classify_stage_free(stage, root.ptr(memory.live.context().get()), rules);
                     memory.free(addr, size_of::<bindings::classifier>());
                 }
                 Err(err)

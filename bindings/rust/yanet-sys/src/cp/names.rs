@@ -37,6 +37,7 @@ impl Display for NameError {
 impl core::error::Error for NameError {}
 
 /// Checks storage bounds and NULs, allowing an empty optional field.
+#[inline]
 pub fn validate_c_field(name: &str, capacity: usize) -> Result<(), NameError> {
     if name.len() >= capacity {
         return Err(NameError::TooLong { len: name.len(), capacity });
@@ -48,6 +49,7 @@ pub fn validate_c_field(name: &str, capacity: usize) -> Result<(), NameError> {
 }
 
 /// Checks an obligatory name, including room for its terminator.
+#[inline]
 pub fn validate_name(name: &str, capacity: usize) -> Result<(), NameError> {
     if name.is_empty() {
         return Err(NameError::Empty);

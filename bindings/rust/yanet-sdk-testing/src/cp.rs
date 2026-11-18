@@ -1,9 +1,10 @@
 //! A configuration owner over the block arena, for the builder tests under
 //! Miri and natively alike.
 //!
-//! It sets up no C memory context and calls no C: a configuration that embeds a
-//! C object, such as an LPM, is built over the real agent in the C harness,
-//! from Go tests.
+//! It sets up no C memory context and calls no C. Builds that need an embedded
+//! C object are refused. Read built configurations through [`TestOwner::read`]
+//! or [`TestOwner::read_module`] and release them through
+//! [`TestOwner::release`].
 
 use alloc::{
     string::{String, ToString},
@@ -15,8 +16,17 @@ use core::{
     fmt,
 };
 
-use yanet_shm::root::ShmRoot;
-use yanet_sys::cp::{BlockAddr, Context, Header, Owner};
+use yanet_shm::{
+    resolve::{Graph, Resolve},
+    root::ShmRoot,
+};
+use yanet_sys::{
+    cp::{
+        BlockAddr, Built, BuiltObject, Context, Freed, Fresh, Header, Live, LiveContext, ModuleKind, ObjectKind, Owner,
+        Retiring,
+    },
+    dp::{Module, ModuleConfig, Object},
+};
 
 use crate::BlockArena;
 
@@ -103,15 +113,7 @@ pub struct TestOwner {
 
 impl TestOwner {
     /// An owner of an empty arena, for a dataplane of one worker.
-    ///
-    /// # Safety
-    ///
-    /// No configuration that opens a C object, such as an LPM built from
-    /// ranges or a hash index built from records, is built over the owner: it
-    /// leaves no live C memory context in a header, which such an object opens
-    /// its own context under. An LPM built from no ranges and a hash index
-    /// built from no records open nothing.
-    pub unsafe fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             arena: BlockArena::new(),
             blocks: RefCell::default(),
@@ -131,6 +133,137 @@ impl TestOwner {
     /// The owner for a dataplane of the given number of workers.
     pub fn with_workers(self, count: u64) -> Self {
         Self { workers: count, ..self }
+    }
+
+    /// Runs `f` over a live object built by this owner.
+    ///
+    /// Each call brands the body and resolving context together, as
+    /// `Agent::read` does. Neither may escape the callback or be mixed with
+    /// another read.
+    ///
+    /// ```compile_fail
+    /// use yanet_sdk_testing::cp::TestOwner;
+    /// use yanet_shm::rel::ShmSlice;
+    /// use yanet_sys::{cp::BuiltObject, dp::Object};
+    ///
+    /// fn mixed<O: Object<Config = ShmSlice<u64>>>(
+    ///     first_owner: &TestOwner, first: &BuiltObject<O, TestOwner>,
+    ///     second_owner: &TestOwner, second: &BuiltObject<O, TestOwner>,
+    /// ) -> usize {
+    ///     first_owner.read(first, |_, outer| {
+    ///         second_owner.read(second, |cx, _| outer.as_slice(&cx).len())
+    ///     })
+    /// }
+    /// ```
+    ///
+    /// The body cannot escape:
+    ///
+    /// ```compile_fail
+    /// use yanet_sdk_testing::cp::TestOwner;
+    /// use yanet_sys::{cp::BuiltObject, dp::Object};
+    ///
+    /// fn escape<'a, O: Object>(owner: &'a TestOwner, built: &'a BuiltObject<O, TestOwner>)
+    ///     -> &'a O::Config
+    /// {
+    ///     owner.read(built, |_, config| config)
+    /// }
+    /// ```
+    ///
+    /// Nor can its context:
+    ///
+    /// ```compile_fail
+    /// use yanet_sdk_testing::cp::{TestCx, TestOwner};
+    /// use yanet_sys::{cp::BuiltObject, dp::Object};
+    ///
+    /// fn escape<'a, O: Object>(owner: &'a TestOwner, built: &'a BuiltObject<O, TestOwner>)
+    ///     -> TestCx<'a>
+    /// {
+    ///     owner.read(built, |cx, _| cx)
+    /// }
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// The object is not live in this owner.
+    pub fn read<O: Object, R>(
+        &self,
+        built: &BuiltObject<O, TestOwner>,
+        f: impl for<'g> FnOnce(TestCx<'g>, &'g O::Config) -> R,
+    ) -> R {
+        self.assert_live(built.header(), HeaderKind::Object);
+        // SAFETY: the live object belongs to this arena, and borrowing its
+        // handle prevents release while the callback reads its built body.
+        let config = unsafe { built.config(self) };
+        // SAFETY: the arena's root retains allocation-wide provenance. The
+        // callback's fresh invariant brand confines resolution to this live
+        // built graph, frozen except for its shared-state types.
+        let graph = unsafe { Graph::new(self.root()) };
+        f(TestCx { graph }, config)
+    }
+
+    /// Runs `f` over a live module configuration built by this owner.
+    ///
+    /// As with [`Self::read`], the body and context are confined to the read.
+    ///
+    /// ```compile_fail
+    /// use yanet_sdk_testing::cp::TestOwner;
+    /// use yanet_shm::rel::ShmSlice;
+    /// use yanet_sys::{cp::Built, dp::Module};
+    ///
+    /// fn mixed<M: Module<Config = ShmSlice<u64>>>(
+    ///     first_owner: &TestOwner, first: &Built<M, TestOwner>,
+    ///     second_owner: &TestOwner, second: &Built<M, TestOwner>,
+    /// ) -> usize {
+    ///     first_owner.read_module(first, |_, outer| {
+    ///         second_owner.read_module(second, |cx, _| outer.as_slice(&cx).len())
+    ///     })
+    /// }
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// The configuration is not live in this owner.
+    pub fn read_module<M: Module, R>(
+        &self,
+        built: &Built<M, TestOwner>,
+        f: impl for<'g> FnOnce(TestCx<'g>, &'g M::Config) -> R,
+    ) -> R {
+        self.assert_live(built.header(), HeaderKind::Module);
+        let body = built.header().get() + ModuleConfig::<M::Config>::BODY_OFFSET;
+        // SAFETY: the live header belongs to this arena and the builder wrote
+        // its body whole. The borrowed handle prevents release during `f`.
+        let config = unsafe { &*self.root().ptr::<M::Config>(body) };
+        // SAFETY: as in read, the arena root covers the live built graph,
+        // whose references and context cannot escape the fresh callback brand.
+        let graph = unsafe { Graph::new(self.root()) };
+        f(TestCx { graph }, config)
+    }
+
+    /// Releases a live module configuration or object built by this owner.
+    ///
+    /// A read borrows the handle, so it cannot release it:
+    ///
+    /// ```compile_fail,E0505
+    /// use yanet_sdk_testing::cp::TestOwner;
+    /// use yanet_sys::{cp::Built, dp::Module};
+    ///
+    /// fn release_while_reading<M: Module>(owner: &TestOwner, built: Built<M, TestOwner>) {
+    ///     owner.read_module(&built, |_, _| owner.release(built));
+    /// }
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// The configuration or object is not live in this owner.
+    pub fn release(&self, built: impl TestBuilt) {
+        built.release(self);
+    }
+
+    fn assert_live(&self, header: Header, kind: HeaderKind) {
+        assert!(
+            self.headers.borrow().contains(&(header, kind)),
+            "the configuration or object is not live in this test owner"
+        );
     }
 
     /// Makes every call of the kind fail after the given number more
@@ -283,14 +416,14 @@ impl TestOwner {
     }
 }
 
-// SAFETY: the arena aligns every block to 64, which covers any size, and keeps
-// it for good; the root is the arena's, which covers every block. No dataplane
-// runs over the owner, so the worker count the test sets indexes nothing. The
-// routines called from destructors do not panic: they record what they find
-// wrong. The owner sets up no C memory context in a header and calls no C,
-// which breaks the contract for a configuration with an embedded C object; the
-// constructor is unsafe, and its caller promises to build none.
+// SAFETY: the arena aligns every block to 64 or 128 as required and keeps it
+// for good. Its root covers every block. No dataplane runs over the owner,
+// so its worker count indexes nothing. Destructor routines record violations
+// rather than panicking. C_MEMORY is false, so embedded C objects are refused
+// before opening a context in a header.
 unsafe impl Owner for TestOwner {
+    const C_MEMORY: bool = false;
+
     type Error = TestError;
 
     fn root(&self) -> ShmRoot {
@@ -305,61 +438,66 @@ unsafe impl Owner for TestOwner {
         self.take(None, size)
     }
 
-    unsafe fn free(&self, addr: BlockAddr, size: usize) {
-        self.give_back(None, addr, size);
+    fn free(block: Freed<'_, Self>) {
+        block.owner().give_back(None, block.addr(), block.size());
     }
 
-    unsafe fn alloc_in(&self, context: Context, size: usize) -> Option<BlockAddr> {
-        self.take(Some(context), size)
+    fn alloc_in(context: &LiveContext<'_, Self>, size: usize) -> Option<BlockAddr> {
+        context.owner().take(Some(context.context()), size)
     }
 
-    unsafe fn free_in(&self, context: Context, addr: BlockAddr, size: usize) {
-        self.give_back(Some(context), addr, size);
+    fn free_in(block: Freed<'_, Self, Context>) {
+        block
+            .owner()
+            .give_back(Some(block.context()), block.addr(), block.size());
     }
 
-    unsafe fn init_header(&self, header: Header, _module: &str, _name: &str) -> Result<(), TestError> {
-        self.init(header, HeaderKind::Module)
+    fn init_header(block: Fresh<'_, Self, ModuleKind>, _module: &str, _name: &str) -> Result<(), TestError> {
+        block.owner().init(block.header(), HeaderKind::Module)
     }
 
-    unsafe fn fini_header(&self, header: Header) {
-        self.fini(header, HeaderKind::Module);
+    fn fini_header(header: Retiring<'_, Self, ModuleKind>) {
+        header.owner().fini(header.header(), HeaderKind::Module);
     }
 
-    unsafe fn init_object_header(&self, header: Header, _ty: &str, _name: &str) -> Result<(), TestError> {
-        self.init(header, HeaderKind::Object)
+    fn init_object_header(block: Fresh<'_, Self, ObjectKind>, _ty: &str, _name: &str) -> Result<(), TestError> {
+        block.owner().init(block.header(), HeaderKind::Object)
     }
 
-    unsafe fn fini_object_header(&self, header: Header) {
-        self.fini(header, HeaderKind::Object);
+    fn fini_object_header(header: Retiring<'_, Self, ObjectKind>) {
+        header.owner().fini(header.header(), HeaderKind::Object);
     }
 
-    unsafe fn register_counter(&self, _header: Header, _name: &str, size: u64) -> Result<u64, TestError> {
-        self.counter_sizes.borrow_mut().push(size);
-        self.register()
+    fn register_counter(header: &Live<'_, Self, ModuleKind>, _name: &str, size: u64) -> Result<u64, TestError> {
+        let owner = header.owner();
+        owner.counter_sizes.borrow_mut().push(size);
+        owner.register()
     }
 
-    unsafe fn ensure_counter_registry(&self, header: Header, tag: &str) -> Result<u64, TestError> {
-        if self.fails(Call::Registration) {
+    fn ensure_counter_registry(header: &Live<'_, Self, ModuleKind>, tag: &str) -> Result<u64, TestError> {
+        let owner = header.owner();
+        if owner.fails(Call::Registration) {
             return Err(TestError::Registration);
         }
-        Ok(self.counter_registry(header, tag))
+        Ok(owner.counter_registry(header.header(), tag))
     }
 
-    unsafe fn register_counter_in(
-        &self,
-        header: Header,
+    fn register_counter_in(
+        header: &Live<'_, Self, ModuleKind>,
         tag: &str,
         name: &str,
         size: u64,
     ) -> Result<(u64, u64), TestError> {
-        let registry = self.counter_registry(header, tag);
-        self.counter_sizes.borrow_mut().push(size);
-        if self.fails(Call::Registration) {
+        let owner = header.owner();
+        let header = header.header();
+        let registry = owner.counter_registry(header, tag);
+        owner.counter_sizes.borrow_mut().push(size);
+        if owner.fails(Call::Registration) {
             return Err(TestError::Registration);
         }
         // The counters of a registry are numbered from zero, and a name met
         // before gets its id back, refused under another size.
-        let mut counters = self.tagged_counters.borrow_mut();
+        let mut counters = owner.tagged_counters.borrow_mut();
         let mut own = counters
             .iter()
             .filter(|counter| counter.0 == header && counter.1 == registry);
@@ -374,15 +512,17 @@ unsafe impl Owner for TestOwner {
         }
     }
 
-    unsafe fn register_object_counter(&self, header: Header, name: &str, size: u64) -> Result<u64, TestError> {
-        self.counter_sizes.borrow_mut().push(size);
-        if self.fails(Call::Registration) {
+    fn register_object_counter(header: &Live<'_, Self, ObjectKind>, name: &str, size: u64) -> Result<u64, TestError> {
+        let owner = header.owner();
+        let header = header.header();
+        owner.counter_sizes.borrow_mut().push(size);
+        if owner.fails(Call::Registration) {
             return Err(TestError::Registration);
         }
         // The counters of an object are numbered from zero, apart from the
         // modules' counters, and a name met before gets its id back, refused
         // under another size.
-        let mut counters = self.object_counters.borrow_mut();
+        let mut counters = owner.object_counters.borrow_mut();
         let mut own = counters.iter().filter(|counter| counter.0 == header);
         match own.clone().position(|counter| counter.1 == name) {
             Some(id) if own.nth(id).is_some_and(|counter| counter.2 == size) => Ok(id as u64),
@@ -395,15 +535,17 @@ unsafe impl Owner for TestOwner {
         }
     }
 
-    unsafe fn link_device(&self, _header: Header, _name: &str) -> Result<u64, TestError> {
-        self.register()
+    fn link_device(header: &Live<'_, Self, ModuleKind>, _name: &str) -> Result<u64, TestError> {
+        header.owner().register()
     }
 
-    unsafe fn link_object(&self, header: Header, ty: &str, name: &str) -> Result<u64, TestError> {
+    fn link_object(header: &Live<'_, Self, ModuleKind>, ty: &str, name: &str) -> Result<u64, TestError> {
+        let owner = header.owner();
+        let header = header.header();
         // The links of a header are numbered from zero, apart from its
         // counters and devices, and a pair linked before gets its index again
         // with no call that may fail, as `cp_module_link_object` does.
-        let mut links = self.object_links.borrow_mut();
+        let mut links = owner.object_links.borrow_mut();
         let own = links.iter().filter(|link| link.0 == header);
         if let Some(index) = own
             .clone()
@@ -412,10 +554,62 @@ unsafe impl Owner for TestOwner {
             return Ok(index as u64);
         }
         let index = own.count() as u64;
-        if self.fails(Call::Registration) {
+        if owner.fails(Call::Registration) {
             return Err(TestError::Registration);
         }
         links.push((header, ty.to_string(), name.to_string()));
         Ok(index)
+    }
+}
+
+impl Default for TestOwner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// The resolving context of a test read, branded with its built body.
+#[derive(Clone, Copy)]
+pub struct TestCx<'g> {
+    graph: Graph<'g>,
+}
+
+impl<'g> Resolve<'g> for TestCx<'g> {
+    fn graph(&self) -> Graph<'g> {
+        self.graph
+    }
+}
+
+/// A module configuration or object built over a [`TestOwner`].
+///
+/// Sealed to the two builder handle types.
+pub trait TestBuilt: sealed::Sealed {}
+
+impl<M: Module> TestBuilt for Built<M, TestOwner> {}
+impl<O: Object> TestBuilt for BuiltObject<O, TestOwner> {}
+
+mod sealed {
+    use super::{Built, BuiltObject, HeaderKind, Module, Object, TestOwner};
+
+    pub trait Sealed {
+        fn release(self, owner: &TestOwner);
+    }
+
+    impl<M: Module> Sealed for Built<M, TestOwner> {
+        fn release(self, owner: &TestOwner) {
+            owner.assert_live(self.header(), HeaderKind::Module);
+            // SAFETY: this live module belongs to the owner, has never been
+            // published, and consuming the handle excludes outstanding reads.
+            unsafe { self.destroy(owner) };
+        }
+    }
+
+    impl<O: Object> Sealed for BuiltObject<O, TestOwner> {
+        fn release(self, owner: &TestOwner) {
+            owner.assert_live(self.header(), HeaderKind::Object);
+            // SAFETY: this live object belongs to the owner, has never been
+            // published, and consuming the handle excludes outstanding reads.
+            unsafe { self.destroy(owner) };
+        }
     }
 }

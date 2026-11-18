@@ -12,6 +12,10 @@ use crate::bindings;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Refusal {
+    /// The owner has no C memory for an embedded C object.
+    ///
+    /// Reported as `YANET_ERROR_FAILED_PRECONDITION`.
+    NoCMemory,
     /// The owner's shared memory is exhausted, also under an embedded C
     /// object that ran out of it; `YANET_ERROR_RESOURCE_EXHAUSTED`.
     OutOfMemory,
@@ -66,6 +70,7 @@ impl Refusal {
     /// For a key given twice `Display` adds the positions of both records.
     pub fn message(self) -> &'static str {
         match self {
+            Self::NoCMemory => "the owner has no C memory for an embedded C object",
             Self::OutOfMemory => "the shared memory is exhausted",
             Self::BlockTooLarge => "an owned block larger than the largest block of the allocator",
             Self::InvalidRange => "a range ends before it starts",
@@ -83,6 +88,7 @@ impl Refusal {
     /// The `yanet_error_kind` the C-facing layer reports the refusal with.
     pub fn kind(self) -> bindings::yanet_error_kind {
         match self {
+            Self::NoCMemory => bindings::yanet_error_kind_YANET_ERROR_FAILED_PRECONDITION,
             Self::OutOfMemory => bindings::yanet_error_kind_YANET_ERROR_RESOURCE_EXHAUSTED,
             Self::BlockTooLarge
             | Self::InvalidRange
