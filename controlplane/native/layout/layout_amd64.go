@@ -11,7 +11,7 @@ import (
 )
 
 // Fingerprint identifies the layout of every view in this file.
-const Fingerprint = "522c4e99344d32bb"
+const Fingerprint = "8a64aa56f945511f"
 
 // Agent is the C struct agent, 1056 bytes.
 type Agent struct {
@@ -63,6 +63,11 @@ type ChainEctx struct {
 	Schedule                      PacketFront
 	AbsDropSink                   shm.Local
 	// modules: flexible array at offset 184.
+}
+
+// ClassifyAttrLine is the C struct classify_attr_line, 24 bytes.
+type ClassifyAttrLine struct {
+	Line Vline
 }
 
 // ConfigGenEctx is the C struct config_gen_ectx, 288 bytes.
@@ -924,6 +929,14 @@ type TscClock struct {
 	TscToNsMult      uint64
 	RealTimeNs       uint64
 	TimestampCounter uint64
+}
+
+// Vline is the C struct vline, 24 bytes.
+type Vline struct {
+	MemoryContext shm.Ptr[MemoryContext]
+	Size          uint32
+	_             [4]byte
+	Values        shm.Ptr[uint32]
 }
 
 // Agents returns the first count elements of the flexible array agents.
