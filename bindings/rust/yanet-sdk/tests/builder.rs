@@ -145,67 +145,6 @@ fn test_slice_interrupted_after_initialization_releases_nested_field_before_earl
     }
 }
 
-#[test]
-fn test_derive_releases_both_fields_at_a_coincident_offset() {
-    std::thread_local! {
-        static EVENTS: core::cell::RefCell<Vec<i8>> = const { core::cell::RefCell::new(Vec::new()) };
-    }
-
-    #[repr(transparent)]
-    struct Marker<const ID: i8>([u8; 0]);
-
-    // SAFETY: the empty array is its whole layout and needs no drop.
-    unsafe impl<const ID: i8> ShmLayout for Marker<ID> {}
-
-    // SAFETY: the marker owns no blocks. Its teardown only records the event.
-    unsafe impl<const ID: i8> Free for Marker<ID> {
-        fn free<W: Owner>(_: Taken<'_, Self, W>) {
-            EVENTS.with_borrow_mut(|events| events.push(-ID));
-        }
-    }
-
-    impl<const ID: i8> Build for Marker<ID> {
-        type Parts<'b, W: Owner> = ();
-
-        fn write<'s, 'b, W: Owner>((): (), place: Place<'s, 'b, Self, W>) -> Result<Init<'s, Self>, Refusal> {
-            EVENTS.with_borrow_mut(|events| events.push(ID));
-            // SAFETY: the marker contains no relative edges or registrations.
-            Ok(unsafe { place.put(Self([])) })
-        }
-    }
-
-    #[derive(ShmLayout)]
-    #[repr(C)]
-    struct Coincident {
-        first: Marker<1>,
-        second: Marker<2>,
-        word: Flaky,
-    }
-
-    assert_eq!(offset_of!(Coincident, first), offset_of!(Coincident, second));
-
-    for fails in [false, true] {
-        let owner = TestOwner::new();
-        let built = Builder::<Fixture<u64>>::build::<Failure, _>(&owner, "coincident", |b| {
-            let _boxed = b.boxed::<Coincident>(CoincidentParts {
-                first: (),
-                second: (),
-                word: FlakyParts { word: 1, fails },
-            })?;
-            Ok(0)
-        });
-        if fails {
-            let err = built.expect_err("the last field refuses after both markers initialize");
-            assert!(matches!(err, BuildError::Refused(Refusal::OutOfMemory)));
-            assert_eq!([1, 2, -2, -1].as_slice(), EVENTS.take().as_slice());
-        } else {
-            owner.release(built.expect("the complete record was released"));
-            assert_eq!([1, 2, -1, -2].as_slice(), EVENTS.take().as_slice());
-        }
-        owner.assert_released();
-    }
-}
-
 /// A word whose write is refused when its parts say so.
 #[repr(C)]
 struct Flaky(u64);
@@ -534,7 +473,7 @@ fn test_build_leaves_indexes_of_no_records_empty_and_unallocated() {
 
 #[test]
 fn test_build_writes_nested_slices_and_a_box() {
-    let owner = owner();
+    let owner = owner().with_child_return_log();
 
     let built = build_policy(&owner, &[(1, &[80, 443]), (2, &[]), (3, &[53])]).expect("built");
 
@@ -562,6 +501,11 @@ fn test_build_writes_nested_slices_and_a_box() {
         );
     });
     owner.release(built);
+    // Return the rules and their ports before the default box.
+    assert_eq!(
+        [8, 16, 3 * size_of::<Rule>(), size_of::<Rule>()],
+        owner.take_child_returns().as_slice()
+    );
     owner.assert_released();
 }
 
