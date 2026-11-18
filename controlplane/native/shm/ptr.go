@@ -7,6 +7,8 @@
 package shm
 
 import (
+	"bytes"
+	"strings"
 	"sync/atomic"
 	"unsafe"
 )
@@ -76,3 +78,23 @@ func (m *Ptr[T]) distance(target *T) int64 {
 //
 // A view keeps such a field at its size and offset and never follows it.
 type Local uintptr
+
+// CopyString copies value into a C character array as strtcpy does: at
+// most one byte short of the array, then a terminating zero; the bytes
+// after it stay as they were.
+func CopyString(field []byte, value string) {
+	if end := strings.IndexByte(value, 0); end >= 0 {
+		value = value[:end]
+	}
+	length := min(len(value), len(field)-1)
+	copy(field, value[:length])
+	field[length] = 0
+}
+
+// String returns the NUL-terminated string a C character array holds.
+func String(field []byte) string {
+	if end := bytes.IndexByte(field, 0); end >= 0 {
+		field = field[:end]
+	}
+	return string(field)
+}

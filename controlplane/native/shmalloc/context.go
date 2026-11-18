@@ -1,7 +1,6 @@
 package shmalloc
 
 import (
-	"strings"
 	"sync/atomic"
 	"unsafe"
 
@@ -17,7 +16,7 @@ func ContextInit(context *layout.MemoryContext, name string, allocator *layout.B
 	context.BallocSize = 0
 	context.BfreeSize = 0
 	context.BlockAllocator.Set(allocator)
-	copyName(context.Name[:], name)
+	shm.CopyString(context.Name[:], name)
 	context.Parent.Set(nil)
 	context.FirstChild.Set(nil)
 	context.NextSibling.Set(nil)
@@ -32,7 +31,7 @@ func ContextInitFrom(context, parent *layout.MemoryContext, name string) {
 	context.BfreeSize = 0
 	allocator := parent.BlockAllocator.Get()
 	context.BlockAllocator.Set(allocator)
-	copyName(context.Name[:], name)
+	shm.CopyString(context.Name[:], name)
 	context.Parent.Set(parent)
 	context.FirstChild.Set(nil)
 
@@ -109,16 +108,4 @@ func ContextRealloc(context *layout.MemoryContext, data unsafe.Pointer, oldSize,
 		ContextFree(context, data, oldSize)
 	}
 	return moved
-}
-
-// copyName copies name into a C character array as strtcpy does: at most
-// one byte short of the array, then a terminating zero; the bytes after
-// it stay as they were.
-func copyName(field []byte, name string) {
-	if end := strings.IndexByte(name, 0); end >= 0 {
-		name = name[:end]
-	}
-	length := min(len(name), len(field)-1)
-	copy(field, name[:length])
-	field[length] = 0
 }
