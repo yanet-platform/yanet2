@@ -18,15 +18,27 @@ const RecordFrameSize = uint32(C.RING_RECORD_FRAME_SIZE)
 
 // Record is one payload read from a worker's ring.
 //
-// It carries the worker index and the sequence number the writer wrote into
-// the record's frame. The records of one read share one allocation, and nothing else
-// uses it. So a later read does not change the payload. The payload's
-// capacity equals its length, so an append allocates new memory and never
-// writes into the next record.
+// It carries the worker index, the sequence number the writer wrote into
+// the record's frame and the number of records lost right before it. The
+// records of one read share one allocation, and nothing else uses it. So a
+// later read does not change the payload. The payload's capacity equals its
+// length, so an append allocates new memory and never writes into the next
+// record.
 type Record struct {
 	Worker uint16
 	Seqno  uint32
-	Bytes  []byte
+	// Lost is the number of records the writer committed between the
+	// previous record this reader returned and this one.
+	//
+	// The writer numbers the records it commits consecutively, so the gap in
+	// sequence numbers counts the records evicted before the reader got them
+	// and those a corrupt frame made it skip: the frame itself and the intact
+	// records behind it up to the write position. A record the writer
+	// rejects takes no number and is never counted. Losses after the last
+	// returned record show only on the next one. The count wraps modulo
+	// 2^32. A reader's first record has no predecessor and reports 0.
+	Lost  uint32
+	Bytes []byte
 }
 
 // RecordSource gives a Reader raw access to one ring.
@@ -86,6 +98,13 @@ type Reader struct {
 	src      RecordSource
 
 	readIdx atomic.Uint64
+	// nextSeqno is the sequence number of the record after the last one
+	// returned, when no record is lost in between.
+	//
+	// It has no value until the reader returns its first record, which the
+	// flag below marks.
+	nextSeqno uint32
+	hasSeqno  bool
 	// buf is a scratch buffer reused across calls. No caller ever gets it.
 	//
 	// Between calls it holds only the start of a record that is not yet
@@ -135,7 +154,8 @@ func (m *Reader) HasMore() bool {
 //
 // After the copy, Read moves its position forward and loads the readable
 // position again. If the writer evicted bytes during the copy, Read drops
-// them, so the caller never gets an overwritten record. A record length
+// them, so the caller never gets an overwritten record; the next returned
+// record counts every record dropped this way as lost. A record length
 // outside [frame size, capacity] is corruption. Read then returns the
 // records before it, drops the rest of the buffer, and resumes at the write
 // position it loaded at the start. A normal call allocates one slice and
@@ -217,10 +237,18 @@ func (m *Reader) Read(maxBytes uint32) []Record {
 			totalLen := binary.LittleEndian.Uint32(m.buf[offset : offset+4])
 			seqno := binary.LittleEndian.Uint32(m.buf[offset+4 : offset+8])
 
+			var lost uint32
+			if m.hasSeqno {
+				// Wraps like the writer's 32-bit counter.
+				lost = seqno - m.nextSeqno
+			}
+			m.nextSeqno, m.hasSeqno = seqno+1, true
+
 			n := copy(payloads, m.buf[offset+int(RecordFrameSize):offset+int(totalLen)])
 			records = append(records, Record{
 				Worker: m.worker,
 				Seqno:  seqno,
+				Lost:   lost,
 				Bytes:  payloads[:n:n],
 			})
 			payloads = payloads[n:]

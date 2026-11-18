@@ -84,7 +84,10 @@ its own.
   record in one step.
 - Each reader keeps its own cursor per worker. A slow reader loses the
   records that the writer evicted before the reader got to them. A slow
-  reader never slows down the writer or other readers.
+  reader never slows down the writer or other readers. The Go reader
+  counts these lost records from the gap in seqno and reports them on the
+  next record it returns (`Record.Lost`). A reader's first record reports
+  0, and the count wraps modulo 2^32 like seqno.
 
 ## Framing and seqno
 

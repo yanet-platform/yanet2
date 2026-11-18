@@ -2,6 +2,7 @@ use core::{error::Error, time::Duration};
 use std::{
     fs,
     io::{self, Write},
+    time::Instant,
 };
 
 use pcap_file::{
@@ -11,7 +12,7 @@ use pcap_file::{
         PcapNgWriter,
         blocks::{
             Block,
-            enhanced_packet::EnhancedPacketBlock,
+            enhanced_packet::{EnhancedPacketBlock, EnhancedPacketOption},
             interface_description::{InterfaceDescriptionBlock, InterfaceDescriptionOption, InterfaceTsResolution},
         },
     },
@@ -190,29 +191,50 @@ impl PdumpWriter {
             .ok_or_else(|| -> Box<dyn Error> { "pdump record missing metadata".into() })?;
         let ts = Duration::from_nanos(meta.timestamp);
 
+        // A single interface carries the records of every worker, so the
+        // count covers only the record's own ring, not the interface.
+        let mut options = Vec::new();
+        if rec.lost_before > 0 {
+            options.push(EnhancedPacketOption::DropCount(rec.lost_before));
+        }
+
         let packet_block = EnhancedPacketBlock {
             interface_id: writer.interface_id,
             timestamp: ts,
             original_len: meta.packet_len,
             data: rec.data.into(),
-            options: vec![],
+            options,
         };
 
         Ok(writer.inner.write_block(&Block::EnhancedPacket(packet_block))?)
     }
 }
 
+/// Shortest time between two loss reports on stderr.
+const LOSS_REPORT_INTERVAL: Duration = Duration::from_secs(1);
+
 /// Failure of the capture's writing side, carried out of the blocking task.
 pub type WriteError = Box<dyn Error + Send + Sync>;
 
 /// Writes captured records until a limit, the stream or a failure ends the
 /// capture, always flushing. An output that goes away is not a failure.
-pub fn pdump_write(
+///
+/// The running and final totals of lost records are reported on the loss
+/// sink, never as text in the output: a running total at most once per
+/// interval, and the capture's total at its end. A failed report is ignored,
+/// so a closed stderr never ends the capture.
+pub fn pdump_write<W>(
     mut writer: PdumpWriter,
     mut rx: mpsc::Receiver<pdumppb::Record>,
     packet_limit: Option<u64>,
-) -> Result<(), WriteError> {
+    mut losses: W,
+) -> Result<(), WriteError>
+where
+    W: Write,
+{
     let mut count = 0;
+    let mut lost = 0;
+    let mut reported_at: Option<Instant> = None;
     let captured = loop {
         if let Some(limit) = packet_limit
             && count >= limit
@@ -225,6 +247,14 @@ pub fn pdump_write(
         let Some(rec) = rx.blocking_recv() else {
             break Ok(());
         };
+
+        if rec.lost_before > 0 {
+            lost += rec.lost_before;
+            if reported_at.is_none_or(|at| at.elapsed() >= LOSS_REPORT_INTERVAL) {
+                let _ = writeln!(losses, "lost {lost} records to ring overwrites so far");
+                reported_at = Some(Instant::now());
+            }
+        }
 
         if let Err(err) = writer.write(rec) {
             if is_broken_pipe(err.as_ref()) {
@@ -250,6 +280,10 @@ pub fn pdump_write(
             root_cause(err.as_ref())
         ))),
     };
+
+    if lost > 0 {
+        let _ = writeln!(losses, "lost {lost} records to ring overwrites in this capture");
+    }
 
     captured.and(flushed)
 }
@@ -296,6 +330,8 @@ pub async fn pdump_stream_reader(
 
 #[cfg(test)]
 mod test {
+    use std::thread;
+
     use pcap_file::{pcap::PcapReader, pcapng::PcapNgReader};
     use tempfile::NamedTempFile;
 
@@ -318,6 +354,7 @@ mod test {
                     ..Default::default()
                 }),
                 data: vec![0xAB; len],
+                lost_before: 0,
             };
             payloads.push(record.data.clone());
             writer.write(record).expect("must write the record");
@@ -356,17 +393,119 @@ mod test {
     }
 
     #[test]
+    fn test_pcapng_records_drop_count_only_after_a_gap() {
+        let file = NamedTempFile::new().expect("must create a temp file");
+        let path = file.path().to_str().expect("temp path must be valid UTF-8");
+        let mut writer = PdumpWriter::new(DumpOutputFormat::PcapNg, path).expect("must open");
+        for lost_before in [0, 5] {
+            let record = pdumppb::Record {
+                meta: Some(pdumppb::RecordMeta { packet_len: 60, ..Default::default() }),
+                data: vec![0xAB; 60],
+                lost_before,
+            };
+            writer.write(record).expect("must write the record");
+        }
+        writer.flush().expect("must flush");
+
+        let mut reader = PcapNgReader::new(file.reopen().expect("must reopen")).expect("must parse the pcapng header");
+        let mut options = Vec::new();
+        while let Some(block) = reader.next_block() {
+            if let (Block::EnhancedPacket(packet), _) = block.expect("must parse block") {
+                options.push(
+                    packet
+                        .options
+                        .into_iter()
+                        .map(|option| option.into_owned())
+                        .collect::<Vec<_>>(),
+                );
+            }
+        }
+        assert_eq!(vec![vec![], vec![EnhancedPacketOption::DropCount(5)]], options);
+    }
+
+    fn lossy_record(lost_before: u64) -> pdumppb::Record {
+        pdumppb::Record {
+            meta: Some(pdumppb::RecordMeta::default()),
+            data: Vec::new(),
+            lost_before,
+        }
+    }
+
+    #[test]
+    fn test_pdump_write_reports_running_total_once_per_interval_and_final_total() {
+        let writer = PdumpWriter::new(DumpOutputFormat::Pcap, "/dev/null").expect("must open");
+        let (tx, rx) = mpsc::channel(3);
+        for lost_before in [3, 0, 5] {
+            tx.try_send(lossy_record(lost_before)).expect("must accept the record");
+        }
+        drop(tx);
+        let mut losses = Vec::new();
+
+        pdump_write(writer, rx, None, &mut losses).expect("must write the records");
+
+        assert_eq!(
+            concat!(
+                "lost 3 records to ring overwrites so far\n",
+                "lost 8 records to ring overwrites in this capture\n",
+            ),
+            String::from_utf8(losses).expect("losses must be UTF-8")
+        );
+    }
+
+    #[test]
+    fn test_pdump_write_reports_running_total_again_after_the_interval() {
+        let writer = PdumpWriter::new(DumpOutputFormat::Pcap, "/dev/null").expect("must open");
+        let (tx, rx) = mpsc::channel(1);
+        let mut losses = Vec::new();
+
+        thread::scope(|scope| {
+            let capture = scope.spawn(|| pdump_write(writer, rx, None, &mut losses));
+            tx.blocking_send(lossy_record(1)).expect("the writer must run");
+            thread::sleep(LOSS_REPORT_INTERVAL);
+            tx.blocking_send(lossy_record(2)).expect("the writer must run");
+            drop(tx);
+            capture
+                .join()
+                .expect("the writer must not panic")
+                .expect("must write the records");
+        });
+
+        assert_eq!(
+            concat!(
+                "lost 1 records to ring overwrites so far\n",
+                "lost 3 records to ring overwrites so far\n",
+                "lost 3 records to ring overwrites in this capture\n",
+            ),
+            String::from_utf8(losses).expect("losses must be UTF-8")
+        );
+    }
+
+    #[test]
+    fn test_pdump_write_without_losses_reports_nothing() {
+        let writer = PdumpWriter::new(DumpOutputFormat::Pcap, "/dev/null").expect("must open");
+        let (tx, rx) = mpsc::channel(1);
+        tx.try_send(lossy_record(0)).expect("must accept the record");
+        drop(tx);
+        let mut losses = Vec::new();
+
+        pdump_write(writer, rx, None, &mut losses).expect("must write the record");
+
+        assert!(losses.is_empty());
+    }
+
+    #[test]
     fn test_pdump_write_reports_an_output_that_cannot_take_records() {
         let writer = PdumpWriter::new(DumpOutputFormat::Text, "/dev/full").expect("must open");
         let (tx, rx) = mpsc::channel(1);
         tx.try_send(pdumppb::Record {
             meta: Some(pdumppb::RecordMeta::default()),
             data: Vec::new(),
+            lost_before: 0,
         })
         .expect("must accept the record");
         drop(tx);
 
-        let err = pdump_write(writer, rx, None).expect_err("a full output must fail the capture");
+        let err = pdump_write(writer, rx, None, io::sink()).expect_err("a full output must fail the capture");
 
         assert!(err.to_string().starts_with("failed to write record: "), "{err}");
     }
@@ -386,11 +525,16 @@ mod test {
     fn test_pdump_write_reports_a_failed_record() {
         let writer = PdumpWriter::new(DumpOutputFormat::Pcap, "/dev/null").expect("must open");
         let (tx, rx) = mpsc::channel(1);
-        tx.try_send(pdumppb::Record { meta: None, data: Vec::new() })
-            .expect("must accept the record");
+        tx.try_send(pdumppb::Record {
+            meta: None,
+            data: Vec::new(),
+            lost_before: 0,
+        })
+        .expect("must accept the record");
         drop(tx);
 
-        let err = pdump_write(writer, rx, None).expect_err("a record without metadata must fail the capture");
+        let err =
+            pdump_write(writer, rx, None, io::sink()).expect_err("a record without metadata must fail the capture");
 
         assert_eq!("failed to write record: pdump record missing metadata", err.to_string());
     }
