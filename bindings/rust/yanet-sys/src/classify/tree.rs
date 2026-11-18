@@ -19,7 +19,7 @@ use yanet_shm::{rel::ShmBox, resolve::Resolve, shm::ShmLayout};
 use super::{Addr4, Joint, LineAttr, Net4Attr, Net6Attr, PortAttr, Rule, RuleMap, RuleTable, lpm_value};
 use crate::{
     bindings,
-    cp::{Build, MemoryContext, Owned, Owner, Refusal},
+    cp::{Build, Init, MemoryContext, Owned, Owner, Place, Refusal},
 };
 
 /// A classifier of a tree: an attribute, or a joint of two classifiers.
@@ -31,15 +31,16 @@ use crate::{
 /// use yanet_shm::{resolve::Resolve, shm::ShmLayout};
 /// use yanet_sys::{
 ///     classify::Node,
-///     cp::{Build, MemoryContext, Owner, Refusal},
+///     cp::{Build, Init, MemoryContext, Owner, Place, Refusal},
 /// };
 /// #[repr(C)]
 /// struct Mine(u32);
 /// unsafe impl ShmLayout for Mine {}
 /// unsafe impl Build for Mine {
 ///     type Parts<'b, W: Owner> = u32;
-///     unsafe fn write<W: Owner>(_: u32, _: &MemoryContext<'_, W>, _: usize) -> Result<(), Refusal> {
-///         Ok(())
+///     fn write<'s, 'b, W: Owner>(value: u32, place: Place<'s, 'b, Self, W>) -> Result<Init<'s, Self>, Refusal> {
+///         // SAFETY: the integer owns nothing and has no relative edges.
+///         Ok(unsafe { place.put(Self(value)) })
 ///     }
 ///     unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
 /// }
@@ -374,11 +375,10 @@ macro_rules! holders {
         unsafe impl<$($param: Build),*> Build for $name<$($param),*> {
             type Parts<'b, W: Owner> = Infallible;
 
-            unsafe fn write<W: Owner>(
+            fn write<'s, 'b, W: Owner>(
                 parts: Infallible,
-                _: &MemoryContext<'_, W>,
-                _: usize,
-            ) -> Result<(), Refusal> {
+                _: Place<'s, 'b, Self, W>,
+            ) -> Result<Init<'s, Self>, Refusal> {
                 match parts {}
             }
 
@@ -423,10 +423,10 @@ mod sealed {
 /// context's build, whose C object is written whole; the part is of the same
 /// build.
 #[doc(hidden)]
-pub unsafe fn link<W: Owner, T: Build>(memory: &MemoryContext<'_, W>, edge: usize, part: Owned<'_, T, W>) {
+pub unsafe fn link<'b, W: Owner, T: Build>(memory: &'b MemoryContext<'b, W>, edge: usize, part: Owned<'b, T, W>) {
     // SAFETY: the edge is an aligned, unwritten offset word of the node
     // (caller contract); a box write only stores the offset.
-    let written = unsafe { <ShmBox<T> as Build>::write::<W>(part, memory, edge) };
+    let written = unsafe { memory.write_at::<ShmBox<T>>(edge, part) };
     debug_assert!(written.is_ok(), "a box write does not fail");
 }
 

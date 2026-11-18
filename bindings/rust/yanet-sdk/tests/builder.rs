@@ -19,11 +19,11 @@ use yanet_sdk::{
     ObjectBuilder, ObjectCommitCx, ObjectCounter, ObjectLink, OwnedSlice, PerWorker, PerWorkerSlice, Refusal,
     Registered, ShmBox, ShmLayout, ShmSlice, TaggedCounter, TaggedCounters, Traffic, Verdict,
 };
-use yanet_sdk_testing::cp::{Call, LiveHeaders, TestCx, TestError, TestOwner};
+use yanet_sdk_testing::cp::{Call, Interruptible, LiveHeaders, TestCx, TestError, TestOwner};
 use yanet_sys::{
     bindings::{COUNTER_TAG_VALUE_LEN, CP_MODULE_NAME_LEN, CP_OBJECT_NAME_LEN},
     common::LINE_BLOCK_ALIGN,
-    cp::{BuildError, Builder, Built, MemoryContext, Owner, Scope},
+    cp::{BuildError, Builder, Built, Init, MemoryContext, Owner, Place, Scope},
     dp::ModuleConfig,
 };
 
@@ -82,6 +82,63 @@ struct Node<T, const N: usize> {
     fixed: [T; N],
 }
 
+// The lower-case const tests hygiene of the generated destination binding.
+#[allow(non_upper_case_globals)]
+mod derived {
+    use super::{Interruptible, ShmSlice};
+
+    #[derive(yanet_sdk::ShmLayout)]
+    #[repr(C)]
+    pub(super) struct Enclosing<const __place: usize> {
+        pub(super) prior: [ShmSlice<u8>; __place],
+        pub(super) current: Interruptible<ShmSlice<u32>>,
+    }
+}
+
+#[allow(clippy::std_instead_of_core)]
+#[test]
+fn test_slice_interrupted_after_initialization_releases_nested_field_before_derived_guards() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    use derived::{Enclosing, EnclosingParts};
+
+    let owner = TestOwner::new().with_child_return_log();
+    for unwind in [false, true] {
+        let built = Builder::<Fixture<u64>>::build::<Failure, _>(&owner, "nested", |b| {
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                b.slice::<Enclosing<1>>(2, |_| {
+                    let interrupt: fn() -> Result<(), Refusal> = if unwind {
+                        || panic!("initialized field")
+                    } else {
+                        || Err(Refusal::InvalidRange)
+                    };
+                    Ok(EnclosingParts {
+                        prior: [b.slice(17, |_| Ok(0))?],
+                        current: (b.slice(2, |_| Ok(0))?, interrupt),
+                    })
+                })
+            }));
+            if unwind {
+                let panic = result.expect_err("initialized field unwinds");
+                assert_eq!(Some(&"initialized field"), panic.downcast_ref::<&str>());
+            } else {
+                assert!(matches!(
+                    result.unwrap(),
+                    Err(BuildError::Refused(Refusal::InvalidRange))
+                ));
+            }
+            assert_eq!(
+                [8, 17, 2 * size_of::<Enclosing<1>>()],
+                owner.take_child_returns().as_slice()
+            );
+            Ok(0)
+        })
+        .expect("same build survives interrupted field");
+        owner.release(built);
+        owner.assert_released();
+    }
+}
+
 /// A word whose write is refused when its parts say so.
 #[repr(C)]
 struct Flaky(u64);
@@ -101,13 +158,12 @@ unsafe impl ShmLayout for Flaky {}
 unsafe impl Build for Flaky {
     type Parts<'b, W: Owner> = FlakyParts;
 
-    unsafe fn write<W: Owner>(parts: FlakyParts, memory: &MemoryContext<'_, W>, addr: usize) -> Result<(), Refusal> {
+    fn write<'s, 'b, W: Owner>(parts: FlakyParts, place: Place<'s, 'b, Self, W>) -> Result<Init<'s, Self>, Refusal> {
         if parts.fails {
             return Err(Refusal::OutOfMemory);
         }
-        // SAFETY: the address is aligned and exclusive (caller contract).
-        unsafe { memory.root().ptr::<u64>(addr).write(parts.word) };
-        Ok(())
+        // SAFETY: the word has no address-relative fields or release work.
+        Ok(unsafe { place.put(Self(parts.word)) })
     }
 
     unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
@@ -599,7 +655,8 @@ fn test_build_padded_field_failure_releases_written_and_unwritten_children() {
 fn test_build_leaves_an_empty_slice_null_and_unallocated() {
     let owner = owner();
 
-    let built = build::<WordsModule>(&owner, |b| b.slice(0, |_| Ok(0))).expect("built");
+    let built =
+        build::<WordsModule>(&owner, |b| b.slice(0, |_| panic!("empty slice cannot call fill"))).expect("built");
 
     owner.read_module(&built, |view, config| {
         assert_eq!((0, 0, 0), (config.offset(), config.len(), config.as_slice(&view).len()));
@@ -797,17 +854,19 @@ fn test_build_releases_everything_when_the_closure_panics() {
 
 #[test]
 fn test_build_releases_everything_when_an_item_of_a_nested_slice_fails() {
-    let owner = owner();
+    let owner = owner().with_child_return_log();
+    let mut indices = Vec::new();
 
-    // Rule 1 owns a finished ports block when rule 2's ports fail halfway.
+    // Two committed rules precede the current, unfinished ports block.
     let err = Builder::<PolicyModule>::build::<AuthorError, _>(&owner, "policy0", |b| {
         Ok(PolicyParts {
-            rules: b.slice(2, |idx| {
+            rules: b.slice(4, |idx| {
+                indices.push(idx);
                 let id = idx as u64 + 1;
                 Ok(RuleParts {
                     id,
-                    ports: b.slice(2, |port| {
-                        if id == 2 && port == 1 {
+                    ports: b.slice(idx + 1, |port| {
+                        if id == 3 && port == 1 {
                             return Err(AuthorError::Input("port 81 is invalid"));
                         }
                         Ok(80 + port as u64)
@@ -822,6 +881,11 @@ fn test_build_releases_everything_when_an_item_of_a_nested_slice_fails() {
     .expect_err("invalid port");
 
     assert_eq!(AuthorError::Input("port 81 is invalid"), err);
+    assert_eq!([0, 1, 2], indices.as_slice());
+    assert_eq!(
+        [24, 16, 8, 4 * size_of::<Rule>()],
+        owner.take_child_returns().as_slice()
+    );
     owner.assert_released();
 }
 
@@ -831,17 +895,17 @@ fn test_build_releases_everything_when_an_item_of_a_nested_slice_fails() {
 fn test_build_releases_everything_when_a_nested_fill_panics() {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
-    let owner = owner();
+    let owner = owner().with_child_return_log();
 
     let result = catch_unwind(AssertUnwindSafe(|| {
         Builder::<PolicyModule>::build::<Failure, _>(&owner, "policy0", |b| {
             Ok(PolicyParts {
-                rules: b.slice(2, |idx| {
+                rules: b.slice(4, |idx| {
                     let id = idx as u64 + 1;
                     Ok(RuleParts {
                         id,
-                        ports: b.slice(2, |port| {
-                            assert!(!(id == 2 && port == 1), "the fill of the author panics");
+                        ports: b.slice(idx + 1, |port| {
+                            assert!(!(id == 3 && port == 1), "the fill of the author panics");
                             Ok(80 + port as u64)
                         })?,
                     })
@@ -854,6 +918,10 @@ fn test_build_releases_everything_when_a_nested_fill_panics() {
     }));
 
     assert!(result.is_err());
+    assert_eq!(
+        [24, 16, 8, 4 * size_of::<Rule>()],
+        owner.take_child_returns().as_slice()
+    );
     owner.assert_released();
 }
 
@@ -1350,6 +1418,32 @@ fn test_build_returns_everything_when_a_write_is_refused_at_each_word() {
         assert_eq!(BuildError::Refused(Refusal::OutOfMemory), err);
         owner.assert_released();
     }
+}
+
+#[test]
+fn test_slice_element_refusal_returns_current_ports_before_committed_rules() {
+    let owner = owner().with_child_return_log();
+    let mut indices = Vec::new();
+    let err = build::<EntriesModule>(&owner, |b| {
+        let device = b.device("eth0")?;
+        b.slice(4, |idx| {
+            indices.push(idx);
+            Ok(EntryParts {
+                device,
+                counter: b.counter("hits")?,
+                ports: b.slice(idx + 1, |_| Ok(80))?,
+                word: FlakyParts { word: 0, fails: idx == 2 },
+            })
+        })
+    })
+    .expect_err("third element refuses its final field");
+    assert_eq!(BuildError::Refused(Refusal::OutOfMemory), err);
+    assert_eq!([0, 1, 2], indices.as_slice());
+    assert_eq!(
+        [24, 16, 8, 4 * size_of::<Entry>()],
+        owner.take_child_returns().as_slice()
+    );
+    owner.assert_released();
 }
 
 #[test]

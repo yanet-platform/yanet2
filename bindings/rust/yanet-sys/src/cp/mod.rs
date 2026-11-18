@@ -50,7 +50,7 @@ pub use builder::{
     Retiring, Scope,
 };
 #[doc(hidden)]
-pub use builder::{MemoryContext, Partial};
+pub use builder::{Init, MemoryContext, Partial, Place};
 pub use error::{BuildError, Refusal};
 pub use owner::Owner;
 pub use record::FfiRecord;

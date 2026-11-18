@@ -19,11 +19,16 @@ use core::{
 };
 
 use arena::ArenaOwner;
-use yanet_shm::{index::HashIndexKey, shm::ShmLayout};
+use yanet_sdk_testing::cp::Interruptible;
+use yanet_shm::{
+    index::HashIndexKey,
+    rel::{ShmBox, ShmSlice},
+    shm::ShmLayout,
+};
 use yanet_sys::{
     bindings,
     common::index::HashIndex,
-    cp::{BuildError, Builder, Built, Owner, Refusal},
+    cp::{Build, BuildError, Builder, Built, Owner, Refusal},
     dp::{Batch, CommitCx, Cx, Module},
 };
 
@@ -96,6 +101,124 @@ fn first_child<'o, M: Module>(
                 .ptr::<bindings::memory_context>(link.addr().wrapping_add(offset))
         })
     }
+}
+
+/// Interrupts a completed element after an earlier element has committed.
+#[allow(clippy::std_instead_of_core)]
+fn interrupt_second<'b, T: Build, W: Owner>(
+    scope: yanet_sys::cp::Scope<'b, '_, W>,
+    unwind: bool,
+    mut fill: impl FnMut(usize) -> Result<T::Parts<'b, W>, BuildError<W::Error>>,
+) {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        scope.slice::<Interruptible<T>>(3, |idx| {
+            let interrupt: fn() -> Result<(), Refusal> = match (idx, unwind) {
+                (0, _) => || Ok(()),
+                (1, false) => || Err(Refusal::InvalidRange),
+                (1, true) => || panic!("interrupted initialized index"),
+                _ => panic!("no fill after the interrupted element"),
+            };
+            Ok((fill(idx)?, interrupt))
+        })
+    }));
+    if unwind {
+        let panic = result.expect_err("the completed write unwinds");
+        assert_eq!(Some(&"interrupted initialized index"), panic.downcast_ref::<&str>());
+    } else {
+        assert_matches!(result.unwrap(), Err(BuildError::Refused(Refusal::InvalidRange)));
+    }
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "Miri does not run C")]
+fn test_slice_interrupted_after_initialization_preserves_live_sibling_context() {
+    struct Sibling;
+    impl Module for Sibling {
+        const NAME: &'static str = "sibling";
+        type Config = ShmBox<HashIndex<Ipv4Addr>>;
+        type Prepared<'p> = ();
+
+        fn handle<'id>(_: &mut Cx<'id, Self>, _: &mut Batch<'id>) {}
+        fn prepare<'p>(_: &CommitCx<'p, Self>) {}
+    }
+
+    let owner = ArenaOwner::new();
+    let baseline = owner.free_bytes();
+    let records = [(Ipv4Addr::LOCALHOST, 7)];
+    for unwind in [false, true] {
+        let built = Builder::<Sibling>::build::<Error, _>(&owner, "index", |b| {
+            let sibling = b.boxed::<HashIndex<Ipv4Addr>>(records.as_slice().into())?;
+            interrupt_second::<HashIndex<Ipv4Addr>, _>(b, unwind, |_| Ok(records.as_slice().into()));
+            Ok(sibling)
+        })
+        .expect("publish the earlier index alone");
+
+        let context = owner
+            .root()
+            .ptr::<bindings::memory_context>(built.header().context().get());
+        let sibling = owner.body(&built).get(&owner);
+        let expected = ptr::from_ref(sibling).cast::<bindings::memory_context>();
+        // SAFETY: read only the known live header and index, never a possibly
+        // stale link target. A relative link is measured from its own word.
+        unsafe {
+            let head = &raw const (*context).first_child;
+            assert_eq!(expected.addr(), head.addr().wrapping_add(head.read().addr()));
+            assert!((&raw const (*expected).next_sibling).read().is_null());
+        }
+        assert_eq!(Some(7), sibling.resolve(&owner).get(Ipv4Addr::LOCALHOST));
+        // SAFETY: this test owns the unpublished root and has no live views.
+        unsafe { built.destroy(&owner) };
+        assert_eq!(baseline, owner.free_bytes());
+    }
+}
+
+#[test]
+fn test_slice_interrupted_after_initialization_returns_current_index_run_before_prefix() {
+    use yanet_sdk_testing::cp::{TestError, TestOwner};
+
+    type Table = HashIndex<Ipv4Addr>;
+    type Run = ShmSlice<Table>;
+    let owner = TestOwner::new().with_child_return_log();
+    for unwind in [false, true] {
+        let built = Builder::<Index<Ipv4Addr>>::build::<BuildError<TestError>, _>(&owner, "index", |b| {
+            interrupt_second::<Run, _>(b, unwind, |idx| b.slice::<Table>(idx + 1, |_| Ok([].as_slice().into())));
+            Ok([].as_slice().into())
+        })
+        .expect("empty index without C memory");
+        assert_eq!(
+            [2 * size_of::<Table>(), size_of::<Table>(), 3 * size_of::<Run>()],
+            owner.take_child_returns().as_slice()
+        );
+        owner.release(built);
+        owner.assert_released();
+    }
+}
+
+#[allow(clippy::std_instead_of_core)]
+#[test]
+fn test_boxed_write_unwind_after_initialization_releases_child_and_box_inside_build() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    use yanet_sdk_testing::cp::{TestError, TestOwner};
+
+    type Ports = ShmSlice<u64>;
+    let owner = TestOwner::new().with_child_return_log();
+    let built = Builder::<Index<Ipv4Addr>>::build::<BuildError<TestError>, _>(&owner, "index", |b| {
+        let ports = b.slice(3, |_| Ok(80))?;
+        let panic = catch_unwind(AssertUnwindSafe(|| {
+            b.boxed::<Interruptible<Ports>>((ports, || panic!("initialized box")))
+        }))
+        .expect_err("initialized box unwinds");
+        assert_eq!(Some(&"initialized box"), panic.downcast_ref::<&str>());
+        assert_eq!([24, size_of::<Ports>()], owner.take_child_returns().as_slice());
+        assert_eq!(1, owner.live_blocks(), "only the root is still allocated");
+        Ok([].as_slice().into())
+    })
+    .expect("same build survives interrupted box");
+    owner.release(built);
+    owner.assert_released();
 }
 
 /// verifies that a built index names the position of every key it was given

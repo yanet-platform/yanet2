@@ -29,7 +29,7 @@ use yanet_sdk_testing::BlockArena;
 use yanet_shm::{rel::RelPtr, shm::ShmLayout};
 use yanet_sys::{
     bindings,
-    cp::{Build, MemoryContext, Owner, Refusal},
+    cp::{Build, Init, MemoryContext, Owner, Place, Refusal},
     dp::{
         Batch, CommitCx, Counter, CounterLayout, CounterRef, Cx, Gauge, Module, Object, ObjectCommitCx, ObjectConfig,
         ObjectCounter, ObjectLink, PerWorker, PerWorkerSlice, TaggedCounter, TaggedCounters, TaggedCountersRef,
@@ -170,7 +170,7 @@ unsafe impl ShmLayout for Config {}
 unsafe impl Build for Config {
     type Parts<'b, W: Owner> = Infallible;
 
-    unsafe fn write<W: Owner>(parts: Infallible, _: &MemoryContext<'_, W>, _: usize) -> Result<(), Refusal> {
+    fn write<'s, 'b, W: Owner>(parts: Infallible, _: Place<'s, 'b, Self, W>) -> Result<Init<'s, Self>, Refusal> {
         match parts {}
     }
 
@@ -196,7 +196,7 @@ unsafe impl ShmLayout for StateConfig {}
 unsafe impl Build for StateConfig {
     type Parts<'b, W: Owner> = Infallible;
 
-    unsafe fn write<W: Owner>(parts: Infallible, _: &MemoryContext<'_, W>, _: usize) -> Result<(), Refusal> {
+    fn write<'s, 'b, W: Owner>(parts: Infallible, _: Place<'s, 'b, Self, W>) -> Result<Init<'s, Self>, Refusal> {
         match parts {}
     }
 

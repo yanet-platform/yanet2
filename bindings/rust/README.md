@@ -280,6 +280,23 @@ table. A zero-sized prepared value does not read a missing prepared buffer.
 The `dp` benchmark's harness group also covers whole-front passing and reads
 of stable worker fields.
 
+## Writing configuration parts
+
+`Scope::slice` still calls the author's fill function once per index, in
+order. It reserves one block and lends the next uninitialized element to
+`Build::write` after each fill. Parts can own children from the enclosing
+build. The shorter slot lifetime prevents returning a completion from
+another element, even within that same build.
+
+Manual `unsafe impl Build` writers now take a typed `Place` instead of a
+memory context and raw address. The place supplies both, and completing it
+returns an `Init` for that slot. Until completion, the writer must roll back
+its own partial initialization. After completion, the transaction owns
+cleanup on refusal or unwind, even when the receipt is forgotten. Accepting
+the receipt transfers the whole element to the committed prefix. Relative
+edges must still be written at their final addresses, and `Build::free`
+retains its unsafe ownership contract.
+
 ## Custom configuration owners
 
 Module and object builders keep their existing APIs. Custom implementations of
