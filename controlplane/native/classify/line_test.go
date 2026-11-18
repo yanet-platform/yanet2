@@ -20,7 +20,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
 )
 
-const arenaSize = 64 << 20
+const arenaSize = 256 << 20
 
 // newContext returns a memory context over a fresh anonymous mapping,
 // with an allocator C and Go both draw from.
@@ -92,7 +92,9 @@ func cLineRules(rules []classify.LineRule) []coracle.LineRule {
 func requireLineMatchesC(t *testing.T, rules []classify.LineRule) {
 	t.Helper()
 	context := newContext(t)
-	want, err := coracle.LineCompile(unsafe.Pointer(context), "ratelimit:proto", cLineRules(rules))
+	cRules := coracle.NewCLineRules(cLineRules(rules))
+	defer cRules.Free()
+	want, err := cRules.Compile(unsafe.Pointer(context), "ratelimit:proto")
 	require.NoError(t, err)
 
 	got := classify.CompileLine(rules, classify.LineDomain)
@@ -199,21 +201,46 @@ func measureFootprint(t *testing.T, compile func(context *layout.MemoryContext))
 	shmalloc.Init(allocator)
 	shmalloc.PutArena(allocator, unsafe.Pointer(&arena[0]), uintptr(len(arena)))
 	shmalloc.ContextInit(context, "classify", allocator)
-	before, _ := coracle.Snapshot(arena)
+	// Only the lines the allocator already wrote its free links into
+	// differ from the pattern before the compile; they are kept to
+	// compare against, every other line is compared to the pattern.
+	pattern := bytes.Repeat([]byte{0xCD}, 64)
+	linked := map[int][]byte{}
+	readArena(arena, func() {
+		for line := 0; line < len(arena); line += 64 {
+			if !bytes.Equal(arena[line:line+64], pattern) {
+				linked[line] = bytes.Clone(arena[line : line+64])
+			}
+		}
+	})
 
 	var heapBefore, heapAfter runtime.MemStats
 	runtime.ReadMemStats(&heapBefore)
 	compile(context)
 	runtime.ReadMemStats(&heapAfter)
 
-	after, _ := coracle.Snapshot(arena)
 	touched := uint64(0)
-	for line := 0; line < len(arena); line += 64 {
-		if !bytes.Equal(before[line:line+64], after[line:line+64]) {
-			touched += 64
+	readArena(arena, func() {
+		for line := 0; line < len(arena); line += 64 {
+			before, ok := linked[line]
+			if !ok {
+				before = pattern
+			}
+			if !bytes.Equal(arena[line:line+64], before) {
+				touched += 64
+			}
 		}
-	}
+	})
 	return footprint{Shared: touched, Heap: heapAfter.TotalAlloc - heapBefore.TotalAlloc}
+}
+
+// readArena runs read with all of the arena addressable, restoring what
+// AddressSanitizer marks unaddressable afterwards.
+func readArena(arena []byte, read func()) {
+	runs := coracle.PoisonedRuns(arena)
+	coracle.Unpoison(arena)
+	read()
+	coracle.Repoison(arena, runs)
 }
 
 // Test_CompileLine_UsesLessTemporaryMemoryThanC verifies that compiling a

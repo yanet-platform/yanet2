@@ -64,75 +64,65 @@ func CompileLine(rules []LineRule, size uint32) *Line {
 		values[point] = numbers[values[point]]
 	}
 
-	// The registry is sized exactly: a first pass counts every group's
-	// distinct values, a second one stores them.
-	seen := make([]uint32, count)
-	stage := Stage{RuleGroups: groups, Starts: make([]uint32, len(firsts)+1)}
-	total := uint32(0)
-	for group, first := range firsts {
-		stage.Starts[group] = total
-		forLineGroupValues(rules[first].Ranges, values, size, uint32(group), seen, func(uint32) {
-			total++
-		})
-	}
-	stage.Starts[len(firsts)] = total
-	clear(seen)
-	stage.Values = make([]uint32, 0, total)
-	for group, first := range firsts {
-		forLineGroupValues(rules[first].Ranges, values, size, uint32(group), seen, func(value uint32) {
-			stage.Values = append(stage.Values, value)
-			stage.MaxValue = max(stage.MaxValue, value)
-		})
-	}
+	stage := newStage(groups, len(firsts), count, func(group uint32, builder *stageBuilder) {
+		rule := rules[firsts[group]].Ranges
+		if lineRuleIsAny(rule, size) {
+			for _, value := range values {
+				builder.Reach(value)
+			}
+			return
+		}
+		for _, span := range rule {
+			from, to := clampLineRange(span, size)
+			for point := from; point <= to && point < size; point++ {
+				builder.Reach(values[point])
+			}
+		}
+	})
 	return &Line{Values: values, Stage: stage}
 }
 
-// forLineGroupValues calls collect with every distinct value a group
-// reaches, in the order the C registry collects them: the whole domain
-// for a group matching all of it, its intervals otherwise. seen stamps
-// the values a group already reached with the group's number plus one.
-func forLineGroupValues(rule []LineRange, values []uint32, size uint32, group uint32, seen []uint32, collect func(value uint32)) {
-	reach := func(value uint32) {
-		if seen[value] != group+1 {
-			seen[value] = group + 1
-			collect(value)
-		}
-	}
-	if lineRuleIsAny(rule, size) {
-		for _, value := range values {
-			reach(value)
-		}
-		return
-	}
-	for _, span := range rule {
-		from, to := clampLineRange(span, size)
-		for point := from; point <= to && point < size; point++ {
-			reach(values[point])
-		}
-	}
+// groupLineRules returns the group of every rule and the first rule of
+// every group.
+func groupLineRules(rules []LineRule) ([]uint32, []uint32) {
+	return groupRules(len(rules), func(idx int) ([]LineRange, bool) {
+		return rules[idx].Ranges, rules[idx].Absent
+	})
 }
 
-// groupLineRules returns the group of every rule, numbering the distinct
+// interval is a closed interval of an attribute domain.
+type interval interface {
+	comparable
+	Bounds() (uint32, uint32)
+}
+
+func (m LineRange) Bounds() (uint32, uint32) {
+	return m.From, m.To
+}
+
+// groupRules returns the group of every rule, numbering the distinct
 // interval lists in the order they first appear, and the first rule of
-// every group. The groups are found through an open addressing table of
-// group numbers, probed by the hash C uses.
-func groupLineRules(rules []LineRule) ([]uint32, []uint32) {
-	groups := make([]uint32, len(rules))
-	firsts := make([]uint32, 0, len(rules))
+// every group; an absent rule has no group. The groups are found
+// through an open addressing table of group numbers, probed by the hash
+// the C compiles use.
+func groupRules[S interval](count int, rule func(idx int) ([]S, bool)) ([]uint32, []uint32) {
+	groups := make([]uint32, count)
+	firsts := make([]uint32, 0, count)
 	slots := uint32(1)
-	for slots < uint32(len(rules))*2 {
+	for slots < uint32(count)*2 {
 		slots <<= 1
 	}
 	table := make([]uint32, slots)
 	for idx := range table {
 		table[idx] = InvalidGroup
 	}
-	for idx, rule := range rules {
-		if rule.Absent {
+	for idx := range count {
+		spans, absent := rule(idx)
+		if absent {
 			groups[idx] = InvalidGroup
 			continue
 		}
-		slot := lineRuleHash(rule.Ranges) & (slots - 1)
+		slot := spansHash(spans) & (slots - 1)
 		for {
 			group := table[slot]
 			if group == InvalidGroup {
@@ -142,7 +132,7 @@ func groupLineRules(rules []LineRule) ([]uint32, []uint32) {
 				groups[idx] = group
 				break
 			}
-			if slices.Equal(rules[firsts[group]].Ranges, rule.Ranges) {
+			if first, _ := rule(int(firsts[group])); slices.Equal(first, spans) {
 				groups[idx] = group
 				break
 			}
@@ -152,12 +142,13 @@ func groupLineRules(rules []LineRule) ([]uint32, []uint32) {
 	return groups, firsts
 }
 
-// lineRuleHash hashes the intervals of a rule as the C line compile does.
-func lineRuleHash(ranges []LineRange) uint32 {
-	hash := uint32(len(ranges))
-	for _, span := range ranges {
-		hash = hash*31 + span.From
-		hash = hash*31 + span.To
+// spansHash hashes an interval list as the C compiles do.
+func spansHash[S interval](spans []S) uint32 {
+	hash := uint32(len(spans))
+	for _, span := range spans {
+		from, to := span.Bounds()
+		hash = hash*31 + from
+		hash = hash*31 + to
 	}
 	return hash
 }
@@ -204,23 +195,9 @@ func freeVline(line *layout.Vline) {
 
 // commitVline allocates a vline under context and fills it with values.
 func commitVline(line *layout.Vline, context *layout.MemoryContext, name string, values []uint32) error {
-	childSize := unsafe.Sizeof(layout.MemoryContext{})
-	block := shmalloc.ContextAlloc(context, childSize)
-	if block == nil {
-		return fmt.Errorf("allocate the memory context of %s: %w", name, errNoMemory)
+	if err := allocVline(line, context, name, uint32(len(values))); err != nil {
+		return fmt.Errorf("allocate the line %s: %w", name, err)
 	}
-	child := (*layout.MemoryContext)(block)
-	shmalloc.ContextInitFrom(child, context, name)
-	size := uintptr(len(values)) * unsafe.Sizeof(uint32(0))
-	stored := shmalloc.ContextAlloc(child, size)
-	if stored == nil {
-		shmalloc.ContextFini(child)
-		shmalloc.ContextFree(context, block, childSize)
-		return fmt.Errorf("allocate the values of %s: %w", name, errNoMemory)
-	}
-	copy(unsafe.Slice((*uint32)(stored), len(values)), values)
-	line.MemoryContext.Set(child)
-	line.Size = uint32(len(values))
-	line.Values.Set((*uint32)(stored))
+	copy(unsafe.Slice(line.Values.Get(), len(values)), values)
 	return nil
 }

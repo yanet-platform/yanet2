@@ -41,3 +41,52 @@ func (m *Stage) Group(group uint32) []uint32 {
 func (m *Stage) GroupCount() uint32 {
 	return uint32(len(m.Starts) - 1)
 }
+
+// stageBuilder collects the region values of one group at a time, each
+// value once.
+type stageBuilder struct {
+	Stage *Stage
+	// Seen stamps the values the current group reached with its number
+	// plus one.
+	Seen     []uint32
+	Group    uint32
+	Counting bool
+	Total    uint32
+}
+
+// Reach records that the current group matches a region value.
+func (m *stageBuilder) Reach(value uint32) {
+	if m.Seen[value] == m.Group+1 {
+		return
+	}
+	m.Seen[value] = m.Group + 1
+	if m.Counting {
+		m.Total++
+		return
+	}
+	m.Stage.Values = append(m.Stage.Values, value)
+	m.Stage.MaxValue = max(m.Stage.MaxValue, value)
+}
+
+// newStage builds the stage of a compile whose regions hold count
+// distinct values: forGroup reaches every region value a group matches,
+// repeats allowed, in the order the C registry collects them. The values
+// are stored once per group, sized exactly by a first counting pass.
+func newStage(ruleGroups []uint32, groupCount int, count uint32, forGroup func(group uint32, builder *stageBuilder)) Stage {
+	stage := Stage{RuleGroups: ruleGroups, Starts: make([]uint32, groupCount+1)}
+	builder := &stageBuilder{Stage: &stage, Seen: make([]uint32, count), Counting: true}
+	for group := range uint32(groupCount) {
+		stage.Starts[group] = builder.Total
+		builder.Group = group
+		forGroup(group, builder)
+	}
+	stage.Starts[groupCount] = builder.Total
+	clear(builder.Seen)
+	builder.Counting = false
+	stage.Values = make([]uint32, 0, builder.Total)
+	for group := range uint32(groupCount) {
+		builder.Group = group
+		forGroup(group, builder)
+	}
+	return stage
+}

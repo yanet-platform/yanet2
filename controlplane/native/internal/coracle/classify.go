@@ -7,10 +7,12 @@ package coracle
 #include <stdlib.h>
 #include <time.h>
 #include "lib/classify/classifiers/line.h"
+#include "lib/classify/classifiers/port.h"
 #include "lib/classify/compiler/line.h"
+#include "lib/classify/compiler/u16_ranges.h"
 
-// The line compile the module SDK declares: a rule is the interval view
-// itself, over the domain of one byte.
+// The line and port compiles the module SDK declares: a rule is the
+// interval view itself.
 static void
 coracle_get_lines(
 	const struct classifier_rule *rule, struct classify_line_ranges *view
@@ -18,37 +20,63 @@ coracle_get_lines(
 	*view = *(const struct classify_line_ranges *)rule;
 }
 
+static void
+coracle_get_ports(
+	const struct classifier_rule *rule, struct filter_u16_ranges *view
+) {
+	*view = *(const struct filter_u16_ranges *)rule;
+}
+
 CLASSIFY_LINE_COMPILE(
 	coracle_line, struct classify_attr_line, 0x100, coracle_get_lines
 )
+CLASSIFY_U16_RANGES_COMPILE(
+	coracle_port, struct classify_attr_port, coracle_get_ports
+)
+
+enum coracle_attr_kind { CORACLE_LINE, CORACLE_PORT };
+
+// One compiled attribute of either kind: both embed a single line.
+union coracle_attr {
+	struct classify_attr_line line;
+	struct classify_attr_port port;
+};
 
 static int
-coracle_line_compile(
+coracle_attr_compile(
+	enum coracle_attr_kind kind,
 	struct memory_context *context,
 	const char *name,
-	const struct classify_line_ranges **rules,
+	void **rules,
 	uint32_t rule_count,
-	struct classify_attr_line *attr,
+	union coracle_attr *attr,
 	struct classifier *stage
 ) {
-	return classify_coracle_line_compile(
-		context,
-		name,
-		(const struct classifier_rule **)rules,
-		rule_count,
-		attr,
-		stage
+	const struct classifier_rule **cast =
+		(const struct classifier_rule **)rules;
+	if (kind == CORACLE_LINE) {
+		return classify_coracle_line_compile(
+			context, name, cast, rule_count, &attr->line, stage
+		);
+	}
+	return classify_coracle_port_compile(
+		context, name, cast, rule_count, &attr->port, stage
 	);
 }
 
+static struct vline *
+coracle_attr_line(enum coracle_attr_kind kind, union coracle_attr *attr) {
+	return kind == CORACLE_LINE ? &attr->line.line : &attr->port.line;
+}
+
 static uint32_t *
-coracle_line_values(struct classify_attr_line *attr) {
-	return ADDR_OF(&attr->line.values);
+coracle_vline_values(struct vline *line) {
+	return ADDR_OF(&line->values);
 }
 
 static const char *
-coracle_line_context_name(struct classify_attr_line *attr) {
-	return ADDR_OF(&attr->line.memory_context)->name;
+coracle_vline_context_name(struct vline *line) {
+	return ADDR_OF(&line->memory_context)->name;
 }
 
 static struct value_range *
@@ -62,23 +90,25 @@ coracle_range_values(struct value_range *range) {
 }
 
 static void
-coracle_line_free(
+coracle_attr_free(
+	enum coracle_attr_kind kind,
 	struct memory_context *context,
-	struct classify_attr_line *attr,
+	union coracle_attr *attr,
 	struct classifier *stage,
 	uint32_t rule_count
 ) {
 	classifier_fini(stage, context, rule_count);
-	vline_free(&attr->line);
+	vline_free(coracle_attr_line(kind, attr));
 }
 
-// Compiles and frees the line attribute of the rules iterations times
-// and returns the nanoseconds taken, or -1 when a compile fails.
+// Compiles and frees an attribute iterations times and returns the
+// nanoseconds taken, or -1 when a compile fails.
 static int64_t
-coracle_line_compile_loop(
+coracle_attr_compile_loop(
+	enum coracle_attr_kind kind,
 	struct memory_context *context,
 	const char *name,
-	const struct classify_line_ranges **rules,
+	void **rules,
 	uint32_t rule_count,
 	uint64_t iterations
 ) {
@@ -86,14 +116,14 @@ coracle_line_compile_loop(
 	struct timespec end;
 	clock_gettime(CLOCK_MONOTONIC, &start);
 	for (uint64_t idx = 0; idx < iterations; ++idx) {
-		struct classify_attr_line attr;
+		union coracle_attr attr;
 		struct classifier stage;
-		if (coracle_line_compile(
-			    context, name, rules, rule_count, &attr, &stage
+		if (coracle_attr_compile(
+			    kind, context, name, rules, rule_count, &attr, &stage
 		    )) {
 			return -1;
 		}
-		coracle_line_free(context, &attr, &stage, rule_count);
+		coracle_attr_free(kind, context, &attr, &stage, rule_count);
 	}
 	clock_gettime(CLOCK_MONOTONIC, &end);
 	return (int64_t)(end.tv_sec - start.tv_sec) * 1000000000 +
@@ -115,9 +145,16 @@ type LineRule struct {
 	Absent bool
 }
 
-// LineResult is what a C line compile produced, copied out of shared
-// memory.
-type LineResult struct {
+// PortRule is one rule of a port compile: its intervals, or none at all
+// for a rule absent from the projection.
+type PortRule struct {
+	Ranges [][2]uint16
+	Absent bool
+}
+
+// AttrResult is what a C attribute compile produced, copied out of
+// shared memory.
+type AttrResult struct {
 	Values      []uint32
 	RuleGroups  []uint32
 	Groups      [][]uint32
@@ -125,18 +162,17 @@ type LineResult struct {
 	ContextName string
 }
 
-// CLineRules holds a ruleset in C memory, as the line compile reads it.
-type CLineRules struct {
-	pointers **C.struct_classify_line_ranges
+// CRules is a ruleset in C memory, as one attribute compile reads it.
+type CRules struct {
+	kind     C.enum_coracle_attr_kind
+	pointers *unsafe.Pointer
 	count    C.uint32_t
 	blocks   []unsafe.Pointer
 }
 
-// NewCLineRules copies rules into C memory; Free releases it.
-func NewCLineRules(rules []LineRule) *CLineRules {
-	m := &CLineRules{count: C.uint32_t(len(rules))}
-	rawPointers := m.alloc(max(len(rules), 1), unsafe.Sizeof(uintptr(0)))
-	m.pointers = (**C.struct_classify_line_ranges)(rawPointers)
+// NewCLineRules copies line rules into C memory; Free releases it.
+func NewCLineRules(rules []LineRule) *CRules {
+	m := newCRules(C.CORACLE_LINE, len(rules))
 	pointers := unsafe.Slice(m.pointers, len(rules))
 	for idx, rule := range rules {
 		if rule.Absent {
@@ -152,61 +188,86 @@ func NewCLineRules(rules []LineRule) *CLineRules {
 			view.items = &items[0]
 		}
 		view.count = C.uint32_t(len(rule.Ranges))
-		pointers[idx] = view
+		pointers[idx] = unsafe.Pointer(view)
 	}
 	return m
 }
 
-func (m *CLineRules) alloc(count int, size uintptr) unsafe.Pointer {
+// NewCPortRules copies port rules into C memory; Free releases it.
+func NewCPortRules(rules []PortRule) *CRules {
+	m := newCRules(C.CORACLE_PORT, len(rules))
+	pointers := unsafe.Slice(m.pointers, len(rules))
+	for idx, rule := range rules {
+		if rule.Absent {
+			continue
+		}
+		view := (*C.struct_filter_u16_ranges)(m.alloc(1, unsafe.Sizeof(C.struct_filter_u16_ranges{})))
+		if len(rule.Ranges) > 0 {
+			items := unsafe.Slice((*C.struct_filter_u16_span)(m.alloc(len(rule.Ranges), unsafe.Sizeof(C.struct_filter_u16_span{}))), len(rule.Ranges))
+			for rangeIdx, span := range rule.Ranges {
+				items[rangeIdx].from = C.uint16_t(span[0])
+				items[rangeIdx].to = C.uint16_t(span[1])
+			}
+			view.items = &items[0]
+		}
+		view.count = C.uint32_t(len(rule.Ranges))
+		pointers[idx] = unsafe.Pointer(view)
+	}
+	return m
+}
+
+func newCRules(kind C.enum_coracle_attr_kind, count int) *CRules {
+	m := &CRules{kind: kind, count: C.uint32_t(count)}
+	m.pointers = (*unsafe.Pointer)(m.alloc(max(count, 1), unsafe.Sizeof(uintptr(0))))
+	return m
+}
+
+func (m *CRules) alloc(count int, size uintptr) unsafe.Pointer {
 	block := C.calloc(C.size_t(count), C.size_t(size))
 	m.blocks = append(m.blocks, block)
 	return block
 }
 
 // Free releases the C copy.
-func (m *CLineRules) Free() {
+func (m *CRules) Free() {
 	for _, block := range m.blocks {
 		C.free(block)
 	}
 }
 
-// CompileLoop compiles and frees the line attribute of the rules
-// iterations times in C, allocating from context, and returns the time
-// the compiles took.
-func (m *CLineRules) CompileLoop(context unsafe.Pointer, name string, iterations int) (time.Duration, error) {
+// CompileLoop compiles and frees the attribute of the rules iterations
+// times in C, allocating from context, and returns the time the
+// compiles took.
+func (m *CRules) CompileLoop(context unsafe.Pointer, name string, iterations int) (time.Duration, error) {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
-	elapsed := C.coracle_line_compile_loop((*C.struct_memory_context)(context), cName, m.pointers, m.count, C.uint64_t(iterations))
+	elapsed := C.coracle_attr_compile_loop(m.kind, (*C.struct_memory_context)(context), cName, m.pointers, m.count, C.uint64_t(iterations))
 	if elapsed < 0 {
-		return 0, fmt.Errorf("the C line compile failed")
+		return 0, fmt.Errorf("the C attribute compile failed")
 	}
 	return time.Duration(elapsed), nil
 }
 
-// LineCompile runs the C line compile of the module SDK over rules,
+// Compile runs the C attribute compile of the module SDK over the rules,
 // allocating from context, and returns what it produced after freeing
 // it again.
-func LineCompile(context unsafe.Pointer, name string, rules []LineRule) (*LineResult, error) {
-	cRules := NewCLineRules(rules)
-	defer cRules.Free()
-	count := int(cRules.count)
+func (m *CRules) Compile(context unsafe.Pointer, name string) (*AttrResult, error) {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
-
-	var attr C.struct_classify_attr_line
+	var attr C.union_coracle_attr
 	var stage C.struct_classifier
 	memoryContext := (*C.struct_memory_context)(context)
-	rulesPointer := cRules.pointers
-	if C.coracle_line_compile(memoryContext, cName, rulesPointer, C.uint32_t(count), &attr, &stage) != 0 {
-		return nil, fmt.Errorf("the C line compile failed")
+	if C.coracle_attr_compile(m.kind, memoryContext, cName, m.pointers, m.count, &attr, &stage) != 0 {
+		return nil, fmt.Errorf("the C attribute compile failed")
 	}
-	defer C.coracle_line_free(memoryContext, &attr, &stage, C.uint32_t(count))
+	defer C.coracle_attr_free(m.kind, memoryContext, &attr, &stage, m.count)
 
-	result := &LineResult{
-		Values:      append([]uint32{}, unsafe.Slice((*uint32)(unsafe.Pointer(C.coracle_line_values(&attr))), attr.line.size)...),
-		RuleGroups:  append([]uint32{}, unsafe.Slice((*uint32)(unsafe.Pointer(stage.rule_groups)), count)...),
+	line := C.coracle_attr_line(m.kind, &attr)
+	result := &AttrResult{
+		Values:      append([]uint32{}, unsafe.Slice((*uint32)(unsafe.Pointer(C.coracle_vline_values(line))), line.size)...),
+		RuleGroups:  append([]uint32{}, unsafe.Slice((*uint32)(unsafe.Pointer(stage.rule_groups)), int(m.count))...),
 		MaxValue:    uint32(stage.registry.max_value),
-		ContextName: C.GoString(C.coracle_line_context_name(&attr)),
+		ContextName: C.GoString(C.coracle_vline_context_name(line)),
 	}
 	for idx := range uint64(stage.registry.range_count) {
 		valueRange := C.coracle_stage_range(&stage, C.uint64_t(idx))
