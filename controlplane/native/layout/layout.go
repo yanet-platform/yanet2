@@ -11,7 +11,7 @@ import (
 )
 
 // Fingerprint identifies the layout of every view in this file.
-const Fingerprint = "27352ccb4eb17e52"
+const Fingerprint = "522c4e99344d32bb"
 
 // Agent is the C struct agent, 1056 bytes.
 type Agent struct {
@@ -377,6 +377,13 @@ type CpPipelineRegistry struct {
 	Registry      Registry
 }
 
+// DecapModuleConfig is the C struct decap_module_config, 984 bytes.
+type DecapModuleConfig struct {
+	CpModule  CpModule
+	Prefixes4 Lpm
+	Prefixes6 Lpm
+}
+
 // DeviceEctx is the C struct device_ectx, 64 bytes.
 type DeviceEctx struct {
 	CpDevice           shm.Ptr[CpDevice]
@@ -569,6 +576,23 @@ type HashIndex struct {
 type HashIndexEntry struct {
 	Hash  uint32
 	Value uint32
+}
+
+// Lpm is the C struct lpm, 144 bytes.
+type Lpm struct {
+	MemoryContext MemoryContext
+	Pages         shm.Ptr[shm.Ptr[LpmPage]]
+	PageCount     uint64
+}
+
+// LpmPage is the C struct lpm_page, 2048 bytes.
+type LpmPage struct {
+	Values [256]LpmValue
+}
+
+// LpmValue is the C union lpm_value; read its members through unsafe.
+type LpmValue struct {
+	raw [8]byte
 }
 
 // MemoryContext is the C struct memory_context, 128 bytes.
