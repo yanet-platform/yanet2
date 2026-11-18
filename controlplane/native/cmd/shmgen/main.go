@@ -36,19 +36,48 @@ func main() {
 	importPath := flag.String("import", "", "import path of the package, for the test")
 	output := flag.String("out", "", "Go file to write")
 	testOutput := flag.String("test", "", "Go test file to write")
+	locals := flag.String("local", "",
+		"comma-separated struct.field pointers that hold a process-local address")
 	flag.Parse()
 
 	if *binary == "" || *output == "" || flag.NArg() == 0 {
 		fmt.Fprintln(os.Stderr, "usage: shmgen -binary FILE -out FILE [-test FILE -import PATH] STRUCT...")
 		os.Exit(2)
 	}
-	if err := run(*binary, *packageName, *importPath, *output, *testOutput, flag.Args()); err != nil {
+	options := options{
+		Binary:      *binary,
+		PackageName: *packageName,
+		ImportPath:  *importPath,
+		Output:      *output,
+		TestOutput:  *testOutput,
+		Locals:      map[string]bool{},
+	}
+	for _, local := range strings.Split(*locals, ",") {
+		if local != "" {
+			options.Locals[local] = true
+		}
+	}
+	if err := run(options, flag.Args()); err != nil {
 		fmt.Fprintf(os.Stderr, "shmgen: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(binary, packageName, importPath, output, testOutput string, roots []string) error {
+// options holds the command line.
+type options struct {
+	Binary      string
+	PackageName string
+	ImportPath  string
+	Output      string
+	TestOutput  string
+	// Locals holds the struct.field pointers that hold an address only
+	// the writing process can use.
+	Locals map[string]bool
+}
+
+func run(options options, roots []string) error {
+	binary, packageName, importPath := options.Binary, options.PackageName, options.ImportPath
+	output, testOutput := options.Output, options.TestOutput
 	file, err := elf.Open(binary)
 	if err != nil {
 		return err
@@ -69,20 +98,20 @@ func run(binary, packageName, importPath, output, testOutput string, roots []str
 	}
 	constraint := "//go:build linux && " + goarch
 
-	gen, err := newGenerator(data)
+	m, err := newGenerator(data, options.Locals)
 	if err != nil {
 		return err
 	}
 	for _, root := range roots {
-		if err := gen.addRoot(root); err != nil {
+		if err := m.addRoot(root); err != nil {
 			return err
 		}
 	}
-	if err := gen.drain(); err != nil {
+	if err := m.drain(); err != nil {
 		return err
 	}
 
-	source, err := gen.render(packageName, filepath.Base(binary), constraint)
+	source, err := m.render(packageName, filepath.Base(binary), constraint)
 	if err != nil {
 		return err
 	}
@@ -95,7 +124,7 @@ func run(binary, packageName, importPath, output, testOutput string, roots []str
 	if importPath == "" {
 		return fmt.Errorf("-test needs -import")
 	}
-	test, err := gen.renderTest(packageName, importPath, filepath.Base(binary), constraint)
+	test, err := m.renderTest(packageName, importPath, filepath.Base(binary), constraint)
 	if err != nil {
 		return err
 	}
@@ -104,14 +133,14 @@ func run(binary, packageName, importPath, output, testOutput string, roots []str
 
 // check is one size or offset the generated test pins.
 type check struct {
-	name       string
-	expression string
-	want       int64
+	Name       string
+	Expression string
+	Want       int64
 }
 
 // view is the Go source of one generated type.
 type view struct {
-	source string
+	Source string
 }
 
 type generator struct {
@@ -140,17 +169,21 @@ type generator struct {
 	signatures map[string]string
 	// conflicts collects Go names whose C types disagree.
 	conflicts []string
+	// locals holds the struct.field pointers that hold a process-local
+	// address.
+	locals map[string]bool
 }
 
 // pending is a type waiting to be generated.
 type pending struct {
-	name string
-	typ  dwarf.Type
+	Name string
+	Type dwarf.Type
 }
 
-func newGenerator(data *dwarf.Data) (*generator, error) {
-	gen := &generator{
+func newGenerator(data *dwarf.Data, locals map[string]bool) (*generator, error) {
+	m := &generator{
 		data:        data,
+		locals:      locals,
 		definitions: map[string][]dwarf.Offset{},
 		names:       map[dwarf.Type]string{},
 		views:       map[string]*view{},
@@ -168,7 +201,7 @@ func newGenerator(data *dwarf.Data) (*generator, error) {
 			break
 		}
 		if entry.Tag == dwarf.TagAtomicType {
-			if err := gen.addAtomic(entry); err != nil {
+			if err := m.addAtomic(entry); err != nil {
 				return nil, err
 			}
 			continue
@@ -181,9 +214,9 @@ func newGenerator(data *dwarf.Data) (*generator, error) {
 		if name == "" || declaration {
 			continue
 		}
-		gen.definitions[name] = append(gen.definitions[name], entry.Offset)
+		m.definitions[name] = append(m.definitions[name], entry.Offset)
 	}
-	return gen, nil
+	return m, nil
 }
 
 // addAtomic records the type an _Atomic qualifier applies to. debug/dwarf
@@ -273,11 +306,11 @@ func (m *generator) drain() error {
 		next := m.queue[0]
 		m.queue = m.queue[1:]
 		var err error
-		switch typ := next.typ.(type) {
+		switch typ := next.Type.(type) {
 		case *dwarf.StructType:
-			err = m.emitStruct(next.name, typ)
+			err = m.emitStruct(next.Name, typ)
 		case *dwarf.EnumType:
-			m.emitEnum(next.name, typ)
+			m.emitEnum(next.Name, typ)
 		}
 		if err != nil {
 			return err
@@ -373,7 +406,7 @@ func (m *generator) named(typ dwarf.Type, name string) string {
 		return name
 	}
 	m.signatures[name] = signature
-	m.queue = append(m.queue, pending{name: name, typ: typ})
+	m.queue = append(m.queue, pending{Name: name, Type: typ})
 	return name
 }
 
@@ -486,9 +519,9 @@ func (m *generator) emitStruct(name string, typ *dwarf.StructType) error {
 			name, cName(typ),
 		)
 		fmt.Fprintf(&body, "type %s struct {\n\traw [%d]byte\n}\n", name, typ.ByteSize)
-		m.views[name] = &view{source: body.String()}
+		m.views[name] = &view{Source: body.String()}
 		m.checks = append(m.checks, check{
-			name: name + " size", expression: fmt.Sprintf("unsafe.Sizeof(layout.%s{})", name), want: typ.ByteSize,
+			Name: name + " size", Expression: fmt.Sprintf("unsafe.Sizeof(layout.%s{})", name), Want: typ.ByteSize,
 		})
 		return nil
 	}
@@ -564,7 +597,7 @@ func (m *generator) emitStruct(name string, typ *dwarf.StructType) error {
 		}
 		fieldName = unique(used, fieldName)
 		goType := m.goType(field.Type, name+fieldName)
-		if strings.HasPrefix(field.Name, "abs_") {
+		if strings.HasPrefix(field.Name, "abs_") || m.locals[typ.StructName+"."+field.Name] {
 			// The dataplane resolves these for its own process.
 			goType = "shm.Local"
 		}
@@ -579,9 +612,9 @@ func (m *generator) emitStruct(name string, typ *dwarf.StructType) error {
 			fmt.Fprintf(&body, "\t%s %s%s\n", fieldName, goType, comment)
 		}
 		m.checks = append(m.checks, check{
-			name:       name + "." + fieldName + " offset",
-			expression: fmt.Sprintf("unsafe.Offsetof(layout.%s{}.%s)", name, fieldName),
-			want:       offset,
+			Name:       name + "." + fieldName + " offset",
+			Expression: fmt.Sprintf("unsafe.Offsetof(layout.%s{}.%s)", name, fieldName),
+			Want:       offset,
 		})
 		fmt.Fprintf(&m.fingerprint, "%s@%d:%d;", field.Name, offset, size)
 		cursor = offset + size
@@ -589,9 +622,9 @@ func (m *generator) emitStruct(name string, typ *dwarf.StructType) error {
 	pad(typ.ByteSize)
 	body.WriteString("}\n")
 
-	m.views[name] = &view{source: body.String()}
+	m.views[name] = &view{Source: body.String()}
 	m.checks = append(m.checks, check{
-		name: name + " size", expression: fmt.Sprintf("unsafe.Sizeof(layout.%s{})", name), want: typ.ByteSize,
+		Name: name + " size", Expression: fmt.Sprintf("unsafe.Sizeof(layout.%s{})", name), Want: typ.ByteSize,
 	})
 	return nil
 }
@@ -606,7 +639,7 @@ func (m *generator) emitEnum(name string, typ *dwarf.EnumType) {
 	var body strings.Builder
 	fmt.Fprintf(&body, "// %s is the C enum %s.\n", name, typ.EnumName)
 	fmt.Fprintf(&body, "type %s %s\n", name, base)
-	m.views[name] = &view{source: body.String()}
+	m.views[name] = &view{Source: body.String()}
 	for _, value := range typ.Val {
 		constant := camel(strings.ToLower(value.Name))
 		if _, taken := m.constants[constant]; taken {
@@ -635,7 +668,7 @@ func (m *generator) render(packageName, binary, constraint string) ([]byte, erro
 		out.WriteString(")\n\n")
 	}
 	for _, name := range sortedKeys(m.views) {
-		out.WriteString(m.views[name].source)
+		out.WriteString(m.views[name].Source)
 		out.WriteString("\n")
 	}
 	sort.Strings(m.methods)
@@ -659,7 +692,7 @@ func (m *generator) renderTest(packageName, importPath, binary, constraint strin
 	out.WriteString("func Test_Layout_MatchesDWARF(t *testing.T) {\n")
 	out.WriteString("\tcases := []struct {\n\t\tname string\n\t\tgot  uintptr\n\t\twant uintptr\n\t}{\n")
 	for _, check := range m.checks {
-		fmt.Fprintf(&out, "\t\t{%q, %s, %d},\n", check.name, check.expression, check.want)
+		fmt.Fprintf(&out, "\t\t{%q, %s, %d},\n", check.Name, check.Expression, check.Want)
 	}
 	out.WriteString("\t}\n\tfor _, tc := range cases {\n")
 	out.WriteString("\t\tt.Run(tc.name, func(t *testing.T) {\n\t\t\trequire.Equal(t, tc.want, tc.got)\n\t\t})\n\t}\n}\n")

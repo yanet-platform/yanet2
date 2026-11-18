@@ -17,10 +17,18 @@ import (
 // Every process maps the storage at its own address, so a stored address
 // would be wrong in every other process; a distance is right in all of
 // them. Ptr is only ever used in place inside the mapping: a copy moved
-// elsewhere points somewhere else.
+// elsewhere points somewhere else, which go vet reports as a copied lock.
 type Ptr[T any] struct {
+	_      noCopy
 	offset int64
 }
+
+// noCopy makes go vet report copies of the type that embeds it; it takes
+// no space.
+type noCopy struct{}
+
+func (*noCopy) Lock()   {}
+func (*noCopy) Unlock() {}
 
 // Get returns the target, or nil.
 func (m *Ptr[T]) Get() *T {

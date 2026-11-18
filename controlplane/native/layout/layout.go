@@ -512,19 +512,19 @@ type DpWorker struct {
 	Gen             uint64
 	Clock           TscClock
 	CurrentTime     uint64
-	Iterations      shm.Ptr[uint64]
-	RxCount         shm.Ptr[uint64]
-	RxSize          shm.Ptr[uint64]
-	TxCount         shm.Ptr[uint64]
-	TxSize          shm.Ptr[uint64]
-	RemoteRxCount   shm.Ptr[uint64]
-	RemoteTxCount   shm.Ptr[uint64]
-	LocalTxDrops    shm.Ptr[uint64]
-	RemoteTxDrops   shm.Ptr[uint64]
-	RxChainedDrops  shm.Ptr[uint64]
-	DisposedCount   shm.Ptr[uint64]
-	RxMempool       shm.Ptr[RteMempool]
-	RxBursts        shm.Ptr[uint64]
+	Iterations      shm.Local
+	RxCount         shm.Local
+	RxSize          shm.Local
+	TxCount         shm.Local
+	TxSize          shm.Local
+	RemoteRxCount   shm.Local
+	RemoteTxCount   shm.Local
+	LocalTxDrops    shm.Local
+	RemoteTxDrops   shm.Local
+	RxChainedDrops  shm.Local
+	DisposedCount   shm.Local
+	RxMempool       shm.Local
+	RxBursts        shm.Local
 	CoreId          uint32
 	RxBurstSize     uint32
 	AssignmentCount uint32
