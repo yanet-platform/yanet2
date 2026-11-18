@@ -137,25 +137,24 @@ impl<'b, T: Build, W: Owner> Slot<'b, T, W> {
     ///
     /// The address is an aligned, exclusive, unwritten slot of this type in
     /// this build. On success the caller takes ownership of the whole value.
-    unsafe fn run(
-        addr: usize,
-        memory: &'b MemoryContext<'b, W>,
-        write: impl for<'slot> FnOnce(Place<'slot, 'b, T, W>) -> Result<Init<'slot, T>, Refusal>,
-    ) -> Result<(), Refusal> {
+    unsafe fn write(addr: usize, memory: &'b MemoryContext<'b, W>, parts: T::Parts<'b, W>) -> Result<(), Refusal> {
         let mut slot = Self {
             addr,
             memory,
             initialized: false,
             _value: PhantomData,
         };
-        let _receipt = write(Place {
-            addr,
-            memory,
-            initialized: &mut slot.initialized,
-            _slot: PhantomData,
-            _build: PhantomData,
-            _value: PhantomData,
-        })?;
+        let _receipt = T::write(
+            parts,
+            Place {
+                addr,
+                memory,
+                initialized: &mut slot.initialized,
+                _slot: PhantomData,
+                _build: PhantomData,
+                _value: PhantomData,
+            },
+        )?;
         forget(slot);
         Ok(())
     }
@@ -177,7 +176,7 @@ impl<'b, W: Owner> MemoryContext<'b, W> {
     /// this build, and takes over its teardown on success.
     pub(crate) unsafe fn write_at<T: Build>(&'b self, addr: usize, parts: T::Parts<'b, W>) -> Result<(), Refusal> {
         // SAFETY: the caller owns the slot. Its write uses the issuing build.
-        unsafe { Slot::run(addr, self, |place| T::write(parts, place)) }
+        unsafe { Slot::<T, W>::write(addr, self, parts) }
     }
 }
 
@@ -212,16 +211,12 @@ impl<'b, T: Build, W: Owner> SliceWriter<'b, T, W> {
         })
     }
 
-    pub(super) fn with_slot(
-        &mut self,
-        write: impl for<'slot> FnOnce(Place<'slot, 'b, T, W>) -> Result<Init<'slot, T>, Refusal>,
-    ) -> Result<(), Refusal> {
+    pub(super) fn write_next(&mut self, parts: T::Parts<'b, W>) -> Result<(), Refusal> {
         assert!(self.written < self.len);
         let addr = self.addr + self.written * size_of::<T>();
-        // SAFETY: the checked reservation covers this next, unwritten element.
-        // The exclusive loan prevents another operation until the receipt is
-        // accepted, at which point the prefix immediately takes ownership.
-        unsafe { Slot::run(addr, self.memory, write)? };
+        // SAFETY: the reservation covers this next, unwritten element.
+        // Only after the write succeeds does the prefix take ownership.
+        unsafe { Slot::<T, W>::write(addr, self.memory, parts)? };
         self.written += 1;
         Ok(())
     }

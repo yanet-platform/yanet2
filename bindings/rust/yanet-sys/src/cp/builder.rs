@@ -1180,9 +1180,7 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
     pub fn boxed<T: Build>(self, parts: T::Parts<'b, W>) -> Result<Owned<'b, T, W>, E> {
         const { assert!(size_of::<T>() != 0, "a block of a zero-sized type") };
         let mut writer = SliceWriter::<T, W>::reserve(self, core::num::NonZeroUsize::MIN)?;
-        writer
-            .with_slot(|place| T::write(parts, place))
-            .map_err(refused::<W, E>)?;
+        writer.write_next(parts).map_err(refused::<W, E>)?;
         let (addr, _) = writer.finish().into_raw();
         Ok(Owned {
             addr,
@@ -1222,9 +1220,7 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
         let mut writer = SliceWriter::<T, W>::reserve(self, nonempty)?;
         for idx in 0..len {
             let parts = fill(idx)?;
-            writer
-                .with_slot(|place| T::write(parts, place))
-                .map_err(refused::<W, E>)?;
+            writer.write_next(parts).map_err(refused::<W, E>)?;
         }
         Ok(writer.finish())
     }
