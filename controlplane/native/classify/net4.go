@@ -57,16 +57,18 @@ func newNetwork(from uint32, bits uint8) network {
 // The tree committed holds the final values only, so neighbouring
 // classes ending with one value share its slots.
 func CompileNet4(rules []Net4Rule) (*Net4, error) {
-	nets, starts, err := normalizeNet4Rules(rules)
+	// From here on firsts, starts and netsOf index the distinct lists.
+	lists, numbers := internLists(len(rules), func(idx int) ([]netip.Prefix, bool) {
+		return rules[idx].Prefixes, rules[idx].Absent
+	})
+	nets, starts, err := normalizeNet4Lists(lists)
 	if err != nil {
 		return nil, err
 	}
-	netsOf := func(idx int) []network {
-		return nets[starts[idx]:starts[idx+1]]
+	netsOf := func(list int) []network {
+		return nets[starts[list]:starts[list+1]]
 	}
-	groups, firsts := groupRules(len(rules), func(idx int) ([]network, bool) {
-		return netsOf(idx), rules[idx].Absent
-	})
+	groups, firsts := groupLists(numbers, len(lists), netsOf)
 
 	// A key packs the first address of a network, its length and its
 	// place in nets: the sorted keys sort the networks by first address,
@@ -153,21 +155,21 @@ func CompileNet4(rules []Net4Rule) (*Net4, error) {
 	return compiled, nil
 }
 
-// normalizeNet4Rules returns the networks of every rule in one slice,
-// rule after rule, and where every rule's networks begin, one more entry
-// where the last rule's end.
-func normalizeNet4Rules(rules []Net4Rule) ([]network, []int, error) {
+// normalizeNet4Lists returns the networks of every list in one slice,
+// list after list, and where every list's networks begin, one more entry
+// where the last list's end.
+func normalizeNet4Lists(lists [][]netip.Prefix) ([]network, []int, error) {
 	total := 0
-	for _, rule := range rules {
-		total += len(rule.Prefixes)
+	for _, list := range lists {
+		total += len(list)
 	}
 	nets := make([]network, 0, total)
-	starts := make([]int, 0, len(rules)+1)
-	for idx, rule := range rules {
+	starts := make([]int, 0, len(lists)+1)
+	for idx, list := range lists {
 		starts = append(starts, len(nets))
-		for _, prefix := range rule.Prefixes {
+		for _, prefix := range list {
 			if !prefix.Addr().Is4() {
-				return nil, nil, fmt.Errorf("rule %d: %s is not an IPv4 prefix", idx, prefix)
+				return nil, nil, fmt.Errorf("network list %d: %s is not an IPv4 prefix", idx, prefix)
 			}
 			addr := prefix.Masked().Addr().As4()
 			nets = append(nets, newNetwork(binary.BigEndian.Uint32(addr[:]), uint8(prefix.Bits())))

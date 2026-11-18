@@ -148,6 +148,16 @@ func Test_CompileNet6_MatchesC(t *testing.T) {
 	}
 }
 
+// Test_CompileNet6_GroupsEqualListsByContent verifies that rules sharing
+// one network list and rules holding copies of it compile as C compiles
+// them: the storage of a list never decides its group.
+func Test_CompileNet6_GroupsEqualListsByContent(t *testing.T) {
+	shared := randomNet6RulesOf(5, 8)[7].Networks
+	copied := append([]classify.Net6Network{}, shared...)
+	rules := []classify.Net6Rule{{Networks: shared}, {Networks: copied}, {Networks: shared}, {Networks: shared[:1]}, {Networks: copied[:1]}}
+	requireNet6MatchesC(t, rules)
+}
+
 // Test_CompileNet6_RejectsMaskHalvesThatAreNotPrefixes verifies that a
 // network whose mask half is not a prefix fails the compile, where C
 // would read past its intervals.

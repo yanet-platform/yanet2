@@ -68,9 +68,13 @@ func loadProductionRulesets(t testing.TB) []productionRuleset {
 		}
 		require.NoError(t, json.Unmarshal(data, &document))
 		ruleset := productionRuleset{Name: filepath.Base(path)}
+		// Rules spelling one address list share one slice of its networks,
+		// as a producer hands its lists out.
+		lists4 := map[string][]netip.Prefix{}
+		lists6 := map[string][]classify.Net6Network{}
 		for _, rule := range document.Rules {
 			proto, port := aclTransport(rule)
-			src4, dst4 := ipv4Prefixes(t, rule.Srcs), ipv4Prefixes(t, rule.Dsts)
+			src4, dst4 := shared(lists4, rule.Srcs, ipv4Prefixes), shared(lists4, rule.Dsts, ipv4Prefixes)
 			if len(src4) == 0 || len(dst4) == 0 {
 				ruleset.Src4 = append(ruleset.Src4, classify.Net4Rule{Absent: true})
 				ruleset.Dst4 = append(ruleset.Dst4, classify.Net4Rule{Absent: true})
@@ -82,7 +86,7 @@ func loadProductionRulesets(t testing.TB) []productionRuleset {
 				ruleset.Proto4 = append(ruleset.Proto4, proto)
 				ruleset.Port4 = append(ruleset.Port4, port)
 			}
-			src6, dst6 := ipv6Networks(t, rule.Srcs), ipv6Networks(t, rule.Dsts)
+			src6, dst6 := shared(lists6, rule.Srcs, ipv6Networks), shared(lists6, rule.Dsts, ipv6Networks)
 			if len(src6) == 0 || len(dst6) == 0 {
 				ruleset.Src6 = append(ruleset.Src6, classify.Net6Rule{Absent: true})
 				ruleset.Dst6 = append(ruleset.Dst6, classify.Net6Rule{Absent: true})
@@ -114,10 +118,21 @@ func aclTransport(rule aclRule) (classify.LineRule, classify.PortRule) {
 	return proto, port
 }
 
+// shared returns the networks of an address list, parsed once a list and
+// shared by every rule spelling it.
+func shared[T any](lists map[string][]T, addresses []string, parse func([]string) []T) []T {
+	key := strings.Join(addresses, " ")
+	list, ok := lists[key]
+	if !ok {
+		list = parse(addresses)
+		lists[key] = list
+	}
+	return list
+}
+
 // ipv4Prefixes returns the IPv4 networks among addresses, a bare address
 // a host network.
-func ipv4Prefixes(t testing.TB, addresses []string) []netip.Prefix {
-	t.Helper()
+func ipv4Prefixes(addresses []string) []netip.Prefix {
 	var prefixes []netip.Prefix
 	for _, address := range addresses {
 		if strings.Contains(address, ":") {
@@ -126,9 +141,7 @@ func ipv4Prefixes(t testing.TB, addresses []string) []netip.Prefix {
 		if !strings.Contains(address, "/") {
 			address += "/32"
 		}
-		prefix, err := netip.ParsePrefix(address)
-		require.NoError(t, err)
-		prefixes = append(prefixes, prefix)
+		prefixes = append(prefixes, netip.MustParsePrefix(address))
 	}
 	return prefixes
 }
@@ -136,8 +149,7 @@ func ipv4Prefixes(t testing.TB, addresses []string) []netip.Prefix {
 // ipv6Networks returns the IPv6 networks among addresses: a prefix, a
 // bare address as a host network, or an address and a mask spelled as
 // an address.
-func ipv6Networks(t testing.TB, addresses []string) []classify.Net6Network {
-	t.Helper()
+func ipv6Networks(addresses []string) []classify.Net6Network {
 	var networks []classify.Net6Network
 	for _, address := range addresses {
 		if !strings.Contains(address, ":") {
@@ -145,22 +157,16 @@ func ipv6Networks(t testing.TB, addresses []string) []classify.Net6Network {
 		}
 		addr, mask, found := strings.Cut(address, "/")
 		var network classify.Net6Network
-		parsed, err := netip.ParseAddr(addr)
-		require.NoError(t, err)
-		network.Addr = parsed.As16()
+		network.Addr = netip.MustParseAddr(addr).As16()
 		switch {
 		case !found:
 			for idx := range network.Mask {
 				network.Mask[idx] = 0xff
 			}
 		case strings.Contains(mask, ":"):
-			parsed, err := netip.ParseAddr(mask)
-			require.NoError(t, err)
-			network.Mask = parsed.As16()
+			network.Mask = netip.MustParseAddr(mask).As16()
 		default:
-			prefix, err := netip.ParsePrefix(address)
-			require.NoError(t, err)
-			for bit := range prefix.Bits() {
+			for bit := range netip.MustParsePrefix(address).Bits() {
 				network.Mask[bit/8] |= 0x80 >> (bit % 8)
 			}
 		}
@@ -306,6 +312,40 @@ func Test_ProductionShaped_Sizes(t *testing.T) {
 				ruleset.Name, attribute.name, len(stage.RuleGroups), present, stage.GroupCount(), stage.MaxValue+1)
 		}
 	}
+}
+
+// Test_ProductionShaped_InputSizes logs the networks of every
+// production-shaped ruleset as rules reference them and as they are
+// stored, each shared list once.
+func Test_ProductionShaped_InputSizes(t *testing.T) {
+	for _, ruleset := range loadProductionRulesets(t) {
+		referenced4, stored4 := storedNetworks(ruleset.Src4, func(rule classify.Net4Rule) []netip.Prefix { return rule.Prefixes })
+		referenced6, stored6 := storedNetworks(ruleset.Src6, func(rule classify.Net6Rule) []classify.Net6Network { return rule.Networks })
+		dstReferenced4, dstStored4 := storedNetworks(ruleset.Dst4, func(rule classify.Net4Rule) []netip.Prefix { return rule.Prefixes })
+		dstReferenced6, dstStored6 := storedNetworks(ruleset.Dst6, func(rule classify.Net6Rule) []classify.Net6Network { return rule.Networks })
+		t.Logf("%s: IPv4 sources %d networks referenced, %d stored; destinations %d, %d", ruleset.Name, referenced4, stored4, dstReferenced4, dstStored4)
+		t.Logf("%s: IPv6 sources %d networks referenced, %d stored; destinations %d, %d", ruleset.Name, referenced6, stored6, dstReferenced6, dstStored6)
+	}
+}
+
+// storedNetworks returns how many networks the rules reference and how
+// many their lists store, each list sharing its storage counted once.
+func storedNetworks[R, T any](rules []R, list func(R) []T) (int, int) {
+	seen := map[*T]int{}
+	referenced, stored := 0, 0
+	for _, rule := range rules {
+		networks := list(rule)
+		referenced += len(networks)
+		if len(networks) == 0 {
+			continue
+		}
+		data := unsafe.SliceData(networks)
+		if length, ok := seen[data]; !ok || length < len(networks) {
+			stored += len(networks) - length
+			seen[data] = len(networks)
+		}
+	}
+	return referenced, stored
 }
 
 // Test_ProductionShaped_MatchesC verifies that the ratelimit classifiers

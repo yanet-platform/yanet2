@@ -104,16 +104,18 @@ func CompileNet6(rules []Net6Rule, attr *layout.ClassifyAttrNet6, context *layou
 }
 
 func compileNet6(rules []Net6Rule, attr *layout.ClassifyAttrNet6, context *layout.MemoryContext, name string) (*Stage, error) {
-	nets, starts, err := normalizeNet6Rules(rules)
+	// From here on firsts, starts and netsOf index the distinct lists.
+	lists, numbers := internLists(len(rules), func(idx int) ([]Net6Network, bool) {
+		return rules[idx].Networks, rules[idx].Absent
+	})
+	nets, starts, err := normalizeNet6Lists(lists)
 	if err != nil {
 		return nil, err
 	}
-	netsOf := func(idx int) []network6 {
-		return nets[starts[idx]:starts[idx+1]]
+	netsOf := func(list int) []network6 {
+		return nets[starts[list]:starts[list+1]]
 	}
-	groups, firsts := groupRules(len(rules), func(idx int) ([]network6, bool) {
-		return netsOf(idx), rules[idx].Absent
-	})
+	groups, firsts := groupLists(numbers, len(lists), netsOf)
 
 	// The networks of the groups, each once, found through a table of
 	// their numbers plus one as groupRules finds the groups, and the one
@@ -248,28 +250,28 @@ func allocZeroedTable(table *layout.ValueTable, context *layout.MemoryContext, n
 	return cells, nil
 }
 
-// normalizeNet6Rules returns the networks of every rule in one slice,
-// rule after rule, and where every rule's networks begin, one more entry
-// where the last rule's end.
-func normalizeNet6Rules(rules []Net6Rule) ([]network6, []int, error) {
+// normalizeNet6Lists returns the networks of every list in one slice,
+// list after list, and where every list's networks begin, one more entry
+// where the last list's end.
+func normalizeNet6Lists(lists [][]Net6Network) ([]network6, []int, error) {
 	total := 0
-	for _, rule := range rules {
-		total += len(rule.Networks)
+	for _, list := range lists {
+		total += len(list)
 	}
 	nets := make([]network6, 0, total)
-	starts := make([]int, 0, len(rules)+1)
-	for idx, rule := range rules {
+	starts := make([]int, 0, len(lists)+1)
+	for idx, list := range lists {
 		starts = append(starts, len(nets))
-		for _, network := range rule.Networks {
+		for _, network := range list {
 			var net network6
 			var err error
 			net.Hi, err = newHalf(binary.BigEndian.Uint64(network.Addr[:8]), binary.BigEndian.Uint64(network.Mask[:8]))
 			if err != nil {
-				return nil, nil, fmt.Errorf("rule %d: %w", idx, err)
+				return nil, nil, fmt.Errorf("network list %d: %w", idx, err)
 			}
 			net.Lo, err = newHalf(binary.BigEndian.Uint64(network.Addr[8:]), binary.BigEndian.Uint64(network.Mask[8:]))
 			if err != nil {
-				return nil, nil, fmt.Errorf("rule %d: %w", idx, err)
+				return nil, nil, fmt.Errorf("network list %d: %w", idx, err)
 			}
 			nets = append(nets, net)
 		}

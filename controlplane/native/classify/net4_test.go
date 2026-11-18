@@ -116,6 +116,16 @@ func Test_CompileNet4_MatchesC(t *testing.T) {
 	}
 }
 
+// Test_CompileNet4_GroupsEqualListsByContent verifies that rules sharing
+// one network list and rules holding copies of it compile as C compiles
+// them: the storage of a list never decides its group.
+func Test_CompileNet4_GroupsEqualListsByContent(t *testing.T) {
+	shared := []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8"), netip.MustParsePrefix("10.1.0.0/16")}
+	copied := append([]netip.Prefix{}, shared...)
+	rules := []classify.Net4Rule{{Prefixes: shared}, {Prefixes: copied}, {Prefixes: shared}, {Prefixes: shared[:1]}, {Prefixes: copied[:1]}}
+	requireNet4MatchesC(t, rules)
+}
+
 // FuzzCompileNet4_MatchesC verifies that any IPv4 network ruleset
 // compiles in Go to what it compiles to in C; every six bytes are one
 // prefix, a zero first byte ending a rule.
