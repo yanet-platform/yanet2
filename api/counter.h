@@ -20,6 +20,9 @@ struct counter_tag {
 };
 
 // Return a tag with key and value truncated to the fixed field sizes.
+//
+// The fields are zeroed past their terminators: tags are copied whole into
+// shared memory, where stack bytes would otherwise land.
 static inline struct counter_tag
 counter_tag_init(const char *key, const char *value) {
 	struct counter_tag tag = {0};
