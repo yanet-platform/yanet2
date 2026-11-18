@@ -22,7 +22,7 @@ struct counter_tag {
 // Return a tag with key and value truncated to the fixed field sizes.
 static inline struct counter_tag
 counter_tag_init(const char *key, const char *value) {
-	struct counter_tag tag;
+	struct counter_tag tag = {0};
 	(void)strtcpy(tag.key, key, sizeof(tag.key));
 	(void)strtcpy(tag.value, value, sizeof(tag.value));
 	return tag;
