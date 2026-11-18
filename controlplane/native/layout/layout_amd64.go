@@ -11,7 +11,7 @@ import (
 )
 
 // Fingerprint identifies the layout of every view in this file.
-const Fingerprint = "e382e44b400f7ecb"
+const Fingerprint = "c22256dbfe4f5ce4"
 
 // Agent is the C struct agent, 1056 bytes.
 type Agent struct {
@@ -920,6 +920,17 @@ type RteMemzone struct {
 // RteMemzoneAnonymous40 is the C union (anonymous); read its members through unsafe.
 type RteMemzoneAnonymous40 struct {
 	raw [8]byte
+}
+
+// RuleTable is the C struct rule_table, 56 bytes.
+type RuleTable struct {
+	MemoryContext shm.Ptr[MemoryContext]
+	VDim          uint32
+	HDim          uint32
+	ClassMap      Vline
+	Rows          shm.Ptr[shm.Ptr[uint32]]
+	ClassCount    uint32
+	_             [4]byte
 }
 
 // Spinlock is the C struct spinlock, 1 bytes.

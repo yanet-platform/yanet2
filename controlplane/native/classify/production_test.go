@@ -295,6 +295,34 @@ func productionJoins(t testing.TB, attributes []productionAttribute) []productio
 	}
 }
 
+// productionRuleTable is the rule table of one family of a ratelimit
+// classifier: its name, the joint of its networks, the transport stage
+// and the member rules of the family.
+type productionRuleTable struct {
+	name    string
+	left    *classify.Joint
+	right   *classify.Stage
+	members []bool
+}
+
+// productionRuleTables returns the rule tables of both families of a
+// ruleset, over its joins in the order productionJoins returns them.
+func productionRuleTables(t testing.TB, ruleset productionRuleset, joins []productionJoin) []productionRuleTable {
+	t.Helper()
+	members4 := make([]bool, len(ruleset.Src4))
+	for idx, rule := range ruleset.Src4 {
+		members4[idx] = !rule.Absent
+	}
+	members6 := make([]bool, len(ruleset.Src6))
+	for idx, rule := range ruleset.Src6 {
+		members6[idx] = !rule.Absent
+	}
+	return []productionRuleTable{
+		{"rules4", joint(t, joins[0].left, joins[0].right), joint(t, joins[1].left, joins[1].right).Stage(), members4},
+		{"rules6", joint(t, joins[2].left, joins[2].right), joint(t, joins[3].left, joins[3].right).Stage(), members6},
+	}
+}
+
 // Test_ProductionShaped_Sizes logs the sizes the ratelimit classifiers
 // of every production-shaped ruleset reach.
 func Test_ProductionShaped_Sizes(t *testing.T) {
@@ -357,8 +385,12 @@ func Test_ProductionShaped_MatchesC(t *testing.T) {
 		for _, attribute := range attributes {
 			attribute.matches(t)
 		}
-		for _, join := range productionJoins(t, attributes) {
+		joins := productionJoins(t, attributes)
+		for _, join := range joins {
 			requireJoinMatchesC(t, *join.left, *join.right)
+		}
+		for _, rules := range productionRuleTables(t, ruleset, joins) {
+			requireRuleTableMatchesC(t, rules.left, rules.right, rules.members)
 		}
 	}
 }
@@ -386,7 +418,30 @@ func Benchmark_ProductionShaped(b *testing.B) {
 				}
 			})
 		}
-		for _, join := range productionJoins(b, attributes) {
+		joins := productionJoins(b, attributes)
+		for _, rules := range productionRuleTables(b, ruleset, joins) {
+			b.Run(ruleset.Name+"/"+rules.name+"/c", func(b *testing.B) {
+				context := newContext(b)
+				cLeft, err := coracle.NewCStage(unsafe.Pointer(context), cStage(rules.left.Stage()))
+				require.NoError(b, err)
+				defer cLeft.Free()
+				cRight, err := coracle.NewCStage(unsafe.Pointer(context), cStage(rules.right))
+				require.NoError(b, err)
+				defer cRight.Free()
+				b.ResetTimer()
+				_, err = coracle.JoinRulesLoop(unsafe.Pointer(context), "ratelimit:"+rules.name, cLeft, cRight, rules.members, b.N)
+				require.NoError(b, err)
+			})
+			b.Run(ruleset.Name+"/"+rules.name+"/native", func(b *testing.B) {
+				context := newContext(b)
+				table := newAttr[layout.RuleTable](b, context)
+				for b.Loop() {
+					require.NoError(b, classify.JoinRules(rules.left, rules.right, rules.members, table, context, "ratelimit:"+rules.name))
+					classify.FreeRuleTable(table)
+				}
+			})
+		}
+		for _, join := range joins {
 			b.Run(ruleset.Name+"/"+join.name+"/c", func(b *testing.B) {
 				context := newContext(b)
 				cLeft, err := coracle.NewCStage(unsafe.Pointer(context), cStage(join.left))
@@ -435,7 +490,29 @@ func Test_ProductionShaped_UsesLessTemporaryMemoryThanC(t *testing.T) {
 				ruleset.Name, attribute.name, viaC.Shared, native.Shared, native.Heap)
 			require.Less(t, native.Shared+native.Heap, viaC.Shared+viaC.Heap, "%s %s", ruleset.Name, attribute.name)
 		}
-		for _, join := range productionJoins(t, attributes) {
+		joins := productionJoins(t, attributes)
+		for _, rules := range productionRuleTables(t, ruleset, joins) {
+			stages := newContext(t)
+			cLeft, err := coracle.NewCStage(unsafe.Pointer(stages), cStage(rules.left.Stage()))
+			require.NoError(t, err)
+			cRight, err := coracle.NewCStage(unsafe.Pointer(stages), cStage(rules.right))
+			require.NoError(t, err)
+			viaC := measureFootprintOf(t, arenaSize, func(context *layout.MemoryContext) {
+				_, err := coracle.JoinRulesLoop(unsafe.Pointer(context), "ratelimit:"+rules.name, cLeft, cRight, rules.members, 1)
+				require.NoError(t, err)
+			})
+			cLeft.Free()
+			cRight.Free()
+			native := measureFootprintOf(t, arenaSize, func(context *layout.MemoryContext) {
+				table := newAttr[layout.RuleTable](t, context)
+				require.NoError(t, classify.JoinRules(rules.left, rules.right, rules.members, table, context, "ratelimit:"+rules.name))
+				classify.FreeRuleTable(table)
+			})
+			t.Logf("%s %s: C %d bytes of shared memory and %d of heap; native %d of shared memory and %d of Go heap",
+				ruleset.Name, rules.name, viaC.Shared, viaC.Heap, native.Shared, native.Heap)
+			require.Less(t, native.Shared+native.Heap, viaC.Shared+viaC.Heap, "%s %s", ruleset.Name, rules.name)
+		}
+		for _, join := range joins {
 			stages := newContext(t)
 			cLeft, err := coracle.NewCStage(unsafe.Pointer(stages), cStage(join.left))
 			require.NoError(t, err)

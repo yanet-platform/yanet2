@@ -10,6 +10,7 @@ package coracle
 #include "common/value.h"
 #include "lib/classify/compiler/declare.h"
 #include "lib/classify/compiler/helper.h"
+#include "lib/classify/rule_table.h"
 
 extern uint64_t coracle_heap_bytes;
 
@@ -70,6 +71,70 @@ coracle_joint_values(struct value_range *range) {
 static const char *
 coracle_table_context_name(struct value_table *table) {
 	return ADDR_OF(&table->memory_context)->name;
+}
+
+// The rule every member slot of a rule table join points to; the join
+// reads only whether a slot is set.
+static struct classifier_rule coracle_member;
+
+// Returns the rule slots of a rule table join, one set for every member.
+static const struct classifier_rule **
+coracle_members(const uint8_t *members, uint32_t count) {
+	const struct classifier_rule **rules =
+		calloc(count ? count : 1, sizeof(*rules));
+	for (uint32_t idx = 0; rules != NULL && idx < count; ++idx) {
+		rules[idx] = members[idx] ? &coracle_member : NULL;
+	}
+	return rules;
+}
+
+static uint32_t *
+coracle_rule_table_row(struct rule_table *table, uint32_t idx) {
+	return ADDR_OF(ADDR_OF(&table->rows) + idx);
+}
+
+static uint32_t *
+coracle_rule_table_map(struct rule_table *table) {
+	return ADDR_OF(&table->class_map.values);
+}
+
+static const char *
+coracle_rule_table_context_name(struct rule_table *table) {
+	return ADDR_OF(&table->memory_context)->name;
+}
+
+static const char *
+coracle_rule_table_map_context_name(struct rule_table *table) {
+	return ADDR_OF(&table->class_map.memory_context)->name;
+}
+
+// Joins two stages into a rule table and frees it iterations times and
+// returns the nanoseconds taken, or -1 when a join fails.
+static int64_t
+coracle_join_rules_loop(
+	struct memory_context *context,
+	const char *name,
+	const struct classifier *left,
+	const struct classifier *right,
+	const struct classifier_rule *const *rules,
+	uint32_t rule_count,
+	uint64_t iterations
+) {
+	struct timespec start;
+	struct timespec end;
+	clock_gettime(CLOCK_MONOTONIC, &start);
+	for (uint64_t idx = 0; idx < iterations; ++idx) {
+		struct rule_table table;
+		if (classify_join_rules(
+			    context, name, left, right, rules, rule_count, &table
+		    )) {
+			return -1;
+		}
+		rule_table_free(&table);
+	}
+	clock_gettime(CLOCK_MONOTONIC, &end);
+	return (int64_t)(end.tv_sec - start.tv_sec) * 1000000000 +
+	       (end.tv_nsec - start.tv_nsec);
 }
 
 // Joins two stages and frees the join iterations times and returns the
@@ -214,6 +279,68 @@ func JoinLoop(context unsafe.Pointer, name string, left, right *CStage, iteratio
 	elapsed := C.coracle_join_loop((*C.struct_memory_context)(context), cName, left.stage, right.stage, left.rules, C.uint64_t(iterations))
 	if elapsed < 0 {
 		return 0, fmt.Errorf("the C join failed")
+	}
+	return time.Duration(elapsed), nil
+}
+
+// RuleTableResult is what a C rule table join produced, copied out of
+// shared memory.
+type RuleTableResult struct {
+	ClassMap           []uint32
+	Rows               [][]uint32
+	ContextName        string
+	ClassesContextName string
+}
+
+// cMembers returns the rule slots of a rule table join in C memory; the
+// caller frees them.
+func cMembers(members []bool) **C.struct_classifier_rule {
+	flags := make([]C.uint8_t, len(members)+1)
+	for idx, member := range members {
+		if member {
+			flags[idx] = 1
+		}
+	}
+	return C.coracle_members(&flags[0], C.uint32_t(len(members)))
+}
+
+// JoinRules runs the C rule table join of the module SDK over two
+// stages, the members of the rules set, allocating from context, and
+// returns what it produced after freeing it again.
+func JoinRules(context unsafe.Pointer, name string, left, right *CStage, members []bool) (*RuleTableResult, error) {
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
+	rules := cMembers(members)
+	defer C.free(unsafe.Pointer(rules))
+	table := (*C.struct_rule_table)(C.calloc(1, C.size_t(unsafe.Sizeof(C.struct_rule_table{}))))
+	defer C.free(unsafe.Pointer(table))
+	if C.classify_join_rules((*C.struct_memory_context)(context), cName, left.stage, right.stage, rules, C.uint32_t(len(members)), table) != 0 {
+		return nil, fmt.Errorf("the C rule table join failed")
+	}
+	defer C.rule_table_free(table)
+	result := &RuleTableResult{
+		ClassMap:           append([]uint32{}, unsafe.Slice((*uint32)(unsafe.Pointer(C.coracle_rule_table_map(table))), table.v_dim)...),
+		ContextName:        C.GoString(C.coracle_rule_table_context_name(table)),
+		ClassesContextName: C.GoString(C.coracle_rule_table_map_context_name(table)),
+	}
+	for idx := range uint32(table.class_count) {
+		row := unsafe.Slice((*uint32)(unsafe.Pointer(C.coracle_rule_table_row(table, C.uint32_t(idx)))), table.h_dim)
+		result.Rows = append(result.Rows, append([]uint32{}, row...))
+	}
+	return result, nil
+}
+
+// JoinRulesLoop joins two stages into a rule table and frees it
+// iterations times in C, allocating from context, and returns the time
+// the joins took.
+func JoinRulesLoop(context unsafe.Pointer, name string, left, right *CStage, members []bool, iterations int) (time.Duration, error) {
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
+	rules := cMembers(members)
+	defer C.free(unsafe.Pointer(rules))
+	elapsed := C.coracle_join_rules_loop((*C.struct_memory_context)(context), cName, left.stage, right.stage, rules, C.uint32_t(len(members)), C.uint64_t(iterations))
+	if elapsed < 0 {
+		return 0, fmt.Errorf("the C rule table join failed")
 	}
 	return time.Duration(elapsed), nil
 }
