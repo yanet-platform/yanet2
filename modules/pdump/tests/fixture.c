@@ -3,7 +3,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <bpf_impl.h>
 #include <pcap/pcap.h>
 #include <rte_bpf.h>
 #include <rte_malloc.h>
@@ -24,8 +23,10 @@
 
 #define PDUMP_TEST_MEMORY_LIMIT (4u * 1024u * 1024u)
 
-struct rte_bpf *
-pdump_test_compile_accept_ip_filter(uint32_t snaplen, yanet_error **err) {
+struct ebpf_insn *
+pdump_test_compile_accept_ip_filter(
+	uint32_t snaplen, uint32_t *count, yanet_error **err
+) {
 	pcap_t *pcap = pcap_open_dead(DLT_EN10MB, snaplen);
 	if (pcap == NULL) {
 		yanet_error_add(err, "pcap_open_dead failed");
@@ -49,35 +50,27 @@ pdump_test_compile_accept_ip_filter(uint32_t snaplen, yanet_error **err) {
 		return NULL;
 	}
 
+	// Verified as the control plane verifies a filter before storing it.
 	struct rte_bpf *loaded = rte_bpf_load(prm);
-	rte_free(prm);
 	if (loaded == NULL) {
+		rte_free(prm);
 		yanet_error_add(err, "rte_bpf_load failed");
 		return NULL;
 	}
-
-	uint64_t buf_sz = loaded->sz;
-	uint8_t *buf = malloc(buf_sz);
-	if (buf == NULL) {
-		yanet_error_add(err, "failed to allocate the filter copy");
-		rte_bpf_destroy(loaded);
-		return NULL;
-	}
-	memcpy(buf, loaded, buf_sz);
 	rte_bpf_destroy(loaded);
 
-	struct rte_bpf *bpf = (struct rte_bpf *)buf;
-	// JIT is not wired into the dataplane's own copy either; keep the
-	// interpreter path the real handler always runs.
-	bpf->jit.func = NULL;
-	bpf->jit.sz = 0;
+	size_t ins_size = (size_t)prm->nb_ins * sizeof(struct ebpf_insn);
+	struct ebpf_insn *ins = malloc(ins_size);
+	if (ins == NULL) {
+		rte_free(prm);
+		yanet_error_add(err, "failed to allocate the filter copy");
+		return NULL;
+	}
+	memcpy(ins, prm->ins, ins_size);
+	*count = prm->nb_ins;
+	rte_free(prm);
 
-	size_t bsz = sizeof(bpf[0]);
-	size_t xsz = (size_t)bpf->prm.nb_xsym * sizeof(struct rte_bpf_xsym);
-	SET_OFFSET_OF(&bpf->prm.xsym, (struct rte_bpf_xsym *)(buf + bsz));
-	SET_OFFSET_OF(&bpf->prm.ins, (struct ebpf_insn *)(buf + bsz + xsz));
-
-	return bpf;
+	return ins;
 }
 
 struct packet *
@@ -206,7 +199,8 @@ pdump_test_fixture_build(
 		);
 		SET_OFFSET_OF(&fx->config.rate_bucket, &fx->rate_bucket);
 	}
-	SET_OFFSET_OF(&fx->config.ebpf_program, params->bpf);
+	SET_OFFSET_OF(&fx->config.filter_ins, params->filter_ins);
+	fx->config.filter_ins_count = params->filter_ins_count;
 	TEST_ASSERT_SUCCESS(
 		counter_registry_init(
 			&fx->config.cp_module.counter_registry,

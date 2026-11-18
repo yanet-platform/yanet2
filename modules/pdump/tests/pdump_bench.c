@@ -620,9 +620,11 @@ main(int argc, char **argv) {
 	pin_self(writer_cpu);
 
 	yanet_error *err = NULL;
-	struct rte_bpf *bpf =
-		pdump_test_compile_accept_ip_filter(BENCH_SNAPLEN, &err);
-	if (bpf == NULL) {
+	uint32_t filter_ins_count = 0;
+	struct ebpf_insn *filter_ins = pdump_test_compile_accept_ip_filter(
+		BENCH_SNAPLEN, &filter_ins_count, &err
+	);
+	if (filter_ins == NULL) {
 		bench_die(
 			err ? yanet_error_message(err)
 			    : "failed to compile the ip filter"
@@ -683,7 +685,8 @@ main(int argc, char **argv) {
 			.snaplen = BENCH_SNAPLEN,
 			.worker_idx = 0,
 			.module = module,
-			.bpf = bpf,
+			.filter_ins = filter_ins,
+			.filter_ins_count = filter_ins_count,
 			.gen = &gen,
 		};
 		if (pdump_test_fixture_build(ut, &params, &fixtures[bi]) !=
@@ -774,7 +777,7 @@ main(int argc, char **argv) {
 	}
 	pdump_test_gen_destroy(&gen);
 	dataplane_ut_free(ut);
-	free(bpf);
+	free(filter_ins);
 
 	return bad_total == 0 ? 0 : 1;
 }

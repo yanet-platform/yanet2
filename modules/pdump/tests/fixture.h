@@ -26,20 +26,22 @@ struct dataplane_ut;
 struct module;
 struct packet;
 struct ring_worker;
-struct rte_bpf;
 
 // Worker clock a built fixture stamps into every captured record.
 #define PDUMP_TEST_TIMESTAMP 123456789ULL
 
-// Compile the classic "ip" eBPF filter into a ready-to-run program.
+// Compile the classic "ip" filter into verified eBPF instructions.
 //
 // Accepts every Ethernet frame whose ethertype is IPv4 and rejects every
-// other frame, independent of the IP header's own validity. Mirrors the
-// pointer layout of a configured filter without a control-plane dependency
-// in the benchmark. Returns NULL and leaves err set on failure; the
-// caller frees a non-NULL result with free().
-struct rte_bpf *
-pdump_test_compile_accept_ip_filter(uint32_t snaplen, yanet_error **err);
+// other frame, independent of the IP header's own validity. Returns the
+// instructions as a configured filter stores them, with their number in
+// count, without a control-plane dependency in the benchmark. Returns NULL
+// and leaves err set on failure; the caller frees a non-NULL result with
+// free().
+struct ebpf_insn *
+pdump_test_compile_accept_ip_filter(
+	uint32_t snaplen, uint32_t *count, yanet_error **err
+);
 
 // Free every packet left on a front's input, output and drop lists.
 void
@@ -82,8 +84,8 @@ pdump_test_gen_worker_ectx(struct pdump_test_gen *gen, uint64_t worker_idx);
 //
 // Stands in for what the control plane and the ectx build normally wire up
 // for a published generation, since neither runs for a config built by
-// hand. module, bpf and gen are borrowed from the caller and must outlive
-// the fixture; pdump_test_fixture_destroy does not release them.
+// hand. module, filter_ins and gen are borrowed from the caller and must
+// outlive the fixture; pdump_test_fixture_destroy does not release them.
 // Registry device the fixture's single placement executes on.
 #define PDUMP_TEST_FIXTURE_DEVICE_ID 9
 
@@ -116,7 +118,8 @@ struct pdump_test_fixture_params {
 	// Borrowed: the fixture resolves against these but does not own or
 	// free them.
 	struct module *module;
-	struct rte_bpf *bpf;
+	struct ebpf_insn *filter_ins;
+	uint32_t filter_ins_count;
 	struct pdump_test_gen *gen;
 };
 

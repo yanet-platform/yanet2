@@ -26,8 +26,9 @@
 // handler for the worker that runs the context.
 //
 // The ring and its data area are the linked ring object's entry for that
-// worker; the filter is the config's program with its absolute
-// instruction address. A NULL ring leaves capture disabled.
+// worker; the filter is an interpreter descriptor around the config's
+// instructions, at their absolute address. A NULL ring leaves capture
+// disabled.
 struct pdump_prepared {
 	struct ring_worker *ring;
 	uint8_t *ring_data;
@@ -254,8 +255,9 @@ pdump_resolve_prepared(
 
 	struct pdump_module_config *config =
 		container_of(cp_module, struct pdump_module_config, cp_module);
-	struct rte_bpf *bpf = ADDR_OF(&config->ebpf_program);
-	if (bpf == NULL || config->ring_link_idx == PDUMP_RING_LINK_NONE) {
+	struct ebpf_insn *filter_ins = ADDR_OF(&config->filter_ins);
+	if (filter_ins == NULL ||
+	    config->ring_link_idx == PDUMP_RING_LINK_NONE) {
 		return result;
 	}
 	struct module_object_link_ectx *link =
@@ -278,10 +280,14 @@ pdump_resolve_prepared(
 		module_ectx->abs_counter_storage
 	);
 
-	result.bpf = *bpf;
-	result.bpf.prm.ins = ADDR_OF(&bpf->prm.ins);
-	result.bpf.prm.xsym = NULL;
-	result.bpf.prm.nb_xsym = 0;
+	// The descriptor rte_bpf_convert gives a classic filter, around the
+	// instructions the control plane verified. The interpreter reads
+	// nothing else: it runs on its own fixed stack, so the stack size the
+	// verifier derives stays zero, and the dataplane runs no JIT.
+	result.bpf.prm.ins = filter_ins;
+	result.bpf.prm.nb_ins = config->filter_ins_count;
+	result.bpf.prm.prog_arg.type = RTE_BPF_ARG_PTR_MBUF;
+	result.bpf.prm.prog_arg.size = sizeof(struct rte_mbuf);
 	result.ring_data = ADDR_OF(&ring->local.data);
 	result.ring = ring;
 	return result;
