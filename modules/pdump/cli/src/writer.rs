@@ -15,6 +15,7 @@ use pcap_file::{
             enhanced_packet::EnhancedPacketBlock,
             interface_description::{InterfaceDescriptionBlock, InterfaceDescriptionOption, InterfaceTsResolution},
             interface_statistics::{InterfaceStatisticsBlock, InterfaceStatisticsOption},
+            opt_common::CommonOption,
         },
     },
 };
@@ -158,10 +159,17 @@ impl PdumpWriter {
             return Ok(());
         }
 
+        // Like dumpcap, which stores its capture-buffer drops as isb_ifdrop,
+        // and names the counters' source in the block comment.
         let stats = InterfaceStatisticsBlock {
             interface_id: writer.interface_id,
             timestamp: SystemTime::now().duration_since(UNIX_EPOCH)?,
-            options: vec![InterfaceStatisticsOption::IsbIfDrop(lost)],
+            options: vec![
+                InterfaceStatisticsOption::Common(CommonOption::Comment(
+                    "Records lost in the pdump capture ring".into(),
+                )),
+                InterfaceStatisticsOption::IsbIfDrop(lost),
+            ],
         };
         writer.inner.write_block(&Block::InterfaceStatistics(stats))?;
         Ok(())
@@ -415,8 +423,9 @@ mod test {
     }
 
     /// Writes records with the given loss counts to a fresh pcapng file through
-    /// `pdump_write` and returns the drops of every interface statistics block.
-    fn pcapng_statistics_drops(losses: &[u64]) -> Vec<Vec<u64>> {
+    /// `pdump_write` and returns the comments and drops of every interface
+    /// statistics block.
+    fn pcapng_statistics(losses: &[u64]) -> Vec<(Vec<String>, Vec<u64>)> {
         let file = NamedTempFile::new().expect("must create a temp file");
         let path = file.path().to_str().expect("temp path must be valid UTF-8");
         let writer = PdumpWriter::new(DumpOutputFormat::PcapNg, path).expect("must open");
@@ -428,32 +437,37 @@ mod test {
         pdump_write(writer, rx, None, io::sink()).expect("must write the records");
 
         let mut reader = PcapNgReader::new(file.reopen().expect("must reopen")).expect("must parse the pcapng header");
-        let mut drops = Vec::new();
+        let mut blocks = Vec::new();
         while let Some(block) = reader.next_block() {
             if let (Block::InterfaceStatistics(stats), _) = block.expect("must parse block") {
-                drops.push(
-                    stats
-                        .options
-                        .iter()
-                        .filter_map(|option| match option {
-                            InterfaceStatisticsOption::IsbIfDrop(drop) => Some(*drop),
-                            _ => None,
-                        })
-                        .collect(),
-                );
+                let mut comments = Vec::new();
+                let mut drops = Vec::new();
+                for option in &stats.options {
+                    match option {
+                        InterfaceStatisticsOption::Common(CommonOption::Comment(comment)) => {
+                            comments.push(comment.to_string())
+                        }
+                        InterfaceStatisticsOption::IsbIfDrop(drop) => drops.push(*drop),
+                        _ => {}
+                    }
+                }
+                blocks.push((comments, drops));
             }
         }
-        drops
+        blocks
     }
 
     #[test]
     fn test_pcapng_records_total_lost_in_one_statistics_block() {
-        assert_eq!(vec![vec![8]], pcapng_statistics_drops(&[3, 0, 5]));
+        assert_eq!(
+            vec![(vec!["Records lost in the pdump capture ring".to_owned()], vec![8])],
+            pcapng_statistics(&[3, 0, 5])
+        );
     }
 
     #[test]
     fn test_pcapng_without_losses_has_no_statistics_block() {
-        assert!(pcapng_statistics_drops(&[0, 0]).is_empty());
+        assert!(pcapng_statistics(&[0, 0]).is_empty());
     }
 
     #[test]
