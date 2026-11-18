@@ -149,3 +149,41 @@ func Test_UpsertModule_MatchesC(t *testing.T) {
 		})
 	}
 }
+
+// Test_BuildWorkerContexts_MatchesC verifies that building every worker's
+// execution contexts for a generation with an upserted module from Go,
+// counter storages continued from the published generation included,
+// leaves the storage as config_gen_ectxs_create does.
+func Test_BuildWorkerContexts_MatchesC(t *testing.T) {
+	for _, name := range []string{"fresh", "a"} {
+		t.Run("module "+name, func(t *testing.T) {
+			memory := newPublishedFixture(t)
+			cp := memory.Instance().Cp
+			workers := memory.Instance().Dp.WorkerCount
+			memory.CompareWithC(t,
+				func() {
+					config, err := cblackhole.NewModuleConfig(memory.cAgent, name)
+					require.NoError(t, err)
+					coracle.WithConfigLock(unsafe.Pointer(cp), func() {
+						old := cp.CpConfigGen.Get()
+						gen := cNewGeneration(t, memory)
+						require.NoError(t, coracle.ModuleUpsert(unsafe.Pointer(&gen.ModuleRegistry), config.AsFFIModule().AsRawPtr()))
+						require.NotNil(t, coracle.BuildWorkerContexts(unsafe.Pointer(gen), unsafe.Pointer(old), workers))
+					})
+				},
+				func() {
+					module, err := cpconfig.NewBlackhole(memory.owner, name)
+					require.NoError(t, err)
+					lock := shm.LockPid(&cp.ConfigLock, int32(os.Getpid()))
+					defer lock.Unlock()
+					old := cp.CpConfigGen.Get()
+					gen, err := cpconfig.NewGeneration(cp, old)
+					require.NoError(t, err)
+					require.NoError(t, cpconfig.UpsertModule(&gen.ModuleRegistry, module))
+					_, err = cpconfig.BuildWorkerContexts(gen, old, workers)
+					require.NoError(t, err)
+				},
+			)
+		})
+	}
+}

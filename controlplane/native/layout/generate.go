@@ -6,7 +6,8 @@
 // generated from a binary of that architecture.
 //
 // The -local list names the pointers the dataplane stores as absolute
-// addresses of its own process; nothing in the C declarations says so.
+// addresses of its own process, and -relative the abs_ pointers the
+// control plane stores relative; nothing in the C declarations says so.
 package layout
 
-//go:generate go run ../cmd/shmgen -binary ../../../build/dataplane/yanet-dataplane -package layout -import github.com/yanet-platform/yanet2/controlplane/native/layout -out layout.go -test layout_test.go -local dp_worker.iterations,dp_worker.rx_count,dp_worker.rx_size,dp_worker.tx_count,dp_worker.tx_size,dp_worker.remote_rx_count,dp_worker.remote_tx_count,dp_worker.local_tx_drops,dp_worker.remote_tx_drops,dp_worker.rx_chained_drops,dp_worker.disposed_count,dp_worker.rx_mempool,dp_worker.rx_bursts dp_config cp_config cp_config_gen agent cp_module dp_worker
+//go:generate go run ../cmd/shmgen -binary ../../../build/dataplane/yanet-dataplane -package layout -import github.com/yanet-platform/yanet2/controlplane/native/layout -out layout.go -test layout_test.go -local dp_worker.iterations,dp_worker.rx_count,dp_worker.rx_size,dp_worker.tx_count,dp_worker.tx_size,dp_worker.remote_rx_count,dp_worker.remote_tx_count,dp_worker.local_tx_drops,dp_worker.remote_tx_drops,dp_worker.rx_chained_drops,dp_worker.disposed_count,dp_worker.rx_mempool,dp_worker.rx_bursts -relative module_ectx.abs_runtime_counter_storages dp_config cp_config cp_config_gen agent cp_module dp_worker

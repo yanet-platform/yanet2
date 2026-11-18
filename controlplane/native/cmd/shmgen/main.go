@@ -38,6 +38,8 @@ func main() {
 	testOutput := flag.String("test", "", "Go test file to write")
 	locals := flag.String("local", "",
 		"comma-separated struct.field pointers that hold a process-local address")
+	relatives := flag.String("relative", "",
+		"comma-separated abs_ struct.field pointers that C stores relative nonetheless")
 	flag.Parse()
 
 	if *binary == "" || *output == "" || flag.NArg() == 0 {
@@ -51,10 +53,16 @@ func main() {
 		Output:      *output,
 		TestOutput:  *testOutput,
 		Locals:      map[string]bool{},
+		Relatives:   map[string]bool{},
 	}
 	for _, local := range strings.Split(*locals, ",") {
 		if local != "" {
 			options.Locals[local] = true
+		}
+	}
+	for _, relative := range strings.Split(*relatives, ",") {
+		if relative != "" {
+			options.Relatives[relative] = true
 		}
 	}
 	if err := run(options, flag.Args()); err != nil {
@@ -73,6 +81,8 @@ type options struct {
 	// Locals holds the struct.field pointers that hold an address only
 	// the writing process can use.
 	Locals map[string]bool
+	// Relatives holds the abs_ struct.field pointers C stores relative.
+	Relatives map[string]bool
 }
 
 func run(options options, roots []string) error {
@@ -98,7 +108,7 @@ func run(options options, roots []string) error {
 	}
 	constraint := "//go:build linux && " + goarch
 
-	m, err := newGenerator(data, options.Locals)
+	m, err := newGenerator(data, options.Locals, options.Relatives)
 	if err != nil {
 		return err
 	}
@@ -172,6 +182,8 @@ type generator struct {
 	// locals holds the struct.field pointers that hold a process-local
 	// address.
 	locals map[string]bool
+	// relatives holds the abs_ struct.field pointers C stores relative.
+	relatives map[string]bool
 }
 
 // pending is a type waiting to be generated.
@@ -180,10 +192,11 @@ type pending struct {
 	Type dwarf.Type
 }
 
-func newGenerator(data *dwarf.Data, locals map[string]bool) (*generator, error) {
+func newGenerator(data *dwarf.Data, locals, relatives map[string]bool) (*generator, error) {
 	m := &generator{
 		data:        data,
 		locals:      locals,
+		relatives:   relatives,
 		definitions: map[string][]dwarf.Offset{},
 		names:       map[dwarf.Type]string{},
 		views:       map[string]*view{},
@@ -597,7 +610,8 @@ func (m *generator) emitStruct(name string, typ *dwarf.StructType) error {
 		}
 		fieldName = unique(used, fieldName)
 		goType := m.goType(field.Type, name+fieldName)
-		if strings.HasPrefix(field.Name, "abs_") || m.locals[typ.StructName+"."+field.Name] {
+		key := typ.StructName + "." + field.Name
+		if (strings.HasPrefix(field.Name, "abs_") && !m.relatives[key]) || m.locals[key] {
 			// The dataplane resolves these for its own process.
 			goType = "shm.Local"
 		}

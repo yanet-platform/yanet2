@@ -608,7 +608,7 @@ type ModuleEctx struct {
 	AbsCounterStorage             shm.Local
 	RuntimeCounterStorageCount    uint64
 	RuntimeCounterStorages        shm.Ptr[shm.Ptr[CounterStorage]]
-	AbsRuntimeCounterStorages     shm.Local
+	AbsRuntimeCounterStorages     shm.Ptr[shm.Ptr[CounterStorage]]
 	AbsRuntimeCounterStoragesBase shm.Local
 	ConfigGenEctx                 shm.Ptr[ConfigGenEctx]
 	AbsConfigGenEctx              shm.Local

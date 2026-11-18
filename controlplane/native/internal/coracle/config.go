@@ -7,6 +7,7 @@ package coracle
 #include "lib/controlplane/config/cp_module.h"
 #include "lib/controlplane/config/cp_object.h"
 #include "lib/controlplane/config/cp_pipeline.h"
+#include "lib/controlplane/config/econtext.h"
 #include "lib/controlplane/config/zone.h"
 #include "lib/errors/errors.h"
 
@@ -35,6 +36,14 @@ CORACLE_COPY(function)
 CORACLE_COPY(pipeline)
 CORACLE_COPY(device)
 CORACLE_COPY(object)
+
+static void *
+coracle_ectxs_create(struct cp_config_gen *gen, struct cp_config_gen *old, uint64_t workers) {
+	yanet_error *err = NULL;
+	void *result = config_gen_ectxs_create(gen, old, workers, &err);
+	yanet_error_free(err);
+	return result;
+}
 */
 import "C"
 
@@ -98,4 +107,10 @@ func ModuleUpsert(registry, module unsafe.Pointer) error {
 		return fmt.Errorf("module upsert failed")
 	}
 	return nil
+}
+
+// BuildWorkerContexts runs config_gen_ectxs_create and returns the array
+// of per-worker contexts, or nil.
+func BuildWorkerContexts(gen, old unsafe.Pointer, workers uint64) unsafe.Pointer {
+	return C.coracle_ectxs_create((*C.struct_cp_config_gen)(gen), (*C.struct_cp_config_gen)(old), C.uint64_t(workers))
 }
