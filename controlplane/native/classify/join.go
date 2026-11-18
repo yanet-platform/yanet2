@@ -52,26 +52,43 @@ type groupPair struct {
 	Right uint32
 }
 
+// Hash hashes a pair as merge_group_pair_hash does.
+func (m groupPair) Hash() uint32 {
+	return (m.Left*2654435761 ^ m.Right*2246822519) * 3266489917
+}
+
 // pairRules returns the pair of every rule, or InvalidGroup for a rule
 // without a group on either side, and the distinct pairs in order of
-// first appearance.
+// first appearance, found through a table of pair numbers plus one as
+// groupRules finds the groups.
 func pairRules(left, right []uint32) ([]uint32, []groupPair) {
 	ruleGroups := make([]uint32, len(left))
-	index := map[groupPair]uint32{}
 	var pairs []groupPair
+	var hashes []uint32
+	table := make([]uint32, 16)
 	for idx := range left {
 		if left[idx] == InvalidGroup || right[idx] == InvalidGroup {
 			ruleGroups[idx] = InvalidGroup
 			continue
 		}
 		groups := groupPair{Left: left[idx], Right: right[idx]}
-		pair, ok := index[groups]
-		if !ok {
-			pair = uint32(len(pairs))
-			index[groups] = pair
-			pairs = append(pairs, groups)
+		hash := groups.Hash()
+		mask := uint32(len(table) - 1)
+		slot := hash & mask
+		for table[slot] != 0 && pairs[table[slot]-1] != groups {
+			slot = (slot + 1) & mask
 		}
-		ruleGroups[idx] = pair
+		if table[slot] != 0 {
+			ruleGroups[idx] = table[slot] - 1
+			continue
+		}
+		ruleGroups[idx] = uint32(len(pairs))
+		pairs = append(pairs, groups)
+		hashes = append(hashes, hash)
+		table[slot] = uint32(len(pairs))
+		if 2*len(pairs) > len(table) {
+			table = groupTable(hashes, 2*len(table))
+		}
 	}
 	return ruleGroups, pairs
 }
@@ -84,6 +101,42 @@ func pairHash(pair uint32) uint32 {
 	hash ^= hash >> 13
 	hash *= 0xc2b2ae35
 	return hash ^ hash>>16
+}
+
+// xorInto writes the values held by exactly one of two ascending runs
+// into out, ascending, and returns how many; out has room for both.
+func xorInto(out, left, right []uint32) int {
+	count, idx, jdx := 0, 0, 0
+	for idx < len(left) && jdx < len(right) {
+		switch value := left[idx]; {
+		case value < right[jdx]:
+			out[count] = value
+			count++
+			idx++
+		case value > right[jdx]:
+			out[count] = right[jdx]
+			count++
+			jdx++
+		default:
+			idx++
+			jdx++
+		}
+	}
+	count += copy(out[count:], left[idx:])
+	return count + copy(out[count:], right[jdx:])
+}
+
+// xorRuns returns the values held by exactly one of two ascending runs,
+// ascending: one run as it is when the other is empty, else written into
+// out, which has room for both.
+func xorRuns(out, left, right []uint32) []uint32 {
+	switch {
+	case len(right) == 0:
+		return left
+	case len(left) == 0:
+		return right
+	}
+	return out[:xorInto(out, left, right)]
 }
 
 // appendXor appends the values held by exactly one of two ascending runs
@@ -253,7 +306,8 @@ type joiner struct {
 	Nodes    []paintNode
 	RowTerms []uint32
 	RowHash  uint32
-	// The paint, the R and C terms and the key of one cell.
+	// The scratch of the paint, the R and C terms and the key of one
+	// cell, each the length of the pair count.
 	CellPaint []uint32
 	Terms     []uint32
 	Key       []uint32
@@ -271,7 +325,10 @@ func newJoiner(left, right *Stage, pairs []groupPair) joiner {
 		Left:     make([]uint32, hDim),
 		Up:       make([]uint32, hDim),
 		Heads:    make([]uint32, hDim),
-		Key:      make([]uint32, 0, len(pairs)),
+		// A pair set of a cell or a row holds every pair at most once.
+		CellPaint: make([]uint32, len(pairs)),
+		Terms:     make([]uint32, len(pairs)),
+		Key:       make([]uint32, len(pairs)),
 	}
 	leftSides := make([]joinSide, left.GroupCount())
 	rightSides := make([]joinSide, right.GroupCount())
@@ -336,45 +393,51 @@ func numberLists(lists *pairLists, dim uint32) ([]uint32, uint32) {
 // PrepareRow counts what tells every cell of a row from its neighbours
 // and lists the pairs painting each of its columns. The counts wrap, the
 // true ones being at most the pair count.
+//
+// The lists grow in locals stored back once a row: a store of a slice
+// into the joiner is a pointer write, which costs a barrier check.
 func (m *joiner) PrepareRow(v uint32) {
 	painted := m.Painted.Get(v)
-	copy(m.Left, m.LeftBase)
-	clear(m.Heads)
+	left, heads := m.Left, m.Heads
+	copy(left, m.LeftBase)
+	clear(heads)
 	clear(m.Up)
-	m.Nodes = m.Nodes[:0]
-	m.RowTerms = m.RowTerms[:0]
-	m.RowHash = 0
+	nodes := m.Nodes[:0]
+	rowTerms := m.RowTerms[:0]
+	rowHash := uint32(0)
 	for _, pair := range painted {
 		cols := m.Cols[pair]
 		if cols.Flipped {
-			m.RowTerms = append(m.RowTerms, pair)
-			m.RowHash ^= pairHash(pair)
+			rowTerms = append(rowTerms, pair)
+			rowHash ^= pairHash(pair)
 		}
 		sign := uint32(1)
 		if m.Rows[pair].Flipped {
 			sign = ^uint32(0)
 		}
 		for _, h := range cols.Edges {
-			m.Left[h] += sign
+			left[h] += sign
 		}
 		for _, h := range cols.Small {
-			m.Nodes = append(m.Nodes, paintNode{Pair: pair, Next: m.Heads[h]})
-			m.Heads[h] = uint32(len(m.Nodes))
+			nodes = append(nodes, paintNode{Pair: pair, Next: heads[h]})
+			heads[h] = uint32(len(nodes))
 		}
 	}
+	m.Nodes, m.RowTerms, m.RowHash = nodes, rowTerms, rowHash
 	// The first row reads no row above: every cell of it differs.
 	if v == 0 {
 		m.UpBase = 1
 		return
 	}
 	// The pairs with an edge at the row paint one of it and the row above.
-	changed := appendXor(m.Key[:0], painted, m.Painted.Get(v-1))
+	changed := m.Key[:xorInto(m.Key, painted, m.Painted.Get(v-1))]
 	m.UpBase = 0
 	for _, pair := range changed {
 		if m.Cols[pair].Flipped {
 			m.UpBase++
 		}
 	}
+	up := m.Up
 	for _, pair := range changed {
 		cols := m.Cols[pair]
 		sign := uint32(1)
@@ -382,7 +445,7 @@ func (m *joiner) PrepareRow(v uint32) {
 			sign = ^uint32(0)
 		}
 		for _, h := range cols.Small {
-			m.Up[h] += sign
+			up[h] += sign
 		}
 	}
 }
@@ -398,18 +461,19 @@ func (m *joiner) CellClass(v, h uint32) (uint32, error) {
 	if unpainted && cached.Row == v+1 {
 		return cached.Class, nil
 	}
-	m.CellPaint = m.CellPaint[:0]
+	// A list holds the latest pair first, so the paint fills from the
+	// end of its scratch.
+	paint := m.CellPaint[len(m.CellPaint):]
 	hash := m.RowHash ^ m.ColHash[h]
 	for node := m.Heads[h]; node != 0; node = m.Nodes[node-1].Next {
 		pair := m.Nodes[node-1].Pair
-		m.CellPaint = append(m.CellPaint, pair)
+		paint = m.CellPaint[len(m.CellPaint)-len(paint)-1:]
+		paint[0] = pair
 		hash ^= pairHash(pair)
 	}
-	// A list holds the latest pair first.
-	slices.Reverse(m.CellPaint)
-	m.Terms = appendXor(m.Terms[:0], m.RowTerms, m.ColTerms.Get(h))
-	m.Key = appendXor(m.Key[:0], m.Terms, m.CellPaint)
-	class, err := m.Classes.Intern(hash, m.Key)
+	terms := xorRuns(m.Terms, m.RowTerms, m.ColTerms.Get(h))
+	key := xorRuns(m.Key, terms, paint)
+	class, err := m.Classes.Intern(hash, key)
 	if err == nil && unpainted {
 		*cached = rowClass{Row: v + 1, Class: class}
 	}
