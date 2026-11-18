@@ -17,8 +17,8 @@ import (
 
 // rawSharedMemory mirrors the C handle struct yanet_shm.
 type rawSharedMemory struct {
-	base unsafe.Pointer
-	size uintptr
+	Base unsafe.Pointer
+	Size uintptr
 }
 
 // Fixture is an in-process dataplane whose storage both the cgo control
@@ -45,7 +45,7 @@ func NewFixture(t *testing.T, config dataplaneut.Config) *Fixture {
 	require.NoError(t, err)
 	t.Cleanup(harness.Free)
 	raw := (*rawSharedMemory)(harness.SharedMemory().AsRawPtr())
-	image := unsafe.Slice((*byte)(raw.base), raw.size)
+	image := unsafe.Slice((*byte)(raw.Base), raw.Size)
 	storage, err := zone.FromMemory(image)
 	require.NoError(t, err)
 	return &Fixture{Harness: harness, Image: image, Storage: storage}
