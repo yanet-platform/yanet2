@@ -127,14 +127,10 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         debug_bounds
             .push(quote_spanned!(field_ty.span()=> <#field_ty as #p::Build>::Parts<'b, __W>: #core::fmt::Debug));
         writes.push(quote_spanned! {field_ty.span()=>
-            <#field_ty as #p::Build>::write::<__W>(
-                #binding,
-                __memory,
-                __addr + #core::mem::offset_of!(#ty, #ident),
-            )?;
+            __addr.write_field::<#field_ty>(#core::mem::offset_of!(#ty, #ident), #binding)?;
             let #guard = #p::Partial::<#field_ty, __W>::new(
-                __memory,
-                __addr + #core::mem::offset_of!(#ty, #ident),
+                __addr.memory(),
+                __addr.addr() + #core::mem::offset_of!(#ty, #ident),
                 1,
             );
         });
@@ -241,21 +237,20 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         unsafe impl #impl_generics #p::Build for #ty #where_clause {
             type Parts<'b, __W: #p::Owner> = #parts_name<'b, __W, #(#args),*>;
 
-            unsafe fn write<__W: #p::Owner>(
-                __parts: #parts_name<'_, __W, #(#args),*>,
-                __memory: &#p::MemoryContext<'_, __W>,
-                __addr: usize,
-            ) -> #core::result::Result<(), #p::Refusal> {
+            fn write<'slot, 'b, __W: #p::Owner>(
+                __parts: #parts_name<'b, __W, #(#args),*>,
+                mut __addr: #p::Place<'slot, 'b, Self, __W>,
+            ) -> #core::result::Result<#p::Init<'slot, Self>, #p::Refusal> {
                 #instance_checks
                 let #parts_name { #(#idents),* } = __parts;
-                // SAFETY: each field lies in the value at the address, which
-                // the caller vouches for, and a guard covers the field just
-                // written.
+                // SAFETY: the offsets name distinct fields of this place.
+                // Each completed field stays guarded until the whole value
+                // takes over, without moving any address-relative edge.
                 unsafe {
                     #(#writes)*
                     #(#core::mem::forget(#guards);)*
+                    #core::result::Result::Ok(__addr.assume_init())
                 }
-                #core::result::Result::Ok(())
             }
 
             unsafe fn free<__W: #p::Owner>(

@@ -45,7 +45,7 @@ pub use crate::bindings::{
 use crate::{
     bindings,
     common::lpm::Lpm,
-    cp::{Build, FfiRecord, MemoryContext, Owner, Refusal},
+    cp::{Build, FfiRecord, Init, MemoryContext, Owner, Place, Refusal},
 };
 
 mod tree;
@@ -572,7 +572,7 @@ macro_rules! classifiers {
         unsafe impl Build for $name {
             type Parts<'b, W: Owner> = Infallible;
 
-            unsafe fn write<W: Owner>(parts: Infallible, _: &MemoryContext<'_, W>, _: usize) -> Result<(), Refusal> {
+            fn write<'s, 'b, W: Owner>(parts: Infallible, _: Place<'s, 'b, Self, W>) -> Result<Init<'s, Self>, Refusal> {
                 match parts {}
             }
 

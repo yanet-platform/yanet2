@@ -80,6 +80,7 @@ pub struct TestOwner {
     arena: &'static BlockArena,
     /// Blocks handed out and not yet returned, with their size and context.
     blocks: RefCell<Vec<(BlockAddr, usize, Option<Context>)>>,
+    child_returns: Option<RefCell<Vec<usize>>>,
     /// Headers initialised and not yet finalised, with the kind of each.
     headers: RefCell<Vec<(Header, HeaderKind)>>,
     registered: Cell<u64>,
@@ -117,6 +118,7 @@ impl TestOwner {
         Self {
             arena: BlockArena::new(),
             blocks: RefCell::default(),
+            child_returns: None,
             headers: RefCell::default(),
             registered: Cell::new(0),
             workers: 1,
@@ -133,6 +135,19 @@ impl TestOwner {
     /// The owner for a dataplane of the given number of workers.
     pub fn with_workers(self, count: u64) -> Self {
         Self { workers: count, ..self }
+    }
+
+    /// Records the size of each returned child block, in release order.
+    pub fn with_child_return_log(self) -> Self {
+        Self {
+            child_returns: Some(RefCell::default()),
+            ..self
+        }
+    }
+
+    /// Takes the recorded return sizes. Without logging the list is empty.
+    pub fn take_child_returns(&self) -> Vec<usize> {
+        self.child_returns.as_ref().map(RefCell::take).unwrap_or_default()
     }
 
     /// Runs `f` over a live object built by this owner.
@@ -367,6 +382,11 @@ impl TestOwner {
     }
 
     fn give_back(&self, context: Option<Context>, addr: BlockAddr, size: usize) {
+        if context.is_some()
+            && let Some(log) = &self.child_returns
+        {
+            log.borrow_mut().push(size);
+        }
         let mut blocks = self.blocks.borrow_mut();
         let block = blocks
             .iter()

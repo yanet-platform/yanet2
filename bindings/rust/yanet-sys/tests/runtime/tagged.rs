@@ -9,7 +9,7 @@ use core::{
 use yanet_shm::{rel::RelPtr, shm::ShmLayout};
 use yanet_sys::{
     bindings,
-    cp::{Build, MemoryContext, Owner, Refusal},
+    cp::{Build, Init, MemoryContext, Owner, Place, Refusal},
     dp::{Batch, CommitCx, Cx, Module, TaggedCounters, TaggedCountersRef, Traffic, Verdict},
 };
 
@@ -31,7 +31,7 @@ unsafe impl ShmLayout for Config {}
 unsafe impl Build for Config {
     type Parts<'b, W: Owner> = Infallible;
 
-    unsafe fn write<W: Owner>(parts: Infallible, _: &MemoryContext<'_, W>, _: usize) -> Result<(), Refusal> {
+    fn write<'s, 'b, W: Owner>(parts: Infallible, _: Place<'s, 'b, Self, W>) -> Result<Init<'s, Self>, Refusal> {
         match parts {}
     }
 
