@@ -137,6 +137,8 @@ func Test_Layout_MatchesDWARF(t *testing.T) {
 		{"ClassifyAttrLine size", unsafe.Sizeof(layout.ClassifyAttrLine{}), 24},
 		{"ClassifyAttrPort.Line offset", unsafe.Offsetof(layout.ClassifyAttrPort{}.Line), 0},
 		{"ClassifyAttrPort size", unsafe.Sizeof(layout.ClassifyAttrPort{}), 24},
+		{"ClassifyAttrNet4.Lpm offset", unsafe.Offsetof(layout.ClassifyAttrNet4{}.Lpm), 0},
+		{"ClassifyAttrNet4 size", unsafe.Sizeof(layout.ClassifyAttrNet4{}), 144},
 		{"BlockAllocator.Pools offset", unsafe.Offsetof(layout.BlockAllocator{}.Pools), 0},
 		{"BlockAllocator.NotEmptyMask offset", unsafe.Offsetof(layout.BlockAllocator{}.NotEmptyMask), 768},
 		{"BlockAllocator.Lock offset", unsafe.Offsetof(layout.BlockAllocator{}.Lock), 772},

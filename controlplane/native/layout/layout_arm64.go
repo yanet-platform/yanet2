@@ -11,7 +11,7 @@ import (
 )
 
 // Fingerprint identifies the layout of every view in this file.
-const Fingerprint = "586f1121a98e12dc"
+const Fingerprint = "f8adef8873a1488e"
 
 // Agent is the C struct agent, 1056 bytes.
 type Agent struct {
@@ -68,6 +68,11 @@ type ChainEctx struct {
 // ClassifyAttrLine is the C struct classify_attr_line, 24 bytes.
 type ClassifyAttrLine struct {
 	Line Vline
+}
+
+// ClassifyAttrNet4 is the C struct classify_attr_net4, 144 bytes.
+type ClassifyAttrNet4 struct {
+	Lpm Lpm
 }
 
 // ClassifyAttrPort is the C struct classify_attr_port, 24 bytes.

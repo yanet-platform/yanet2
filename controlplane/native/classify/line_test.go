@@ -40,6 +40,18 @@ func newContext(t testing.TB) *layout.MemoryContext {
 	return context
 }
 
+// newAttr returns a zeroed attribute allocated from context, where a
+// configuration embeds it: its relative pointers must not move, as they
+// would on a goroutine stack.
+func newAttr[T any](t testing.TB, context *layout.MemoryContext) *T {
+	t.Helper()
+	var zero T
+	block := shmalloc.ContextAlloc(context, unsafe.Sizeof(zero))
+	require.NotNil(t, block)
+	clear(unsafe.Slice((*byte)(block), unsafe.Sizeof(zero)))
+	return (*T)(block)
+}
+
 // randomLineRules returns a reproducible ruleset over the line domain
 // that exercises every rule shape the compile tells apart.
 func randomLineRules(seed uint64) []classify.LineRule {
@@ -106,8 +118,8 @@ func requireLineMatchesC(t *testing.T, rules []classify.LineRule) {
 	}
 	require.Equal(t, want.MaxValue, got.Stage.MaxValue, "max value")
 
-	var attr layout.ClassifyAttrLine
-	require.NoError(t, got.Commit(&attr, context, "ratelimit:proto"))
+	attr := newAttr[layout.ClassifyAttrLine](t, context)
+	require.NoError(t, got.Commit(attr, context, "ratelimit:proto"))
 	require.Equal(t, uint32(classify.LineDomain), attr.Line.Size)
 	require.Equal(t, want.Values, unsafe.Slice(attr.Line.Values.Get(), attr.Line.Size), "committed values")
 	require.Equal(t, want.ContextName, shm.String(attr.Line.MemoryContext.Get().Name[:]), "context name")
@@ -166,9 +178,9 @@ func Benchmark_CompileLine(b *testing.B) {
 			context := newContext(b)
 			for b.Loop() {
 				line := classify.CompileLine(rules, classify.LineDomain)
-				var attr layout.ClassifyAttrLine
-				require.NoError(b, line.Commit(&attr, context, "ratelimit:proto"))
-				classify.FreeLine(&attr)
+				attr := newAttr[layout.ClassifyAttrLine](b, context)
+				require.NoError(b, line.Commit(attr, context, "ratelimit:proto"))
+				classify.FreeLine(attr)
 			}
 		})
 	}
@@ -257,9 +269,9 @@ func Test_CompileLine_UsesLessTemporaryMemoryThanC(t *testing.T) {
 		})
 		native := measureFootprint(t, func(context *layout.MemoryContext) {
 			line := classify.CompileLine(rules, classify.LineDomain)
-			var attr layout.ClassifyAttrLine
-			require.NoError(t, line.Commit(&attr, context, "ratelimit:proto"))
-			classify.FreeLine(&attr)
+			attr := newAttr[layout.ClassifyAttrLine](t, context)
+			require.NoError(t, line.Commit(attr, context, "ratelimit:proto"))
+			classify.FreeLine(attr)
 		})
 		t.Logf("%d rules: C %d bytes of shared memory; native %d of shared memory and %d of Go heap",
 			count, viaC.Shared, native.Shared, native.Heap)

@@ -7,8 +7,10 @@ package coracle
 #include <stdlib.h>
 #include <time.h>
 #include "lib/classify/classifiers/line.h"
+#include "lib/classify/classifiers/net4.h"
 #include "lib/classify/classifiers/port.h"
 #include "lib/classify/compiler/line.h"
+#include "lib/classify/compiler/net4.h"
 #include "lib/classify/compiler/u16_ranges.h"
 
 // The line and port compiles the module SDK declares: a rule is the
@@ -27,6 +29,13 @@ coracle_get_ports(
 	*view = *(const struct filter_u16_ranges *)rule;
 }
 
+static void
+coracle_get_net4s(
+	const struct classifier_rule *rule, struct filter_net4s *view
+) {
+	*view = *(const struct filter_net4s *)rule;
+}
+
 CLASSIFY_LINE_COMPILE(
 	coracle_line, struct classify_attr_line, 0x100, coracle_get_lines
 )
@@ -34,12 +43,13 @@ CLASSIFY_U16_RANGES_COMPILE(
 	coracle_port, struct classify_attr_port, coracle_get_ports
 )
 
-enum coracle_attr_kind { CORACLE_LINE, CORACLE_PORT };
+enum coracle_attr_kind { CORACLE_LINE, CORACLE_PORT, CORACLE_NET4 };
 
-// One compiled attribute of either kind: both embed a single line.
+// One compiled attribute of any kind.
 union coracle_attr {
 	struct classify_attr_line line;
 	struct classify_attr_port port;
+	struct classify_attr_net4 net4;
 };
 
 static int
@@ -54,14 +64,26 @@ coracle_attr_compile(
 ) {
 	const struct classifier_rule **cast =
 		(const struct classifier_rule **)rules;
-	if (kind == CORACLE_LINE) {
+	switch (kind) {
+	case CORACLE_LINE:
 		return classify_coracle_line_compile(
 			context, name, cast, rule_count, &attr->line, stage
 		);
+	case CORACLE_PORT:
+		return classify_coracle_port_compile(
+			context, name, cast, rule_count, &attr->port, stage
+		);
+	default:
+		return classify_net4_compile(
+			context,
+			name,
+			cast,
+			rule_count,
+			coracle_get_net4s,
+			&attr->net4,
+			stage
+		);
 	}
-	return classify_coracle_port_compile(
-		context, name, cast, rule_count, &attr->port, stage
-	);
 }
 
 static struct vline *
@@ -98,6 +120,10 @@ coracle_attr_free(
 	uint32_t rule_count
 ) {
 	classifier_fini(stage, context, rule_count);
+	if (kind == CORACLE_NET4) {
+		lpm_free(&attr->net4.lpm);
+		return;
+	}
 	vline_free(coracle_attr_line(kind, attr));
 }
 
@@ -134,8 +160,13 @@ import "C"
 
 import (
 	"fmt"
+	"net/netip"
 	"time"
 	"unsafe"
+
+	"github.com/yanet-platform/yanet2/controlplane/native/layout"
+	"github.com/yanet-platform/yanet2/controlplane/native/lpm"
+	"github.com/yanet-platform/yanet2/controlplane/native/shm"
 )
 
 // LineRule is one rule of a line compile: its intervals, or none at all
@@ -155,11 +186,75 @@ type PortRule struct {
 // AttrResult is what a C attribute compile produced, copied out of
 // shared memory.
 type AttrResult struct {
-	Values      []uint32
+	// Values holds the committed line of a line or port attribute.
+	Values []uint32
+	// Stretches holds the lookups of a network attribute's tree.
+	Stretches   []Stretch
 	RuleGroups  []uint32
 	Groups      [][]uint32
 	MaxValue    uint32
 	ContextName string
+}
+
+// Stretch is a maximal stretch of keys a prefix tree maps to one value.
+type Stretch struct {
+	From  string
+	To    string
+	Value uint32
+}
+
+// Stretches returns what a prefix tree maps every key to, as maximal
+// stretches of one value in ascending key order, keys of keySize bytes:
+// two trees answer every lookup alike exactly when their stretches are
+// equal, however their pages are laid out.
+func Stretches(tree *layout.Lpm, keySize int) []Stretch {
+	var stretches []Stretch
+	lpm.Walk(tree, keySize, func(from, to []byte, value uint32) {
+		if count := len(stretches); count > 0 && stretches[count-1].Value == value {
+			stretches[count-1].To = string(to)
+			return
+		}
+		stretches = append(stretches, Stretch{From: string(from), To: string(to), Value: value})
+	})
+	return stretches
+}
+
+// Net4Rule is one rule of an IPv4 network compile: its prefixes, or
+// none at all for a rule absent from the projection.
+type Net4Rule struct {
+	Prefixes []netip.Prefix
+	Absent   bool
+}
+
+// NewCNet4Rules copies IPv4 network rules into C memory; Free releases
+// it.
+func NewCNet4Rules(rules []Net4Rule) *CRules {
+	m := newCRules(C.CORACLE_NET4, len(rules))
+	pointers := unsafe.Slice(m.pointers, len(rules))
+	for idx, rule := range rules {
+		if rule.Absent {
+			continue
+		}
+		view := (*C.struct_filter_net4s)(m.alloc(1, unsafe.Sizeof(C.struct_filter_net4s{})))
+		if len(rule.Prefixes) > 0 {
+			items := unsafe.Slice((*C.struct_net4)(m.alloc(len(rule.Prefixes), unsafe.Sizeof(C.struct_net4{}))), len(rule.Prefixes))
+			for netIdx, prefix := range rule.Prefixes {
+				addr := prefix.Addr().As4()
+				mask := uint32(0)
+				if prefix.Bits() > 0 {
+					mask = ^uint32(0) << (32 - prefix.Bits())
+				}
+				for byteIdx := range 4 {
+					items[netIdx].addr[byteIdx] = C.uint8_t(addr[byteIdx])
+					items[netIdx].mask[byteIdx] = C.uint8_t(mask >> (24 - 8*byteIdx))
+				}
+			}
+			view.items = &items[0]
+		}
+		view.count = C.uint32_t(len(rule.Prefixes))
+		pointers[idx] = unsafe.Pointer(view)
+	}
+	return m
 }
 
 // CRules is a ruleset in C memory, as one attribute compile reads it.
@@ -262,12 +357,18 @@ func (m *CRules) Compile(context unsafe.Pointer, name string) (*AttrResult, erro
 	}
 	defer C.coracle_attr_free(m.kind, memoryContext, &attr, &stage, m.count)
 
-	line := C.coracle_attr_line(m.kind, &attr)
 	result := &AttrResult{
-		Values:      append([]uint32{}, unsafe.Slice((*uint32)(unsafe.Pointer(C.coracle_vline_values(line))), line.size)...),
-		RuleGroups:  append([]uint32{}, unsafe.Slice((*uint32)(unsafe.Pointer(stage.rule_groups)), int(m.count))...),
-		MaxValue:    uint32(stage.registry.max_value),
-		ContextName: C.GoString(C.coracle_vline_context_name(line)),
+		RuleGroups: append([]uint32{}, unsafe.Slice((*uint32)(unsafe.Pointer(stage.rule_groups)), int(m.count))...),
+		MaxValue:   uint32(stage.registry.max_value),
+	}
+	if m.kind == C.CORACLE_NET4 {
+		tree := (*layout.ClassifyAttrNet4)(unsafe.Pointer(&attr))
+		result.Stretches = Stretches(&tree.Lpm, 4)
+		result.ContextName = shm.String(tree.Lpm.MemoryContext.Name[:])
+	} else {
+		line := C.coracle_attr_line(m.kind, &attr)
+		result.Values = append([]uint32{}, unsafe.Slice((*uint32)(unsafe.Pointer(C.coracle_vline_values(line))), line.size)...)
+		result.ContextName = C.GoString(C.coracle_vline_context_name(line))
 	}
 	for idx := range uint64(stage.registry.range_count) {
 		valueRange := C.coracle_stage_range(&stage, C.uint64_t(idx))

@@ -87,9 +87,9 @@ func requirePortsMatchC(t *testing.T, rules []classify.PortRule) {
 	}
 	require.Equal(t, want.MaxValue, got.Stage.MaxValue, "max value")
 
-	var attr layout.ClassifyAttrPort
-	require.NoError(t, got.Commit(&attr, context, "ratelimit:port"))
-	defer classify.FreePort(&attr)
+	attr := newAttr[layout.ClassifyAttrPort](t, context)
+	require.NoError(t, got.Commit(attr, context, "ratelimit:port"))
+	defer classify.FreePort(attr)
 	require.Equal(t, uint32(classify.PortDomain), attr.Line.Size)
 	require.Equal(t, want.Values, unsafe.Slice(attr.Line.Values.Get(), attr.Line.Size), "committed values")
 	require.Equal(t, want.ContextName, shm.String(attr.Line.MemoryContext.Get().Name[:]), "context name")
@@ -155,9 +155,9 @@ func Benchmark_CompilePorts(b *testing.B) {
 			context := newContext(b)
 			for b.Loop() {
 				ports := classify.CompilePorts(rules)
-				var attr layout.ClassifyAttrPort
-				require.NoError(b, ports.Commit(&attr, context, "ratelimit:port"))
-				classify.FreePort(&attr)
+				attr := newAttr[layout.ClassifyAttrPort](b, context)
+				require.NoError(b, ports.Commit(attr, context, "ratelimit:port"))
+				classify.FreePort(attr)
 			}
 		})
 	}
@@ -177,9 +177,9 @@ func Test_CompilePorts_UsesLessTemporaryMemoryThanC(t *testing.T) {
 		})
 		native := measureFootprint(t, func(context *layout.MemoryContext) {
 			ports := classify.CompilePorts(rules)
-			var attr layout.ClassifyAttrPort
-			require.NoError(t, ports.Commit(&attr, context, "ratelimit:port"))
-			classify.FreePort(&attr)
+			attr := newAttr[layout.ClassifyAttrPort](t, context)
+			require.NoError(t, ports.Commit(attr, context, "ratelimit:port"))
+			classify.FreePort(attr)
 		})
 		t.Logf("%d rules: C %d bytes of shared memory; native %d of shared memory and %d of Go heap",
 			count, viaC.Shared, native.Shared, native.Heap)
