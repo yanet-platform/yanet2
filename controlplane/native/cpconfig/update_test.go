@@ -12,9 +12,12 @@ import (
 
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/native/cpconfig"
 	"github.com/yanet-platform/yanet2/controlplane/native/internal/coracle"
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
+	"github.com/yanet-platform/yanet2/controlplane/native/zone"
+	"github.com/yanet-platform/yanet2/modules/blackhole/bindings/go/cblackhole"
 )
 
 // runAssigner plays the dataplane's assigner thread for an in-process
@@ -121,4 +124,48 @@ func Test_UpdateModules_DataplaneRunsGoGeneration(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, result.Drop, 5, "the Go generation drops through blackhole a")
 	require.Equal(t, before+5, moduleDrops(t, memory), "module counters continue across the Go publish")
+}
+
+// assignOnce delivers the next generation the instance publishes after
+// current to the workers, once, as the dataplane's assigner would.
+func assignOnce(instance *zone.Instance, current *layout.CpConfigGen) chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			if gen := instance.Cp.CpConfigGen.Load(); gen != current {
+				coracle.AssignWorkerContexts(unsafe.Pointer(instance.Dp), unsafe.Pointer(gen))
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}()
+	return done
+}
+
+// Test_UpdateModules_MatchesC verifies that a whole module update from
+// Go, generation copy, upsert, every worker's contexts, publication and
+// the teardown of the replaced generation included, leaves the storage as
+// cp_config_update_modules does.
+func Test_UpdateModules_MatchesC(t *testing.T) {
+	for _, name := range []string{"fresh", "a"} {
+		t.Run("module "+name, func(t *testing.T) {
+			memory := newPublishedFixture(t)
+			instance := memory.Instance()
+			memory.CompareWithC(t,
+				func() {
+					config, err := cblackhole.NewModuleConfig(memory.cAgent, name)
+					require.NoError(t, err)
+					require.NoError(t, memory.cAgent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}))
+				},
+				func() {
+					module, err := cpconfig.NewBlackhole(memory.owner, name)
+					require.NoError(t, err)
+					assigned := assignOnce(instance, instance.Cp.CpConfigGen.Get())
+					require.NoError(t, cpconfig.UpdateModules(instance, []*layout.CpModule{module}))
+					<-assigned
+				},
+			)
+		})
+	}
 }

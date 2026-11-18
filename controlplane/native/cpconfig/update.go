@@ -115,7 +115,7 @@ func install(cp *layout.CpConfig, dp *layout.DpConfig, gen, old *layout.CpConfig
 	shm.UnlockByte(&cp.GenLock.Locked)
 
 	waitForWorkers(dp, gen)
-	retire(old)
+	retire(cp, old)
 	return nil
 }
 
@@ -139,22 +139,6 @@ func waitForWorkers(dp *layout.DpConfig, gen *layout.CpConfigGen) {
 				continue
 			}
 			time.Sleep(time.Millisecond)
-		}
-	}
-}
-
-// retire drops the publication's reference to a replaced generation.
-//
-// The last reference is kept: dropping it obliges the dropper to free the
-// generation, which this package does not do yet.
-func retire(old *layout.CpConfigGen) {
-	for {
-		count := atomic.LoadUint64(&old.Refcnt)
-		if count <= 1 {
-			return
-		}
-		if atomic.CompareAndSwapUint64(&old.Refcnt, count, count-1) {
-			return
 		}
 	}
 }
