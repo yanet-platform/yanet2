@@ -35,8 +35,8 @@ func BuildWorkerContexts(gen, old *layout.CpConfigGen, workerCount uint64) (*shm
 	}
 	roots := unsafe.Slice((*shm.Ptr[layout.ConfigGenEctx])(block), workerCount)
 	for worker := range workerCount {
-		builder := &contextBuilder{gen: gen, old: old, cp: cp, dp: cp.DpConfig.Get(), worker: worker}
-		root, err := builder.root()
+		m := &contextBuilder{gen: gen, old: old, cp: cp, dp: cp.DpConfig.Get(), worker: worker}
+		root, err := m.root()
 		if err != nil {
 			return nil, fmt.Errorf("build execution context of worker %d: %w", worker, err)
 		}
@@ -402,12 +402,12 @@ func (m *contextBuilder) chain(device *layout.DeviceEctx, pipeline *layout.Pipel
 		context.ModulePtrs.Set(&ptrs[0])
 	}
 	path := pathNames{
-		device:   shm.String(device.CpDevice.Get().Name[:]),
-		pipeline: shm.String(pipeline.CpPipeline.Get().Name[:]),
-		function: shm.String(function.CpFunction.Get().Name[:]),
-		chain:    shm.String(chain.Name[:]),
+		Device:   shm.String(device.CpDevice.Get().Name[:]),
+		Pipeline: shm.String(pipeline.CpPipeline.Get().Name[:]),
+		Function: shm.String(function.CpFunction.Get().Name[:]),
+		Chain:    shm.String(chain.Name[:]),
 	}
-	storage, err := m.spawn(chainTags(path.device, path.pipeline, path.function, path.chain), &chain.CounterRegistry)
+	storage, err := m.spawn(chainTags(path.Device, path.Pipeline, path.Function, path.Chain), &chain.CounterRegistry)
 	if err != nil {
 		return nil, err
 	}
@@ -417,7 +417,7 @@ func (m *contextBuilder) chain(device *layout.DeviceEctx, pipeline *layout.Pipel
 		moduleType, moduleName := shm.String(modules[idx].Type[:]), shm.String(modules[idx].Name[:])
 		module := lookupModule(&m.gen.ModuleRegistry, moduleType, moduleName)
 		if module == nil {
-			return nil, fmt.Errorf("module %s:%s not found in chain %q", moduleType, moduleName, path.chain)
+			return nil, fmt.Errorf("module %s:%s not found in chain %q", moduleType, moduleName, path.Chain)
 		}
 		built, err := m.module(device, path, module)
 		if err != nil {
@@ -430,7 +430,7 @@ func (m *contextBuilder) chain(device *layout.DeviceEctx, pipeline *layout.Pipel
 
 // pathNames names the place of a module context in the tree.
 type pathNames struct {
-	device, pipeline, function, chain string
+	Device, Pipeline, Function, Chain string
 }
 
 func (m *contextBuilder) module(device *layout.DeviceEctx, path pathNames, module *layout.CpModule) (*layout.ModuleEctx, error) {
@@ -453,7 +453,7 @@ func (m *contextBuilder) module(device *layout.DeviceEctx, path pathNames, modul
 	}
 
 	moduleType, moduleName := shm.String(module.Type[:]), shm.String(module.Name[:])
-	modulePath := modulePathTags(path.device, path.pipeline, path.function, path.chain, moduleType, moduleName)
+	modulePath := modulePathTags(path.Device, path.Pipeline, path.Function, path.Chain, moduleType, moduleName)
 	storage, err := m.spawn(moduleTags(modulePath), &module.CounterRegistry)
 	if err != nil {
 		return nil, err
@@ -485,7 +485,7 @@ func (m *contextBuilder) module(device *layout.DeviceEctx, path pathNames, modul
 		objects := unsafe.Slice(m.tree.Objects.Get(), m.tree.ObjectCount)
 		for idx := range linked {
 			objectType, objectName := shm.String(linked[idx].Type[:]), shm.String(linked[idx].Name[:])
-			index, ok := m.lookupObject(objectType, objectName)
+			index, ok := lookupObject(m.gen, objectType, objectName)
 			if !ok {
 				return nil, fmt.Errorf("linked object %s:%s not found for module %s:%s", objectType, objectName, moduleType, moduleName)
 			}
@@ -598,8 +598,10 @@ func (m *contextBuilder) lookupPipeline(name string) *layout.CpPipeline {
 	return containerOf[layout.CpPipeline](registryGet(registry, index), offset)
 }
 
-func (m *contextBuilder) lookupObject(objectType, name string) (uint64, bool) {
-	return registryLookup(&m.gen.ObjectRegistry.EntityRegistry.Registry, hashStringPair(name, objectType),
+// lookupObject returns the registry index of the object of a type and
+// name in the generation.
+func lookupObject(gen *layout.CpConfigGen, objectType, name string) (uint64, bool) {
+	return registryLookup(&gen.ObjectRegistry.EntityRegistry.Registry, hashStringPair(name, objectType),
 		func(item *layout.RegistryItem) bool {
 			object := containerOf[layout.CpObject](item, 0)
 			return shm.String(object.Type[:]) == objectType && shm.String(object.Name[:]) == name

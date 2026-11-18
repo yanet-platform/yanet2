@@ -154,6 +154,12 @@ func register(cp *layout.CpConfig, agent *layout.Agent) error {
 func sweep(cp *layout.CpConfig) {
 	shm.LockByte(&cp.AgentLock.Locked)
 	defer shm.UnlockByte(&cp.AgentLock.Locked)
+	SweepLocked(cp)
+}
+
+// SweepLocked frees the superseded agents whose configurations no
+// generation holds any more; the agent lock is held.
+func SweepLocked(cp *layout.CpConfig) {
 
 	registry := cp.AgentRegistry.Get()
 	if registry == nil {
@@ -188,6 +194,23 @@ func cleanup(agent *layout.Agent) {
 		)
 	}
 	shmalloc.ContextFree(&cp.MemoryContext, unsafe.Pointer(agent), unsafe.Sizeof(layout.Agent{}))
+}
+
+// IsCurrent reports whether agent is the one its name resolves to in the
+// registry; the agent lock is held.
+func IsCurrent(cp *layout.CpConfig, agent *layout.Agent) bool {
+	registry := cp.AgentRegistry.Get()
+	if registry == nil {
+		return false
+	}
+	slots := registry.Agents(int(registry.Count))
+	name := shm.String(agent.Name[:])
+	for idx := range slots {
+		if head := slots[idx].Get(); shm.String(head.Name[:]) == name {
+			return head == agent
+		}
+	}
+	return false
 }
 
 // Find returns the current agent of that name in the instance, whichever
