@@ -9,7 +9,7 @@ use yanet_sdk_testing::BlockArena;
 use yanet_shm::shm::ShmLayout;
 use yanet_sys::{
     bindings,
-    cp::{Build, Init, MemoryContext, Owner, Place, Refusal},
+    cp::{Build, Free, Init, Owner, Place, Refusal, Taken},
     dp::{
         Batch, CommitCx, Cx, Module, Object, ObjectCommitCx, ObjectConfig, ObjectLink, PerWorker, PerWorkerSlice,
         Verdict, WorkerSlice, WorkerSlot,
@@ -38,17 +38,18 @@ struct Config<T = u64> {
 // pattern, with no padding and no drop.
 unsafe impl<T: Copy + ShmLayout> ShmLayout for Config<T> {}
 
-// SAFETY: the configuration is laid out by hand and never built: its parts
-// cannot exist, so nothing is ever written, and its slot block belongs to the
-// test.
-unsafe impl<T: Copy + ShmLayout> Build for Config<T> {
+// SAFETY: the slot block belongs to the test arena. The fixture has no
+// constructible parts and can never take ownership from a build.
+unsafe impl<T: Copy + ShmLayout> Free for Config<T> {
+    fn free<W: Owner>(_: Taken<'_, Self, W>) {}
+}
+
+impl<T: Copy + ShmLayout> Build for Config<T> {
     type Parts<'b, W: Owner> = Infallible;
 
     fn write<'s, 'b, W: Owner>(parts: Infallible, _: Place<'s, 'b, Self, W>) -> Result<Init<'s, Self>, Refusal> {
         match parts {}
     }
-
-    unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
 }
 
 /// The committed context of a module of a counting configuration over a slot
@@ -421,15 +422,17 @@ struct Regions {
 // every bit pattern, with no padding and no drop.
 unsafe impl ShmLayout for Regions {}
 
-// SAFETY: as for `Config`: laid out by hand and never built.
-unsafe impl Build for Regions {
+// SAFETY: the region blocks and their table belong to the test arena.
+unsafe impl Free for Regions {
+    fn free<W: Owner>(_: Taken<'_, Self, W>) {}
+}
+
+impl Build for Regions {
     type Parts<'b, W: Owner> = Infallible;
 
     fn write<'s, 'b, W: Owner>(parts: Infallible, _: Place<'s, 'b, Self, W>) -> Result<Init<'s, Self>, Refusal> {
         match parts {}
     }
-
-    unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
 }
 
 /// Lays out the table and the [`WORKERS`] zeroed regions of `len` values of a

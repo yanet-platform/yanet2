@@ -89,6 +89,13 @@ impl<T> ShmSlice<T> {
 }
 
 impl<T> ShmBox<T> {
+    /// Stored offset of the owned block.
+    #[doc(hidden)]
+    #[inline(always)]
+    pub fn offset(&self) -> isize {
+        self.ptr.offset()
+    }
+
     /// The value the owned block holds, resolved through `cx`.
     #[inline(always)]
     pub fn get<'g>(&'g self, cx: &impl Resolve<'g>) -> &'g T {

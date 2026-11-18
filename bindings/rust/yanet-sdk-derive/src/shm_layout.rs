@@ -79,15 +79,16 @@ fn bind_generics(generics: &Generics, p: &TokenStream) -> syn::Result<(Generics,
 
 // Split by declaration order with logarithmic type depth. Parts are laid out
 // in the opposite order so unsubmitted values drop newest first.
-fn record_tree(fields: &[(TokenStream, TokenStream)]) -> (TokenStream, TokenStream) {
+fn record_tree(fields: &[(TokenStream, TokenStream, TokenStream)]) -> (TokenStream, TokenStream, TokenStream) {
     match fields {
         [] => unreachable!("a derived record has at least one field"),
-        [(field, part)] => (field.clone(), part.clone()),
+        [(ty, field, part)] => (ty.clone(), field.clone(), part.clone()),
         _ => {
             let (left, right) = fields.split_at(fields.len() / 2);
-            let (left_fields, left_parts) = record_tree(left);
-            let (right_fields, right_parts) = record_tree(right);
+            let (left_ty, left_fields, left_parts) = record_tree(left);
+            let (right_ty, right_fields, right_parts) = record_tree(right);
             (
+                quote!((#left_ty, #right_ty)),
                 quote!((#left_fields, #right_fields)),
                 quote!((#right_parts, #left_parts)),
             )
@@ -115,6 +116,7 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     let aligns = check_repr(input)?;
     let sdk = format_ident!("__yanet_sdk_for_{}", name);
     let core = format_ident!("__yanet_core_for_{}", name);
+    let layout = format_ident!("__LayoutFor{}", name);
     let p = quote!(#sdk::__private);
 
     let generic = !input.generics.params.is_empty();
@@ -126,7 +128,6 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     let mut bounds = Vec::new();
     let mut parts_fields = Vec::new();
     let mut record_fields = Vec::new();
-    let mut frees = Vec::new();
     let mut debug_bounds = Vec::new();
     let mut idents = Vec::new();
     let mut field_idents = Vec::new();
@@ -142,21 +143,16 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         parts_fields.push(quote_spanned!(field_ty.span()=> #vis #ident: <#field_ty as #p::Build>::Parts<'b, __W>));
         debug_bounds
             .push(quote_spanned!(field_ty.span()=> <#field_ty as #p::Build>::Parts<'b, __W>: #core::fmt::Debug));
+        let descriptor = quote_spanned!(field_ty.span()=> #p::RecordField<#field_ty>);
         let field = quote_spanned! {field_ty.span()=>
-            #p::RecordField::<#field_ty>::at(#core::mem::offset_of!(#ty, #ident))
+            #p::RecordField::<#field_ty>::at(#core::mem::offset_of!(Self, #ident))
         };
-        record_fields.push((field, quote!(#binding)));
-        frees.push(quote_spanned! {field_ty.span()=>
-            <#field_ty as #p::Build>::free::<__W>(
-                __addr + #core::mem::offset_of!(#ty, #ident),
-                __memory,
-            );
-        });
+        record_fields.push((descriptor, field, quote!(#binding)));
         idents.push(quote!(#ident: #binding));
         field_idents.push(ident);
         field_names.push(ident.to_string());
     }
-    let (record_fields, record_parts) = record_tree(&record_fields);
+    let (record_type, record_fields, record_parts) = record_tree(&record_fields);
     let drop_msg = format!("ShmLayout: `{name}` needs drop; shared-memory types are never dropped");
     let align_msg = format!("ShmLayout: `{name}` is aligned to more than the block allocator's MAX_ALIGN");
     let vis = &input.vis;
@@ -175,7 +171,7 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     // A non-generic type is checked once here. A generic one cannot name its
     // parameters in a constant, so every alignment it asks for is checked here,
     // a `Drop` impl clashes with the blanket impl below, and the value's
-    // layout is checked again where each instance is written or freed.
+    // layout is checked again in each instance's field recipe.
     let checks = if generic {
         quote! {
             #(#core::assert!(#aligns <= #p::MAX_ALIGN, #align_msg);)*
@@ -193,10 +189,8 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     };
     let instance_checks = generic.then(|| {
         quote! {
-            const {
-                #core::assert!(!#core::mem::needs_drop::<Self>(), #drop_msg);
-                #core::assert!(#core::mem::align_of::<Self>() <= #p::MAX_ALIGN, #align_msg);
-            }
+            #core::assert!(!#core::mem::needs_drop::<Self>(), #drop_msg);
+            #core::assert!(#core::mem::align_of::<Self>() <= #p::MAX_ALIGN, #align_msg);
         }
     });
 
@@ -241,38 +235,54 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
             }
         }
 
-        // SAFETY: every field is written at its own offset from the parts of
-        // its own type, each exactly once, and nothing else is written; a
-        // refused field returns the fields before it, last first, and the
-        // parts after it are dropped; the blocks owned are exactly those of
-        // the fields, each freed once.
-        unsafe impl #impl_generics #p::Build for #ty #where_clause {
+        const _: () = {
+            // A public record can have fields whose types are private.
+            #[allow(non_camel_case_types)]
+            trait #layout {
+                type Fields;
+                const FIELDS: Self::Fields;
+            }
+
+            impl #impl_generics #layout for #ty #where_clause {
+                type Fields = #record_type;
+                const FIELDS: Self::Fields = {
+                    #instance_checks
+                    #record_fields
+                };
+            }
+
+            // SAFETY: the tree names every actual field once in declaration
+            // order, with its own type and aligned offset, even for zero-sized
+            // fields. The written fields form the entire value, including all
+            // registrations and owning edges, and teardown releases each once.
+            unsafe impl #impl_generics #p::Record for #ty #where_clause {
+                type RecordParts<'b, __W: #p::Owner> = #parts_name<'b, __W, #(#args),*>;
+
+                fn write_fields<'slot, 'b, __W: #p::Owner>(
+                    __parts: Self::RecordParts<'b, __W>,
+                    __addr: #p::RecordPlace<'slot, 'b, Self, __W>,
+                ) -> #core::result::Result<#p::Init<'slot, Self>, #p::Refusal>
+                where
+                    Self: #p::Build,
+                {
+                    let #parts_name { #(#idents),* } = __parts;
+                    __addr.write(<Self as #layout>::FIELDS, #record_parts)
+                }
+
+                fn free_fields<__W: #p::Owner>(__addr: #p::RecordTaken<'_, Self, __W>) {
+                    __addr.free(<Self as #layout>::FIELDS);
+                }
+            }
+        };
+
+        impl #impl_generics #p::Build for #ty #where_clause {
             type Parts<'b, __W: #p::Owner> = #parts_name<'b, __W, #(#args),*>;
 
             fn write<'slot, 'b, __W: #p::Owner>(
                 __parts: #parts_name<'b, __W, #(#args),*>,
                 __addr: #p::Place<'slot, 'b, Self, __W>,
             ) -> #core::result::Result<#p::Init<'slot, Self>, #p::Refusal> {
-                #instance_checks
-                let #parts_name { #(#idents),* } = __parts;
-                // SAFETY: the plan names every actual field once in
-                // declaration order with its type and offset.
-                __addr.write_record(
-                    unsafe { #p::RecordPlan::<Self, _>::new(#record_fields) },
-                    #record_parts,
-                )
-            }
-
-            unsafe fn free<__W: #p::Owner>(
-                __addr: usize,
-                __memory: &#p::MemoryContext<'_, __W>,
-            ) {
-                #instance_checks
-                // SAFETY: each field lies in the value at the address, which
-                // was written whole (caller contract).
-                unsafe {
-                    #(#frees)*
-                }
+                __addr.write_record(__parts)
             }
         }
     })

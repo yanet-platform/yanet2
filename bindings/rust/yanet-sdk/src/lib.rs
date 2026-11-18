@@ -208,7 +208,9 @@ pub mod prelude {
 #[doc(hidden)]
 pub mod __private {
     pub use yanet_shm::shm::{MAX_ALIGN, ShmLayout};
-    pub use yanet_sys::cp::{Build, FfiRecord, Init, MemoryContext, Owner, Place, RecordField, RecordPlan, Refusal};
+    pub use yanet_sys::cp::{
+        Build, FfiRecord, Init, Owner, Place, Record, RecordField, RecordPlace, RecordTaken, Refusal,
+    };
 }
 
 /// Doc tests that pin what a build refuses, with the compile error each

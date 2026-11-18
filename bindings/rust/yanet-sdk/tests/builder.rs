@@ -23,7 +23,7 @@ use yanet_sdk_testing::cp::{Call, Interruptible, LiveHeaders, TestCx, TestError,
 use yanet_sys::{
     bindings::{COUNTER_TAG_VALUE_LEN, CP_MODULE_NAME_LEN, CP_OBJECT_NAME_LEN},
     common::LINE_BLOCK_ALIGN,
-    cp::{BuildError, Builder, Built, Init, MemoryContext, Owner, Place, Scope},
+    cp::{BuildError, Builder, Built, Free, Init, Owner, Place, Scope, Taken},
     dp::ModuleConfig,
 };
 
@@ -146,7 +146,7 @@ fn test_slice_interrupted_after_initialization_releases_nested_field_before_earl
 }
 
 #[test]
-fn test_derive_writes_and_rolls_back_both_fields_at_a_coincident_offset() {
+fn test_derive_releases_both_fields_at_a_coincident_offset() {
     std::thread_local! {
         static EVENTS: core::cell::RefCell<Vec<i8>> = const { core::cell::RefCell::new(Vec::new()) };
     }
@@ -157,18 +157,20 @@ fn test_derive_writes_and_rolls_back_both_fields_at_a_coincident_offset() {
     // SAFETY: the empty array is its whole layout and needs no drop.
     unsafe impl<const ID: i8> ShmLayout for Marker<ID> {}
 
-    // SAFETY: write initializes the whole marker, which owns no blocks.
-    unsafe impl<const ID: i8> Build for Marker<ID> {
+    // SAFETY: the marker owns no blocks. Its teardown only records the event.
+    unsafe impl<const ID: i8> Free for Marker<ID> {
+        fn free<W: Owner>(_: Taken<'_, Self, W>) {
+            EVENTS.with_borrow_mut(|events| events.push(-ID));
+        }
+    }
+
+    impl<const ID: i8> Build for Marker<ID> {
         type Parts<'b, W: Owner> = ();
 
         fn write<'s, 'b, W: Owner>((): (), place: Place<'s, 'b, Self, W>) -> Result<Init<'s, Self>, Refusal> {
             EVENTS.with_borrow_mut(|events| events.push(ID));
             // SAFETY: the marker contains no relative edges or registrations.
             Ok(unsafe { place.put(Self([])) })
-        }
-
-        unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {
-            EVENTS.with_borrow_mut(|events| events.push(-ID));
         }
     }
 
@@ -182,19 +184,26 @@ fn test_derive_writes_and_rolls_back_both_fields_at_a_coincident_offset() {
 
     assert_eq!(offset_of!(Coincident, first), offset_of!(Coincident, second));
 
-    let owner = TestOwner::new();
-    let err = Builder::<Fixture<u64>>::build::<Failure, _>(&owner, "coincident", |b| {
-        let _built = b.boxed::<Coincident>(CoincidentParts {
-            first: (),
-            second: (),
-            word: FlakyParts { word: 1, fails: true },
-        })?;
-        Ok(0)
-    })
-    .expect_err("the last field refuses after both markers initialize");
-    assert!(matches!(err, BuildError::Refused(Refusal::OutOfMemory)));
-    assert_eq!([1, 2, -2, -1].as_slice(), EVENTS.take().as_slice());
-    owner.assert_released();
+    for fails in [false, true] {
+        let owner = TestOwner::new();
+        let built = Builder::<Fixture<u64>>::build::<Failure, _>(&owner, "coincident", |b| {
+            let _boxed = b.boxed::<Coincident>(CoincidentParts {
+                first: (),
+                second: (),
+                word: FlakyParts { word: 1, fails },
+            })?;
+            Ok(0)
+        });
+        if fails {
+            let err = built.expect_err("the last field refuses after both markers initialize");
+            assert!(matches!(err, BuildError::Refused(Refusal::OutOfMemory)));
+            assert_eq!([1, 2, -2, -1].as_slice(), EVENTS.take().as_slice());
+        } else {
+            owner.release(built.expect("the complete record was released"));
+            assert_eq!([1, 2, -1, -2].as_slice(), EVENTS.take().as_slice());
+        }
+        owner.assert_released();
+    }
 }
 
 /// A word whose write is refused when its parts say so.
@@ -210,21 +219,21 @@ struct FlakyParts {
 // SAFETY: a word accepts every bit pattern and has no padding.
 unsafe impl ShmLayout for Flaky {}
 
-// SAFETY: the word is the whole value, written or refused as a whole. It
-// stands in, under Miri, for an embedded C object whose initialisation runs
-// out of memory.
-unsafe impl Build for Flaky {
+// SAFETY: the initialized word owns no blocks or registrations.
+unsafe impl Free for Flaky {
+    fn free<W: Owner>(_: Taken<'_, Self, W>) {}
+}
+
+impl Build for Flaky {
     type Parts<'b, W: Owner> = FlakyParts;
 
     fn write<'s, 'b, W: Owner>(parts: FlakyParts, place: Place<'s, 'b, Self, W>) -> Result<Init<'s, Self>, Refusal> {
         if parts.fails {
             return Err(Refusal::OutOfMemory);
         }
-        // SAFETY: the word has no address-relative fields or release work.
+        // SAFETY: the word does not depend on its address or its build.
         Ok(unsafe { place.put(Self(parts.word)) })
     }
-
-    unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
 }
 
 /// A device, a counter, a block of ports and a word whose write may be

@@ -2,7 +2,9 @@
 
 use core::{fmt, marker::PhantomData, mem::forget};
 
-use super::{Brand, Build, BuildError, Kind, MemoryContext, OwnedSlice, Owner, Refusal, Scope, free_elements, refused};
+use super::{
+    Brand, Build, BuildError, Free, Kind, MemoryContext, OwnedSlice, Owner, Refusal, Scope, ShmLayout, Taken, refused,
+};
 
 type Invariant<T> = PhantomData<fn(T) -> T>;
 
@@ -55,7 +57,7 @@ impl<'slot, 'b, T: Build, W: Owner> Place<'slot, 'b, T, W> {
     /// All fields are initialized and valid to read as `T` at this final
     /// address. Relative links resolve to live targets of the correct type
     /// and extent, and registrations are live and correctly typed for this
-    /// exact build. The value alone owns the resources [`Build::free`] will
+    /// exact build. The value alone owns the resources [`Free::free`] will
     /// release in this memory context, once each at the original size.
     pub unsafe fn assume_init(self) -> Init<'slot, T> {
         *self.initialized = true;
@@ -65,44 +67,29 @@ impl<'slot, 'b, T: Build, W: Owner> Place<'slot, 'b, T, W> {
         }
     }
 
-    /// Writes one field at its final offset, transferring it to the caller.
-    ///
-    /// # Safety
-    ///
-    /// The offset names an unwritten, aligned field of the given type within
-    /// this destination. On success the caller must release that field if the
-    /// enclosing write fails or unwinds before the whole value takes it over.
-    pub unsafe fn write_field<U: Build>(&mut self, offset: usize, parts: U::Parts<'b, W>) -> Result<(), Refusal> {
-        // SAFETY: the caller supplies the exclusive field of this place.
-        unsafe { self.memory.write_at::<U>(self.addr + offset, parts) }
+    /// Initializes the certified fields of this record in declaration order.
+    pub fn write_record(self, parts: T::RecordParts<'b, W>) -> Result<Init<'slot, T>, Refusal>
+    where
+        T: Record,
+    {
+        T::write_fields(parts, RecordPlace(self))
     }
+}
 
-    /// Initializes each field of this place and commits the whole value.
-    ///
-    /// A plan for one record type cannot initialize a different one, even
-    /// if the two have the same size and field types.
-    ///
-    /// ```compile_fail,E0308
-    /// use yanet_sys::cp::{Owner, Place, RecordField, RecordPlan};
-    /// fn wrong_record<'s, 'b, W: Owner>(
-    ///     place: Place<'s, 'b, [u32; 1], W>,
-    ///     plan: RecordPlan<u32, RecordField<u32>>,
-    /// ) {
-    ///     let _ = place.write_record(plan, 1);
-    /// }
-    /// ```
-    pub fn write_record<F: fields::List>(
-        self,
-        plan: RecordPlan<T, F>,
-        parts: F::Parts<'b, W>,
-    ) -> Result<Init<'slot, T>, Refusal> {
-        // SAFETY: the plan describes the actual fields of this exclusive
-        // place. Success transfers every field to the parent transaction.
-        unsafe {
-            let (written, _) = plan.fields.write_at(self.addr, self.memory, parts, ((), ()))?;
-            forget(written);
-            Ok(self.assume_init())
+impl<'slot, 'b, T: Build, W: Owner, const N: usize> Place<'slot, 'b, [T; N], W> {
+    pub(super) fn write_array(self, parts: [T::Parts<'b, W>; N]) -> Result<Init<'slot, [T; N]>, Refusal> {
+        // SAFETY: the empty prefix owns no elements yet.
+        let mut prefix = unsafe { Run::<T, W>::new(self.addr, 0, self.memory) };
+        // The iterator owns the unused parts and drops them before the prefix.
+        for part in parts {
+            let addr = self.addr + prefix.written * size_of::<T>();
+            // SAFETY: the iterator submits exactly one part per array element.
+            unsafe { Slot::<T, W>::write(addr, self.memory, part)? };
+            prefix.written += 1;
         }
+        forget(prefix);
+        // SAFETY: the array has taken ownership of all its initialized fields.
+        Ok(unsafe { self.assume_init() })
     }
 }
 
@@ -120,40 +107,115 @@ impl<T> RecordField<T> {
     }
 }
 
-/// The complete layout of a derived record, independent of its final address.
+/// The compile-time layout used for both construction and release.
 ///
-/// Offsets themselves grant no write rights. Certifying a layout requires
-/// an explicit unsafe proof.
+/// # Safety
 ///
-/// ```compile_fail,E0133
-/// use yanet_sys::cp::{RecordField, RecordPlan};
-/// let _ = RecordPlan::<[u32; 2], _>::new(RecordField::<u32>::at(0));
-/// ```
-#[derive(Debug)]
-pub struct RecordPlan<T, F> {
-    fields: F,
-    _parent: Invariant<T>,
+/// Both callbacks must use their capability with the same tree. The tree
+/// lists every actual field of `Self` once in declaration order, at its
+/// real offset and with its real type. Every entry must be aligned at any
+/// valid address of `Self`, even when zero-sized. Initializing the listed
+/// fields must satisfy all of [`Place::assume_init`] for the whole value.
+/// The release callback must uphold the [`Free`] contract.
+pub unsafe trait Record: ShmLayout {
+    /// The record's parts in the author-facing form.
+    type RecordParts<'b, W: Owner>;
+
+    /// Submits the field tree and its parts to the exclusive write.
+    fn write_fields<'slot, 'b, W: Owner>(
+        parts: Self::RecordParts<'b, W>,
+        place: RecordPlace<'slot, 'b, Self, W>,
+    ) -> Result<Init<'slot, Self>, Refusal>
+    where
+        Self: Build;
+
+    /// Submits the same field tree to the exclusive release.
+    fn free_fields<W: Owner>(value: RecordTaken<'_, Self, W>);
 }
 
-impl<T, F: fields::List> RecordPlan<T, F> {
-    /// # Safety
-    ///
-    /// The tree must list every actual field of `T` exactly once in
-    /// declaration order, with its type and offset. Each field must be
-    /// aligned at any valid address of `T`, even if zero-sized. Writing all
-    /// entries from their parts must satisfy the full contract of
-    /// [`Place::assume_init`] at that address, without writing padding.
-    pub const unsafe fn new(fields: F) -> Self {
-        Self { fields, _parent: PhantomData }
+// SAFETY: the record certifies that its tree describes exactly the fields of
+// the initialized value, including all the resources it owns.
+unsafe impl<T: Record> Free for T {
+    fn free<W: Owner>(value: Taken<'_, Self, W>) {
+        T::free_fields(RecordTaken(value));
+    }
+}
+
+/// A write destination lent only to the certified record implementation.
+///
+/// Safe code cannot turn a general destination into a certified one:
+///
+/// ```compile_fail,E0423
+/// use yanet_sys::cp::{Owner, Place, RecordPlace};
+/// fn certify<'s, 'b, W: Owner>(place: Place<'s, 'b, u32, W>) {
+///     let _ = RecordPlace(place);
+/// }
+/// ```
+///
+/// The certificate is also bound to the parent type:
+///
+/// ```compile_fail,E0308
+/// use yanet_sys::cp::{Owner, RecordPlace};
+/// fn substitute<'s, 'b, W: Owner>(place: RecordPlace<'s, 'b, u32, W>) -> RecordPlace<'s, 'b, u64, W> {
+///     place
+/// }
+/// ```
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct RecordPlace<'slot, 'b, T: Build, W: Owner>(Place<'slot, 'b, T, W>);
+
+impl<'slot, 'b, T: Build, W: Owner> RecordPlace<'slot, 'b, T, W> {
+    /// Writes the fields certified by the record implementation.
+    #[inline]
+    pub fn write<F: fields::List>(self, fields: F, parts: F::Parts<'b, W>) -> Result<Init<'slot, T>, Refusal> {
+        let Self(place) = self;
+        // SAFETY: the record certifies every field of this exclusive place.
+        let (written, _) = unsafe { fields.write_at(place.addr, place.memory, parts, ((), ()))? };
+        forget(written);
+        // SAFETY: all fields are initialized and owned by the record.
+        Ok(unsafe { place.assume_init() })
+    }
+}
+
+/// A release capability lent only to the certified record implementation.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct RecordTaken<'a, T: ShmLayout, W: Owner>(Taken<'a, T, W>);
+
+impl<T: ShmLayout, W: Owner> RecordTaken<'_, T, W> {
+    /// Releases the certified fields in declaration order.
+    #[inline]
+    pub fn free<F: fields::List>(self, fields: F) {
+        let Self(value) = self;
+        // SAFETY: the record certifies every field of this exclusive value.
+        unsafe { fields::release_record(fields, value) };
     }
 }
 
 mod fields {
-    use super::{Build, MemoryContext, Owner, RecordField, Refusal};
-    use crate::cp::builder::Partial;
+    use super::{Build, MemoryContext, Owner, RecordField, Refusal, Run, ShmLayout, Taken};
 
     pub struct Written<'b, T: Build, W: Owner> {
-        _guard: Partial<'b, T, W>,
+        _guard: Run<'b, T, W>,
+    }
+
+    /// Exclusive release rights for one certified subtree.
+    pub struct Release<'a, F, W: Owner> {
+        fields: F,
+        addr: usize,
+        memory: &'a MemoryContext<'a, W>,
+    }
+
+    /// # Safety
+    ///
+    /// The tree describes distinct, initialized fields of the owned value,
+    /// with their exact types and offsets, in declaration order.
+    pub(super) unsafe fn release_record<F: List, T: ShmLayout, W: Owner>(fields: F, value: Taken<'_, T, W>) {
+        F::release(Release {
+            fields,
+            addr: value.addr(),
+            memory: value.memory(),
+        });
     }
 
     type Staged<G, P, L> = Result<(G, (P, L)), Refusal>;
@@ -176,6 +238,11 @@ mod fields {
             parts: Self::Parts<'b, W>,
             state: (P, L),
         ) -> Staged<Self::Written<'b, W>, P, L>;
+
+        /// Releases the listed fields in declaration order.
+        fn release<W: Owner>(release: Release<'_, Self, W>)
+        where
+            Self: Sized;
     }
 
     impl<T: Build> List for RecordField<T> {
@@ -190,17 +257,17 @@ mod fields {
             state: (P, L),
         ) -> Staged<Self::Written<'b, W>, P, L> {
             let field = addr + self.offset;
-            // SAFETY: the plan certifies this field. Its slot rolls back before
-            // `state` drops earlier writes, then unused parts, on failure.
+            // SAFETY: the record certifies this field. Its slot rolls back
+            // before prior writes and then unused parts on failure.
             unsafe {
                 memory.write_at::<T>(field, parts)?;
-                Ok((
-                    Written {
-                        _guard: Partial::new(memory, field, 1),
-                    },
-                    state,
-                ))
+                Ok((Written { _guard: Run::new(field, 1, memory) }, state))
             }
+        }
+
+        fn release<W: Owner>(Release { fields, addr, memory }: Release<'_, Self, W>) {
+            // SAFETY: the certificate owns this exact initialized field.
+            T::free(unsafe { Taken::new(addr + fields.offset, memory) });
         }
     }
 
@@ -226,6 +293,12 @@ mod fields {
                     right.write_at(addr, memory, right_parts, ((left, prior), later))?;
                 Ok(((right, left), (prior, later)))
             }
+        }
+
+        #[inline(always)]
+        fn release<W: Owner>(Release { fields: (left, right), addr, memory }: Release<'_, Self, W>) {
+            A::release(Release { fields: left, addr, memory });
+            B::release(Release { fields: right, addr, memory });
         }
     }
 }
@@ -316,7 +389,7 @@ impl<T: Build, W: Owner> Drop for Slot<'_, T, W> {
     fn drop(&mut self) {
         if self.initialized {
             // SAFETY: initialization transferred the whole value to this guard.
-            unsafe { T::free(self.addr, self.memory) };
+            T::free(unsafe { Taken::new(self.addr, self.memory) });
         }
     }
 }
@@ -329,6 +402,66 @@ impl<'b, W: Owner> MemoryContext<'b, W> {
     pub(crate) unsafe fn write_at<T: Build>(&'b self, addr: usize, parts: T::Parts<'b, W>) -> Result<(), Refusal> {
         // SAFETY: the caller owns the slot. Its write uses the issuing build.
         unsafe { Slot::<T, W>::write(addr, self, parts) }
+    }
+}
+
+/// A run of initialized values owned until their parent takes them over.
+pub(super) struct Run<'a, T: Free, W: Owner> {
+    memory: &'a MemoryContext<'a, W>,
+    addr: usize,
+    written: usize,
+    _element: Invariant<T>,
+}
+
+impl<'a, T: Free, W: Owner> Run<'a, T, W> {
+    /// # Safety
+    ///
+    /// The prefix holds `written` initialized elements in this context and
+    /// this guard takes exclusive ownership of every element's resources.
+    pub(super) unsafe fn new(addr: usize, written: usize, memory: &'a MemoryContext<'_, W>) -> Self {
+        Self {
+            memory,
+            addr,
+            written,
+            _element: PhantomData,
+        }
+    }
+
+    /// Releases a prefix and returns its backing allocation.
+    ///
+    /// # Safety
+    ///
+    /// The caller owns an unreferenced block allocated for `len` elements
+    /// in this context. `written` is the initialized prefix length, at most
+    /// `len`. Only the prefix owns resources.
+    #[inline]
+    pub(super) unsafe fn release_block(addr: usize, written: usize, len: usize, memory: &MemoryContext<'_, W>) {
+        // SAFETY: the prefix holds precisely the elements to release.
+        unsafe { Self::release(addr, written, memory) };
+        // SAFETY: the caller owns the original allocation and the prefix
+        // has returned its resources.
+        unsafe { memory.free(addr, len * size_of::<T>()) };
+    }
+
+    /// # Safety
+    ///
+    /// The caller owns the `written` initialized elements at this address
+    /// and their resources in this context. No references remain to them.
+    pub(super) unsafe fn release(addr: usize, written: usize, memory: &MemoryContext<'_, W>) {
+        // Newest first: C prepends child contexts and unlinks from the head,
+        // so this order is linear.
+        for idx in (0..written).rev() {
+            let element = addr + idx * size_of::<T>();
+            // SAFETY: this call owns the initialized element at this index.
+            T::free(unsafe { Taken::new(element, memory) });
+        }
+    }
+}
+
+impl<T: Free, W: Owner> Drop for Run<'_, T, W> {
+    fn drop(&mut self) {
+        // SAFETY: the guard owns exactly the initialized prefix.
+        unsafe { Self::release(self.addr, self.written, self.memory) };
     }
 }
 
@@ -391,9 +524,6 @@ impl<T: Build, W: Owner> Drop for SliceWriter<'_, T, W> {
     fn drop(&mut self) {
         // SAFETY: only the committed prefix owns values. The transaction
         // has ended and the unreferenced block retains its original size.
-        unsafe {
-            free_elements::<T, W>(self.addr, self.written, self.memory);
-            self.memory.free(self.addr, self.len * size_of::<T>());
-        }
+        unsafe { Run::<T, W>::release_block(self.addr, self.written, self.len, self.memory) };
     }
 }

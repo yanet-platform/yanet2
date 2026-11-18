@@ -52,6 +52,10 @@ impl<K: HashIndexKey> HashIndex<K> {
     #[doc(hidden)]
     pub const SLOTS_OFFSET: usize = offset_of!(Self, slots);
 
+    pub(crate) fn slots(&self) -> &ShmSlice<Slot<K>> {
+        &self.slots
+    }
+
     /// The index as a handler call reads it.
     pub fn resolve<'g>(&'g self, cx: &impl Resolve<'g>) -> HashIndexRef<'g, K> {
         HashIndexRef::new(self.slots.as_slice(cx))

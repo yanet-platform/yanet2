@@ -288,20 +288,23 @@ order. It reserves one block and lends the next uninitialized element to
 build. The shorter slot lifetime prevents returning a completion from
 another element, even within that same build.
 
-Manual `unsafe impl Build` writers now take a typed `Place` instead of a
-memory context and raw address. The place supplies both, and completing it
-returns an `Init` for that slot. Until completion, the writer must roll back
-its own partial initialization. After completion, the transaction owns
-cleanup on refusal or unwind, even when the receipt is forgotten. Accepting
-the receipt transfers the whole element to the committed prefix. Relative
-edges must still be written at their final addresses, and `Build::free`
-retains its unsafe ownership contract.
+`Build` is safe to implement. Its writer receives a typed `Place` and returns
+an `Init` for that slot. The transaction owns rollback after completion, even
+if the writer refuses, unwinds, or forgets the receipt. A manual writer using
+an unsafe placement operation must clean up any partial state before
+completion. Relative edges are written at their final addresses.
 
-`#[derive(ShmLayout)]` certifies the complete set of fields for the record
-type. The SDK writes each through a slot and keeps its rollback right until
-the parent commits. On refusal or unwind, it releases the initialized
-fields in reverse order. Fields are identified by their place in the plan,
-not by their byte offset, which can coincide for zero-sized fields.
+Teardown receives a non-copyable `Taken` that binds one complete value to the
+allocator that built it. `Free::free` consumes that right and releases the
+value's resources, not its enclosing storage. Custom `Free` implementations
+are unsafe: they must release exactly those resources and must not panic.
+Manual implementations migrate their old `Build::free` bodies to
+`yanet_sys::cp::Free`. The ordinary `Scope` and `*Parts` APIs are unchanged.
+
+`#[derive(ShmLayout)]` certifies the complete field tree once for both
+directions. Normal teardown follows declaration order. A refused or unwinding
+write rolls back initialized fields in reverse order. Fields at the same
+address, such as zero-sized fields, still have separate release rights.
 
 ## Custom configuration owners
 
@@ -309,8 +312,8 @@ Module and object builders keep their existing APIs. Custom implementations of
 `yanet_sys::cp::Owner` migrate the thirteen formerly unsafe lifecycle and
 registration methods to safe associated functions. The trait itself remains
 unsafe: the implementation still guarantees raw provenance, allocation alignment,
-correct C operations and non-panicking finalization and freeing.
-`root`, `worker_count` and root `alloc` retain their `&self` receiver.
+correct C operations and non-panicking provenance lookup, finalization and
+freeing. `root`, `worker_count` and root `alloc` retain their `&self` receiver.
 
 Use the owner stored in each capability, not a separately selected instance.
 For example, the freeing seam changes from
@@ -332,8 +335,8 @@ The remaining signatures follow the operation's state and header kind:
 
 Header capabilities expose `owner()` and `header()`; a live-context capability
 exposes `owner()` and `context()`. Keep each required unsafe C call and its safety
-justification inside the implementation. Safe dispatch does not make C calls safe
-or relax the `Build::write` and `Build::free` contracts.
+justification inside the implementation. Safe dispatch does not make raw
+placement, custom release proofs or C calls safe.
 
 Before, a call such as
 `unsafe { owner.register_counter(header, "packets", 1) }` required the caller to

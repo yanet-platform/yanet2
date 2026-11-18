@@ -23,8 +23,8 @@ use yanet_shm::{
 };
 use yanet_sys::{
     cp::{
-        BlockAddr, Build, Built, BuiltObject, Context, Freed, Fresh, Header, Init, Live, LiveContext, MemoryContext,
-        ModuleKind, ObjectKind, Owner, Place, Refusal, Retiring,
+        BlockAddr, Build, Built, BuiltObject, Context, Freed, Fresh, Header, Init, Live, LiveContext, ModuleKind,
+        ObjectKind, Owner, Place, Record, RecordField, RecordPlace, RecordTaken, Refusal, Retiring,
     },
     dp::{Module, ModuleConfig, Object},
 };
@@ -39,31 +39,42 @@ pub struct Interruptible<T>(T);
 // SAFETY: the wrapper has exactly its field's shared-memory representation.
 unsafe impl<T: ShmLayout> ShmLayout for Interruptible<T> {}
 
-// SAFETY: the only field is built and released at its final offset. Once
-// complete, its rollback belongs to the active transaction.
-unsafe impl<T: Build> Build for Interruptible<T> {
+impl<T: Build> Interruptible<T> {
+    const FIELD: RecordField<T> = RecordField::at(0);
+}
+
+// SAFETY: the sole field is the whole wrapper, at offset zero.
+unsafe impl<T: Build> Record for Interruptible<T> {
+    type RecordParts<'b, W: Owner> = T::Parts<'b, W>;
+
+    fn write_fields<'s, 'b, W: Owner>(
+        parts: Self::RecordParts<'b, W>,
+        place: RecordPlace<'s, 'b, Self, W>,
+    ) -> Result<Init<'s, Self>, Refusal>
+    where
+        Self: Build,
+    {
+        place.write(Self::FIELD, parts)
+    }
+
+    fn free_fields<W: Owner>(value: RecordTaken<'_, Self, W>) {
+        value.free(Self::FIELD);
+    }
+}
+
+impl<T: Build> Build for Interruptible<T> {
     type Parts<'b, W: Owner> = (T::Parts<'b, W>, fn() -> Result<(), Refusal>);
 
     fn write<'s, 'b, W: Owner>(
         (parts, interrupt): Self::Parts<'b, W>,
-        mut place: Place<'s, 'b, Self, W>,
+        place: Place<'s, 'b, Self, W>,
     ) -> Result<Init<'s, Self>, Refusal> {
-        // SAFETY: the field covers the whole wrapper and transfers to it on
-        // success. No fallible operation separates the two transitions.
-        let receipt = unsafe {
-            place.write_field::<T>(0, parts)?;
-            place.assume_init()
-        };
+        let receipt = place.write_record(parts)?;
         if let Err(err) = interrupt() {
             let _forgotten = core::mem::ManuallyDrop::new(receipt);
             return Err(err);
         }
         Ok(receipt)
-    }
-
-    unsafe fn free<W: Owner>(addr: usize, memory: &MemoryContext<'_, W>) {
-        // SAFETY: the initialized field is the whole value at this address.
-        unsafe { T::free(addr, memory) }
     }
 }
 
