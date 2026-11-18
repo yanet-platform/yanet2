@@ -1,7 +1,8 @@
 //go:build linux && amd64
 
 // Package shmalloc allocates YANET shared memory the way the C block
-// allocator and memory contexts do, without cgo.
+// allocator and memory contexts do, without cgo outside AddressSanitizer
+// builds, which reach the sanitizer through it.
 //
 // Its free lists are the C ones: a Go process and a C process can
 // allocate from one allocator and free each other's blocks. That makes
@@ -22,10 +23,8 @@ import (
 // taken from the allocator's layout.
 const PoolCount = len(layout.BlockAllocator{}.Pools)
 
-// RedZone is the guard an AddressSanitizer build of the dataplane puts on
-// both sides of every block (ASAN_RED_ZONE); zero in other builds, which
-// are the only ones this package serves.
-const RedZone = 0
+// linkSize is the size of the link word a free block starts with.
+const linkSize = unsafe.Sizeof(shm.Ptr[byte]{})
 
 const (
 	minBits         = 3
@@ -75,7 +74,9 @@ func link(block unsafe.Pointer) *shm.Ptr[byte] {
 func take(allocator *layout.BlockAllocator, pool int) unsafe.Pointer {
 	entry := &allocator.Pools[pool]
 	block := unsafe.Pointer(entry.FreeList.Get())
+	unpoison(block, linkSize)
 	entry.FreeList.Set(link(block).Get())
+	poison(block, linkSize)
 	entry.Allocate++
 	entry.Free--
 	if entry.Free == 0 {
@@ -87,14 +88,18 @@ func take(allocator *layout.BlockAllocator, pool int) unsafe.Pointer {
 // borrow splits a block of the next larger pool into two of this pool.
 func borrow(allocator *layout.BlockAllocator, pool int) {
 	data := take(allocator, pool+1)
+	unpoison(data, linkSize)
 	entry := &allocator.Pools[pool]
 	next := unsafe.Add(data, poolSize(pool))
+	unpoison(next, linkSize)
 	link(next).Set(entry.FreeList.Get())
 	link(data).Set((*byte)(next))
 	entry.FreeList.Set((*byte)(data))
 	allocator.Pools[pool+1].Borrow++
 	entry.Free += 2
 	allocator.NotEmptyMask |= 1 << pool
+	poison(next, linkSize)
+	poison(data, linkSize)
 }
 
 // Alloc returns a block of at least size bytes, or nil when no free block
@@ -117,7 +122,9 @@ func Alloc(allocator *layout.BlockAllocator, size uintptr) unsafe.Pointer {
 		parent--
 		borrow(allocator, parent)
 	}
-	return unsafe.Add(take(allocator, pool), RedZone)
+	memory := take(allocator, pool)
+	unpoison(unsafe.Add(memory, RedZone), size-2*RedZone)
+	return unsafe.Add(memory, RedZone)
 }
 
 // put adds a block to the head of its pool's free list; there is no
@@ -125,10 +132,12 @@ func Alloc(allocator *layout.BlockAllocator, size uintptr) unsafe.Pointer {
 func put(allocator *layout.BlockAllocator, block unsafe.Pointer, size uintptr) {
 	pool := poolIndex(size)
 	entry := &allocator.Pools[pool]
+	unpoison(block, linkSize)
 	link(block).Set(entry.FreeList.Get())
 	entry.FreeList.Set((*byte)(block))
 	entry.Free++
 	allocator.NotEmptyMask |= 1 << pool
+	poison(block, size)
 }
 
 // Free returns a block of size bytes that Alloc gave; size must be the

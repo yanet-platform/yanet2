@@ -13,7 +13,7 @@ against C byte for byte.
 | `layout` | The generated views (`go generate`), per architecture | no |
 | `shm` | Relative pointers, process-local words, byte and pid locks, C strings | no |
 | `zone` | Maps the storage, finds instances, pins generations, reads topology, modules, agents | no |
-| `shmalloc` | Block allocator and memory contexts of `common/memory*.h` | no |
+| `shmalloc` | Block allocator and memory contexts of `common/memory*.h` | `-asan` builds only |
 | `agent` | `agent_attach`, agent registry, sweep of superseded agents | no |
 | `cpconfig` | Module configurations, generation copy and upsert, workers' execution contexts, counter storages, publication, teardown of retired generations | no |
 | `lpm` | Prefix trees of `common/lpm.h` | no |
@@ -24,9 +24,13 @@ against C byte for byte.
 
 Tests: `make test-only GO_TEST_PACKAGES="./controlplane/native/..."`. The production
 packages build with `CGO_ENABLED=0`. The layouts are generated from an amd64 dataplane
-only, so the packages that use them build on linux/amd64 only. The tests that compare
-with C do not build under `-asan`: AddressSanitizer gives the C allocator red zones the
-Go allocator does not mirror.
+only, so the packages that use them build on linux/amd64 only.
+
+Under `-asan` the allocator does what the C one does in an AddressSanitizer build: red
+zones around every block and the same poisoning of free blocks and link words, through
+the sanitizer's interface. The comparisons with C then also require Go to leave exactly
+the runs of memory unaddressable that C leaves, and Go's own reads and writes of shared
+memory are checked against them.
 
 ## How Go is held to C
 
@@ -110,5 +114,8 @@ and `decap`.
   registry copy that fails part-way, or a worker's context that fails part-way, leaves
   what it allocated; several context allocations are not checked for exhaustion.
 - A generation an agent pins while attaching is never freed if C retires it meanwhile.
+- Whether blocks carry red zones is decided by how Go is built, which matches the C side
+  in one process. A separate Go process attached to an AddressSanitizer build of the
+  dataplane needs the dataplane to publish its red zone in shared memory.
 - The layout test checks the generated views against the DWARF they came from; nothing
   checks at run time that a dataplane was built from the same headers.

@@ -1,4 +1,4 @@
-//go:build linux && amd64 && !asan
+//go:build linux && amd64
 
 package shmalloc_test
 
@@ -40,7 +40,10 @@ func newRegion(t testing.TB) *region {
 		syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_PRIVATE|syscall.MAP_ANONYMOUS,
 	)
 	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, syscall.Munmap(mapping)) })
+	t.Cleanup(func() {
+		coracle.Unpoison(mapping)
+		require.NoError(t, syscall.Munmap(mapping))
+	})
 	start := unsafe.Pointer(&mapping[0])
 	pad := (regionAlign - uintptr(start)%regionAlign) % regionAlign
 	return &region{base: unsafe.Add(start, pad)}
@@ -58,9 +61,17 @@ func (m *region) arena() unsafe.Pointer {
 	return unsafe.Add(m.base, arenaOffset)
 }
 
-// image returns a copy of the region's bytes.
-func (m *region) image() []byte {
-	return bytes.Clone(unsafe.Slice((*byte)(m.base), regionSize))
+// state is a region's bytes and, in AddressSanitizer builds, the runs of
+// it marked unaddressable.
+type state struct {
+	Image []byte
+	Runs  []coracle.Run
+}
+
+// state returns a copy of the region's bytes and unaddressable runs.
+func (m *region) state() state {
+	image, runs := coracle.Snapshot(unsafe.Slice((*byte)(m.base), regionSize))
+	return state{Image: image, Runs: runs}
 }
 
 // offset returns where a block lies in the region, or -1 for nil.
@@ -161,8 +172,8 @@ type block struct {
 
 // run applies the operations to a fresh region, pick choosing the
 // implementation of each one (-1 for the setup), and returns where every
-// allocation landed and the region's final bytes.
-func run(t testing.TB, operations []operation, pick func(idx int) implementation) ([]int64, []byte) {
+// allocation landed and the region's final state.
+func run(t testing.TB, operations []operation, pick func(idx int) implementation) ([]int64, state) {
 	t.Helper()
 	memory := newRegion(t)
 	setup := pick(-1)
@@ -189,18 +200,20 @@ func run(t testing.TB, operations []operation, pick func(idx int) implementation
 		live[victim] = live[len(live)-1]
 		live = live[:len(live)-1]
 	}
-	return offsets, memory.image()
+	return offsets, memory.state()
 }
 
-// requireSameImage fails on the first byte at which two images differ.
-func requireSameImage(t testing.TB, want, got []byte) {
+// requireSameState fails on the first byte at which two regions differ,
+// or when they differ in what is unaddressable.
+func requireSameState(t testing.TB, want, got state) {
 	t.Helper()
-	if bytes.Equal(want, got) {
+	require.Equal(t, want.Runs, got.Runs, "unaddressable runs differ")
+	if bytes.Equal(want.Image, got.Image) {
 		return
 	}
-	for idx := range want {
-		if want[idx] != got[idx] {
-			t.Fatalf("images differ first at offset %#x: %#x, want %#x", idx, got[idx], want[idx])
+	for idx := range want.Image {
+		if want.Image[idx] != got.Image[idx] {
+			t.Fatalf("images differ first at offset %#x: %#x, want %#x", idx, got.Image[idx], want.Image[idx])
 		}
 	}
 }
@@ -220,10 +233,10 @@ func Test_Constants_MatchC(t *testing.T) {
 func Test_Alloc_MatchesC(t *testing.T) {
 	for _, seed := range []uint64{1, 2, 3} {
 		operations := randomOperations(seed, 20000)
-		wantOffsets, wantImage := run(t, operations, func(int) implementation { return cAllocator })
-		gotOffsets, gotImage := run(t, operations, func(int) implementation { return goAllocator })
+		wantOffsets, wantState := run(t, operations, func(int) implementation { return cAllocator })
+		gotOffsets, gotState := run(t, operations, func(int) implementation { return goAllocator })
 		require.Equal(t, wantOffsets, gotOffsets, "seed %d", seed)
-		requireSameImage(t, wantImage, gotImage)
+		requireSameState(t, wantState, gotState)
 	}
 }
 
@@ -232,15 +245,15 @@ func Test_Alloc_MatchesC(t *testing.T) {
 // alone ends.
 func Test_Alloc_SharesFreeListsWithC(t *testing.T) {
 	operations := randomOperations(4, 20000)
-	wantOffsets, wantImage := run(t, operations, func(int) implementation { return cAllocator })
-	gotOffsets, gotImage := run(t, operations, func(idx int) implementation {
+	wantOffsets, wantState := run(t, operations, func(int) implementation { return cAllocator })
+	gotOffsets, gotState := run(t, operations, func(idx int) implementation {
 		if idx%2 == 0 {
 			return goAllocator
 		}
 		return cAllocator
 	})
 	require.Equal(t, wantOffsets, gotOffsets)
-	requireSameImage(t, wantImage, gotImage)
+	requireSameState(t, wantState, gotState)
 }
 
 // FuzzAlloc_MatchesC verifies that any sequence of allocations and frees
@@ -250,10 +263,10 @@ func FuzzAlloc_MatchesC(f *testing.F) {
 	f.Add([]byte{49, 0, 0, 0, 1, 49, 0, 0, 0, 1, 0, 1, 0, 0, 0})
 	f.Fuzz(func(t *testing.T, data []byte) {
 		operations := decodeOperations(data)
-		wantOffsets, wantImage := run(t, operations, func(int) implementation { return cAllocator })
-		gotOffsets, gotImage := run(t, operations, func(int) implementation { return goAllocator })
+		wantOffsets, wantState := run(t, operations, func(int) implementation { return cAllocator })
+		gotOffsets, gotState := run(t, operations, func(int) implementation { return goAllocator })
 		require.Equal(t, wantOffsets, gotOffsets)
-		requireSameImage(t, wantImage, gotImage)
+		requireSameState(t, wantState, gotState)
 	})
 }
 
@@ -294,8 +307,8 @@ var goContext = contextImplementation{
 
 // runContexts builds a root context with three children, allocates and
 // frees through them, finalises the middle child and returns the region's
-// bytes.
-func runContexts(t *testing.T, implementation contextImplementation) []byte {
+// final state.
+func runContexts(t *testing.T, implementation contextImplementation) state {
 	t.Helper()
 	memory := newRegion(t)
 	coracle.BlockAllocatorInit(memory.allocator())
@@ -316,12 +329,12 @@ func runContexts(t *testing.T, implementation contextImplementation) []byte {
 		implementation.free(memory.context(1+idx%3), blocks[idx].address, blocks[idx].size)
 	}
 	implementation.fini(memory.context(2))
-	return memory.image()
+	return memory.state()
 }
 
 // Test_Context_MatchesC verifies that memory contexts initialised,
 // counted, linked into a tree and finalised by Go leave the bytes C
 // leaves.
 func Test_Context_MatchesC(t *testing.T) {
-	requireSameImage(t, runContexts(t, cContext), runContexts(t, goContext))
+	requireSameState(t, runContexts(t, cContext), runContexts(t, goContext))
 }

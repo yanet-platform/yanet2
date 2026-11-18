@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
+	"github.com/yanet-platform/yanet2/controlplane/native/internal/coracle"
 	"github.com/yanet-platform/yanet2/controlplane/native/zone"
 )
 
@@ -61,15 +62,19 @@ func (m *Fixture) Instance() *zone.Instance {
 // CompareWithC runs an operation through C, keeps the storage it leaves,
 // restores the storage from before it and runs the operation through Go:
 // both start from the same bytes at the same addresses, so they must end
-// at the same bytes.
+// at the same bytes. In AddressSanitizer builds the storage's
+// unaddressable runs are kept and restored with its bytes and must end
+// the same too.
 func (m *Fixture) CompareWithC(t *testing.T, viaC, viaGo func()) {
 	t.Helper()
-	before := bytes.Clone(m.Image)
+	before, beforeRuns := coracle.Snapshot(m.Image)
 	viaC()
-	want := bytes.Clone(m.Image)
-	copy(m.Image, before)
+	want, wantRuns := coracle.Snapshot(m.Image)
+	coracle.Restore(m.Image, before, beforeRuns)
 	viaGo()
-	RequireSameBytes(t, want, m.Image)
+	got, gotRuns := coracle.Snapshot(m.Image)
+	RequireSameBytes(t, want, got)
+	require.Equal(t, wantRuns, gotRuns, "unaddressable runs differ")
 }
 
 // RequireSameBytes fails at the first byte where got differs from want.

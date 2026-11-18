@@ -1,4 +1,4 @@
-//go:build linux && amd64 && !asan
+//go:build linux && amd64
 
 package agent_test
 
