@@ -77,6 +77,24 @@ fn bind_generics(generics: &Generics, p: &TokenStream) -> syn::Result<(Generics,
     Ok((bound, args))
 }
 
+// Split by declaration order with logarithmic type depth. Parts are laid out
+// in the opposite order so unsubmitted values drop newest first.
+fn record_tree(fields: &[(TokenStream, TokenStream)]) -> (TokenStream, TokenStream) {
+    match fields {
+        [] => unreachable!("a derived record has at least one field"),
+        [(field, part)] => (field.clone(), part.clone()),
+        _ => {
+            let (left, right) = fields.split_at(fields.len() / 2);
+            let (left_fields, left_parts) = record_tree(left);
+            let (right_fields, right_parts) = record_tree(right);
+            (
+                quote!((#left_fields, #right_fields)),
+                quote!((#right_parts, #left_parts)),
+            )
+        }
+    }
+}
+
 pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     let name = &input.ident;
     let Data::Struct(data) = &input.data else {
@@ -107,8 +125,7 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
 
     let mut bounds = Vec::new();
     let mut parts_fields = Vec::new();
-    let mut writes = Vec::new();
-    let mut guards = Vec::new();
+    let mut record_fields = Vec::new();
     let mut frees = Vec::new();
     let mut debug_bounds = Vec::new();
     let mut idents = Vec::new();
@@ -119,22 +136,16 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         let field_ty = &field.ty;
         let vis = &field.vis;
         let binding = format_ident!("__f{}", idx);
-        let guard = format_ident!("__g{}", idx);
         bounds.push(quote_spanned! {field_ty.span()=>
             __field_is_build::<#field_ty>();
         });
         parts_fields.push(quote_spanned!(field_ty.span()=> #vis #ident: <#field_ty as #p::Build>::Parts<'b, __W>));
         debug_bounds
             .push(quote_spanned!(field_ty.span()=> <#field_ty as #p::Build>::Parts<'b, __W>: #core::fmt::Debug));
-        writes.push(quote_spanned! {field_ty.span()=>
-            __addr.write_field::<#field_ty>(#core::mem::offset_of!(#ty, #ident), #binding)?;
-            let #guard = #p::Partial::<#field_ty, __W>::new(
-                __addr.memory(),
-                __addr.addr() + #core::mem::offset_of!(#ty, #ident),
-                1,
-            );
-        });
-        guards.push(guard);
+        let field = quote_spanned! {field_ty.span()=>
+            #p::RecordField::<#field_ty>::at(#core::mem::offset_of!(#ty, #ident))
+        };
+        record_fields.push((field, quote!(#binding)));
         frees.push(quote_spanned! {field_ty.span()=>
             <#field_ty as #p::Build>::free::<__W>(
                 __addr + #core::mem::offset_of!(#ty, #ident),
@@ -145,6 +156,7 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         field_idents.push(ident);
         field_names.push(ident.to_string());
     }
+    let (record_fields, record_parts) = record_tree(&record_fields);
     let drop_msg = format!("ShmLayout: `{name}` needs drop; shared-memory types are never dropped");
     let align_msg = format!("ShmLayout: `{name}` is aligned to more than the block allocator's MAX_ALIGN");
     let vis = &input.vis;
@@ -239,18 +251,16 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
 
             fn write<'slot, 'b, __W: #p::Owner>(
                 __parts: #parts_name<'b, __W, #(#args),*>,
-                mut __addr: #p::Place<'slot, 'b, Self, __W>,
+                __addr: #p::Place<'slot, 'b, Self, __W>,
             ) -> #core::result::Result<#p::Init<'slot, Self>, #p::Refusal> {
                 #instance_checks
                 let #parts_name { #(#idents),* } = __parts;
-                // SAFETY: the offsets name distinct fields of this place.
-                // Each completed field stays guarded until the whole value
-                // takes over, without moving any address-relative edge.
-                unsafe {
-                    #(#writes)*
-                    #(#core::mem::forget(#guards);)*
-                    #core::result::Result::Ok(__addr.assume_init())
-                }
+                // SAFETY: the plan names every actual field once in
+                // declaration order with its type and offset.
+                __addr.write_record(
+                    unsafe { #p::RecordPlan::<Self, _>::new(#record_fields) },
+                    #record_parts,
+                )
             }
 
             unsafe fn free<__W: #p::Owner>(

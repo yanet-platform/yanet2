@@ -76,6 +76,158 @@ impl<'slot, 'b, T: Build, W: Owner> Place<'slot, 'b, T, W> {
         // SAFETY: the caller supplies the exclusive field of this place.
         unsafe { self.memory.write_at::<U>(self.addr + offset, parts) }
     }
+
+    /// Initializes each field of this place and commits the whole value.
+    ///
+    /// A plan for one record type cannot initialize a different one, even
+    /// if the two have the same size and field types.
+    ///
+    /// ```compile_fail,E0308
+    /// use yanet_sys::cp::{Owner, Place, RecordField, RecordPlan};
+    /// fn wrong_record<'s, 'b, W: Owner>(
+    ///     place: Place<'s, 'b, [u32; 1], W>,
+    ///     plan: RecordPlan<u32, RecordField<u32>>,
+    /// ) {
+    ///     let _ = place.write_record(plan, 1);
+    /// }
+    /// ```
+    pub fn write_record<F: fields::List>(
+        self,
+        plan: RecordPlan<T, F>,
+        parts: F::Parts<'b, W>,
+    ) -> Result<Init<'slot, T>, Refusal> {
+        // SAFETY: the plan describes the actual fields of this exclusive
+        // place. Success transfers every field to the parent transaction.
+        unsafe {
+            let (written, _) = plan.fields.write_at(self.addr, self.memory, parts, ((), ()))?;
+            forget(written);
+            Ok(self.assume_init())
+        }
+    }
+}
+
+/// One entry in a derived record's layout, in declaration order.
+#[derive(Debug)]
+pub struct RecordField<T> {
+    offset: usize,
+    _value: Invariant<T>,
+}
+
+impl<T> RecordField<T> {
+    /// Describes a field of type `T` at this byte offset from its parent.
+    pub const fn at(offset: usize) -> Self {
+        Self { offset, _value: PhantomData }
+    }
+}
+
+/// The complete layout of a derived record, independent of its final address.
+///
+/// Offsets themselves grant no write rights. Certifying a layout requires
+/// an explicit unsafe proof.
+///
+/// ```compile_fail,E0133
+/// use yanet_sys::cp::{RecordField, RecordPlan};
+/// let _ = RecordPlan::<[u32; 2], _>::new(RecordField::<u32>::at(0));
+/// ```
+#[derive(Debug)]
+pub struct RecordPlan<T, F> {
+    fields: F,
+    _parent: Invariant<T>,
+}
+
+impl<T, F: fields::List> RecordPlan<T, F> {
+    /// # Safety
+    ///
+    /// The tree must list every actual field of `T` exactly once in
+    /// declaration order, with its type and offset. Each field must be
+    /// aligned at any valid address of `T`, even if zero-sized. Writing all
+    /// entries from their parts must satisfy the full contract of
+    /// [`Place::assume_init`] at that address, without writing padding.
+    pub const unsafe fn new(fields: F) -> Self {
+        Self { fields, _parent: PhantomData }
+    }
+}
+
+mod fields {
+    use super::{Build, MemoryContext, Owner, RecordField, Refusal};
+    use crate::cp::builder::Partial;
+
+    pub struct Written<'b, T: Build, W: Owner> {
+        _guard: Partial<'b, T, W>,
+    }
+
+    type Staged<G, P, L> = Result<(G, (P, L)), Refusal>;
+
+    pub trait List {
+        type Parts<'b, W: Owner>;
+        type Written<'b, W: Owner>;
+
+        /// Stages initialized fields in reverse teardown order. `state`
+        /// owns prior writes followed by unsubmitted parts after this group.
+        ///
+        /// # Safety
+        ///
+        /// The entries describe distinct unwritten fields of the parent at
+        /// `addr` from `memory`.
+        unsafe fn write_at<'b, W: Owner, P, L>(
+            self,
+            addr: usize,
+            memory: &'b MemoryContext<'b, W>,
+            parts: Self::Parts<'b, W>,
+            state: (P, L),
+        ) -> Staged<Self::Written<'b, W>, P, L>;
+    }
+
+    impl<T: Build> List for RecordField<T> {
+        type Parts<'b, W: Owner> = T::Parts<'b, W>;
+        type Written<'b, W: Owner> = Written<'b, T, W>;
+
+        unsafe fn write_at<'b, W: Owner, P, L>(
+            self,
+            addr: usize,
+            memory: &'b MemoryContext<'b, W>,
+            parts: Self::Parts<'b, W>,
+            state: (P, L),
+        ) -> Staged<Self::Written<'b, W>, P, L> {
+            let field = addr + self.offset;
+            // SAFETY: the plan certifies this field. Its slot rolls back before
+            // `state` drops earlier writes, then unused parts, on failure.
+            unsafe {
+                memory.write_at::<T>(field, parts)?;
+                Ok((
+                    Written {
+                        _guard: Partial::new(memory, field, 1),
+                    },
+                    state,
+                ))
+            }
+        }
+    }
+
+    impl<A: List, B: List> List for (A, B) {
+        // Each tuple drops later fields first within its group.
+        type Parts<'b, W: Owner> = (B::Parts<'b, W>, A::Parts<'b, W>);
+        type Written<'b, W: Owner> = (B::Written<'b, W>, A::Written<'b, W>);
+
+        unsafe fn write_at<'b, W: Owner, P, L>(
+            self,
+            addr: usize,
+            memory: &'b MemoryContext<'b, W>,
+            (right_parts, left_parts): Self::Parts<'b, W>,
+            (prior, later): (P, L),
+        ) -> Staged<Self::Written<'b, W>, P, L> {
+            let (left, right) = self;
+            // SAFETY: each group owns distinct slots, in declaration order.
+            // Hand off the rest of the rollback state before starting a group.
+            unsafe {
+                let (left, (prior, (later, right_parts))) =
+                    left.write_at(addr, memory, left_parts, (prior, (later, right_parts)))?;
+                let (right, ((left, prior), later)) =
+                    right.write_at(addr, memory, right_parts, ((left, prior), later))?;
+                Ok(((right, left), (prior, later)))
+            }
+        }
+    }
 }
 
 impl<T: Build, W: Owner> fmt::Debug for Place<'_, '_, T, W> {

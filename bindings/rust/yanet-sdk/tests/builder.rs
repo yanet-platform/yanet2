@@ -91,13 +91,16 @@ mod derived {
     #[repr(C)]
     pub(super) struct Enclosing<const __place: usize> {
         pub(super) prior: [ShmSlice<u8>; __place],
+        pub(super) middle: ShmSlice<u16>,
         pub(super) current: Interruptible<ShmSlice<u32>>,
+        pub(super) after_first: ShmSlice<u8>,
+        pub(super) after_second: ShmSlice<u16>,
     }
 }
 
 #[allow(clippy::std_instead_of_core)]
 #[test]
-fn test_slice_interrupted_after_initialization_releases_nested_field_before_derived_guards() {
+fn test_slice_interrupted_after_initialization_releases_nested_field_before_earlier_fields() {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
     use derived::{Enclosing, EnclosingParts};
@@ -114,7 +117,10 @@ fn test_slice_interrupted_after_initialization_releases_nested_field_before_deri
                     };
                     Ok(EnclosingParts {
                         prior: [b.slice(17, |_| Ok(0))?],
+                        middle: b.slice(3, |_| Ok(0))?,
                         current: (b.slice(2, |_| Ok(0))?, interrupt),
+                        after_first: b.slice(13, |_| Ok(0))?,
+                        after_second: b.slice(11, |_| Ok(0))?,
                     })
                 })
             }));
@@ -128,7 +134,7 @@ fn test_slice_interrupted_after_initialization_releases_nested_field_before_deri
                 ));
             }
             assert_eq!(
-                [8, 17, 2 * size_of::<Enclosing<1>>()],
+                [8, 6, 17, 22, 13, 2 * size_of::<Enclosing<1>>()],
                 owner.take_child_returns().as_slice()
             );
             Ok(0)
@@ -137,6 +143,58 @@ fn test_slice_interrupted_after_initialization_releases_nested_field_before_deri
         owner.release(built);
         owner.assert_released();
     }
+}
+
+#[test]
+fn test_derive_writes_and_rolls_back_both_fields_at_a_coincident_offset() {
+    std::thread_local! {
+        static EVENTS: core::cell::RefCell<Vec<i8>> = const { core::cell::RefCell::new(Vec::new()) };
+    }
+
+    #[repr(transparent)]
+    struct Marker<const ID: i8>([u8; 0]);
+
+    // SAFETY: the empty array is its whole layout and needs no drop.
+    unsafe impl<const ID: i8> ShmLayout for Marker<ID> {}
+
+    // SAFETY: write initializes the whole marker, which owns no blocks.
+    unsafe impl<const ID: i8> Build for Marker<ID> {
+        type Parts<'b, W: Owner> = ();
+
+        fn write<'s, 'b, W: Owner>((): (), place: Place<'s, 'b, Self, W>) -> Result<Init<'s, Self>, Refusal> {
+            EVENTS.with_borrow_mut(|events| events.push(ID));
+            // SAFETY: the marker contains no relative edges or registrations.
+            Ok(unsafe { place.put(Self([])) })
+        }
+
+        unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {
+            EVENTS.with_borrow_mut(|events| events.push(-ID));
+        }
+    }
+
+    #[derive(ShmLayout)]
+    #[repr(C)]
+    struct Coincident {
+        first: Marker<1>,
+        second: Marker<2>,
+        word: Flaky,
+    }
+
+    assert_eq!(offset_of!(Coincident, first), offset_of!(Coincident, second));
+
+    let owner = TestOwner::new();
+    let err = Builder::<Fixture<u64>>::build::<Failure, _>(&owner, "coincident", |b| {
+        let _built = b.boxed::<Coincident>(CoincidentParts {
+            first: (),
+            second: (),
+            word: FlakyParts { word: 1, fails: true },
+        })?;
+        Ok(0)
+    })
+    .expect_err("the last field refuses after both markers initialize");
+    assert!(matches!(err, BuildError::Refused(Refusal::OutOfMemory)));
+    assert_eq!([1, 2, -2, -1].as_slice(), EVENTS.take().as_slice());
+    owner.assert_released();
 }
 
 /// A word whose write is refused when its parts say so.

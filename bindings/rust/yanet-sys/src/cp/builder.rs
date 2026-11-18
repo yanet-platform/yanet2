@@ -63,7 +63,7 @@ pub use classify::Branch;
 mod placement;
 
 use placement::SliceWriter;
-pub use placement::{Init, Place};
+pub use placement::{Init, Place, RecordField, RecordPlan};
 
 /// Invariant lifetime brand: values of two builds never unify.
 type Brand<'b> = PhantomData<fn(&'b ()) -> &'b ()>;
@@ -1102,10 +1102,8 @@ fn failed<W: Owner, E: From<BuildError<W::Error>>>(err: W::Error) -> E {
     BuildError::Owner(err).into()
 }
 
-/// Owns a written prefix within a larger value until its parent takes over.
-/// Arrays and generated field writers use it to roll back on refusal or panic.
-#[doc(hidden)]
-pub struct Partial<'a, T: Build, W: Owner> {
+/// Owns a written array prefix until the array takes over.
+struct Partial<'a, T: Build, W: Owner> {
     memory: &'a MemoryContext<'a, W>,
     addr: usize,
     written: usize,
@@ -1119,7 +1117,7 @@ impl<'a, T: Build, W: Owner> Partial<'a, T, W> {
     ///
     /// The prefix was written whole, and it is owned by nothing else; the
     /// memory context is the one the blocks it owns came from.
-    pub unsafe fn new(memory: &'a MemoryContext<'a, W>, addr: usize, written: usize) -> Self {
+    unsafe fn new(memory: &'a MemoryContext<'a, W>, addr: usize, written: usize) -> Self {
         Self {
             memory,
             addr,

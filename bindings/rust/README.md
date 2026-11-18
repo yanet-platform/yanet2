@@ -297,6 +297,12 @@ the receipt transfers the whole element to the committed prefix. Relative
 edges must still be written at their final addresses, and `Build::free`
 retains its unsafe ownership contract.
 
+`#[derive(ShmLayout)]` certifies the complete set of fields for the record
+type. The SDK writes each through a slot and keeps its rollback right until
+the parent commits. On refusal or unwind, it releases the initialized
+fields in reverse order. Fields are identified by their place in the plan,
+not by their byte offset, which can coincide for zero-sized fields.
+
 ## Custom configuration owners
 
 Module and object builders keep their existing APIs. Custom implementations of
