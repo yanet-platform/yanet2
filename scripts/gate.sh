@@ -191,6 +191,167 @@ gate_rust() {
 	step cargo-test cargo test --workspace --locked
 }
 
+# The Rust SDK workspace (bindings/rust), as rust-sdk.yml checks it on this
+# machine's architecture.
+#
+# The bindings crate reads the DPDK headers and the C flags of a build
+# directory, set to this checkout's own build/ whatever the environment names;
+# cargo finds the workspace's config from the working directory, so every step
+# runs there.
+gate_sdk() {
+	local toolchain stable clang libclang target sdk=(env -C bindings/rust YANET_BUILD_DIR="$root/build")
+	if [ ! -f subprojects/dpdk/meson.build ] || [ ! -d build ] || [ -L build ]; then
+		fail sdk "the SDK bindings read the DPDK sources and this checkout's own build/; run 'git submodule update --init && meson setup build' (AGENTS.md, Worktrees)"
+		return 1
+	fi
+	# The toolchains rust-sdk.yml pins: the nightly of its formatter and the
+	# stable of every other job, which a newer local one would not match.
+	toolchain=$(sed -n 's/^ *toolchain: *\(nightly-[0-9-]*\).*/\1/p' .github/workflows/rust-sdk.yml | head -n 1)
+	stable=$(sed -n 's/^ *- uses: dtolnay\/rust-toolchain@[0-9a-f]* # \([0-9][0-9.]*\)$/\1/p' .github/workflows/rust-sdk.yml | head -n 1)
+	if [ -z "$toolchain" ] || [ -z "$stable" ]; then
+		fail sdk "rust-sdk.yml names no nightly and stable toolchain to read"
+		return 1
+	elif [ "$list" != 1 ] && ! rustup run "$stable" cargo-clippy --version >/dev/null 2>&1; then
+		fail sdk "Rust $stable with clippy is not installed; run 'rustup toolchain install $stable -c clippy -t $(uname -m)-unknown-none'"
+		return 1
+	fi
+	# The clang pair bindgen runs with in CI; a host without it generates the
+	# bindings with its own.
+	clang=$(sed -n "s/^ *CLANG_PATH: *[\"']\{0,1\}\([^\"' #]*\).*/\1/p" .github/workflows/rust-sdk.yml | head -n 1)
+	libclang=$(sed -n "s/^ *LIBCLANG_PATH: *[\"']\{0,1\}\([^\"' #]*\).*/\1/p" .github/workflows/rust-sdk.yml | head -n 1)
+	if [ -z "$clang" ] || [ -z "$libclang" ]; then
+		fail sdk "rust-sdk.yml names no CLANG_PATH and LIBCLANG_PATH to read"
+		return 1
+	elif [ -x "$clang" ] && [ -d "$libclang" ]; then
+		sdk+=(CLANG_PATH="$clang" LIBCLANG_PATH="$libclang")
+	else
+		skipped+=("sdk bindings with $clang and $libclang (not installed; used the local LLVM)")
+	fi
+	step sdk-fmt "${sdk[@]}" cargo "+$toolchain" fmt -- --check || return 1
+	if command -v cargo-shear >/dev/null; then
+		step sdk-shear "${sdk[@]}" cargo "+$stable" shear --deny-warnings --locked || return 1
+	else
+		skipped+=("cargo-shear (not installed)")
+	fi
+	step sdk-clippy "${sdk[@]}" CARGO_BUILD_WARNINGS=deny cargo "+$stable" clippy --workspace --all-targets --locked --keep-going || return 1
+	step sdk-clippy-plugin "${sdk[@]}" CARGO_BUILD_WARNINGS=deny cargo "+$stable" clippy --profile plugin -p yanet-sdk-fixture --features plugin --examples --locked --keep-going || return 1
+	step sdk-clippy-deps "${sdk[@]}" cargo "+$stable" clippy --workspace --lib --locked -- -D unused_crate_dependencies || return 1
+	step sdk-doc "${sdk[@]}" RUSTDOCFLAGS='-D warnings' cargo "+$stable" doc --workspace --no-deps --locked --features yanet-sdk-testing/cp || return 1
+	target="$(uname -m)-unknown-none"
+	if rustup target list --installed --toolchain "$stable" 2>/dev/null | grep -qx "$target"; then
+		step sdk-no-std "${sdk[@]}" cargo "+$stable" check --locked --target "$target" -p yanet-shm -p yanet-sys -p yanet-sdk -p yanet-sdk-plugin -p yanet-packet || return 1
+	else
+		skipped+=("sdk-no-std ($target not installed)")
+	fi
+	step sdk-test "${sdk[@]}" PROPTEST_CASES=200 PROPTEST_RNG_SEED=19567271 cargo "+$stable" test --workspace --locked || return 1
+	step sdk-test-release "${sdk[@]}" cargo "+$stable" test -p yanet-sys --release --locked || return 1
+	step sdk-bench "${sdk[@]}" cargo "+$stable" test -p yanet-sys --bench dp --bench lookup --locked || return 1
+	step sdk-bench-release "${sdk[@]}" cargo "+$stable" test -p yanet-sys --release --bench lookup --locked || return 1
+
+	# The packet crate is meant to move to a repository of its own; rust-sdk.yml
+	# checks that by building a copy outside the workspace.
+	#
+	# Its manifest takes nothing from the workspace or from outside its
+	# directory, and built alone the crate gets only the dependency features it
+	# enables itself, as the copy does.
+	# CI also runs that check on any edit of its workflow; the commands here are
+	# a copy and do not follow such an edit.
+	matching '^(bindings/rust/yanet-packet/|\.github/workflows/rust-sdk\.yml$)' >/dev/null || return 0
+	if python3 -c 'import tomllib' 2>/dev/null; then
+		step sdk-packet-manifest standalone_manifest bindings/rust/yanet-packet/Cargo.toml || return 1
+	else
+		skipped+=("sdk-packet-manifest (python3 without tomllib)")
+	fi
+	step sdk-packet-test "${sdk[@]}" cargo "+$stable" test -p yanet-packet --locked || return 1
+	if rustup target list --installed --toolchain "$stable" 2>/dev/null | grep -qx "$target"; then
+		step sdk-packet-no-std "${sdk[@]}" cargo "+$stable" check -p yanet-packet --locked --target "$target"
+	else
+		skipped+=("sdk-packet-no-std ($target not installed)")
+	fi
+}
+
+# Lists the manifest keys that lean on a workspace or on files outside the
+# crate, in its manifest and in those of the crates it holds.
+#
+# Those are an inherited key, a workspace named by path, and a dependency,
+# patch, replacement, build script or target whose path leaves the packet
+# crate's directory.
+standalone_manifest() {
+	python3 - "$1" <<'EOF'
+import os
+import sys
+import tomllib
+
+root = os.path.dirname(os.path.abspath(sys.argv[1]))
+found = []
+checked = set()
+
+
+def outside(base, path):
+    if not isinstance(path, str):
+        return False
+    if os.path.isabs(path):
+        return True
+    target = os.path.normpath(os.path.join(base, path))
+    return os.path.commonpath([root, target]) != root
+
+
+def check(manifest_path):
+    if manifest_path in checked:
+        return
+    checked.add(manifest_path)
+    base = os.path.dirname(manifest_path)
+    with open(manifest_path, "rb") as manifest_file:
+        manifest = tomllib.load(manifest_file)
+    name = os.path.relpath(manifest_path)
+
+    def inherited(table, keys):
+        for key, value in table.items():
+            if key == "workspace" and value is True:
+                found.append(f"{name}: {'.'.join(keys + [key])}")
+            elif isinstance(value, dict):
+                inherited(value, keys + [key])
+
+    def by_path(table, keys):
+        for dependency, spec in table.items():
+            if not isinstance(spec, dict) or not isinstance(spec.get("path"), str):
+                continue
+            if outside(base, spec["path"]):
+                found.append(f"{name}: {'.'.join(keys + [dependency, 'path'])}")
+            else:
+                check(os.path.join(os.path.normpath(os.path.join(base, spec["path"])), "Cargo.toml"))
+
+    package = manifest.get("package", {})
+    inherited({k: v for k, v in manifest.items() if k != "package"}, [])
+    inherited({k: v for k, v in package.items() if k != "metadata"}, ["package"])
+    if "workspace" in package:
+        found.append(f"{name}: package.workspace")
+    kinds = ("dependencies", "dev-dependencies", "build-dependencies")
+    for kind in kinds:
+        by_path(manifest.get(kind, {}), [kind])
+    for target, spec in manifest.get("target", {}).items():
+        for kind in kinds:
+            by_path(spec.get(kind, {}), ["target", target, kind])
+    for source, patches in manifest.get("patch", {}).items():
+        by_path(patches, ["patch", source])
+    by_path(manifest.get("replace", {}), ["replace"])
+    if outside(base, package.get("build")):
+        found.append(f"{name}: package.build")
+    if outside(base, manifest.get("lib", {}).get("path")):
+        found.append(f"{name}: lib.path")
+    for kind in ("bin", "test", "bench", "example"):
+        for target in manifest.get(kind, []):
+            if outside(base, target.get("path")):
+                found.append(f"{name}: {kind}.{target.get('name', '')}.path")
+
+
+check(os.path.abspath(sys.argv[1]))
+for key in found:
+    print(key)
+sys.exit(1 if found else 0)
+EOF
+}
+
 gate_web() {
 	if [ ! -d node_modules ]; then
 		fail web "no node_modules/; run 'npm ci' at the repository root"
@@ -205,7 +366,17 @@ c=0
 matching '(\.[ch]$|(^|/)meson\.build$|^meson_options\.txt$|^ubsan-ignorelist\.txt$|^subprojects/|^scripts/(go_c(deps|go_flags)|check_link_deps)\.py$)' >/dev/null && c=1
 [ "$c" = 1 ] && gate_c
 if [ "$c" = 1 ] || matching '(\.go$|^go\.(mod|sum)$|\.proto$)' >/dev/null; then gate_go; fi
-matching '(\.rs$|(^|/)Cargo\.(toml|lock)$|^\.rustfmt\.toml$|^\.cargo/|\.proto$)' >/dev/null && gate_rust
+# The SDK workspace is not a member of the root one; as in CI, only its own
+# layer checks it.
+matching '(\.rs$|(^|/)Cargo\.(toml|lock)$|^\.rustfmt\.toml$|^\.cargo/|\.proto$)' | grep -qv '^bindings/rust/' && gate_rust
+# The SDK layer runs on the paths rust-sdk.yml lists and on the C inputs of
+# its bindings the workflow misses.
+#
+# The listed paths are the C headers, packet sources and build configuration
+# that feed its bindings and shims, and the workflow itself; the missed ones
+# are the agent API headers the bindings include and the classifier helper the
+# SDK tests compile.
+matching '(^bindings/rust/|^\.rustfmt\.toml$|^\.cargo/config\.toml$|^(api|common|lib)/.*\.h$|^lib/dataplane/packet/.*\.c$|^lib/classify/compiler/helper\.c$|^subprojects/dpdk$|(^|/)meson\.build$|^meson_options\.txt$|^\.github/workflows/rust-sdk\.yml$)' >/dev/null && gate_sdk
 matching '(^|/)web/|^package(-lock)?\.json$' >/dev/null && gate_web
 matching '\.proto$' >/dev/null && step proto-lint make --no-print-directory proto-lint
 [ -n "$(git rev-list "$base"..HEAD)" ] && step commitlint lint/commit/commitlint.sh --range "$base..HEAD"
