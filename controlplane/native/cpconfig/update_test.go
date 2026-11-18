@@ -3,7 +3,6 @@ package cpconfig_test
 import (
 	"net"
 	"testing"
-	"time"
 	"unsafe"
 
 	"github.com/gopacket/gopacket"
@@ -14,41 +13,10 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/native/cpconfig"
-	"github.com/yanet-platform/yanet2/controlplane/native/internal/coracle"
+	"github.com/yanet-platform/yanet2/controlplane/native/internal/nativetest"
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
-	"github.com/yanet-platform/yanet2/controlplane/native/zone"
 	"github.com/yanet-platform/yanet2/modules/blackhole/bindings/go/cblackhole"
 )
-
-// runAssigner plays the dataplane's assigner thread for an in-process
-// dataplane until the test ends: each newly published generation's
-// contexts are delivered to the workers.
-func runAssigner(t *testing.T, memory *publishedFixture) {
-	t.Helper()
-	instance := memory.Instance()
-	stop := make(chan struct{})
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		var assigned *layout.CpConfigGen
-		for {
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			if gen := instance.Cp.CpConfigGen.Load(); gen != assigned {
-				coracle.AssignWorkerContexts(unsafe.Pointer(instance.Dp), unsafe.Pointer(gen))
-				assigned = gen
-			}
-			time.Sleep(time.Millisecond)
-		}
-	}()
-	t.Cleanup(func() {
-		close(stop)
-		<-done
-	})
-}
 
 // icmpPackets returns count echo requests through port0.
 func icmpPackets(t *testing.T, count int) []gopacket.Packet {
@@ -91,7 +59,7 @@ func moduleDrops(t *testing.T, memory *publishedFixture) uint64 {
 // generation C published.
 func Test_UpdateModules_DataplaneRunsGoGeneration(t *testing.T) {
 	memory := newPublishedFixture(t)
-	runAssigner(t, memory)
+	memory.RunAssigner(t)
 	instance := memory.Instance()
 
 	result, err := memory.Harness.HandlePackets(icmpPackets(t, 3)...)
@@ -126,23 +94,6 @@ func Test_UpdateModules_DataplaneRunsGoGeneration(t *testing.T) {
 	require.Equal(t, before+5, moduleDrops(t, memory), "module counters continue across the Go publish")
 }
 
-// assignOnce delivers the next generation the instance publishes after
-// current to the workers, once, as the dataplane's assigner would.
-func assignOnce(instance *zone.Instance, current *layout.CpConfigGen) chan struct{} {
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for {
-			if gen := instance.Cp.CpConfigGen.Load(); gen != current {
-				coracle.AssignWorkerContexts(unsafe.Pointer(instance.Dp), unsafe.Pointer(gen))
-				return
-			}
-			time.Sleep(time.Millisecond)
-		}
-	}()
-	return done
-}
-
 // Test_UpdateModules_MatchesC verifies that a whole module update from
 // Go, generation copy, upsert, every worker's contexts, publication and
 // the teardown of the replaced generation included, leaves the storage as
@@ -161,7 +112,7 @@ func Test_UpdateModules_MatchesC(t *testing.T) {
 				func() {
 					module, err := cpconfig.NewBlackhole(memory.owner, name)
 					require.NoError(t, err)
-					assigned := assignOnce(instance, instance.Cp.CpConfigGen.Get())
+					assigned := nativetest.AssignOnce(instance, instance.Cp.CpConfigGen.Get())
 					require.NoError(t, cpconfig.UpdateModules(instance, []*layout.CpModule{module}))
 					<-assigned
 				},
