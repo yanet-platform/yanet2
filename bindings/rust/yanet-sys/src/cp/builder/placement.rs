@@ -161,15 +161,6 @@ unsafe impl<T: Record> Free for T {
 ///     let _ = RecordPlace(place);
 /// }
 /// ```
-///
-/// The certificate is also bound to the parent type:
-///
-/// ```compile_fail,E0308
-/// use yanet_sys::cp::{Owner, RecordPlace};
-/// fn substitute<'s, 'b, W: Owner>(place: RecordPlace<'s, 'b, u32, W>) -> RecordPlace<'s, 'b, u64, W> {
-///     place
-/// }
-/// ```
 #[doc(hidden)]
 #[derive(Debug)]
 pub struct RecordPlace<'slot, 'b, T: Build, W: Owner>(Place<'slot, 'b, T, W>);
@@ -427,7 +418,7 @@ impl<'a, T: ShmLayout, W: Owner> Taken<'a, T, W> {
     /// whole. Its resources must not already have been released or handed
     /// over. Even fields sharing an address because they are zero-sized
     /// are distinct fields and must each be released exactly once.
-    pub unsafe fn field<U: ShmLayout>(&mut self, offset: usize) -> Taken<'_, U, W> {
+    pub(crate) unsafe fn field<U: ShmLayout>(&mut self, offset: usize) -> Taken<'_, U, W> {
         Taken {
             addr: self.addr + offset,
             memory: self.memory,
