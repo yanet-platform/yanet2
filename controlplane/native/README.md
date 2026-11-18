@@ -67,8 +67,8 @@ and `decap`.
   thread; the native publish leaves that to an assigner thread, as a real dataplane's
   workers take them on their own cores. The handoff costs the native column 3 µs; with
   delivery on the publishing thread the blackhole publish is 11.0 µs, 6.3 µs of it the
-  workers' execution contexts. Built from the same generation on one thread, those take
-  8.1 µs in C and 10.0 µs in Go.
+  workers' execution contexts. Built from the same generation on one thread with warm
+  memory, those take 5.2 µs in C and 6.7 µs in Go.
 - Allocations per blackhole publish: 54 small objects, 696 bytes.
 
 ## Facts the port depends on
