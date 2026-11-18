@@ -158,4 +158,6 @@ cgo_packages += {
     'libraries': [lib_ringtest_writer, lib_ring_objects],
   },
   'tests/counters': {},
+  # The C oracle the native control plane's tests compare against.
+  'controlplane/native/internal/coracle': {},
 }
