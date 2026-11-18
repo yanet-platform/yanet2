@@ -37,7 +37,7 @@ type decapFixture struct {
 	owner  *agent.Agent
 }
 
-func newDecapFixture(t *testing.T) *decapFixture {
+func newDecapFixture(t testing.TB) *decapFixture {
 	t.Helper()
 	memory := nativetest.NewFixture(t, dataplaneut.Config{
 		WorkerCount:   2,
@@ -196,4 +196,64 @@ func Test_UpdateModules_DataplaneDecapsulatesByGoPrefixes(t *testing.T) {
 
 	requireOutput(t, memory, matched, matchedInner, "a tunnel to the Go prefix is decapsulated")
 	requireOutput(t, memory, other, other, "a tunnel elsewhere passes unchanged")
+}
+
+// benchmarkPrefixes returns 256 /24 prefixes over 16 second octets, a
+// tree of 18 pages.
+func benchmarkPrefixes() []netip.Prefix {
+	prefixes := make([]netip.Prefix, 0, 256)
+	for idx := range 256 {
+		prefixes = append(prefixes, netip.MustParsePrefix(fmt.Sprintf("10.%d.%d.0/24", idx%16, idx/16)))
+	}
+	return prefixes
+}
+
+// Benchmark_NewConfig measures building a decap configuration of 256
+// prefixes through the C decap api over cgo and natively.
+func Benchmark_NewConfig(b *testing.B) {
+	prefixes := benchmarkPrefixes()
+	b.Run("cgo", func(b *testing.B) {
+		memory := newDecapFixture(b)
+		for b.Loop() {
+			config, err := cdecap.NewModuleConfig(memory.cAgent, "d")
+			require.NoError(b, err)
+			for _, prefix := range prefixes {
+				require.NoError(b, config.PrefixAdd(prefix))
+			}
+		}
+	})
+	b.Run("native", func(b *testing.B) {
+		memory := newDecapFixture(b)
+		for b.Loop() {
+			_, err := decap.NewConfig(memory.owner, "d", prefixes)
+			require.NoError(b, err)
+		}
+	})
+}
+
+// Benchmark_UpdateModules_Decap measures building a decap configuration
+// of 256 prefixes and publishing it until every worker runs it, through
+// the cgo control plane and through the native one.
+func Benchmark_UpdateModules_Decap(b *testing.B) {
+	prefixes := benchmarkPrefixes()
+	b.Run("cgo", func(b *testing.B) {
+		memory := newDecapFixture(b)
+		for b.Loop() {
+			config, err := cdecap.NewModuleConfig(memory.cAgent, "d")
+			require.NoError(b, err)
+			for _, prefix := range prefixes {
+				require.NoError(b, config.PrefixAdd(prefix))
+			}
+			require.NoError(b, memory.cAgent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}))
+		}
+	})
+	b.Run("native", func(b *testing.B) {
+		memory := newDecapFixture(b)
+		memory.RunAssigner(b)
+		for b.Loop() {
+			module, err := decap.NewConfig(memory.owner, "d", prefixes)
+			require.NoError(b, err)
+			require.NoError(b, cpconfig.UpdateModules(memory.Instance(), []*layout.CpModule{module}))
+		}
+	})
 }

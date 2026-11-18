@@ -29,7 +29,7 @@ type publishedFixture struct {
 	owner  *agent.Agent
 }
 
-func newPublishedFixture(t *testing.T) *publishedFixture {
+func newPublishedFixture(t testing.TB) *publishedFixture {
 	t.Helper()
 	memory := nativetest.NewFixture(t, dataplaneut.Config{
 		WorkerCount:   2,

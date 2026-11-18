@@ -120,3 +120,26 @@ func Test_UpdateModules_MatchesC(t *testing.T) {
 		})
 	}
 }
+
+// Benchmark_UpdateModules_Blackhole measures building one blackhole
+// configuration and publishing it until every worker runs it, through
+// the cgo control plane and through the native one.
+func Benchmark_UpdateModules_Blackhole(b *testing.B) {
+	b.Run("cgo", func(b *testing.B) {
+		memory := newPublishedFixture(b)
+		for b.Loop() {
+			config, err := cblackhole.NewModuleConfig(memory.cAgent, "a")
+			require.NoError(b, err)
+			require.NoError(b, memory.cAgent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}))
+		}
+	})
+	b.Run("native", func(b *testing.B) {
+		memory := newPublishedFixture(b)
+		memory.RunAssigner(b)
+		for b.Loop() {
+			module, err := cpconfig.NewBlackhole(memory.owner, "a")
+			require.NoError(b, err)
+			require.NoError(b, cpconfig.UpdateModules(memory.Instance(), []*layout.CpModule{module}))
+		}
+	})
+}

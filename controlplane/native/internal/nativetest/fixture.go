@@ -33,7 +33,7 @@ type Fixture struct {
 // NewFixture returns a dataplane harness of the configuration with its
 // storage; memory sizes default to 64 MB of control-plane zone and 4 MB
 // of dataplane zone.
-func NewFixture(t *testing.T, config dataplaneut.Config) *Fixture {
+func NewFixture(t testing.TB, config dataplaneut.Config) *Fixture {
 	t.Helper()
 	if config.CPMemory == 0 {
 		config.CPMemory = uint64(64 * datasize.MB)

@@ -1,8 +1,8 @@
 package nativetest
 
 import (
+	"runtime"
 	"testing"
-	"time"
 	"unsafe"
 
 	"github.com/yanet-platform/yanet2/controlplane/native/internal/coracle"
@@ -13,7 +13,10 @@ import (
 // RunAssigner plays the dataplane's assigner thread for the in-process
 // dataplane until the test ends: each newly published generation's
 // contexts are delivered to the workers.
-func (m *Fixture) RunAssigner(t *testing.T) {
+//
+// It spins rather than sleeps, so a publish it serves is timed without
+// a sleep the in-process C publish, which delivers by itself, never pays.
+func (m *Fixture) RunAssigner(t testing.TB) {
 	t.Helper()
 	instance := m.Instance()
 	stop := make(chan struct{})
@@ -31,7 +34,7 @@ func (m *Fixture) RunAssigner(t *testing.T) {
 				coracle.AssignWorkerContexts(unsafe.Pointer(instance.Dp), unsafe.Pointer(gen))
 				assigned = gen
 			}
-			time.Sleep(time.Millisecond)
+			runtime.Gosched()
 		}
 	}()
 	t.Cleanup(func() {
@@ -52,7 +55,7 @@ func AssignOnce(instance *zone.Instance, current *layout.CpConfigGen) chan struc
 				coracle.AssignWorkerContexts(unsafe.Pointer(instance.Dp), unsafe.Pointer(gen))
 				return
 			}
-			time.Sleep(time.Millisecond)
+			runtime.Gosched()
 		}
 	}()
 	return done
