@@ -11,7 +11,8 @@ import (
 )
 
 // retire drops the publication's reference to a replaced generation and
-// frees it when no reader pins it any more.
+// frees it when no reader pins it any more. The caller holds the
+// instance's allocator lock.
 func retire(cp *layout.CpConfig, old *layout.CpConfigGen) {
 	if atomic.AddUint64(&old.Refcnt, ^uint64(0)) == 0 {
 		freeGeneration(cp, old)
@@ -20,7 +21,8 @@ func retire(cp *layout.CpConfig, old *layout.CpConfigGen) {
 
 // freeGeneration releases a generation nothing references: its workers'
 // contexts, the references its registries hold and its own memory, in
-// the order cp_config_gen_free releases them.
+// the order cp_config_gen_free releases them. The caller holds the
+// instance's allocator lock.
 func freeGeneration(cp *layout.CpConfig, gen *layout.CpConfigGen) {
 	if first := gen.ConfigGenEctxs.Get(); first != nil {
 		roots := unsafe.Slice(first, gen.ConfigGenEctxCount)
@@ -29,14 +31,14 @@ func freeGeneration(cp *layout.CpConfig, gen *layout.CpConfigGen) {
 				freeRoot(cp, root)
 			}
 		}
-		shmalloc.ContextFree(&cp.EctxMemoryContext, unsafe.Pointer(first), 8*uintptr(gen.ConfigGenEctxCount))
+		shmalloc.ContextFreeLocked(&cp.EctxMemoryContext, unsafe.Pointer(first), 8*uintptr(gen.ConfigGenEctxCount))
 	}
 	entityRegistryFini(&gen.ModuleRegistry.EntityRegistry)
 	registryFini(&gen.FunctionRegistry.Registry)
 	registryFini(&gen.PipelineRegistry.Registry)
 	entityRegistryFini(&gen.DeviceRegistry.EntityRegistry)
 	entityRegistryFini(&gen.ObjectRegistry.EntityRegistry)
-	shmalloc.ContextFree(&cp.MemoryContext, unsafe.Pointer(gen), unsafe.Sizeof(layout.CpConfigGen{}))
+	shmalloc.ContextFreeLocked(&cp.MemoryContext, unsafe.Pointer(gen), unsafe.Sizeof(layout.CpConfigGen{}))
 }
 
 // registryFini drops every item's reference and frees the registry's
@@ -53,7 +55,7 @@ func registryFini(registry *layout.Registry) {
 		}
 	}
 	hashIndexFini(&registry.KeyIndex)
-	shmalloc.ContextFree(registry.MemoryContext.Get(), unsafe.Pointer(registry.Items.Get()), 8*uintptr(registry.Capacity))
+	shmalloc.ContextFreeLocked(registry.MemoryContext.Get(), unsafe.Pointer(registry.Items.Get()), 8*uintptr(registry.Capacity))
 	*registry = layout.Registry{}
 }
 
@@ -86,7 +88,7 @@ func freeCounterStorage(storage *layout.CounterStorage) {
 	}
 	context := storage.MemoryContext.Get()
 	if handles := storage.CounterValueHandles.Get(); handles != nil {
-		shmalloc.ContextFree(context, unsafe.Pointer(handles), 8*uintptr(storage.Registry.Get().Count))
+		shmalloc.ContextFreeLocked(context, unsafe.Pointer(handles), 8*uintptr(storage.Registry.Get().Count))
 	}
 	for pool := range storage.Pools {
 		entry := &storage.Pools[pool]
@@ -101,13 +103,13 @@ func freeCounterStorage(storage *layout.CounterStorage) {
 				continue
 			}
 			if atomic.AddUint64(&block.Refcnt, ^uint64(0)) == 0 {
-				shmalloc.ContextFree(context, unsafe.Pointer(block.Pages.Get()), uintptr(counterPageSize))
-				shmalloc.ContextFree(context, unsafe.Pointer(block), unsafe.Sizeof(layout.CounterStorageBlock{}))
+				shmalloc.ContextFreeLocked(context, unsafe.Pointer(block.Pages.Get()), uintptr(counterPageSize))
+				shmalloc.ContextFreeLocked(context, unsafe.Pointer(block), unsafe.Sizeof(layout.CounterStorageBlock{}))
 			}
 		}
-		shmalloc.ContextFree(context, unsafe.Pointer(first), 8*uintptr(entry.BlockCount))
+		shmalloc.ContextFreeLocked(context, unsafe.Pointer(first), 8*uintptr(entry.BlockCount))
 	}
-	shmalloc.ContextFree(context, unsafe.Pointer(storage), unsafe.Sizeof(layout.CounterStorage{}))
+	shmalloc.ContextFreeLocked(context, unsafe.Pointer(storage), unsafe.Sizeof(layout.CounterStorage{}))
 }
 
 func storageRegistryFini(registry *layout.CpConfigCounterStorageRegistry) {
@@ -116,7 +118,7 @@ func storageRegistryFini(registry *layout.CpConfigCounterStorageRegistry) {
 		return
 	}
 	hashIndexFini(&registry.TagIndex)
-	shmalloc.ContextFree(context, unsafe.Pointer(registry.Items.Get()),
+	shmalloc.ContextFreeLocked(context, unsafe.Pointer(registry.Items.Get()),
 		unsafe.Sizeof(layout.CpCounterStorage{})*uintptr(registry.Capacity),
 	)
 	*registry = layout.CpConfigCounterStorageRegistry{}
@@ -131,16 +133,16 @@ func freeRoot(cp *layout.CpConfig, root *layout.ConfigGenEctx) {
 				freeDevice(cp, device)
 			}
 		}
-		shmalloc.ContextFree(context, unsafe.Pointer(first), 8*uintptr(root.DeviceCount))
+		shmalloc.ContextFreeLocked(context, unsafe.Pointer(first), 8*uintptr(root.DeviceCount))
 	}
 	if egress := root.EgressBacking.Get(); egress != nil {
-		shmalloc.ContextFree(context, unsafe.Pointer(egress), 2*uintptr(root.DeviceCount))
+		shmalloc.ContextFreeLocked(context, unsafe.Pointer(egress), 2*uintptr(root.DeviceCount))
 	}
 	if buckets := root.TxBuckets.Get(); buckets != nil {
-		shmalloc.ContextFree(context, unsafe.Pointer(buckets), unsafe.Sizeof(layout.PacketList{})*uintptr(root.TxBucketCount))
+		shmalloc.ContextFreeLocked(context, unsafe.Pointer(buckets), unsafe.Sizeof(layout.PacketList{})*uintptr(root.TxBucketCount))
 	}
 	if backing := root.BackingRegistry.Get(); backing != nil {
-		shmalloc.ContextFree(context, unsafe.Pointer(backing), 2*uintptr(root.BackingRegistryCount))
+		shmalloc.ContextFreeLocked(context, unsafe.Pointer(backing), 2*uintptr(root.BackingRegistryCount))
 	}
 	if first := root.Objects.Get(); first != nil {
 		objects := unsafe.Slice(first, root.ObjectCount)
@@ -149,13 +151,13 @@ func freeRoot(cp *layout.CpConfig, root *layout.ConfigGenEctx) {
 				freeObject(cp, object)
 			}
 		}
-		shmalloc.ContextFree(context, unsafe.Pointer(first), 8*uintptr(root.ObjectCount))
+		shmalloc.ContextFreeLocked(context, unsafe.Pointer(first), 8*uintptr(root.ObjectCount))
 	}
 	if registry := root.CounterStorageRegistry.Get(); registry != nil {
 		storageRegistryFini(registry)
-		shmalloc.ContextFree(&cp.MemoryContext, unsafe.Pointer(registry), unsafe.Sizeof(layout.CpConfigCounterStorageRegistry{}))
+		shmalloc.ContextFreeLocked(&cp.MemoryContext, unsafe.Pointer(registry), unsafe.Sizeof(layout.CpConfigCounterStorageRegistry{}))
 	}
-	shmalloc.ContextFree(context, unsafe.Pointer(root), unsafe.Sizeof(layout.ConfigGenEctx{})+8*uintptr(root.DeviceCount))
+	shmalloc.ContextFreeLocked(context, unsafe.Pointer(root), unsafe.Sizeof(layout.ConfigGenEctx{})+8*uintptr(root.DeviceCount))
 }
 
 func freeObject(cp *layout.CpConfig, object *layout.ObjectEctx) {
@@ -164,9 +166,9 @@ func freeObject(cp *layout.CpConfig, object *layout.ObjectEctx) {
 	if prepared := object.ObjectPrepared.Get(); prepared != nil {
 		dp := cp.DpConfig.Get()
 		descriptor := &unsafe.Slice(dp.DpObjects.Get(), dp.ObjectCount)[object.CpObject.Get().DpObjectIdx]
-		shmalloc.ContextFree(context, unsafe.Pointer(prepared), uintptr(descriptor.PreparedSize))
+		shmalloc.ContextFreeLocked(context, unsafe.Pointer(prepared), uintptr(descriptor.PreparedSize))
 	}
-	shmalloc.ContextFree(context, unsafe.Pointer(object), unsafe.Sizeof(layout.ObjectEctx{}))
+	shmalloc.ContextFreeLocked(context, unsafe.Pointer(object), unsafe.Sizeof(layout.ObjectEctx{}))
 }
 
 func freeDevice(cp *layout.CpConfig, device *layout.DeviceEctx) {
@@ -177,7 +179,7 @@ func freeDevice(cp *layout.CpConfig, device *layout.DeviceEctx) {
 		freeEntry(cp, output)
 	}
 	freeCounterStorage(device.CounterStorage.Get())
-	shmalloc.ContextFree(&cp.EctxMemoryContext, unsafe.Pointer(device), unsafe.Sizeof(layout.DeviceEctx{}))
+	shmalloc.ContextFreeLocked(&cp.EctxMemoryContext, unsafe.Pointer(device), unsafe.Sizeof(layout.DeviceEctx{}))
 }
 
 func freeEntry(cp *layout.CpConfig, entry *layout.DeviceEntryEctx) {
@@ -189,12 +191,12 @@ func freeEntry(cp *layout.CpConfig, entry *layout.DeviceEntryEctx) {
 				freePipeline(cp, pipeline)
 			}
 		}
-		shmalloc.ContextFree(context, unsafe.Pointer(first), 8*uintptr(entry.PipelineCount))
+		shmalloc.ContextFreeLocked(context, unsafe.Pointer(first), 8*uintptr(entry.PipelineCount))
 	}
 	if absolute := entry.Pipelines.Get(); absolute != nil {
-		shmalloc.ContextFree(context, unsafe.Pointer(absolute), 8*uintptr(entry.PipelineCount))
+		shmalloc.ContextFreeLocked(context, unsafe.Pointer(absolute), 8*uintptr(entry.PipelineCount))
 	}
-	shmalloc.ContextFree(context, unsafe.Pointer(entry), unsafe.Sizeof(layout.DeviceEntryEctx{})+8*uintptr(entry.PipelineMapSize))
+	shmalloc.ContextFreeLocked(context, unsafe.Pointer(entry), unsafe.Sizeof(layout.DeviceEntryEctx{})+8*uintptr(entry.PipelineMapSize))
 }
 
 func freePipeline(cp *layout.CpConfig, pipeline *layout.PipelineEctx) {
@@ -210,9 +212,9 @@ func freePipeline(cp *layout.CpConfig, pipeline *layout.PipelineEctx) {
 	}
 	freeCounterStorage(pipeline.CounterStorage.Get())
 	if first != nil {
-		shmalloc.ContextFree(context, unsafe.Pointer(first), 8*uintptr(pipeline.Length))
+		shmalloc.ContextFreeLocked(context, unsafe.Pointer(first), 8*uintptr(pipeline.Length))
 	}
-	shmalloc.ContextFree(context, unsafe.Pointer(pipeline), unsafe.Sizeof(layout.PipelineEctx{})+8*uintptr(pipeline.Length))
+	shmalloc.ContextFreeLocked(context, unsafe.Pointer(pipeline), unsafe.Sizeof(layout.PipelineEctx{})+8*uintptr(pipeline.Length))
 }
 
 func freeFunction(cp *layout.CpConfig, function *layout.FunctionEctx) {
@@ -224,13 +226,13 @@ func freeFunction(cp *layout.CpConfig, function *layout.FunctionEctx) {
 				freeChain(cp, chain)
 			}
 		}
-		shmalloc.ContextFree(context, unsafe.Pointer(first), 8*uintptr(function.ChainCount))
+		shmalloc.ContextFreeLocked(context, unsafe.Pointer(first), 8*uintptr(function.ChainCount))
 	}
 	if absolute := function.Chains.Get(); absolute != nil {
-		shmalloc.ContextFree(context, unsafe.Pointer(absolute), 8*uintptr(function.ChainCount))
+		shmalloc.ContextFreeLocked(context, unsafe.Pointer(absolute), 8*uintptr(function.ChainCount))
 	}
 	freeCounterStorage(function.CounterStorage.Get())
-	shmalloc.ContextFree(context, unsafe.Pointer(function), unsafe.Sizeof(layout.FunctionEctx{})+8*uintptr(function.ChainMapSize))
+	shmalloc.ContextFreeLocked(context, unsafe.Pointer(function), unsafe.Sizeof(layout.FunctionEctx{})+8*uintptr(function.ChainMapSize))
 }
 
 func freeChain(cp *layout.CpConfig, chain *layout.ChainEctx) {
@@ -246,9 +248,9 @@ func freeChain(cp *layout.CpConfig, chain *layout.ChainEctx) {
 	}
 	freeCounterStorage(chain.CounterStorage.Get())
 	if first != nil {
-		shmalloc.ContextFree(context, unsafe.Pointer(first), 8*uintptr(chain.Length))
+		shmalloc.ContextFreeLocked(context, unsafe.Pointer(first), 8*uintptr(chain.Length))
 	}
-	shmalloc.ContextFree(context, unsafe.Pointer(chain), unsafe.Sizeof(layout.ChainEctx{})+8*uintptr(chain.Length))
+	shmalloc.ContextFreeLocked(context, unsafe.Pointer(chain), unsafe.Sizeof(layout.ChainEctx{})+8*uintptr(chain.Length))
 }
 
 func freeModule(cp *layout.CpConfig, module *layout.ModuleEctx) {
@@ -259,25 +261,25 @@ func freeModule(cp *layout.CpConfig, module *layout.ModuleEctx) {
 		for idx := range storages {
 			freeCounterStorage(storages[idx].Get())
 		}
-		shmalloc.ContextFree(context, unsafe.Pointer(first), 8*uintptr(module.RuntimeCounterStorageCount))
+		shmalloc.ContextFreeLocked(context, unsafe.Pointer(first), 8*uintptr(module.RuntimeCounterStorageCount))
 	}
 	if absolute := module.AbsRuntimeCounterStorages.Get(); absolute != nil {
-		shmalloc.ContextFree(context, unsafe.Pointer(absolute), 8*uintptr(module.RuntimeCounterStorageCount))
+		shmalloc.ContextFreeLocked(context, unsafe.Pointer(absolute), 8*uintptr(module.RuntimeCounterStorageCount))
 	}
 	if targets := module.DeviceTargets.Get(); targets != nil {
-		shmalloc.ContextFree(context, unsafe.Pointer(targets), unsafe.Sizeof(layout.ModuleDeviceTarget{})*uintptr(module.DeviceTargetCount))
+		shmalloc.ContextFreeLocked(context, unsafe.Pointer(targets), unsafe.Sizeof(layout.ModuleDeviceTarget{})*uintptr(module.DeviceTargetCount))
 	}
 	if first := module.ObjectLinks.Get(); first != nil {
 		links := unsafe.Slice(first, module.ObjectLinkCount)
 		for idx := range links {
 			freeCounterStorage(links[idx].CounterStorage.Get())
 		}
-		shmalloc.ContextFree(context, unsafe.Pointer(first), unsafe.Sizeof(layout.ModuleObjectLinkEctx{})*uintptr(module.ObjectLinkCount))
+		shmalloc.ContextFreeLocked(context, unsafe.Pointer(first), unsafe.Sizeof(layout.ModuleObjectLinkEctx{})*uintptr(module.ObjectLinkCount))
 	}
 	if prepared := module.ModulePrepared.Get(); prepared != nil {
 		dp := cp.DpConfig.Get()
 		descriptor := &unsafe.Slice(dp.DpModules.Get(), dp.ModuleCount)[module.CpModule.Get().DpModuleIdx]
-		shmalloc.ContextFree(context, unsafe.Pointer(prepared), uintptr(descriptor.PreparedSize))
+		shmalloc.ContextFreeLocked(context, unsafe.Pointer(prepared), uintptr(descriptor.PreparedSize))
 	}
-	shmalloc.ContextFree(context, unsafe.Pointer(module), unsafe.Sizeof(layout.ModuleEctx{}))
+	shmalloc.ContextFreeLocked(context, unsafe.Pointer(module), unsafe.Sizeof(layout.ModuleEctx{}))
 }

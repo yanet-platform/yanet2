@@ -37,7 +37,7 @@ func spawnCounterStorage(context *layout.MemoryContext, old *layout.CounterStora
 		atomic.AddUint64(&old.Refcnt, 1)
 		return old
 	}
-	block := shmalloc.ContextAlloc(context, unsafe.Sizeof(layout.CounterStorage{}))
+	block := shmalloc.ContextAllocLocked(context, unsafe.Sizeof(layout.CounterStorage{}))
 	if block == nil {
 		return nil
 	}
@@ -55,7 +55,7 @@ func spawnCounterStorage(context *layout.MemoryContext, old *layout.CounterStora
 			count = max(count, old.Pools[pool].BlockCount)
 		}
 		entry := &storage.Pools[pool]
-		table := shmalloc.ContextAlloc(context, uintptr(count)*pointerSize)
+		table := shmalloc.ContextAllocLocked(context, uintptr(count)*pointerSize)
 		if table == nil && count > 0 {
 			return nil
 		}
@@ -81,7 +81,7 @@ func spawnCounterStorage(context *layout.MemoryContext, old *layout.CounterStora
 			}
 		}
 		for idx := shared; idx < count; idx++ {
-			fresh := shmalloc.ContextAlloc(context, unsafe.Sizeof(layout.CounterStorageBlock{}))
+			fresh := shmalloc.ContextAllocLocked(context, unsafe.Sizeof(layout.CounterStorageBlock{}))
 			if fresh == nil {
 				return nil
 			}
@@ -89,7 +89,7 @@ func spawnCounterStorage(context *layout.MemoryContext, old *layout.CounterStora
 			blockView := (*layout.CounterStorageBlock)(fresh)
 			blockView.Refcnt = 1
 			blocks[idx].Set(blockView)
-			page := shmalloc.ContextAlloc(context, uintptr(counterPageSize))
+			page := shmalloc.ContextAllocLocked(context, uintptr(counterPageSize))
 			if page == nil {
 				return nil
 			}
@@ -99,7 +99,7 @@ func spawnCounterStorage(context *layout.MemoryContext, old *layout.CounterStora
 	}
 
 	handleSize := unsafe.Sizeof(shm.Ptr[byte]{})
-	handles := shmalloc.ContextAlloc(context, uintptr(registry.Count)*handleSize)
+	handles := shmalloc.ContextAllocLocked(context, uintptr(registry.Count)*handleSize)
 	if handles == nil && registry.Count > 0 {
 		return nil
 	}
@@ -134,12 +134,12 @@ func storageRegistryItems(registry *layout.CpConfigCounterStorageRegistry) []lay
 
 func storageRegistryInit(context *layout.MemoryContext, registry *layout.CpConfigCounterStorageRegistry) error {
 	itemSize := unsafe.Sizeof(layout.CpCounterStorage{})
-	items := shmalloc.ContextAlloc(context, itemSize*storageRegistryPrealloc)
+	items := shmalloc.ContextAllocLocked(context, itemSize*storageRegistryPrealloc)
 	if items == nil {
 		return fmt.Errorf("allocate counter storage registry: %w", ErrNoMemory)
 	}
 	if !hashIndexInit(&registry.TagIndex, context, storageRegistryPrealloc) {
-		shmalloc.ContextFree(context, items, itemSize*storageRegistryPrealloc)
+		shmalloc.ContextFreeLocked(context, items, itemSize*storageRegistryPrealloc)
 		return fmt.Errorf("allocate counter storage index: %w", ErrNoMemory)
 	}
 	registry.Items.Set((*layout.CpCounterStorage)(items))
@@ -170,7 +170,7 @@ func storageRegistryInsert(registry *layout.CpConfigCounterStorageRegistry, tags
 	itemSize := unsafe.Sizeof(layout.CpCounterStorage{})
 	if registry.Count == registry.Capacity {
 		context := registry.MemoryContext.Get()
-		block := shmalloc.ContextAlloc(context, itemSize*uintptr(registry.Capacity*2))
+		block := shmalloc.ContextAllocLocked(context, itemSize*uintptr(registry.Capacity*2))
 		if block == nil {
 			return fmt.Errorf("allocate counter storage registry: %w", ErrNoMemory)
 		}
@@ -181,7 +181,7 @@ func storageRegistryInsert(registry *layout.CpConfigCounterStorageRegistry, tags
 			grown[idx].TagCount = old[idx].TagCount
 			grown[idx].Storage.Set(old[idx].Storage.Get())
 		}
-		shmalloc.ContextFree(context, unsafe.Pointer(&old[0]), itemSize*uintptr(registry.Count))
+		shmalloc.ContextFreeLocked(context, unsafe.Pointer(&old[0]), itemSize*uintptr(registry.Count))
 		registry.Items.Set(&grown[0])
 		registry.Capacity *= 2
 	}

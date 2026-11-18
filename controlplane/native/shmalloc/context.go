@@ -75,7 +75,16 @@ func ContextFini(context *layout.MemoryContext) {
 // ContextAlloc returns a block of size bytes from the context's allocator
 // and counts it against the context, or nil.
 func ContextAlloc(context *layout.MemoryContext, size uintptr) unsafe.Pointer {
-	block := Alloc(context.BlockAllocator.Get(), size)
+	allocator := context.BlockAllocator.Get()
+	Lock(allocator)
+	defer Unlock(allocator)
+	return ContextAllocLocked(context, size)
+}
+
+// ContextAllocLocked is ContextAlloc for a caller holding the lock of the
+// context's allocator.
+func ContextAllocLocked(context *layout.MemoryContext, size uintptr) unsafe.Pointer {
+	block := AllocLocked(context.BlockAllocator.Get(), size)
 	if block == nil {
 		return nil
 	}
@@ -86,12 +95,21 @@ func ContextAlloc(context *layout.MemoryContext, size uintptr) unsafe.Pointer {
 
 // ContextFree returns a block ContextAlloc gave.
 func ContextFree(context *layout.MemoryContext, block unsafe.Pointer, size uintptr) {
+	allocator := context.BlockAllocator.Get()
+	Lock(allocator)
+	defer Unlock(allocator)
+	ContextFreeLocked(context, block, size)
+}
+
+// ContextFreeLocked is ContextFree for a caller holding the lock of the
+// context's allocator.
+func ContextFreeLocked(context *layout.MemoryContext, block unsafe.Pointer, size uintptr) {
 	if block == nil || size == 0 {
 		return
 	}
 	atomic.AddUint64(&context.BfreeCount, 1)
 	atomic.AddUint64(&context.BfreeSize, uint64(size))
-	Free(context.BlockAllocator.Get(), block, size)
+	FreeLocked(context.BlockAllocator.Get(), block, size)
 }
 
 // ContextRealloc moves a block to one of newSize bytes, keeping the bytes

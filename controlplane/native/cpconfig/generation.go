@@ -159,6 +159,15 @@ func lookupModule(registry *layout.CpModuleRegistry, moduleType, name string) *l
 // UpsertModule puts a module configuration into the registry, replacing
 // the one of its type and name, whose counters it continues.
 func UpsertModule(registry *layout.CpModuleRegistry, module *layout.CpModule) error {
+	allocator := &registry.EntityRegistry.Registry.Owner.Get().BlockAllocator
+	shmalloc.Lock(allocator)
+	defer shmalloc.Unlock(allocator)
+	return upsertModule(registry, module)
+}
+
+// upsertModule is UpsertModule for a caller holding the instance's
+// allocator lock.
+func upsertModule(registry *layout.CpModuleRegistry, module *layout.CpModule) error {
 	moduleType, name := shm.String(module.Type[:]), shm.String(module.Name[:])
 	old := lookupModule(registry, moduleType, name)
 	var oldCounters *layout.CounterRegistry
@@ -235,7 +244,15 @@ func counterInsert(registry *layout.CounterRegistry, name string, size uint64, a
 // NewGeneration copies a generation into a fresh one numbered after it:
 // every registry holds the same items with one more reference each.
 func NewGeneration(cp *layout.CpConfig, old *layout.CpConfigGen) (*layout.CpConfigGen, error) {
-	block := shmalloc.ContextAlloc(&cp.MemoryContext, unsafe.Sizeof(layout.CpConfigGen{}))
+	shmalloc.Lock(&cp.BlockAllocator)
+	defer shmalloc.Unlock(&cp.BlockAllocator)
+	return newGeneration(cp, old)
+}
+
+// newGeneration is NewGeneration for a caller holding the instance's
+// allocator lock.
+func newGeneration(cp *layout.CpConfig, old *layout.CpConfigGen) (*layout.CpConfigGen, error) {
+	block := shmalloc.ContextAllocLocked(&cp.MemoryContext, unsafe.Sizeof(layout.CpConfigGen{}))
 	if block == nil {
 		return nil, fmt.Errorf("allocate generation: %w", ErrNoMemory)
 	}

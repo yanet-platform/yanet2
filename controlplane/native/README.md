@@ -69,16 +69,19 @@ same bytes.
 | Operation | cgo | native |
 |---|---|---|
 | Build a decap configuration of 256 prefixes | 35.9 µs | 11.8 µs |
-| Build and publish it until every worker runs it | 45.8 µs | 19.8 µs |
-| Build and publish one blackhole configuration | 7.9 µs | 8.1 µs |
+| Build and publish it until every worker runs it | 46.2 µs | 18.8 µs |
+| Build and publish one blackhole configuration | 7.9 µs | 6.5 µs |
 
 - Building per item through cgo pays a call per prefix; native code pays none.
 - About half of a C publish goes to the counter storages' tag sets: every storage of
   every worker is found and registered under up to 16 fixed 160-byte tags, encoded,
   sorted and hashed anew on each publish. Go writes the same tags, but encodes each path's
   set once and remembers it, since the names along a path do not change.
+- A publish allocates and frees about 140 blocks of shared memory. C takes the allocator
+  lock for each; Go takes it once to build the generation and once to release the old
+  one, allocating the same blocks in the same order.
 - Delivered by an assigner thread instead, as a real dataplane's workers take contexts
-  on their own cores, the native blackhole publish takes 11.2 µs.
+  on their own cores, the native blackhole publish takes 10.7 µs.
 - Allocations per blackhole publish: 46 small objects, 624 bytes.
 
 ## Facts the port depends on

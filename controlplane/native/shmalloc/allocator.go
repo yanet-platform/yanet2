@@ -102,18 +102,37 @@ func borrow(allocator *layout.BlockAllocator, pool int) {
 	poison(data, linkSize)
 }
 
+// Lock takes an allocator's lock for a series of AllocLocked and
+// FreeLocked calls, as a whole build or release of a generation makes.
+//
+// Until Unlock the holder must not wait for a lock whose holder may wait
+// for this allocator, such as an instance's agent, generation or
+// configuration lock; another allocator's lock or a process-local mutex
+// is safe.
+func Lock(allocator *layout.BlockAllocator) {
+	shm.LockByte(&allocator.Lock.Locked)
+}
+
+// Unlock releases an allocator's lock Lock took.
+func Unlock(allocator *layout.BlockAllocator) {
+	shm.UnlockByte(&allocator.Lock.Locked)
+}
+
 // Alloc returns a block of at least size bytes, or nil when no free block
 // is large enough. The block's bytes are left as they were.
 func Alloc(allocator *layout.BlockAllocator, size uintptr) unsafe.Pointer {
+	Lock(allocator)
+	defer Unlock(allocator)
+	return AllocLocked(allocator, size)
+}
+
+// AllocLocked is Alloc for a caller holding the allocator's lock.
+func AllocLocked(allocator *layout.BlockAllocator, size uintptr) unsafe.Pointer {
 	if size == 0 || size > MaxSize {
 		return nil
 	}
 	size += 2 * RedZone
 	pool := poolIndex(size)
-
-	shm.LockByte(&allocator.Lock.Locked)
-	defer shm.UnlockByte(&allocator.Lock.Locked)
-
 	mask := allocator.NotEmptyMask >> pool
 	if mask == 0 {
 		return nil
@@ -143,11 +162,16 @@ func put(allocator *layout.BlockAllocator, block unsafe.Pointer, size uintptr) {
 // Free returns a block of size bytes that Alloc gave; size must be the
 // size it was asked for.
 func Free(allocator *layout.BlockAllocator, block unsafe.Pointer, size uintptr) {
+	Lock(allocator)
+	defer Unlock(allocator)
+	FreeLocked(allocator, block, size)
+}
+
+// FreeLocked is Free for a caller holding the allocator's lock.
+func FreeLocked(allocator *layout.BlockAllocator, block unsafe.Pointer, size uintptr) {
 	if size == 0 {
 		return
 	}
-	shm.LockByte(&allocator.Lock.Locked)
-	defer shm.UnlockByte(&allocator.Lock.Locked)
 	put(allocator, unsafe.Add(block, -RedZone), size+2*RedZone)
 }
 

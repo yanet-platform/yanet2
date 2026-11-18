@@ -27,6 +27,15 @@ const (
 // device to module, whose counter storages continue those old has at the
 // same places. The caller holds the instance's configuration lock.
 func BuildWorkerContexts(gen, old *layout.CpConfigGen, workerCount uint64) (*shm.Ptr[layout.ConfigGenEctx], error) {
+	allocator := &gen.CpConfig.Get().BlockAllocator
+	shmalloc.Lock(allocator)
+	defer shmalloc.Unlock(allocator)
+	return buildWorkerContexts(gen, old, workerCount)
+}
+
+// buildWorkerContexts is BuildWorkerContexts for a caller holding the
+// instance's allocator lock.
+func buildWorkerContexts(gen, old *layout.CpConfigGen, workerCount uint64) (*shm.Ptr[layout.ConfigGenEctx], error) {
 	if workerCount == 0 {
 		return nil, fmt.Errorf("cannot build execution context for zero workers")
 	}
@@ -46,7 +55,7 @@ func BuildWorkerContexts(gen, old *layout.CpConfigGen, workerCount uint64) (*shm
 			for idx := range worker {
 				freeRoot(cp, roots[idx].Get())
 			}
-			shmalloc.ContextFree(&cp.EctxMemoryContext, block, pointerSize*uintptr(workerCount))
+			shmalloc.ContextFreeLocked(&cp.EctxMemoryContext, block, pointerSize*uintptr(workerCount))
 			return nil, fmt.Errorf("build execution context of worker %d: %w", worker, err)
 		}
 		roots[worker].Set(root)
@@ -126,7 +135,7 @@ func (m *contextBuilder) root() (*layout.ConfigGenEctx, error) {
 		tree.DevicePtrs.Set(&devicePtrs[0])
 	}
 
-	egress := unsafe.Slice((*uint16)(shmalloc.ContextAlloc(&m.cp.EctxMemoryContext, 2*uintptr(deviceCount))), deviceCount)
+	egress := unsafe.Slice((*uint16)(shmalloc.ContextAllocLocked(&m.cp.EctxMemoryContext, 2*uintptr(deviceCount))), deviceCount)
 	for idx := range egress {
 		egress[idx] = noPort
 	}
@@ -136,7 +145,7 @@ func (m *contextBuilder) root() (*layout.ConfigGenEctx, error) {
 
 	ports := m.dp.DpTopology.DeviceCount
 	tree.TxBucketCount = uint32(ports)
-	buckets := unsafe.Slice((*layout.PacketList)(shmalloc.ContextAlloc(&m.cp.EctxMemoryContext,
+	buckets := unsafe.Slice((*layout.PacketList)(shmalloc.ContextAllocLocked(&m.cp.EctxMemoryContext,
 		unsafe.Sizeof(layout.PacketList{})*uintptr(ports))), ports)
 	for idx := range buckets {
 		clear(unsafe.Slice((*byte)(unsafe.Pointer(&buckets[idx])), unsafe.Sizeof(layout.PacketList{})))
@@ -145,7 +154,7 @@ func (m *contextBuilder) root() (*layout.ConfigGenEctx, error) {
 		tree.TxBuckets.Set(&buckets[0])
 	}
 
-	registry := (*layout.CpConfigCounterStorageRegistry)(shmalloc.ContextAlloc(&m.cp.MemoryContext,
+	registry := (*layout.CpConfigCounterStorageRegistry)(shmalloc.ContextAllocLocked(&m.cp.MemoryContext,
 		unsafe.Sizeof(layout.CpConfigCounterStorageRegistry{})))
 	if registry == nil {
 		return nil, fmt.Errorf("allocate counter storage registry: %w", ErrNoMemory)
@@ -194,7 +203,7 @@ func (m *contextBuilder) root() (*layout.ConfigGenEctx, error) {
 	}
 
 	tree.BackingRegistryCount = ports
-	backing := unsafe.Slice((*uint16)(shmalloc.ContextAlloc(&m.cp.EctxMemoryContext, 2*uintptr(ports))), ports)
+	backing := unsafe.Slice((*uint16)(shmalloc.ContextAllocLocked(&m.cp.EctxMemoryContext, 2*uintptr(ports))), ports)
 	for idx := range backing {
 		backing[idx] = noPort
 	}
@@ -284,7 +293,7 @@ func (m *contextBuilder) entry(device *layout.DeviceEctx, handler shm.Local, ent
 		return nil, fmt.Errorf("allocate device entry context: %w", ErrNoMemory)
 	}
 	context.Handler = handler
-	ptrsBlock := shmalloc.ContextAlloc(&m.cp.EctxMemoryContext, pointerSize*uintptr(entry.PipelineCount))
+	ptrsBlock := shmalloc.ContextAllocLocked(&m.cp.EctxMemoryContext, pointerSize*uintptr(entry.PipelineCount))
 	context.PipelineCount = entry.PipelineCount
 	if entry.PipelineCount == 0 {
 		return context, nil
@@ -368,7 +377,7 @@ func (m *contextBuilder) function(device *layout.DeviceEctx, pipeline *layout.Pi
 	}
 	context.CpFunction.Set(function)
 	context.ChainMapSize = weightSum
-	ptrsBlock := shmalloc.ContextAlloc(&m.cp.EctxMemoryContext, pointerSize*uintptr(function.ChainCount))
+	ptrsBlock := shmalloc.ContextAllocLocked(&m.cp.EctxMemoryContext, pointerSize*uintptr(function.ChainCount))
 	if ptrsBlock == nil {
 		return nil, fmt.Errorf("allocate chains of function %q: %w", shm.String(function.Name[:]), ErrNoMemory)
 	}
@@ -481,7 +490,7 @@ func (m *contextBuilder) module(device *layout.DeviceEctx, path pathNames, modul
 		storages := unsafe.Slice((*shm.Ptr[layout.CounterStorage])(m.alloc(pointerSize*uintptr(len(registries)))), len(registries))
 		context.RuntimeCounterStorageCount = uint64(len(registries))
 		context.RuntimeCounterStorages.Set(&storages[0])
-		absolute := shmalloc.ContextAlloc(&m.cp.EctxMemoryContext, pointerSize*uintptr(len(registries)))
+		absolute := shmalloc.ContextAllocLocked(&m.cp.EctxMemoryContext, pointerSize*uintptr(len(registries)))
 		context.AbsRuntimeCounterStorages.Set((*shm.Ptr[layout.CounterStorage])(absolute))
 		for idx := range registries {
 			entry := registries[idx].Get()
@@ -560,7 +569,7 @@ func (m *contextBuilder) link(devices []shm.Ptr[layout.DeviceEctx]) {
 
 func (m *contextBuilder) linkModule(devices []shm.Ptr[layout.DeviceEctx], owner *layout.DeviceEctx, context *layout.ModuleEctx) {
 	module := context.CpModule.Get()
-	targets := unsafe.Slice((*layout.ModuleDeviceTarget)(shmalloc.ContextAlloc(&m.cp.EctxMemoryContext,
+	targets := unsafe.Slice((*layout.ModuleDeviceTarget)(shmalloc.ContextAllocLocked(&m.cp.EctxMemoryContext,
 		unsafe.Sizeof(layout.ModuleDeviceTarget{})*uintptr(module.DeviceCount))), module.DeviceCount)
 	for idx := range targets {
 		targets[idx].DeviceId = noPort
@@ -639,7 +648,7 @@ func hashStringPair(first, second string) uint64 {
 // zeroedAlloc allocates size bytes from a context and zeroes them, or
 // returns nil.
 func zeroedAlloc(context *layout.MemoryContext, size uintptr) unsafe.Pointer {
-	block := shmalloc.ContextAlloc(context, size)
+	block := shmalloc.ContextAllocLocked(context, size)
 	if block != nil {
 		clear(unsafe.Slice((*byte)(block), size))
 	}

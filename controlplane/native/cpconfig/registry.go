@@ -104,7 +104,7 @@ func hashIndexInit(index *layout.HashIndex, context *layout.MemoryContext, capac
 		return capacity == 0
 	}
 	slots := uintptr(capacity) * hashIndexSparseFactor
-	block := shmalloc.ContextAlloc(context, slots*unsafe.Sizeof(layout.HashIndexEntry{}))
+	block := shmalloc.ContextAllocLocked(context, slots*unsafe.Sizeof(layout.HashIndexEntry{}))
 	if block == nil {
 		index.Entries.Set(nil)
 		index.Capacity = 0
@@ -124,7 +124,7 @@ func hashIndexFini(index *layout.HashIndex) {
 	if entries == nil {
 		return
 	}
-	shmalloc.ContextFree(index.MemoryContext.Get(), unsafe.Pointer(&entries[0]),
+	shmalloc.ContextFreeLocked(index.MemoryContext.Get(), unsafe.Pointer(&entries[0]),
 		uintptr(len(entries))*unsafe.Sizeof(layout.HashIndexEntry{}),
 	)
 	index.Entries.Set(nil)
@@ -142,7 +142,7 @@ func hashIndexRehash(index *layout.HashIndex, capacity uint32) bool {
 	context := index.MemoryContext.Get()
 	slots := capacity * hashIndexSparseFactor
 	entrySize := unsafe.Sizeof(layout.HashIndexEntry{})
-	block := shmalloc.ContextAlloc(context, uintptr(slots)*entrySize)
+	block := shmalloc.ContextAllocLocked(context, uintptr(slots)*entrySize)
 	if block == nil {
 		return false
 	}
@@ -162,7 +162,7 @@ func hashIndexRehash(index *layout.HashIndex, capacity uint32) bool {
 	index.Entries.Set(&fresh[0])
 	index.Capacity = capacity
 	if old != nil {
-		shmalloc.ContextFree(context, unsafe.Pointer(&old[0]), uintptr(len(old))*entrySize)
+		shmalloc.ContextFreeLocked(context, unsafe.Pointer(&old[0]), uintptr(len(old))*entrySize)
 	}
 	return true
 }
@@ -297,7 +297,7 @@ func registryInit(context *layout.MemoryContext, owner *layout.CpConfig, registr
 	registry.Owner.Set(owner)
 	registry.Capacity = capacity
 	slotSize := unsafe.Sizeof(shm.Ptr[layout.RegistryItem]{})
-	block := shmalloc.ContextAlloc(context, slotSize*uintptr(capacity))
+	block := shmalloc.ContextAllocLocked(context, slotSize*uintptr(capacity))
 	if block == nil {
 		return false
 	}
@@ -308,7 +308,7 @@ func registryInit(context *layout.MemoryContext, owner *layout.CpConfig, registr
 	}
 	if !hashIndexInit(&registry.KeyIndex, context, uint32(capacity)) {
 		registry.Items.Set(nil)
-		shmalloc.ContextFree(context, block, slotSize*uintptr(capacity))
+		shmalloc.ContextFreeLocked(context, block, slotSize*uintptr(capacity))
 		return false
 	}
 	return true
@@ -351,7 +351,7 @@ func registryExtend(registry *layout.Registry) bool {
 		capacity = 1
 	}
 	slotSize := unsafe.Sizeof(shm.Ptr[layout.RegistryItem]{})
-	block := shmalloc.ContextAlloc(context, slotSize*uintptr(capacity))
+	block := shmalloc.ContextAllocLocked(context, slotSize*uintptr(capacity))
 	if block == nil {
 		return false
 	}
@@ -366,7 +366,7 @@ func registryExtend(registry *layout.Registry) bool {
 		registryFreePush(registry, idx-1)
 	}
 	if len(old) > 0 {
-		shmalloc.ContextFree(context, unsafe.Pointer(&old[0]), slotSize*uintptr(oldCapacity))
+		shmalloc.ContextFreeLocked(context, unsafe.Pointer(&old[0]), slotSize*uintptr(oldCapacity))
 	}
 	registry.Capacity = capacity
 	return true

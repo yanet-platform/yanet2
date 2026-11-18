@@ -13,6 +13,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/native/agent"
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
 	"github.com/yanet-platform/yanet2/controlplane/native/shm"
+	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
 	"github.com/yanet-platform/yanet2/controlplane/native/zone"
 )
 
@@ -58,16 +59,31 @@ func UpdateModules(instance *zone.Instance, modules []*layout.CpModule, options 
 		return err
 	}
 	old := cp.CpConfigGen.Get()
-	gen, err := NewGeneration(cp, old)
+	gen, err := buildGeneration(cp, dp, old, modules)
+	releaseOwners(owners)
 	if err != nil {
-		releaseOwners(owners)
 		return err
 	}
+	install(cp, dp, gen, old, opts.Deliver)
+	return nil
+}
+
+// buildGeneration copies a generation, puts the module configurations
+// into the copy and builds its workers' contexts, or frees what it built.
+//
+// It holds the instance's allocator lock once for all of it, rather than
+// once per block as each allocation would.
+func buildGeneration(cp *layout.CpConfig, dp *layout.DpConfig, old *layout.CpConfigGen, modules []*layout.CpModule) (*layout.CpConfigGen, error) {
+	shmalloc.Lock(&cp.BlockAllocator)
+	defer shmalloc.Unlock(&cp.BlockAllocator)
+	gen, err := newGeneration(cp, old)
+	if err != nil {
+		return nil, err
+	}
 	for _, module := range modules {
-		if err := UpsertModule(&gen.ModuleRegistry, module); err != nil {
+		if err := upsertModule(&gen.ModuleRegistry, module); err != nil {
 			freeGeneration(cp, gen)
-			releaseOwners(owners)
-			return fmt.Errorf("upsert module %s:%s: %w", shm.String(module.Type[:]), shm.String(module.Name[:]), err)
+			return nil, fmt.Errorf("upsert module %s:%s: %w", shm.String(module.Type[:]), shm.String(module.Name[:]), err)
 		}
 	}
 	for _, module := range modules {
@@ -77,13 +93,18 @@ func UpdateModules(instance *zone.Instance, modules []*layout.CpModule, options 
 		for _, linked := range unsafe.Slice(module.Objects.Get(), module.ObjectCount) {
 			if _, ok := lookupObject(gen, shm.String(linked.Type[:]), shm.String(linked.Name[:])); !ok {
 				freeGeneration(cp, gen)
-				releaseOwners(owners)
-				return fmt.Errorf("linked object %s:%s not found", shm.String(linked.Type[:]), shm.String(linked.Name[:]))
+				return nil, fmt.Errorf("linked object %s:%s not found", shm.String(linked.Type[:]), shm.String(linked.Name[:]))
 			}
 		}
 	}
-	releaseOwners(owners)
-	return install(cp, dp, gen, old, opts.Deliver)
+	roots, err := buildWorkerContexts(gen, old, dp.WorkerCount)
+	if err != nil {
+		freeGeneration(cp, gen)
+		return nil, err
+	}
+	gen.ConfigGenEctxs.Set(roots)
+	gen.ConfigGenEctxCount = dp.WorkerCount
+	return gen, nil
 }
 
 // holdOwners checks that every module's agent is still current and holds
@@ -128,17 +149,9 @@ func releaseOwners(owners []*layout.Agent) {
 	}
 }
 
-// install builds the workers' contexts of a generation, publishes it,
-// waits until every worker runs it and retires the one it replaces.
-func install(cp *layout.CpConfig, dp *layout.DpConfig, gen, old *layout.CpConfigGen, deliver Deliver) error {
-	roots, err := BuildWorkerContexts(gen, old, dp.WorkerCount)
-	if err != nil {
-		freeGeneration(cp, gen)
-		return err
-	}
-	gen.ConfigGenEctxs.Set(roots)
-	gen.ConfigGenEctxCount = dp.WorkerCount
-
+// install publishes a built generation, waits until every worker runs it
+// and retires the one it replaces.
+func install(cp *layout.CpConfig, dp *layout.DpConfig, gen, old *layout.CpConfigGen, deliver Deliver) {
 	shm.LockByte(&cp.GenLock.Locked)
 	cp.CpConfigGen.Store(gen)
 	shm.UnlockByte(&cp.GenLock.Locked)
@@ -147,8 +160,15 @@ func install(cp *layout.CpConfig, dp *layout.DpConfig, gen, old *layout.CpConfig
 		deliver(dp, gen)
 	}
 	waitForWorkers(dp, gen)
+	release(cp, old)
+}
+
+// release retires a replaced generation under one hold of the instance's
+// allocator lock.
+func release(cp *layout.CpConfig, old *layout.CpConfigGen) {
+	shmalloc.Lock(&cp.BlockAllocator)
+	defer shmalloc.Unlock(&cp.BlockAllocator)
 	retire(cp, old)
-	return nil
 }
 
 // waitForWorkers returns once every worker took its context of the
