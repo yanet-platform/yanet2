@@ -3,7 +3,7 @@
 use core::{fmt, marker::PhantomData, mem::forget};
 
 use super::{
-    Brand, Build, BuildError, Free, Kind, MemoryContext, OwnedSlice, Owner, Refusal, Scope, ShmLayout, Taken, refused,
+    Brand, Build, BuildError, Free, Kind, MemoryContext, OwnedSlice, Owner, Refusal, Scope, ShmLayout, ShmRoot, refused,
 };
 
 type Invariant<T> = PhantomData<fn(T) -> T>;
@@ -78,17 +78,27 @@ impl<'slot, 'b, T: Build, W: Owner> Place<'slot, 'b, T, W> {
 
 impl<'slot, 'b, T: Build, W: Owner, const N: usize> Place<'slot, 'b, [T; N], W> {
     pub(super) fn write_array(self, parts: [T::Parts<'b, W>; N]) -> Result<Init<'slot, [T; N]>, Refusal> {
-        // SAFETY: the empty prefix owns no elements yet.
-        let mut prefix = unsafe { Run::<T, W>::new(self.addr, 0, self.memory) };
+        let mut prefix = Run::<T, W> {
+            memory: self.memory,
+            addr: self.addr,
+            written: 0,
+            _element: PhantomData,
+        };
         // The iterator owns the unused parts and drops them before the prefix.
         for part in parts {
             let addr = self.addr + prefix.written * size_of::<T>();
-            // SAFETY: the iterator submits exactly one part per array element.
-            unsafe { Slot::<T, W>::write(addr, self.memory, part)? };
+            // Each part is paired with one still unwritten array element.
+            Slot::<T, W> {
+                addr,
+                memory: self.memory,
+                initialized: false,
+                _value: PhantomData,
+            }
+            .write(part)?;
             prefix.written += 1;
         }
         forget(prefix);
-        // SAFETY: the array has taken ownership of all its initialized fields.
+        // SAFETY: each array element has supplied its initialization receipt.
         Ok(unsafe { self.assume_init() })
     }
 }
@@ -168,12 +178,7 @@ impl<'slot, 'b, T: Build, W: Owner> RecordPlace<'slot, 'b, T, W> {
     /// Writes the fields certified by the record implementation.
     #[inline]
     pub fn write<F: fields::List>(self, fields: F, parts: F::Parts<'b, W>) -> Result<Init<'slot, T>, Refusal> {
-        let Self(place) = self;
-        // SAFETY: the record certifies every field of this exclusive place.
-        let (written, _) = unsafe { fields.write_at(place.addr, place.memory, parts, ((), ()))? };
-        forget(written);
-        // SAFETY: all fields are initialized and owned by the record.
-        Ok(unsafe { place.assume_init() })
+        fields::write_record(fields, self, parts)
     }
 }
 
@@ -186,17 +191,46 @@ impl<T: ShmLayout, W: Owner> RecordTaken<'_, T, W> {
     /// Releases the certified fields in declaration order.
     #[inline]
     pub fn free<F: fields::List>(self, fields: F) {
-        let Self(value) = self;
-        // SAFETY: the record certifies every field of this exclusive value.
-        unsafe { fields::release_record(fields, value) };
+        fields::release_record(fields, self);
     }
 }
 
 mod fields {
-    use super::{Build, MemoryContext, Owner, RecordField, Refusal, Run, ShmLayout, Taken};
+    use core::{marker::PhantomData, mem::forget};
+
+    use super::{
+        Build, Init, MemoryContext, Owner, RecordField, RecordPlace, RecordTaken, Refusal, Run, ShmLayout, Slot, Taken,
+    };
 
     pub struct Written<'b, T: Build, W: Owner> {
         _guard: Run<'b, T, W>,
+    }
+
+    /// Exclusive write destinations for one certified subtree.
+    pub struct Write<'b, F, W: Owner> {
+        fields: F,
+        addr: usize,
+        memory: &'b MemoryContext<'b, W>,
+    }
+
+    #[inline]
+    pub(super) fn write_record<'slot, 'b, F: List, T: Build, W: Owner>(
+        fields: F,
+        RecordPlace(place): RecordPlace<'slot, 'b, T, W>,
+        parts: F::Parts<'b, W>,
+    ) -> Result<Init<'slot, T>, Refusal> {
+        let (written, _) = F::write(
+            Write {
+                fields,
+                addr: place.addr,
+                memory: place.memory,
+            },
+            parts,
+            ((), ()),
+        )?;
+        forget(written);
+        // SAFETY: the certified traversal initialized the complete record.
+        Ok(unsafe { place.assume_init() })
     }
 
     /// Exclusive release rights for one certified subtree.
@@ -206,15 +240,15 @@ mod fields {
         memory: &'a MemoryContext<'a, W>,
     }
 
-    /// # Safety
-    ///
-    /// The tree describes distinct, initialized fields of the owned value,
-    /// with their exact types and offsets, in declaration order.
-    pub(super) unsafe fn release_record<F: List, T: ShmLayout, W: Owner>(fields: F, value: Taken<'_, T, W>) {
+    #[inline]
+    pub(super) fn release_record<F: List, T: ShmLayout, W: Owner>(
+        fields: F,
+        RecordTaken(value): RecordTaken<'_, T, W>,
+    ) {
         F::release(Release {
             fields,
-            addr: value.addr(),
-            memory: value.memory(),
+            addr: value.addr,
+            memory: value.memory,
         });
     }
 
@@ -226,18 +260,13 @@ mod fields {
 
         /// Stages initialized fields in reverse teardown order. `state`
         /// owns prior writes followed by unsubmitted parts after this group.
-        ///
-        /// # Safety
-        ///
-        /// The entries describe distinct unwritten fields of the parent at
-        /// `addr` from `memory`.
-        unsafe fn write_at<'b, W: Owner, P, L>(
-            self,
-            addr: usize,
-            memory: &'b MemoryContext<'b, W>,
+        fn write<'b, W: Owner, P, L>(
+            destination: Write<'b, Self, W>,
             parts: Self::Parts<'b, W>,
             state: (P, L),
-        ) -> Staged<Self::Written<'b, W>, P, L>;
+        ) -> Staged<Self::Written<'b, W>, P, L>
+        where
+            Self: Sized;
 
         /// Releases the listed fields in declaration order.
         fn release<W: Owner>(release: Release<'_, Self, W>)
@@ -249,25 +278,35 @@ mod fields {
         type Parts<'b, W: Owner> = T::Parts<'b, W>;
         type Written<'b, W: Owner> = Written<'b, T, W>;
 
-        unsafe fn write_at<'b, W: Owner, P, L>(
-            self,
-            addr: usize,
-            memory: &'b MemoryContext<'b, W>,
+        fn write<'b, W: Owner, P, L>(
+            Write { fields, addr, memory }: Write<'b, Self, W>,
             parts: Self::Parts<'b, W>,
             state: (P, L),
         ) -> Staged<Self::Written<'b, W>, P, L> {
-            let field = addr + self.offset;
-            // SAFETY: the record certifies this field. Its slot rolls back
-            // before prior writes and then unused parts on failure.
-            unsafe {
-                memory.write_at::<T>(field, parts)?;
-                Ok((Written { _guard: Run::new(field, 1, memory) }, state))
+            let addr = addr + fields.offset;
+            // The current slot rolls back before prior writes and unused parts.
+            Slot::<T, W> {
+                addr,
+                memory,
+                initialized: false,
+                _value: PhantomData,
             }
+            .write(parts)?;
+            let guard = Run {
+                memory,
+                addr,
+                written: 1,
+                _element: PhantomData,
+            };
+            Ok((Written { _guard: guard }, state))
         }
 
         fn release<W: Owner>(Release { fields, addr, memory }: Release<'_, Self, W>) {
-            // SAFETY: the certificate owns this exact initialized field.
-            T::free(unsafe { Taken::new(addr + fields.offset, memory) });
+            T::free(Taken {
+                addr: addr + fields.offset,
+                memory,
+                _value: PhantomData,
+            });
         }
     }
 
@@ -276,23 +315,23 @@ mod fields {
         type Parts<'b, W: Owner> = (B::Parts<'b, W>, A::Parts<'b, W>);
         type Written<'b, W: Owner> = (B::Written<'b, W>, A::Written<'b, W>);
 
-        unsafe fn write_at<'b, W: Owner, P, L>(
-            self,
-            addr: usize,
-            memory: &'b MemoryContext<'b, W>,
+        fn write<'b, W: Owner, P, L>(
+            Write { fields: (left, right), addr, memory }: Write<'b, Self, W>,
             (right_parts, left_parts): Self::Parts<'b, W>,
             (prior, later): (P, L),
         ) -> Staged<Self::Written<'b, W>, P, L> {
-            let (left, right) = self;
-            // SAFETY: each group owns distinct slots, in declaration order.
             // Hand off the rest of the rollback state before starting a group.
-            unsafe {
-                let (left, (prior, (later, right_parts))) =
-                    left.write_at(addr, memory, left_parts, (prior, (later, right_parts)))?;
-                let (right, ((left, prior), later)) =
-                    right.write_at(addr, memory, right_parts, ((left, prior), later))?;
-                Ok(((right, left), (prior, later)))
-            }
+            let (left, (prior, (later, right_parts))) = A::write(
+                Write { fields: left, addr, memory },
+                left_parts,
+                (prior, (later, right_parts)),
+            )?;
+            let (right, ((left, prior), later)) = B::write(
+                Write { fields: right, addr, memory },
+                right_parts,
+                ((left, prior), later),
+            )?;
+            Ok(((right, left), (prior, later)))
         }
 
         #[inline(always)]
@@ -349,7 +388,79 @@ impl<T> fmt::Debug for Init<'_, T> {
     }
 }
 
-/// Sole rollback owner between initialization and acceptance of its receipt.
+/// Exclusive release right for one initialized value in the issuing context.
+///
+/// The parent retains the storage of the value itself. Only its resources
+/// are handed over to the release implementation.
+#[must_use]
+pub struct Taken<'a, T: ShmLayout, W: Owner> {
+    addr: usize,
+    memory: &'a MemoryContext<'a, W>,
+    _value: PhantomData<fn(T) -> T>,
+}
+
+impl<'a, T: ShmLayout, W: Owner> Taken<'a, T, W> {
+    /// # Safety
+    ///
+    /// The address holds one live, aligned and initialized value satisfying
+    /// the release contract of `T` in this context. No other code can access
+    /// the value or release its resources while this right is held.
+    pub(crate) unsafe fn new(addr: usize, memory: &'a MemoryContext<'_, W>) -> Self {
+        Self { addr, memory, _value: PhantomData }
+    }
+
+    /// Final address of the value.
+    pub fn addr(&self) -> usize {
+        self.addr
+    }
+
+    /// The issuing context and its provenance root.
+    pub fn memory(&self) -> &'a MemoryContext<'a, W> {
+        self.memory
+    }
+
+    /// Gives a reborrowed release right for one of this value's fields.
+    ///
+    /// # Safety
+    ///
+    /// The offset names an aligned field of exactly this type, written
+    /// whole. Its resources must not already have been released or handed
+    /// over. Even fields sharing an address because they are zero-sized
+    /// are distinct fields and must each be released exactly once.
+    pub unsafe fn field<U: ShmLayout>(&mut self, offset: usize) -> Taken<'_, U, W> {
+        Taken {
+            addr: self.addr + offset,
+            memory: self.memory,
+            _value: PhantomData,
+        }
+    }
+
+    pub(crate) fn get(&self) -> &T {
+        let (value, _) = self.view();
+        value
+    }
+
+    #[inline]
+    pub(super) fn view(&self) -> (&T, ShmRoot) {
+        let root = self.memory.root();
+        // SAFETY: the capability holds an initialized, aligned value, and
+        // the shared borrow prevents use of its exclusive release right.
+        (unsafe { &*root.ptr(self.addr) }, root)
+    }
+}
+
+impl<T: ShmLayout, W: Owner> fmt::Debug for Taken<'_, T, W> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Taken")
+            .field("addr", &self.addr)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Exclusive destination and rollback owner of an in-flight write.
+///
+/// The slot is aligned and unwritten when issued; only an accepted receipt
+/// hands the initialized value over to the enclosing guard.
 struct Slot<'b, T: Build, W: Owner> {
     addr: usize,
     memory: &'b MemoryContext<'b, W>,
@@ -358,29 +469,21 @@ struct Slot<'b, T: Build, W: Owner> {
 }
 
 impl<'b, T: Build, W: Owner> Slot<'b, T, W> {
-    /// # Safety
-    ///
-    /// The address is an aligned, exclusive, unwritten slot of this type in
-    /// this build. On success the caller takes ownership of the whole value.
-    unsafe fn write(addr: usize, memory: &'b MemoryContext<'b, W>, parts: T::Parts<'b, W>) -> Result<(), Refusal> {
-        let mut slot = Self {
-            addr,
-            memory,
-            initialized: false,
-            _value: PhantomData,
-        };
+    /// On success the caller takes over the initialized value.
+    #[inline]
+    fn write(mut self, parts: T::Parts<'b, W>) -> Result<(), Refusal> {
         let _receipt = T::write(
             parts,
             Place {
-                addr,
-                memory,
-                initialized: &mut slot.initialized,
+                addr: self.addr,
+                memory: self.memory,
+                initialized: &mut self.initialized,
                 _slot: PhantomData,
                 _build: PhantomData,
                 _value: PhantomData,
             },
         )?;
-        forget(slot);
+        forget(self);
         Ok(())
     }
 }
@@ -388,8 +491,11 @@ impl<'b, T: Build, W: Owner> Slot<'b, T, W> {
 impl<T: Build, W: Owner> Drop for Slot<'_, T, W> {
     fn drop(&mut self) {
         if self.initialized {
-            // SAFETY: initialization transferred the whole value to this guard.
-            T::free(unsafe { Taken::new(self.addr, self.memory) });
+            T::free(Taken {
+                addr: self.addr,
+                memory: self.memory,
+                _value: PhantomData,
+            });
         }
     }
 }
@@ -400,8 +506,13 @@ impl<'b, W: Owner> MemoryContext<'b, W> {
     /// The caller lends an aligned, exclusive destination for the value in
     /// this build, and takes over its teardown on success.
     pub(crate) unsafe fn write_at<T: Build>(&'b self, addr: usize, parts: T::Parts<'b, W>) -> Result<(), Refusal> {
-        // SAFETY: the caller owns the slot. Its write uses the issuing build.
-        unsafe { Slot::<T, W>::write(addr, self, parts) }
+        Slot::<T, W> {
+            addr,
+            memory: self,
+            initialized: false,
+            _value: PhantomData,
+        }
+        .write(parts)
     }
 }
 
@@ -414,19 +525,6 @@ pub(super) struct Run<'a, T: Free, W: Owner> {
 }
 
 impl<'a, T: Free, W: Owner> Run<'a, T, W> {
-    /// # Safety
-    ///
-    /// The prefix holds `written` initialized elements in this context and
-    /// this guard takes exclusive ownership of every element's resources.
-    pub(super) unsafe fn new(addr: usize, written: usize, memory: &'a MemoryContext<'_, W>) -> Self {
-        Self {
-            memory,
-            addr,
-            written,
-            _element: PhantomData,
-        }
-    }
-
     /// Releases a prefix and returns its backing allocation.
     ///
     /// # Safety
@@ -435,33 +533,43 @@ impl<'a, T: Free, W: Owner> Run<'a, T, W> {
     /// in this context. `written` is the initialized prefix length, at most
     /// `len`. Only the prefix owns resources.
     #[inline]
-    pub(super) unsafe fn release_block(addr: usize, written: usize, len: usize, memory: &MemoryContext<'_, W>) {
-        // SAFETY: the prefix holds precisely the elements to release.
-        unsafe { Self::release(addr, written, memory) };
+    pub(super) unsafe fn release_block(addr: usize, written: usize, len: usize, memory: &'a MemoryContext<'_, W>) {
+        drop(Self {
+            memory,
+            addr,
+            written,
+            _element: PhantomData,
+        });
         // SAFETY: the caller owns the original allocation and the prefix
         // has returned its resources.
         unsafe { memory.free(addr, len * size_of::<T>()) };
-    }
-
-    /// # Safety
-    ///
-    /// The caller owns the `written` initialized elements at this address
-    /// and their resources in this context. No references remain to them.
-    pub(super) unsafe fn release(addr: usize, written: usize, memory: &MemoryContext<'_, W>) {
-        // Newest first: C prepends child contexts and unlinks from the head,
-        // so this order is linear.
-        for idx in (0..written).rev() {
-            let element = addr + idx * size_of::<T>();
-            // SAFETY: this call owns the initialized element at this index.
-            T::free(unsafe { Taken::new(element, memory) });
-        }
     }
 }
 
 impl<T: Free, W: Owner> Drop for Run<'_, T, W> {
     fn drop(&mut self) {
-        // SAFETY: the guard owns exactly the initialized prefix.
-        unsafe { Self::release(self.addr, self.written, self.memory) };
+        // Newest first: C prepends child contexts and unlinks from the head,
+        // so this order is linear.
+        for idx in (0..self.written).rev() {
+            let addr = self.addr + idx * size_of::<T>();
+            T::free(Taken {
+                addr,
+                memory: self.memory,
+                _value: PhantomData,
+            });
+        }
+    }
+}
+
+impl<T: Free, W: Owner, const N: usize> Taken<'_, [T; N], W> {
+    pub(super) fn release_array(self) {
+        let Self { addr, memory, .. } = self;
+        drop(Run::<T, W> {
+            memory,
+            addr,
+            written: N,
+            _element: PhantomData,
+        });
     }
 }
 
@@ -499,9 +607,15 @@ impl<'b, T: Build, W: Owner> SliceWriter<'b, T, W> {
     pub(super) fn write_next(&mut self, parts: T::Parts<'b, W>) -> Result<(), Refusal> {
         assert!(self.written < self.len);
         let addr = self.addr + self.written * size_of::<T>();
-        // SAFETY: the reservation covers this next, unwritten element.
-        // Only after the write succeeds does the prefix take ownership.
-        unsafe { Slot::<T, W>::write(addr, self.memory, parts)? };
+        // The reservation covers the next element; the prefix only owns it
+        // once the write succeeds.
+        Slot::<T, W> {
+            addr,
+            memory: self.memory,
+            initialized: false,
+            _value: PhantomData,
+        }
+        .write(parts)?;
         self.written += 1;
         Ok(())
     }

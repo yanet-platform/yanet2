@@ -54,7 +54,7 @@ use crate::{
 
 mod capability;
 
-pub use capability::{Freed, Fresh, Live, LiveContext, Retiring, Taken};
+pub use capability::{Freed, Fresh, Live, LiveContext, Retiring};
 
 mod classify;
 
@@ -62,7 +62,7 @@ pub use classify::Branch;
 
 mod placement;
 
-pub use placement::{Init, Place, Record, RecordField, RecordPlace, RecordTaken};
+pub use placement::{Init, Place, Record, RecordField, RecordPlace, RecordTaken, Taken};
 use placement::{Run, SliceWriter};
 
 /// Invariant lifetime brand: values of two builds never unify.
@@ -247,9 +247,7 @@ impl<T: Copy + ShmLayout> Build for Mutex<T> {
 // SAFETY: the array owns precisely the resources of its elements.
 unsafe impl<T: Free, const N: usize> Free for [T; N] {
     fn free<W: Owner>(value: Taken<'_, Self, W>) {
-        // SAFETY: the complete array is a run of initialized elements at
-        // this address, including one release right per zero-sized element.
-        unsafe { Run::<T, W>::release(value.addr(), N, value.memory()) };
+        value.release_array();
     }
 }
 
@@ -293,20 +291,11 @@ impl<T: Build> Build for ShmBox<T> {
 // SAFETY: a non-null edge owns the live block of exactly the stated length.
 unsafe impl<T: Build> Free for ShmSlice<T> {
     fn free<W: Owner>(value: Taken<'_, Self, W>) {
-        let (addr, memory) = (value.addr(), value.memory());
-        let root = memory.root();
-        // Derive each metadata address directly from the root to avoid
-        // reconstructing the address of a projected struct field.
-        // SAFETY: the capability owns both initialized metadata words.
-        let (offset, len) = unsafe {
-            (
-                root.ptr::<isize>(addr).read(),
-                root.ptr::<u64>(addr + Self::LEN_OFFSET).read() as usize,
-            )
-        };
+        let slice = value.get();
+        let (offset, len) = (slice.offset(), slice.len());
         if offset != 0 {
             // SAFETY: the non-null slice owns this block at its recorded size.
-            unsafe { Run::<T, W>::release_block(addr.wrapping_add_signed(offset), len, len, memory) };
+            unsafe { Run::<T, W>::release_block(value.addr().wrapping_add_signed(offset), len, len, value.memory()) };
         }
     }
 }
@@ -437,18 +426,12 @@ impl<O: Object> Build for ObjectLink<O> {
 // The slots are plain values and own nothing.
 unsafe impl<T: Copy + ShmLayout> Free for PerWorker<T> {
     fn free<W: Owner>(value: Taken<'_, Self, W>) {
-        let (addr, memory) = (value.addr(), value.memory());
-        let root = memory.root();
-        // SAFETY: the capability owns both initialized metadata words.
-        let (offset, workers) = unsafe {
-            (
-                root.ptr::<isize>(addr).read(),
-                root.ptr::<u64>(addr + size_of::<isize>()).read(),
-            )
-        };
+        let slots = value.get();
+        let (offset, workers) = (slots.offset(), slots.worker_count());
         if offset != 0 {
+            let addr = value.addr().wrapping_add_signed(offset);
             // SAFETY: this field alone owns the block sized for its workers.
-            unsafe { memory.free(addr.wrapping_add_signed(offset), slot_block::<T>(workers)) };
+            unsafe { value.memory().free(addr, slot_block::<T>(workers)) };
         }
     }
 }
@@ -477,19 +460,11 @@ impl<T: Copy + ShmLayout> Build for PerWorker<T> {
 // The regions hold plain values and own nothing.
 unsafe impl<T: Copy + ShmLayout> Free for PerWorkerSlice<T> {
     fn free<W: Owner>(value: Taken<'_, Self, W>) {
-        let (addr, memory) = (value.addr(), value.memory());
-        let root = memory.root();
-        // SAFETY: the capability owns the initialized metadata words.
-        let (offset, workers, len) = unsafe {
-            (
-                root.ptr::<isize>(addr).read(),
-                root.ptr::<u64>(addr + size_of::<isize>()).read(),
-                root.ptr::<u64>(addr + 2 * size_of::<isize>()).read() as usize,
-            )
-        };
+        let table = value.get();
+        let (offset, workers, len) = (table.offset(), table.worker_count(), table.len());
         if offset != 0 {
             // SAFETY: the table and its regions belong to this field alone.
-            unsafe { free_regions::<T, W>(addr.wrapping_add_signed(offset), workers, len, memory) };
+            unsafe { free_regions::<T, W>(value.addr().wrapping_add_signed(offset), workers, len, value.memory()) };
         }
     }
 }
@@ -658,10 +633,9 @@ impl<'a, K, const N: usize> From<&'a [(K, u32); N]> for HashIndexParts<'a, K> {
 // An empty index opened no context and allocated nothing.
 unsafe impl<K: HashIndexKey> Free for HashIndex<K> {
     fn free<W: Owner>(value: Taken<'_, Self, W>) {
-        let root = value.memory().root();
+        let (index, root) = value.view();
         let addr = value.addr();
-        // SAFETY: the exclusive right witnesses a fully initialized index.
-        let slots = unsafe { &*root.ptr::<Self>(addr) }.slots();
+        let slots = index.slots();
         let (offset, len) = (slots.offset(), slots.len());
         if offset == 0 {
             return;

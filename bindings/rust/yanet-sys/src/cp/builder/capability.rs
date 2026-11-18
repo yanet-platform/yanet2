@@ -2,7 +2,7 @@
 
 use core::marker::PhantomData;
 
-use super::{BlockAddr, Context, Header, Kind, MemoryContext, Owner, ShmLayout};
+use super::{BlockAddr, Context, Header, Kind};
 
 /// A fresh root block large enough for a header of kind `K`.
 ///
@@ -89,65 +89,6 @@ impl<'a, W: ?Sized> LiveContext<'a, W> {
     /// The initialized header's embedded memory context.
     pub fn context(&self) -> Context {
         self.context
-    }
-}
-
-/// Exclusive release right for one initialized value in the issuing context.
-///
-/// The parent retains the storage of the value itself. Only its resources
-/// are handed over to the release implementation.
-#[must_use]
-pub struct Taken<'a, T: ShmLayout, W: Owner> {
-    addr: usize,
-    memory: &'a MemoryContext<'a, W>,
-    _value: PhantomData<fn(T) -> T>,
-}
-
-impl<'a, T: ShmLayout, W: Owner> Taken<'a, T, W> {
-    /// # Safety
-    ///
-    /// The address holds one live, aligned and initialized value satisfying
-    /// the release contract of `T` in this context. No other code can access
-    /// the value or release its resources while this right is held.
-    pub(crate) unsafe fn new(addr: usize, memory: &'a MemoryContext<'_, W>) -> Self {
-        Self { addr, memory, _value: PhantomData }
-    }
-
-    /// Final address of the value.
-    pub fn addr(&self) -> usize {
-        self.addr
-    }
-
-    /// The issuing context and its provenance root.
-    pub fn memory(&self) -> &'a MemoryContext<'a, W> {
-        self.memory
-    }
-
-    /// Gives a reborrowed release right for one of this value's fields.
-    ///
-    /// # Safety
-    ///
-    /// The offset names an aligned field of exactly this type, written
-    /// whole. Its resources must not already have been released or handed
-    /// over. Even fields sharing an address because they are zero-sized
-    /// are distinct fields and must each be released exactly once.
-    pub unsafe fn field<U: ShmLayout>(&mut self, offset: usize) -> Taken<'_, U, W> {
-        // SAFETY: the caller proves ownership of this field at its offset.
-        unsafe { Taken::new(self.addr + offset, self.memory) }
-    }
-
-    pub(crate) fn get(&self) -> &T {
-        // SAFETY: the capability holds an initialized, aligned value, and
-        // the shared borrow prevents use of its exclusive release right.
-        unsafe { &*self.memory.root().ptr(self.addr) }
-    }
-}
-
-impl<T: ShmLayout, W: Owner> core::fmt::Debug for Taken<'_, T, W> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("Taken")
-            .field("addr", &self.addr)
-            .finish_non_exhaustive()
     }
 }
 

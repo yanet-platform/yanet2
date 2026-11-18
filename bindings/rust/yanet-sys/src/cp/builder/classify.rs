@@ -12,9 +12,10 @@ use core::{
     fmt,
     marker::PhantomData,
     mem::{align_of, forget, size_of},
+    ptr,
 };
 
-use yanet_shm::{root::ShmRoot, shm::MAX_ALIGN};
+use yanet_shm::shm::MAX_ALIGN;
 
 use super::{Brand, Build, BuildError, Kind, MemoryContext, Owned, Owner, Refusal, Scope, refused};
 use crate::{
@@ -24,41 +25,45 @@ use crate::{
 
 /// Owns the storage of a C output, but none of the allocations it may name.
 struct NativeSlot<'b, T, W: Owner> {
-    addr: usize,
+    raw: *mut T,
     memory: &'b MemoryContext<'b, W>,
     _brand: Brand<'b>,
-    _value: PhantomData<fn() -> T>,
 }
 
 impl<'b, T, W: Owner> NativeSlot<'b, T, W> {
     fn reserve<E: From<BuildError<W::Error>>, K: Kind>(scope: Scope<'b, '_, W, E, K>) -> Result<Self, E> {
         const { assert!(size_of::<T>() > 0 && align_of::<T>() <= MAX_ALIGN) };
-        Ok(Self {
-            addr: scope.alloc(size_of::<T>())?,
+        let addr = scope.alloc(size_of::<T>())?;
+        // Own the address before asking the owner for its provenance.
+        let mut slot = Self {
+            raw: ptr::without_provenance_mut(addr),
             memory: scope.memory,
             _brand: PhantomData,
-            _value: PhantomData,
-        })
+        };
+        slot.raw = slot.memory.root().ptr(addr);
+        Ok(slot)
     }
 
-    fn zero(&self) -> (ShmRoot, *mut T) {
-        let root = self.memory.root();
-        let value = root.ptr::<T>(self.addr);
+    fn zero(&self) -> *mut T {
         // SAFETY: the exclusive slot is aligned for one whole value.
-        unsafe { value.write_bytes(0, 1) };
-        (root, value)
+        unsafe { self.raw.write_bytes(0, 1) };
+        self.raw
+    }
+
+    fn context(&self) -> *mut bindings::memory_context {
+        self.raw.with_addr(self.memory.live.context().get()).cast()
     }
 
     /// # Safety
     ///
-    /// The C routine must have written a whole value at its final address,
+    /// The writer must have written a whole value at its final address,
     /// with all owned edges belonging to this build.
     unsafe fn finish(self) -> Owned<'b, T, W>
     where
         T: Build,
     {
         let value = Owned {
-            addr: self.addr,
+            addr: self.raw.addr(),
             memory: self.memory,
             _brand: PhantomData,
             _value: PhantomData,
@@ -72,7 +77,7 @@ impl<T, W: Owner> Drop for NativeSlot<'_, T, W> {
     fn drop(&mut self) {
         // SAFETY: the reservation still owns this unreferenced block of the
         // original size. The caller handles any allocations named within.
-        unsafe { self.memory.free(self.addr, size_of::<T>()) };
+        unsafe { self.memory.free(self.raw.addr(), size_of::<T>()) };
     }
 }
 
@@ -83,16 +88,14 @@ impl<T, W: Owner> Drop for NativeSlot<'_, T, W> {
 /// build and ruleset; it is scratch of the build in its memory, which it
 /// returns when dropped.
 struct Stage<'b, W: Owner> {
-    raw: *mut bindings::classifier,
-    memory: &'b MemoryContext<'b, W>,
+    slot: NativeSlot<'b, bindings::classifier, W>,
     rules: u32,
-    _brand: Brand<'b>,
 }
 
 impl<W: Owner> fmt::Debug for Stage<'_, W> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         f.debug_struct("Stage")
-            .field("addr", &self.raw.addr())
+            .field("addr", &self.raw().addr())
             .field("rules", &self.rules)
             .finish()
     }
@@ -100,27 +103,21 @@ impl<W: Owner> fmt::Debug for Stage<'_, W> {
 
 impl<'b, W: Owner> Stage<'b, W> {
     fn zero(slot: NativeSlot<'b, bindings::classifier, W>, rules: u32) -> Self {
-        let stage = Self {
-            raw: slot.zero().1,
-            memory: slot.memory,
-            rules,
-            _brand: PhantomData,
-        };
-        forget(slot);
-        stage
+        slot.zero();
+        Self { slot, rules }
+    }
+
+    fn raw(&self) -> *mut bindings::classifier {
+        self.slot.raw
     }
 }
 
 impl<W: Owner> Drop for Stage<'_, W> {
     fn drop(&mut self) {
-        // The native pointer retains the root provenance over the context.
-        let context = self.raw.with_addr(self.memory.live.context().get()).cast();
         // SAFETY: a zeroed stage is finalizable even after partial output.
-        // The stage and its allocations still belong to this live context.
-        unsafe { bindings::yanet_sys_classify_stage_free(self.raw, context, self.rules) };
-        // SAFETY: the finalizer has returned the stage's allocations. Only
-        // this guard owns the unreferenced stage block of its original size.
-        unsafe { self.memory.free(self.raw.addr(), size_of::<bindings::classifier>()) };
+        // The slot and its allocations still belong to this live context.
+        unsafe { bindings::yanet_sys_classify_stage_free(self.raw(), self.slot.context(), self.rules) };
+        // The reservation returns its storage only after finalization.
     }
 }
 
@@ -189,8 +186,8 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
                 bindings::yanet_sys_classify_join(
                     context,
                     name.as_ptr(),
-                    left_stage.raw,
-                    right_stage.raw,
+                    left_stage.raw(),
+                    right_stage.raw(),
                     left_stage.rules,
                     join.cast(),
                     stage,
@@ -236,8 +233,8 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
                 bindings::yanet_sys_classify_join_rules(
                     context,
                     name.as_ptr(),
-                    left_stage.raw,
-                    right_stage.raw,
+                    left_stage.raw(),
+                    right_stage.raw(),
                     rules.as_ptr().cast(),
                     left_stage.rules,
                     table.cast(),
@@ -282,7 +279,7 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
                 bindings::yanet_sys_classify_decode(
                     context,
                     name.as_ptr(),
-                    stage.raw,
+                    stage.raw(),
                     rules.as_ptr().cast(),
                     stage.rules,
                     map.cast(),
@@ -330,8 +327,8 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
         write: impl FnOnce(*mut bindings::memory_context, *mut T) -> c_int,
     ) -> Result<Owned<'b, T, W>, E> {
         let slot = NativeSlot::reserve(self)?;
-        let (root, value) = slot.zero();
-        if write(root.ptr(self.memory.live.context().get()), value) != 0 {
+        let value = slot.zero();
+        if write(slot.context(), value) != 0 {
             drop(slot);
             // Memory is C's only failure for the routines of this module.
             return Err(refused::<W, E>(Refusal::OutOfMemory));
@@ -353,7 +350,7 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
         write: impl FnOnce(*mut bindings::memory_context, *mut bindings::classifier, *mut T) -> c_int,
     ) -> Result<Branch<'b, T, W>, E> {
         let stage = Stage::zero(NativeSlot::reserve(self)?, rules);
-        let value = self.written(|context, value| write(context, stage.raw, value))?;
+        let value = self.written(|context, value| write(context, stage.raw(), value))?;
         Ok(Branch { value, stage })
     }
 }
