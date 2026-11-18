@@ -49,9 +49,9 @@ func counterNames(registry *layout.CounterRegistry) []layout.Counter {
 }
 
 // counterName returns the name of the counter at index.
-func counterName(registry *layout.CounterRegistry) func(index uint32) string {
-	return func(index uint32) string {
-		return shm.String(counterNames(registry)[index].Name[:])
+func counterName(registry *layout.CounterRegistry) func(index uint32) []byte {
+	return func(index uint32) []byte {
+		return shm.Bytes(counterNames(registry)[index].Name[:])
 	}
 }
 

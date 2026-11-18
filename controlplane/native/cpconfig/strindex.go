@@ -20,12 +20,12 @@ const strIndexSparseFactor = 4
 // fnv1a is the string hash of common/str_index.h. Its tail of fewer than
 // four bytes is hashed last byte first, as C hashes it: the slot a key
 // lands in is part of the shared layout.
-func fnv1a(key []byte, seed uint32) uint64 {
+func fnv1a[Key string | []byte](key Key, seed uint32) uint64 {
 	const prime = 1099511628211
 	hash := uint64(14695981039346656037) ^ uint64(seed)
 	whole := len(key) &^ 3
-	for _, value := range key[:whole] {
-		hash ^= uint64(value)
+	for idx := range whole {
+		hash ^= uint64(key[idx])
 		hash *= prime
 	}
 	for idx := len(key) - 1; idx >= whole; idx-- {
@@ -37,7 +37,7 @@ func fnv1a(key []byte, seed uint32) uint64 {
 
 // strIndexKey returns the bytes C hashes for a key: up to its first zero
 // or keySize bytes.
-func strIndexKey(key string, keySize int) []byte {
+func strIndexKey(key string, keySize int) string {
 	length := min(len(key), keySize)
 	for idx := range length {
 		if key[idx] == 0 {
@@ -45,7 +45,7 @@ func strIndexKey(key string, keySize int) []byte {
 			break
 		}
 	}
-	return []byte(key[:length])
+	return key[:length]
 }
 
 // strIndexSlot returns the first slot a key probes.
@@ -70,15 +70,15 @@ func strIndexInit(index *layout.StrIndex, context *layout.MemoryContext) {
 
 // strIndexLookup returns the value whose key read equals key, or
 // strIndexInvalid.
-func strIndexLookup(index *layout.StrIndex, key string, keySize int, read func(value uint32) string) uint32 {
+func strIndexLookup(index *layout.StrIndex, key string, keySize int, read func(value uint32) []byte) uint32 {
 	if index.Capacity == 0 {
 		return strIndexInvalid
 	}
 	values := strIndexValues(index)
 	slot := strIndexSlot(index, key, keySize)
-	want := string(strIndexKey(key, keySize))
+	want := strIndexKey(key, keySize)
 	for values[slot] != strIndexInvalid {
-		if read(values[slot]) == want {
+		if string(read(values[slot])) == want {
 			break
 		}
 		slot = (slot + 1) % index.Capacity
@@ -96,7 +96,7 @@ func strIndexInsertForce(index *layout.StrIndex, key string, keySize int, value 
 	index.Size++
 }
 
-func strIndexExpand(index *layout.StrIndex, keySize int, capacity uint32, read func(value uint32) string) bool {
+func strIndexExpand(index *layout.StrIndex, keySize int, capacity uint32, read func(value uint32) []byte) bool {
 	context := index.MemoryContext.Get()
 	block := shmalloc.ContextAlloc(context, uintptr(capacity)*4)
 	if block == nil {
@@ -113,7 +113,7 @@ func strIndexExpand(index *layout.StrIndex, keySize int, capacity uint32, read f
 	index.Size = 0
 	for _, value := range old {
 		if value != strIndexInvalid {
-			strIndexInsertForce(index, read(value), keySize, value)
+			strIndexInsertForce(index, string(read(value)), keySize, value)
 		}
 	}
 	if old != nil {
@@ -124,7 +124,7 @@ func strIndexExpand(index *layout.StrIndex, keySize int, capacity uint32, read f
 
 // strIndexInsert adds a key, growing the index first when it is a quarter
 // full. read returns the key of a value already in the index.
-func strIndexInsert(index *layout.StrIndex, key string, keySize int, value uint32, read func(value uint32) string) bool {
+func strIndexInsert(index *layout.StrIndex, key string, keySize int, value uint32, read func(value uint32) []byte) bool {
 	if index.Size >= index.Capacity/strIndexSparseFactor {
 		grown := max(index.Size, 1) * strIndexSparseFactor * 2
 		if !strIndexExpand(index, keySize, grown, read) {

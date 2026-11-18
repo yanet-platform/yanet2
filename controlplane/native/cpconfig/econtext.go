@@ -1,6 +1,7 @@
 package cpconfig
 
 import (
+	"bytes"
 	"fmt"
 	"unsafe"
 
@@ -81,13 +82,18 @@ func (m *contextBuilder) oldStorages() *layout.CpConfigCounterStorageRegistry {
 // spawn returns the worker's counter storage for a registry, continuing
 // the one registered under tags in the previous generation, and
 // registers it under tags in this one.
-func (m *contextBuilder) spawn(tags []layout.CounterTag, registry *layout.CounterRegistry) (*layout.CounterStorage, error) {
-	old := storageRegistryLookup(m.oldStorages(), tags)
+func (m *contextBuilder) spawn(set tagSet, registry *layout.CounterRegistry) (*layout.CounterStorage, error) {
+	tags := set.Tags[:set.Count]
+	if err := normalizeTags(tags, false); err != nil {
+		return nil, err
+	}
+	hash := tagsHash(tags)
+	old := storageRegistryLookup(m.oldStorages(), tags, hash)
 	storage := spawnCounterStorage(&m.cp.CounterStorageMemoryContext, old, registry)
 	if storage == nil {
 		return nil, fmt.Errorf("spawn counter storage: %w", ErrNoMemory)
 	}
-	if err := storageRegistryInsert(m.tree.CounterStorageRegistry.Get(), tags, storage); err != nil {
+	if err := storageRegistryInsert(m.tree.CounterStorageRegistry.Get(), tags, hash, storage); err != nil {
 		return nil, err
 	}
 	return storage, nil
@@ -163,7 +169,7 @@ func (m *contextBuilder) root() (*layout.ConfigGenEctx, error) {
 		}
 		device := containerOf[layout.CpDevice](item, 0)
 		for port := range topology {
-			if shm.String(topology[port].DeviceName[:]) == shm.String(device.Name[:]) {
+			if bytes.Equal(shm.Bytes(topology[port].DeviceName[:]), shm.Bytes(device.Name[:])) {
 				egress[idx] = uint16(port)
 				break
 			}
@@ -564,7 +570,7 @@ func (m *contextBuilder) linkModule(devices []shm.Ptr[layout.DeviceEctx], owner 
 		}
 		for deviceIdx := range devices {
 			target := devices[deviceIdx].Get()
-			if target == nil || shm.String(target.CpDevice.Get().Name[:]) != name {
+			if target == nil || !shm.Equal(target.CpDevice.Get().Name[:], name) {
 				continue
 			}
 			targets[idx].DeviceId = uint16(deviceIdx)
@@ -578,7 +584,7 @@ func (m *contextBuilder) lookupFunction(name string) *layout.CpFunction {
 	registry := &m.gen.FunctionRegistry.Registry
 	offset := unsafe.Offsetof(layout.CpFunction{}.ConfigItem)
 	index, ok := registryLookup(registry, hashString(name), func(item *layout.RegistryItem) bool {
-		return shm.String(containerOf[layout.CpFunction](item, offset).Name[:]) == name
+		return shm.Equal(containerOf[layout.CpFunction](item, offset).Name[:], name)
 	})
 	if !ok {
 		return nil
@@ -590,7 +596,7 @@ func (m *contextBuilder) lookupPipeline(name string) *layout.CpPipeline {
 	registry := &m.gen.PipelineRegistry.Registry
 	offset := unsafe.Offsetof(layout.CpPipeline{}.ConfigItem)
 	index, ok := registryLookup(registry, hashString(name), func(item *layout.RegistryItem) bool {
-		return shm.String(containerOf[layout.CpPipeline](item, offset).Name[:]) == name
+		return shm.Equal(containerOf[layout.CpPipeline](item, offset).Name[:], name)
 	})
 	if !ok {
 		return nil
@@ -604,7 +610,7 @@ func lookupObject(gen *layout.CpConfigGen, objectType, name string) (uint64, boo
 	return registryLookup(&gen.ObjectRegistry.EntityRegistry.Registry, hashStringPair(name, objectType),
 		func(item *layout.RegistryItem) bool {
 			object := containerOf[layout.CpObject](item, 0)
-			return shm.String(object.Type[:]) == objectType && shm.String(object.Name[:]) == name
+			return shm.Equal(object.Type[:], objectType) && shm.Equal(object.Name[:], name)
 		},
 	)
 }

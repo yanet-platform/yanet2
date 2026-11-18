@@ -1,10 +1,11 @@
 package cpconfig
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 	"sync/atomic"
 	"unsafe"
 
@@ -120,14 +121,6 @@ func spawnCounterStorage(context *layout.MemoryContext, old *layout.CounterStora
 	return storage
 }
 
-// tag returns a counter tag of a key and value, zeroed past both.
-func tag(key, value string) layout.CounterTag {
-	var result layout.CounterTag
-	shm.CopyString(result.Key[:], key)
-	shm.CopyString(result.Value[:], value)
-	return result
-}
-
 // normalizeTags sorts tags by key and refuses duplicate keys and, for a
 // tag set being registered, the values reserved for predicates.
 func normalizeTags(tags []layout.CounterTag, predicate bool) error {
@@ -135,16 +128,18 @@ func normalizeTags(tags []layout.CounterTag, predicate bool) error {
 		return fmt.Errorf("tag count exceeds max %d", maxTagCount)
 	}
 	for idx := range tags {
-		value := shm.String(tags[idx].Value[:])
-		if !predicate && (value == "" || value == "*") {
-			return fmt.Errorf("tag %q: value %q is reserved for predicates", shm.String(tags[idx].Key[:]), value)
+		value := shm.Bytes(tags[idx].Value[:])
+		if !predicate && (len(value) == 0 || string(value) == "*") {
+			return fmt.Errorf("tag %q: value %q is reserved for predicates",
+				shm.String(tags[idx].Key[:]), shm.String(tags[idx].Value[:]),
+			)
 		}
 	}
-	sort.Slice(tags, func(left, right int) bool {
-		return shm.String(tags[left].Key[:]) < shm.String(tags[right].Key[:])
+	slices.SortFunc(tags, func(left, right layout.CounterTag) int {
+		return bytes.Compare(shm.Bytes(left.Key[:]), shm.Bytes(right.Key[:]))
 	})
 	for idx := 0; idx+1 < len(tags); idx++ {
-		if shm.String(tags[idx].Key[:]) == shm.String(tags[idx+1].Key[:]) {
+		if bytes.Equal(shm.Bytes(tags[idx].Key[:]), shm.Bytes(tags[idx+1].Key[:])) {
 			return fmt.Errorf("duplicate key %q", shm.String(tags[idx].Key[:]))
 		}
 	}
@@ -158,8 +153,8 @@ func tagsHash(tags []layout.CounterTag) uint32 {
 	binary.LittleEndian.PutUint64(count[:], uint64(len(tags)))
 	hash := fnv1a(count[:], 0)
 	for idx := range tags {
-		hash = fnv1a([]byte(shm.String(tags[idx].Key[:])), uint32(hash))
-		hash = fnv1a([]byte(shm.String(tags[idx].Value[:])), uint32(hash))
+		hash = fnv1a(shm.Bytes(tags[idx].Key[:]), uint32(hash))
+		hash = fnv1a(shm.Bytes(tags[idx].Value[:]), uint32(hash))
 	}
 	return uint32(hash)
 }
@@ -189,16 +184,18 @@ func storageRegistryInit(context *layout.MemoryContext, registry *layout.CpConfi
 	return nil
 }
 
-func storageRegistryIndex(registry *layout.CpConfigCounterStorageRegistry, tags []layout.CounterTag) uint32 {
+// storageRegistryIndex returns the index of the storage registered under
+// exactly the normalised tags of the hash, or hashIndexInvalid.
+func storageRegistryIndex(registry *layout.CpConfigCounterStorageRegistry, tags []layout.CounterTag, hash uint32) uint32 {
 	items := storageRegistryItems(registry)
-	return hashIndexLookup(&registry.TagIndex, tagsHash(tags), func(value uint32) bool {
+	return hashIndexLookup(&registry.TagIndex, hash, func(value uint32) bool {
 		item := &items[value]
 		if item.TagCount != uint64(len(tags)) {
 			return false
 		}
 		for idx := range tags {
-			if shm.String(item.Tags[idx].Key[:]) != shm.String(tags[idx].Key[:]) ||
-				shm.String(item.Tags[idx].Value[:]) != shm.String(tags[idx].Value[:]) {
+			if !bytes.Equal(shm.Bytes(item.Tags[idx].Key[:]), shm.Bytes(tags[idx].Key[:])) ||
+				!bytes.Equal(shm.Bytes(item.Tags[idx].Value[:]), shm.Bytes(tags[idx].Value[:])) {
 				return false
 			}
 		}
@@ -206,13 +203,10 @@ func storageRegistryIndex(registry *layout.CpConfigCounterStorageRegistry, tags 
 	})
 }
 
-// storageRegistryInsert registers a storage under a tag set.
-func storageRegistryInsert(registry *layout.CpConfigCounterStorageRegistry, tags []layout.CounterTag, storage *layout.CounterStorage) error {
-	tags = append([]layout.CounterTag(nil), tags...)
-	if err := normalizeTags(tags, false); err != nil {
-		return err
-	}
-	if storageRegistryIndex(registry, tags) != hashIndexInvalid {
+// storageRegistryInsert registers a storage under a normalised tag set
+// of the hash.
+func storageRegistryInsert(registry *layout.CpConfigCounterStorageRegistry, tags []layout.CounterTag, hash uint32, storage *layout.CounterStorage) error {
+	if storageRegistryIndex(registry, tags, hash) != hashIndexInvalid {
 		return errors.New("counter storage already registered")
 	}
 	itemSize := unsafe.Sizeof(layout.CpCounterStorage{})
@@ -242,7 +236,7 @@ func storageRegistryInsert(registry *layout.CpConfigCounterStorageRegistry, tags
 	item.Storage.Set(storage)
 	item.TagCount = uint64(len(tags))
 	copy(item.Tags[:], tags)
-	if !hashIndexInsert(&registry.TagIndex, tagsHash(tags), uint32(registry.Count)) {
+	if !hashIndexInsert(&registry.TagIndex, hash, uint32(registry.Count)) {
 		return fmt.Errorf("index counter storage: %w", ErrNoMemory)
 	}
 	registry.Count++
@@ -250,66 +244,81 @@ func storageRegistryInsert(registry *layout.CpConfigCounterStorageRegistry, tags
 }
 
 // storageRegistryLookup returns the storage registered under exactly the
-// tag set, or nil.
-func storageRegistryLookup(registry *layout.CpConfigCounterStorageRegistry, tags []layout.CounterTag) *layout.CounterStorage {
+// normalised tag set of the hash, or nil.
+func storageRegistryLookup(registry *layout.CpConfigCounterStorageRegistry, tags []layout.CounterTag, hash uint32) *layout.CounterStorage {
 	if registry == nil {
 		return nil
 	}
-	tags = append([]layout.CounterTag(nil), tags...)
-	if normalizeTags(tags, true) != nil {
-		return nil
-	}
-	index := storageRegistryIndex(registry, tags)
+	index := storageRegistryIndex(registry, tags, hash)
 	if index == hashIndexInvalid {
 		return nil
 	}
 	return storageRegistryItems(registry)[index].Storage.Get()
 }
 
+// tagSet is a tag set a storage registers under, held by value: building
+// it, normalising and hashing it allocate nothing, as on C's stack.
+type tagSet struct {
+	Tags  [maxTagCount]layout.CounterTag
+	Count int
+}
+
+// newTagSet returns the tag set of key and value pairs.
+func newTagSet(pairs ...string) tagSet {
+	var m tagSet
+	m.Add(pairs...)
+	return m
+}
+
+// Add appends the tags of key and value pairs in place.
+func (m *tagSet) Add(pairs ...string) {
+	for idx := 0; idx+1 < len(pairs); idx += 2 {
+		shm.CopyString(m.Tags[m.Count].Key[:], pairs[idx])
+		shm.CopyString(m.Tags[m.Count].Value[:], pairs[idx+1])
+		m.Count++
+	}
+}
+
 // The tag sets the execution contexts register their storages under.
 
-func deviceTags(device string) []layout.CounterTag {
-	return []layout.CounterTag{tag("device", device), tag("kind", "device")}
+func deviceTags(device string) tagSet {
+	return newTagSet("device", device, "kind", "device")
 }
 
-func pipelineTags(device, pipeline string) []layout.CounterTag {
-	return []layout.CounterTag{tag("device", device), tag("pipeline", pipeline), tag("kind", "pipeline")}
+func pipelineTags(device, pipeline string) tagSet {
+	return newTagSet("device", device, "pipeline", pipeline, "kind", "pipeline")
 }
 
-func functionTags(device, pipeline, function string) []layout.CounterTag {
-	return []layout.CounterTag{
-		tag("device", device), tag("pipeline", pipeline), tag("function", function), tag("kind", "function"),
-	}
+func functionTags(device, pipeline, function string) tagSet {
+	return newTagSet("device", device, "pipeline", pipeline, "function", function, "kind", "function")
 }
 
-func chainTags(device, pipeline, function, chain string) []layout.CounterTag {
-	return []layout.CounterTag{
-		tag("device", device), tag("pipeline", pipeline), tag("function", function),
-		tag("chain", chain), tag("kind", "chain"),
-	}
+func chainTags(device, pipeline, function, chain string) tagSet {
+	return newTagSet("device", device, "pipeline", pipeline, "function", function, "chain", chain, "kind", "chain")
 }
 
-func modulePathTags(device, pipeline, function, chain, moduleType, moduleName string) []layout.CounterTag {
-	return []layout.CounterTag{
-		tag("device", device), tag("pipeline", pipeline), tag("function", function),
-		tag("chain", chain), tag("module_type", moduleType), tag("module_name", moduleName),
-	}
-}
-
-func moduleTags(path []layout.CounterTag) []layout.CounterTag {
-	return append(append([]layout.CounterTag(nil), path...), tag("kind", "module"))
-}
-
-func runtimeTags(path []layout.CounterTag, registryTag string) []layout.CounterTag {
-	return append(append([]layout.CounterTag(nil), path...), tag("kind", "runtime"), tag("config", registryTag))
-}
-
-func objectLinkTags(path []layout.CounterTag, objectType, objectName string) []layout.CounterTag {
-	return append(append([]layout.CounterTag(nil), path...),
-		tag("object_type", objectType), tag("object_name", objectName), tag("kind", "module_object_link"),
+func modulePathTags(device, pipeline, function, chain, moduleType, moduleName string) tagSet {
+	return newTagSet(
+		"device", device, "pipeline", pipeline, "function", function,
+		"chain", chain, "module_type", moduleType, "module_name", moduleName,
 	)
 }
 
-func objectTags(objectType, objectName string) []layout.CounterTag {
-	return []layout.CounterTag{tag("object_type", objectType), tag("object_name", objectName), tag("kind", "object")}
+func moduleTags(path tagSet) tagSet {
+	path.Add("kind", "module")
+	return path
+}
+
+func runtimeTags(path tagSet, registryTag string) tagSet {
+	path.Add("kind", "runtime", "config", registryTag)
+	return path
+}
+
+func objectLinkTags(path tagSet, objectType, objectName string) tagSet {
+	path.Add("object_type", objectType, "object_name", objectName, "kind", "module_object_link")
+	return path
+}
+
+func objectTags(objectType, objectName string) tagSet {
+	return newTagSet("object_type", objectType, "object_name", objectName, "kind", "object")
 }

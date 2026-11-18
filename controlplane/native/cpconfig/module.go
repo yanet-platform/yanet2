@@ -74,7 +74,7 @@ func lookupDataplaneModule(dp *layout.DpConfig, name string) (uint64, bool) {
 		return 0, false
 	}
 	for idx, module := range unsafe.Slice(first, dp.ModuleCount) {
-		if shm.String(module.Name[:]) == name {
+		if shm.Equal(module.Name[:], name) {
 			return uint64(idx), true
 		}
 	}
@@ -87,7 +87,7 @@ func linkDevice(module *layout.CpModule, name string) (uint64, error) {
 	deviceSize := unsafe.Sizeof(layout.CpModuleDevice{})
 	if first := module.Devices.Get(); first != nil {
 		for idx, device := range unsafe.Slice(first, module.DeviceCount) {
-			if shm.String(device.Name[:]) == name {
+			if shm.Equal(device.Name[:], name) {
 				return uint64(idx), nil
 			}
 		}

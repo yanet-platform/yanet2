@@ -25,14 +25,14 @@ const (
 
 // registryHashName hashes one key field up to its terminating zero.
 func registryHashName(field []byte) uint64 {
-	return fnv1a([]byte(shm.String(field)), registryHashSeed)
+	return fnv1a(shm.Bytes(field), registryHashSeed)
 }
 
 // registryHashNamePair hashes a two-field key: the first field's hash
 // seeds the second's.
 func registryHashNamePair(first, second []byte) uint64 {
-	hash := fnv1a([]byte(shm.String(first)), registryHashSeed)
-	return fnv1a([]byte(shm.String(second)), uint32(hash))
+	hash := fnv1a(shm.Bytes(first), registryHashSeed)
+	return fnv1a(shm.Bytes(second), uint32(hash))
 }
 
 // registryHashFold folds a key hash into the 32 bits the index probes

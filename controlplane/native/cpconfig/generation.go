@@ -1,6 +1,7 @@
 package cpconfig
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"math/bits"
@@ -129,7 +130,7 @@ func counterRegistryLink(fresh, old *layout.CounterRegistry) error {
 func moduleEqual(moduleType, name string) func(item *layout.RegistryItem) bool {
 	return func(item *layout.RegistryItem) bool {
 		module := containerOf[layout.CpModule](item, 0)
-		return shm.String(module.Type[:]) == moduleType && shm.String(module.Name[:]) == name
+		return shm.Equal(module.Type[:], moduleType) && shm.Equal(module.Name[:], name)
 	}
 }
 
@@ -187,7 +188,7 @@ func linkRuntimeCounters(module, old *layout.CpModule) error {
 			oldRegistries := runtimeRegistries(old)
 			for oldIdx := range oldRegistries {
 				oldEntry := oldRegistries[oldIdx].Get()
-				if shm.String(oldEntry.Tag[:]) == shm.String(entry.Tag[:]) {
+				if bytes.Equal(shm.Bytes(oldEntry.Tag[:]), shm.Bytes(entry.Tag[:])) {
 					displaced = &oldEntry.Registry
 					break
 				}
