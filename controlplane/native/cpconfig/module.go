@@ -45,8 +45,8 @@ func InitModule(module *layout.CpModule, owner *agent.Agent, moduleType, name st
 
 	counterRegistryInit(&module.CounterRegistry, &module.Entity.MemoryContext)
 	for _, counter := range []struct {
-		name string
-		id   *uint64
+		Name string
+		ID   *uint64
 	}{
 		{"rx", &module.RxCounterId},
 		{"tx", &module.TxCounterId},
@@ -54,11 +54,11 @@ func InitModule(module *layout.CpModule, owner *agent.Agent, moduleType, name st
 		{"pending_input", &module.PendingInputCounterId},
 		{"pending_output", &module.PendingOutputCounterId},
 	} {
-		id, err := counterRegister(&module.CounterRegistry, counter.name, 2)
+		id, err := counterRegister(&module.CounterRegistry, counter.Name, 2)
 		if err != nil {
-			return fmt.Errorf("register %q counter for module %q: %w", counter.name, name, err)
+			return fmt.Errorf("register %q counter for module %q: %w", counter.Name, name, err)
 		}
-		*counter.id = id
+		*counter.ID = id
 	}
 	if _, err := linkDevice(module, ""); err != nil {
 		return err
