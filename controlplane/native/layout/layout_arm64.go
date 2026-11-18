@@ -11,7 +11,7 @@ import (
 )
 
 // Fingerprint identifies the layout of every view in this file.
-const Fingerprint = "f8adef8873a1488e"
+const Fingerprint = "a8e80f6e4a315332"
 
 // Agent is the C struct agent, 1056 bytes.
 type Agent struct {
@@ -939,6 +939,14 @@ type TscClock struct {
 	TscToNsMult      uint64
 	RealTimeNs       uint64
 	TimestampCounter uint64
+}
+
+// ValueTable is the C struct value_table, 24 bytes.
+type ValueTable struct {
+	MemoryContext shm.Ptr[MemoryContext]
+	VDim          uint32
+	HDim          uint32
+	Values        shm.Ptr[shm.Ptr[uint32]]
 }
 
 // Vline is the C struct vline, 24 bytes.

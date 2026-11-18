@@ -20,7 +20,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
 )
 
-const arenaSize = 256 << 20
+const arenaSize = 1 << 30
 
 // newContext returns a memory context over a fresh anonymous mapping,
 // with an allocator C and Go both draw from.
@@ -187,8 +187,8 @@ func Benchmark_CompileLine(b *testing.B) {
 }
 
 // footprint is what one compile wrote: the 64-byte lines of shared
-// memory it ever touched, scratch freed again included, and the Go heap
-// it allocated.
+// memory it ever touched, scratch freed again included, and the heap it
+// allocated, Go and C together.
 type footprint struct {
 	Shared uint64
 	Heap   uint64
@@ -228,7 +228,9 @@ func measureFootprint(t *testing.T, compile func(context *layout.MemoryContext))
 
 	var heapBefore, heapAfter runtime.MemStats
 	runtime.ReadMemStats(&heapBefore)
+	cHeapBefore := coracle.HeapBytes()
 	compile(context)
+	cHeap := coracle.HeapBytes() - cHeapBefore
 	runtime.ReadMemStats(&heapAfter)
 
 	touched := uint64(0)
@@ -243,7 +245,7 @@ func measureFootprint(t *testing.T, compile func(context *layout.MemoryContext))
 			}
 		}
 	})
-	return footprint{Shared: touched, Heap: heapAfter.TotalAlloc - heapBefore.TotalAlloc}
+	return footprint{Shared: touched, Heap: heapAfter.TotalAlloc - heapBefore.TotalAlloc + cHeap}
 }
 
 // readArena runs read with all of the arena addressable, restoring what
