@@ -19,16 +19,53 @@ use core::{
 use yanet_shm::{
     resolve::{Graph, Resolve},
     root::ShmRoot,
+    shm::ShmLayout,
 };
 use yanet_sys::{
     cp::{
-        BlockAddr, Built, BuiltObject, Context, Freed, Fresh, Header, Live, LiveContext, ModuleKind, ObjectKind, Owner,
-        Retiring,
+        BlockAddr, Build, Built, BuiltObject, Context, Freed, Fresh, Header, Init, Live, LiveContext, MemoryContext,
+        ModuleKind, ObjectKind, Owner, Place, Refusal, Retiring,
     },
     dp::{Module, ModuleConfig, Object},
 };
 
 use crate::BlockArena;
+
+/// A value whose build invokes a fault-injection callback after initialization.
+#[derive(Debug)]
+#[repr(transparent)]
+pub struct Interruptible<T>(T);
+
+// SAFETY: the wrapper has exactly its field's shared-memory representation.
+unsafe impl<T: ShmLayout> ShmLayout for Interruptible<T> {}
+
+// SAFETY: the only field is built and released at its final offset. Once
+// complete, its rollback belongs to the active transaction.
+unsafe impl<T: Build> Build for Interruptible<T> {
+    type Parts<'b, W: Owner> = (T::Parts<'b, W>, fn() -> Result<(), Refusal>);
+
+    fn write<'s, 'b, W: Owner>(
+        (parts, interrupt): Self::Parts<'b, W>,
+        mut place: Place<'s, 'b, Self, W>,
+    ) -> Result<Init<'s, Self>, Refusal> {
+        // SAFETY: the field covers the whole wrapper and transfers to it on
+        // success. No fallible operation separates the two transitions.
+        let receipt = unsafe {
+            place.write_field::<T>(0, parts)?;
+            place.assume_init()
+        };
+        if let Err(err) = interrupt() {
+            let _forgotten = core::mem::ManuallyDrop::new(receipt);
+            return Err(err);
+        }
+        Ok(receipt)
+    }
+
+    unsafe fn free<W: Owner>(addr: usize, memory: &MemoryContext<'_, W>) {
+        // SAFETY: the initialized field is the whole value at this address.
+        unsafe { T::free(addr, memory) }
+    }
+}
 
 /// A call of the owner a test can make fail.
 #[derive(Clone, Copy)]

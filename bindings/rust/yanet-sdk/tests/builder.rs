@@ -19,7 +19,7 @@ use yanet_sdk::{
     ObjectBuilder, ObjectCommitCx, ObjectCounter, ObjectLink, OwnedSlice, PerWorker, PerWorkerSlice, Refusal,
     Registered, ShmBox, ShmLayout, ShmSlice, TaggedCounter, TaggedCounters, Traffic, Verdict,
 };
-use yanet_sdk_testing::cp::{Call, LiveHeaders, TestCx, TestError, TestOwner};
+use yanet_sdk_testing::cp::{Call, Interruptible, LiveHeaders, TestCx, TestError, TestOwner};
 use yanet_sys::{
     bindings::{COUNTER_TAG_VALUE_LEN, CP_MODULE_NAME_LEN, CP_OBJECT_NAME_LEN},
     common::LINE_BLOCK_ALIGN,
@@ -80,6 +80,63 @@ struct Node<T, const N: usize> {
     head: ShmBox<T>,
     tail: ShmSlice<T>,
     fixed: [T; N],
+}
+
+// The lower-case const tests hygiene of the generated destination binding.
+#[allow(non_upper_case_globals)]
+mod derived {
+    use super::{Interruptible, ShmSlice};
+
+    #[derive(yanet_sdk::ShmLayout)]
+    #[repr(C)]
+    pub(super) struct Enclosing<const __place: usize> {
+        pub(super) prior: [ShmSlice<u8>; __place],
+        pub(super) current: Interruptible<ShmSlice<u32>>,
+    }
+}
+
+#[allow(clippy::std_instead_of_core)]
+#[test]
+fn test_slice_interrupted_after_initialization_releases_nested_field_before_derived_guards() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    use derived::{Enclosing, EnclosingParts};
+
+    let owner = TestOwner::new().with_child_return_log();
+    for unwind in [false, true] {
+        let built = Builder::<Fixture<u64>>::build::<Failure, _>(&owner, "nested", |b| {
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                b.slice::<Enclosing<1>>(2, |_| {
+                    let interrupt: fn() -> Result<(), Refusal> = if unwind {
+                        || panic!("initialized field")
+                    } else {
+                        || Err(Refusal::InvalidRange)
+                    };
+                    Ok(EnclosingParts {
+                        prior: [b.slice(17, |_| Ok(0))?],
+                        current: (b.slice(2, |_| Ok(0))?, interrupt),
+                    })
+                })
+            }));
+            if unwind {
+                let panic = result.expect_err("initialized field unwinds");
+                assert_eq!(Some(&"initialized field"), panic.downcast_ref::<&str>());
+            } else {
+                assert!(matches!(
+                    result.unwrap(),
+                    Err(BuildError::Refused(Refusal::InvalidRange))
+                ));
+            }
+            assert_eq!(
+                [8, 17, 2 * size_of::<Enclosing<1>>()],
+                owner.take_child_returns().as_slice()
+            );
+            Ok(0)
+        })
+        .expect("same build survives interrupted field");
+        owner.release(built);
+        owner.assert_released();
+    }
 }
 
 /// A word whose write is refused when its parts say so.

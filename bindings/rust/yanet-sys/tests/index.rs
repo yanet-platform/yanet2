@@ -19,6 +19,7 @@ use core::{
 };
 
 use arena::ArenaOwner;
+use yanet_sdk_testing::cp::Interruptible;
 use yanet_shm::{
     index::HashIndexKey,
     rel::{ShmBox, ShmSlice},
@@ -27,7 +28,7 @@ use yanet_shm::{
 use yanet_sys::{
     bindings,
     common::index::HashIndex,
-    cp::{Build, BuildError, Builder, Built, Init, MemoryContext, Owner, Place, Refusal},
+    cp::{Build, BuildError, Builder, Built, Owner, Refusal},
     dp::{Batch, CommitCx, Cx, Module},
 };
 
@@ -99,41 +100,6 @@ fn first_child<'o, M: Module>(
                 .root()
                 .ptr::<bindings::memory_context>(link.addr().wrapping_add(offset))
         })
-    }
-}
-
-/// An index or run of indexes interrupted only after it owns its contents.
-#[repr(transparent)]
-struct Interruptible<T>(T);
-
-// SAFETY: the wrapper has exactly its field's shared-memory representation.
-unsafe impl<T: ShmLayout> ShmLayout for Interruptible<T> {}
-
-// SAFETY: the only field is built and released at its final offset. Once
-// complete, its rollback belongs to the active transaction.
-unsafe impl<T: Build> Build for Interruptible<T> {
-    type Parts<'b, W: Owner> = (T::Parts<'b, W>, fn() -> Result<(), Refusal>);
-
-    fn write<'s, 'b, W: Owner>(
-        (parts, interrupt): Self::Parts<'b, W>,
-        mut place: Place<'s, 'b, Self, W>,
-    ) -> Result<Init<'s, Self>, Refusal> {
-        // SAFETY: the field covers the whole wrapper and transfers to it on
-        // success. No fallible operation separates the two transitions.
-        let receipt = unsafe {
-            place.write_field::<T>(0, parts)?;
-            place.assume_init()
-        };
-        if let Err(err) = interrupt() {
-            let _forgotten = core::mem::ManuallyDrop::new(receipt);
-            return Err(err);
-        }
-        Ok(receipt)
-    }
-
-    unsafe fn free<W: Owner>(addr: usize, memory: &MemoryContext<'_, W>) {
-        // SAFETY: the initialized field is the whole value at this address.
-        unsafe { T::free(addr, memory) }
     }
 }
 
@@ -225,61 +191,6 @@ fn test_slice_interrupted_after_initialization_returns_current_index_run_before_
             [2 * size_of::<Table>(), size_of::<Table>(), 3 * size_of::<Run>()],
             owner.take_child_returns().as_slice()
         );
-        owner.release(built);
-        owner.assert_released();
-    }
-}
-
-// The lower-case const tests hygiene of the generated destination binding.
-#[allow(non_upper_case_globals)]
-mod derived {
-    use super::{Interruptible, ShmSlice};
-
-    #[derive(yanet_sdk::ShmLayout)]
-    #[repr(C)]
-    pub(super) struct Enclosing<const __place: usize> {
-        pub(super) prior: [ShmSlice<u8>; __place],
-        pub(super) current: Interruptible<ShmSlice<u32>>,
-    }
-}
-
-#[allow(clippy::std_instead_of_core)]
-#[test]
-fn test_slice_interrupted_after_initialization_releases_nested_field_before_derived_guards() {
-    use std::panic::{AssertUnwindSafe, catch_unwind};
-
-    use derived::{Enclosing, EnclosingParts};
-    use yanet_sdk_testing::cp::{TestError, TestOwner};
-
-    let owner = TestOwner::new().with_child_return_log();
-    for unwind in [false, true] {
-        let built = Builder::<Index<Ipv4Addr>>::build::<BuildError<TestError>, _>(&owner, "index", |b| {
-            let result = catch_unwind(AssertUnwindSafe(|| {
-                b.slice::<Enclosing<1>>(2, |_| {
-                    let interrupt: fn() -> Result<(), Refusal> = if unwind {
-                        || panic!("initialized field")
-                    } else {
-                        || Err(Refusal::InvalidRange)
-                    };
-                    Ok(EnclosingParts {
-                        prior: [b.slice(17, |_| Ok(0))?],
-                        current: (b.slice(2, |_| Ok(0))?, interrupt),
-                    })
-                })
-            }));
-            if unwind {
-                let panic = result.expect_err("initialized field unwinds");
-                assert_eq!(Some(&"initialized field"), panic.downcast_ref::<&str>());
-            } else {
-                assert_matches!(result.unwrap(), Err(BuildError::Refused(Refusal::InvalidRange)));
-            }
-            assert_eq!(
-                [8, 17, 2 * size_of::<Enclosing<1>>()],
-                owner.take_child_returns().as_slice()
-            );
-            Ok([].as_slice().into())
-        })
-        .expect("same build survives interrupted field");
         owner.release(built);
         owner.assert_released();
     }
