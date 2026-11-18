@@ -20,7 +20,13 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
 )
 
-const arenaSize = 1 << 30
+// arenaSize is the size of a test arena, reserved, not touched: a join
+// of production-shaped networks fills most of it.
+const arenaSize = 4 << 30
+
+// footprintArenaSize is the size of the arena a footprint is measured
+// over, which the measure fills and reads whole.
+const footprintArenaSize = 1 << 30
 
 // newContext returns a memory context over a fresh anonymous mapping,
 // with an allocator C and Go both draw from.
@@ -198,7 +204,13 @@ type footprint struct {
 // pattern and returns what it wrote.
 func measureFootprint(t *testing.T, compile func(context *layout.MemoryContext)) footprint {
 	t.Helper()
-	mapping, err := syscall.Mmap(-1, 0, arenaSize, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_PRIVATE|syscall.MAP_ANONYMOUS)
+	return measureFootprintOf(t, footprintArenaSize, compile)
+}
+
+// measureFootprintOf measures a compile over an arena of size bytes.
+func measureFootprintOf(t *testing.T, size int, compile func(context *layout.MemoryContext)) footprint {
+	t.Helper()
+	mapping, err := syscall.Mmap(-1, 0, size, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_PRIVATE|syscall.MAP_ANONYMOUS)
 	require.NoError(t, err)
 	defer func() {
 		coracle.Unpoison(mapping)
@@ -263,9 +275,11 @@ func readArena(arena []byte, read func()) {
 func Test_CompileLine_UsesLessTemporaryMemoryThanC(t *testing.T) {
 	for _, count := range lineSizes {
 		rules := randomLineRulesOf(1, count)
+		// The rules are copied to C before the measure, as the native
+		// compile gets them ready in Go.
+		cRules := coracle.NewCLineRules(cLineRules(rules))
+		defer cRules.Free()
 		viaC := measureFootprint(t, func(context *layout.MemoryContext) {
-			cRules := coracle.NewCLineRules(cLineRules(rules))
-			defer cRules.Free()
 			_, err := cRules.CompileLoop(unsafe.Pointer(context), "ratelimit:proto", 1)
 			require.NoError(t, err)
 		})

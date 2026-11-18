@@ -178,9 +178,11 @@ func Benchmark_CompileNet4(b *testing.B) {
 func Test_CompileNet4_UsesLessTemporaryMemoryThanC(t *testing.T) {
 	for _, count := range net4Sizes {
 		rules := randomNet4RulesOf(1, count)
+		// The rules are copied to C before the measure, as the native
+		// compile gets them ready in Go.
+		cRules := coracle.NewCNet4Rules(cNet4Rules(rules))
+		defer cRules.Free()
 		viaC := measureFootprint(t, func(context *layout.MemoryContext) {
-			cRules := coracle.NewCNet4Rules(cNet4Rules(rules))
-			defer cRules.Free()
 			_, err := cRules.CompileLoop(unsafe.Pointer(context), "ratelimit:src4", 1)
 			require.NoError(t, err)
 		})

@@ -20,8 +20,8 @@ type PortRange struct {
 	To   uint16
 }
 
-func (m PortRange) Bounds() (uint32, uint32) {
-	return uint32(m.From), uint32(m.To)
+func (m PortRange) Hash() uint32 {
+	return uint32(m.From)*31 + uint32(m.To)
 }
 
 // PortRule is what one rule matches on a port attribute.

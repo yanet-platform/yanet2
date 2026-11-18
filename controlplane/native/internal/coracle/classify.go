@@ -8,9 +8,11 @@ package coracle
 #include <time.h>
 #include "lib/classify/classifiers/line.h"
 #include "lib/classify/classifiers/net4.h"
+#include "lib/classify/classifiers/net6.h"
 #include "lib/classify/classifiers/port.h"
 #include "lib/classify/compiler/line.h"
 #include "lib/classify/compiler/net4.h"
+#include "lib/classify/compiler/net6.h"
 #include "lib/classify/compiler/u16_ranges.h"
 
 // The line and port compiles the module SDK declares: a rule is the
@@ -36,6 +38,13 @@ coracle_get_net4s(
 	*view = *(const struct filter_net4s *)rule;
 }
 
+static void
+coracle_get_net6s(
+	const struct classifier_rule *rule, struct filter_net6s *view
+) {
+	*view = *(const struct filter_net6s *)rule;
+}
+
 CLASSIFY_LINE_COMPILE(
 	coracle_line, struct classify_attr_line, 0x100, coracle_get_lines
 )
@@ -43,13 +52,19 @@ CLASSIFY_U16_RANGES_COMPILE(
 	coracle_port, struct classify_attr_port, coracle_get_ports
 )
 
-enum coracle_attr_kind { CORACLE_LINE, CORACLE_PORT, CORACLE_NET4 };
+enum coracle_attr_kind {
+	CORACLE_LINE,
+	CORACLE_PORT,
+	CORACLE_NET4,
+	CORACLE_NET6
+};
 
 // One compiled attribute of any kind.
 union coracle_attr {
 	struct classify_attr_line line;
 	struct classify_attr_port port;
 	struct classify_attr_net4 net4;
+	struct classify_attr_net6 net6;
 };
 
 static int
@@ -72,6 +87,16 @@ coracle_attr_compile(
 	case CORACLE_PORT:
 		return classify_coracle_port_compile(
 			context, name, cast, rule_count, &attr->port, stage
+		);
+	case CORACLE_NET6:
+		return classify_net6_compile(
+			context,
+			name,
+			cast,
+			rule_count,
+			coracle_get_net6s,
+			&attr->net6,
+			stage
 		);
 	default:
 		return classify_net4_compile(
@@ -122,6 +147,10 @@ coracle_attr_free(
 	classifier_fini(stage, context, rule_count);
 	if (kind == CORACLE_NET4) {
 		lpm_free(&attr->net4.lpm);
+		return;
+	}
+	if (kind == CORACLE_NET6) {
+		classify_attr_net6_free(context, &attr->net6);
 		return;
 	}
 	vline_free(coracle_attr_line(kind, attr));
@@ -188,8 +217,13 @@ type PortRule struct {
 type AttrResult struct {
 	// Values holds the committed line of a line or port attribute.
 	Values []uint32
-	// Stretches holds the lookups of a network attribute's tree.
-	Stretches   []Stretch
+	// Stretches holds the lookups of a network attribute's tree, the
+	// high half one of an IPv6 attribute.
+	Stretches []Stretch
+	// LoStretches holds the lookups of the low half tree of an IPv6
+	// attribute, and Table its table, row after row.
+	LoStretches []Stretch
+	Table       [][]uint32
 	RuleGroups  []uint32
 	Groups      [][]uint32
 	MaxValue    uint32
@@ -252,6 +286,45 @@ func NewCNet4Rules(rules []Net4Rule) *CRules {
 			view.items = &items[0]
 		}
 		view.count = C.uint32_t(len(rule.Prefixes))
+		pointers[idx] = unsafe.Pointer(view)
+	}
+	return m
+}
+
+// Net6Network is an IPv6 network of a rule: an address and a mask.
+type Net6Network struct {
+	Addr [16]byte
+	Mask [16]byte
+}
+
+// Net6Rule is one rule of an IPv6 network compile: its networks, or none
+// at all for a rule absent from the projection.
+type Net6Rule struct {
+	Networks []Net6Network
+	Absent   bool
+}
+
+// NewCNet6Rules copies IPv6 network rules into C memory; Free releases
+// it.
+func NewCNet6Rules(rules []Net6Rule) *CRules {
+	m := newCRules(C.CORACLE_NET6, len(rules))
+	pointers := unsafe.Slice(m.pointers, len(rules))
+	for idx, rule := range rules {
+		if rule.Absent {
+			continue
+		}
+		view := (*C.struct_filter_net6s)(m.alloc(1, unsafe.Sizeof(C.struct_filter_net6s{})))
+		if len(rule.Networks) > 0 {
+			items := unsafe.Slice((*C.struct_net6)(m.alloc(len(rule.Networks), unsafe.Sizeof(C.struct_net6{}))), len(rule.Networks))
+			for netIdx, network := range rule.Networks {
+				for byteIdx := range 16 {
+					items[netIdx].addr[byteIdx] = C.uint8_t(network.Addr[byteIdx])
+					items[netIdx].mask[byteIdx] = C.uint8_t(network.Mask[byteIdx])
+				}
+			}
+			view.items = &items[0]
+		}
+		view.count = C.uint32_t(len(rule.Networks))
 		pointers[idx] = unsafe.Pointer(view)
 	}
 	return m
@@ -361,7 +434,18 @@ func (m *CRules) Compile(context unsafe.Pointer, name string) (*AttrResult, erro
 		RuleGroups: append([]uint32{}, unsafe.Slice((*uint32)(unsafe.Pointer(stage.rule_groups)), int(m.count))...),
 		MaxValue:   uint32(stage.registry.max_value),
 	}
-	if m.kind == C.CORACLE_NET4 {
+	if m.kind == C.CORACLE_NET6 {
+		tree := (*layout.ClassifyAttrNet6)(unsafe.Pointer(&attr))
+		result.Stretches = Stretches(&tree.Hi, 8)
+		result.LoStretches = Stretches(&tree.Lo, 8)
+		result.ContextName = shm.String(tree.Hi.MemoryContext.Name[:])
+		if values := tree.Comb.Values.Get(); values != nil {
+			rows := unsafe.Slice(values, tree.Comb.VDim)
+			for row := range rows {
+				result.Table = append(result.Table, append([]uint32{}, unsafe.Slice(rows[row].Get(), tree.Comb.HDim)...))
+			}
+		}
+	} else if m.kind == C.CORACLE_NET4 {
 		tree := (*layout.ClassifyAttrNet4)(unsafe.Pointer(&attr))
 		result.Stretches = Stretches(&tree.Lpm, 4)
 		result.ContextName = shm.String(tree.Lpm.MemoryContext.Name[:])

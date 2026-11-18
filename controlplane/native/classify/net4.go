@@ -39,8 +39,8 @@ type network struct {
 	Bits uint8
 }
 
-func (m network) Bounds() (uint32, uint32) {
-	return m.From, m.To
+func (m network) Hash() uint32 {
+	return m.From*31 + m.To
 }
 
 // newNetwork returns the network of a masked first address and a length.
@@ -92,7 +92,9 @@ func CompileNet4(rules []Net4Rule) (*Net4, error) {
 		}
 		distinctOf[key&placeMask] = uint32(len(distinct) - 1)
 	}
-	intervals := collectClasses(distinct)
+	intervals := collectClasses(len(distinct), func(idx int) (uint32, uint32) {
+		return distinct[idx].From, distinct[idx].To
+	})
 	whole := intervalSpan{End: uint32(len(intervals.Starts))}
 	// spanAt returns the intervals the network at a place covers.
 	spanAt := func(place int) intervalSpan {
@@ -184,11 +186,17 @@ func net4RuleIsAny(nets []network) bool {
 // placeMask masks the place of a network in a sort key.
 const placeMask = 1<<24 - 1
 
+// intervalKey is the key of an address space: an IPv4 address or an
+// IPv6 half.
+type intervalKey interface {
+	~uint32 | ~uint64
+}
+
 // classIntervals is the address space cut into intervals, ascending,
 // each with the class it belongs to, and the intervals every network
 // covers.
-type classIntervals struct {
-	Starts     []uint32
+type classIntervals[K intervalKey] struct {
+	Starts     []K
 	Classes    []uint32
 	ClassCount uint32
 	Spans      []intervalSpan
@@ -200,8 +208,9 @@ type intervalSpan struct {
 	End   uint32
 }
 
-// collectClasses cuts the address space by distinct networks sorted by
-// first address then length, numbering the classes as
+// collectClasses cuts the address space by count distinct networks
+// sorted by first address then length, bounds giving the first and the
+// last address of each, numbering the classes as
 // range_collector_collect does.
 //
 // A stack holds the networks containing the walk position, innermost on
@@ -209,25 +218,28 @@ type intervalSpan struct {
 // numbered when it first emits an interval, and a network ending where
 // the one around it ends renews that one's class instead of stacking.
 // A network covers the intervals from its push up to its frame's pop.
-func collectClasses(nets []network) classIntervals {
+//
+// A position past the last address wraps to zero only after the last
+// interval, so the walk needs no wider key.
+func collectClasses[K intervalKey](count int, bounds func(idx int) (K, K)) classIntervals[K] {
 	const unnumbered = ^uint32(0)
 	type frame struct {
 		Class uint32
-		To    uint64
+		To    K
 		// Pending is where the networks the frame ends begin in pending.
 		Pending int
 	}
-	collected := classIntervals{Spans: make([]intervalSpan, len(nets))}
+	collected := classIntervals[K]{Spans: make([]intervalSpan, count)}
 	stack := make([]frame, 0, 33)
 	var pending []uint32
-	position := uint64(0)
-	emit := func(to uint64) {
+	position := K(0)
+	emit := func(to K) {
 		top := &stack[len(stack)-1]
 		if top.Class == unnumbered {
 			top.Class = collected.ClassCount
 			collected.ClassCount++
 		}
-		collected.Starts = append(collected.Starts, uint32(position))
+		collected.Starts = append(collected.Starts, position)
 		collected.Classes = append(collected.Classes, top.Class)
 		position = to + 1
 	}
@@ -240,9 +252,9 @@ func collectClasses(nets []network) classIntervals {
 		pending = pending[:top.Pending]
 		stack = stack[:len(stack)-1]
 	}
-	stack = append(stack, frame{Class: unnumbered, To: 1<<32 - 1})
-	for idx, net := range nets {
-		from, to := uint64(net.From), uint64(net.To)
+	stack = append(stack, frame{Class: unnumbered, To: ^K(0)})
+	for idx := range count {
+		from, to := bounds(idx)
 		for stack[len(stack)-1].To < from {
 			pop()
 		}

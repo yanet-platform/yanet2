@@ -90,18 +90,19 @@ func groupLineRules(rules []LineRule) ([]uint32, []uint32) {
 	})
 }
 
-// interval is a closed interval of an attribute domain.
-type interval interface {
+// ruleItem is one item of what a rule matches on an attribute - an
+// interval or a network - with the hash the C compiles give it.
+type ruleItem interface {
 	comparable
-	Bounds() (uint32, uint32)
+	Hash() uint32
 }
 
-func (m LineRange) Bounds() (uint32, uint32) {
-	return m.From, m.To
+func (m LineRange) Hash() uint32 {
+	return m.From*31 + m.To
 }
 
 // groupRules returns the group of every rule, numbering the distinct
-// interval lists in the order they first appear, and the first rule of
+// item lists in the order they first appear, and the first rule of
 // every group; an absent rule has no group.
 //
 // The groups are found through an open addressing table of group numbers
@@ -109,7 +110,7 @@ func (m LineRange) Bounds() (uint32, uint32) {
 // use. It grows with the groups, kept at most half full, so a ruleset of
 // many rules outside the projection or many equal ones costs a table of
 // its groups, not of its rules.
-func groupRules[S interval](count int, rule func(idx int) ([]S, bool)) ([]uint32, []uint32) {
+func groupRules[S ruleItem](count int, rule func(idx int) ([]S, bool)) ([]uint32, []uint32) {
 	groups := make([]uint32, count)
 	var firsts, hashes []uint32
 	table := make([]uint32, 16)
@@ -119,7 +120,7 @@ func groupRules[S interval](count int, rule func(idx int) ([]S, bool)) ([]uint32
 			groups[idx] = InvalidGroup
 			continue
 		}
-		hash := spansHash(spans)
+		hash := itemsHash(spans)
 		mask := uint32(len(table) - 1)
 		slot := hash & mask
 		for ; table[slot] != 0; slot = (slot + 1) & mask {
@@ -161,13 +162,11 @@ func groupTable(hashes []uint32, size int) []uint32 {
 	return table
 }
 
-// spansHash hashes an interval list as the C compiles do.
-func spansHash[S interval](spans []S) uint32 {
-	hash := uint32(len(spans))
-	for _, span := range spans {
-		from, to := span.Bounds()
-		hash = hash*31 + from
-		hash = hash*31 + to
+// itemsHash hashes an item list as the C compiles do.
+func itemsHash[S ruleItem](items []S) uint32 {
+	hash := uint32(len(items))
+	for _, item := range items {
+		hash = hash*31*31 + item.Hash()
 	}
 	return hash
 }

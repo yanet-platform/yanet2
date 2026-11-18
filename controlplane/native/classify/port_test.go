@@ -169,9 +169,11 @@ func Benchmark_CompilePorts(b *testing.B) {
 func Test_CompilePorts_UsesLessTemporaryMemoryThanC(t *testing.T) {
 	for _, count := range portSizes {
 		rules := randomPortRulesOf(1, count)
+		// The rules are copied to C before the measure, as the native
+		// compile gets them ready in Go.
+		cRules := coracle.NewCPortRules(cPortRules(rules))
+		defer cRules.Free()
 		viaC := measureFootprint(t, func(context *layout.MemoryContext) {
-			cRules := coracle.NewCPortRules(cPortRules(rules))
-			defer cRules.Free()
 			_, err := cRules.CompileLoop(unsafe.Pointer(context), "ratelimit:port", 1)
 			require.NoError(t, err)
 		})
