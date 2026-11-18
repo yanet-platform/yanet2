@@ -1,4 +1,4 @@
-//go:build linux && amd64
+//go:build linux && (amd64 || arm64)
 
 // Package nativetest gives the native control plane's tests an in-process
 // dataplane and the comparison of what C and Go write into it. Only tests

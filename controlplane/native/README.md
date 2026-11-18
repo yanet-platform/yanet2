@@ -23,8 +23,9 @@ against C byte for byte.
 | `internal/nativetest` | In-process dataplane fixture, the C-then-Go comparison, the test assigner | tests only |
 
 Tests: `make test-only GO_TEST_PACKAGES="./controlplane/native/..."`. The production
-packages build with `CGO_ENABLED=0`. The layouts are generated from an amd64 dataplane
-only, so the packages that use them build on linux/amd64 only.
+packages build with `CGO_ENABLED=0`. Layouts are generated per architecture, from an amd64
+and an arm64 dataplane, and differ where structures align to cache lines (64 bytes on
+amd64, 128 on arm64); the packages build on linux/amd64 and linux/arm64.
 
 Under `-asan` the allocator does what the C one does in an AddressSanitizer build: red
 zones around every block and the same poisoning of free blocks and link words, through

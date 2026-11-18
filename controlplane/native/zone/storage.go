@@ -1,4 +1,4 @@
-//go:build linux && amd64
+//go:build linux && (amd64 || arm64)
 
 // Package zone attaches to YANET's shared memory without cgo: it maps the
 // storage file a dataplane created, finds its instances and reads the

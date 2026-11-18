@@ -1,4 +1,4 @@
-//go:build linux && amd64
+//go:build linux && (amd64 || arm64)
 
 // Package agent attaches a control-plane agent to a dataplane instance
 // without cgo, as lib/controlplane/agent does: the agent and its arenas

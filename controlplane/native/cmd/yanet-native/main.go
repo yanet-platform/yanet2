@@ -1,4 +1,4 @@
-//go:build linux && amd64
+//go:build linux && (amd64 || arm64)
 
 // Command yanet-native inspects a running YANET dataplane through its
 // shared memory, without cgo: it maps the storage file and prints the

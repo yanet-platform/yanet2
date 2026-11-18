@@ -1,4 +1,4 @@
-//go:build linux && amd64
+//go:build linux && (amd64 || arm64)
 
 // Package coracle runs the C code the native control plane reimplements,
 // as the oracle its tests compare against. Only tests import it: it is

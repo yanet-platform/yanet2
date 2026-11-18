@@ -1,4 +1,4 @@
-//go:build linux && amd64
+//go:build linux && (amd64 || arm64)
 
 // Package shmalloc allocates YANET shared memory the way the C block
 // allocator and memory contexts do, without cgo outside AddressSanitizer
