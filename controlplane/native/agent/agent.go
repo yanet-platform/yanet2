@@ -190,6 +190,25 @@ func cleanup(agent *layout.Agent) {
 	shmalloc.ContextFree(&cp.MemoryContext, unsafe.Pointer(agent), unsafe.Sizeof(layout.Agent{}))
 }
 
+// Find returns the current agent of that name in the instance, whichever
+// process attached it.
+func Find(instance *zone.Instance, name string) (*Agent, bool) {
+	cp := instance.Cp
+	shm.LockByte(&cp.AgentLock.Locked)
+	defer shm.UnlockByte(&cp.AgentLock.Locked)
+	registry := cp.AgentRegistry.Get()
+	if registry == nil {
+		return nil, false
+	}
+	slots := registry.Agents(int(registry.Count))
+	for idx := range slots {
+		if found := slots[idx].Get(); found != nil && shm.String(found.Name[:]) == name {
+			return &Agent{Instance: instance, Agent: found}, true
+		}
+	}
+	return nil, false
+}
+
 // zeroed allocates size bytes from the context and zeroes them, or
 // returns nil.
 func zeroed(context *layout.MemoryContext, size uintptr) unsafe.Pointer {
