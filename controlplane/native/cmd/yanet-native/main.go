@@ -1,3 +1,5 @@
+//go:build linux && amd64
+
 // Command yanet-native inspects a running YANET dataplane through its
 // shared memory, without cgo: it maps the storage file and prints the
 // instances, workers, module types, published module configurations and

@@ -1,3 +1,5 @@
+//go:build linux && amd64 && !asan
+
 package zone_test
 
 import (

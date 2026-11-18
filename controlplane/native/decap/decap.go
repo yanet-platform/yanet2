@@ -1,3 +1,5 @@
+//go:build linux && amd64
+
 // Package decap builds decap module configurations from Go, as the C
 // decap api does: a module header and two prefix trees the dataplane
 // matches the outer destination against.

@@ -1,3 +1,5 @@
+//go:build linux && amd64
+
 // Package agent attaches a control-plane agent to a dataplane instance
 // without cgo, as lib/controlplane/agent does: the agent and its arenas
 // come from the control-plane zone, and the agent registry and the chain

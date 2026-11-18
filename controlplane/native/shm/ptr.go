@@ -105,8 +105,6 @@ func Equal(field []byte, value string) bool {
 // Bytes returns the bytes of a C character array before its terminating
 // NUL, in place: comparing or hashing them copies nothing.
 func Bytes(field []byte) []byte {
-	if end := bytes.IndexByte(field, 0); end >= 0 {
-		return field[:end]
-	}
-	return field
+	before, _, _ := bytes.Cut(field, []byte{0})
+	return before
 }

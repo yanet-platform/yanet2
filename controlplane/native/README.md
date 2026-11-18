@@ -23,7 +23,10 @@ against C byte for byte.
 | `internal/nativetest` | In-process dataplane fixture, the C-then-Go comparison, the test assigner | tests only |
 
 Tests: `make test-only GO_TEST_PACKAGES="./controlplane/native/..."`. The production
-packages build with `CGO_ENABLED=0`.
+packages build with `CGO_ENABLED=0`. The layouts are generated from an amd64 dataplane
+only, so the packages that use them build on linux/amd64 only. The tests that compare
+with C do not build under `-asan`: AddressSanitizer gives the C allocator red zones the
+Go allocator does not mirror.
 
 ## How Go is held to C
 
@@ -101,3 +104,11 @@ and `decap`.
   reach it through cgo, a production dataplane does not need it.
 - Modules beyond blackhole and decap need their configuration builders ported, each
   against its C api with the same comparison.
+- Byte-identical results cover the topologies the tests build: one device, blackhole and
+  decap modules, no objects, no runtime counter registries and no module device links.
+- Error paths are not compared with C. A failed update frees its new generation, but a
+  registry copy that fails part-way, or a worker's context that fails part-way, leaves
+  what it allocated; several context allocations are not checked for exhaustion.
+- A generation an agent pins while attaching is never freed if C retires it meanwhile.
+- The layout test checks the generated views against the DWARF they came from; nothing
+  checks at run time that a dataplane was built from the same headers.

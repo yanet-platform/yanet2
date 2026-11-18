@@ -1,3 +1,5 @@
+//go:build linux && amd64
+
 package cpconfig
 
 import (
@@ -39,6 +41,7 @@ func UpdateModules(instance *zone.Instance, modules []*layout.CpModule) error {
 	}
 	for _, module := range modules {
 		if err := UpsertModule(&gen.ModuleRegistry, module); err != nil {
+			freeGeneration(cp, gen)
 			releaseOwners(owners)
 			return fmt.Errorf("upsert module %s:%s: %w", shm.String(module.Type[:]), shm.String(module.Name[:]), err)
 		}
@@ -49,6 +52,7 @@ func UpdateModules(instance *zone.Instance, modules []*layout.CpModule) error {
 		}
 		for _, linked := range unsafe.Slice(module.Objects.Get(), module.ObjectCount) {
 			if _, ok := lookupObject(gen, shm.String(linked.Type[:]), shm.String(linked.Name[:])); !ok {
+				freeGeneration(cp, gen)
 				releaseOwners(owners)
 				return fmt.Errorf("linked object %s:%s not found", shm.String(linked.Type[:]), shm.String(linked.Name[:]))
 			}
@@ -105,6 +109,7 @@ func releaseOwners(owners []*layout.Agent) {
 func install(cp *layout.CpConfig, dp *layout.DpConfig, gen, old *layout.CpConfigGen) error {
 	roots, err := BuildWorkerContexts(gen, old, dp.WorkerCount)
 	if err != nil {
+		freeGeneration(cp, gen)
 		return err
 	}
 	gen.ConfigGenEctxs.Set(roots)

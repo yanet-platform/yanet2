@@ -1,3 +1,5 @@
+//go:build linux && amd64
+
 // Package coracle runs the C code the native control plane reimplements,
 // as the oracle its tests compare against. Only tests import it: it is
 // the one place of the native control plane that uses cgo.

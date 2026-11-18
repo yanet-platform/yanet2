@@ -1,3 +1,5 @@
+//go:build linux && amd64
+
 // Package lpm builds the longest-prefix-match trees of common/lpm.h in
 // shared memory, without cgo, for the dataplane's own lookup to read: the
 // pages, their chunk directory and the order the tree grows in are C's.

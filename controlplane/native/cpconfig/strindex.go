@@ -1,3 +1,5 @@
+//go:build linux && amd64
+
 // Package cpconfig builds and publishes YANET configurations from Go
 // without cgo, as lib/controlplane/config does: configurations, their
 // counter registries and indexes, and the generations that publish them,

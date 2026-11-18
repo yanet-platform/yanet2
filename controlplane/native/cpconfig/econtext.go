@@ -1,3 +1,5 @@
+//go:build linux && amd64
+
 package cpconfig
 
 import (
@@ -39,6 +41,10 @@ func BuildWorkerContexts(gen, old *layout.CpConfigGen, workerCount uint64) (*shm
 		m := &contextBuilder{gen: gen, old: old, cp: cp, dp: cp.DpConfig.Get(), worker: worker}
 		root, err := m.root()
 		if err != nil {
+			for idx := range worker {
+				freeRoot(cp, roots[idx].Get())
+			}
+			shmalloc.ContextFree(&cp.EctxMemoryContext, block, pointerSize*uintptr(workerCount))
 			return nil, fmt.Errorf("build execution context of worker %d: %w", worker, err)
 		}
 		roots[worker].Set(root)

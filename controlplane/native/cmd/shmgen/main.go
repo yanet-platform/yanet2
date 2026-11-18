@@ -55,12 +55,12 @@ func main() {
 		Locals:      map[string]bool{},
 		Relatives:   map[string]bool{},
 	}
-	for _, local := range strings.Split(*locals, ",") {
+	for local := range strings.SplitSeq(*locals, ",") {
 		if local != "" {
 			options.Locals[local] = true
 		}
 	}
-	for _, relative := range strings.Split(*relatives, ",") {
+	for relative := range strings.SplitSeq(*relatives, ",") {
 		if relative != "" {
 			options.Relatives[relative] = true
 		}
@@ -572,10 +572,7 @@ func (m *generator) emitStruct(name string, typ *dwarf.StructType) error {
 				}
 				names = append(names, next.Name)
 			}
-			start := first / 8
-			if start < cursor {
-				start = cursor
-			}
+			start := max(first/8, cursor)
 			pad(start)
 			size := (last+7)/8 - start
 			fieldName := unique(used, fmt.Sprintf("Bits%d", start))
@@ -742,7 +739,7 @@ func cName(typ *dwarf.StructType) string {
 // CpConfig.
 func camel(name string) string {
 	var builder strings.Builder
-	for _, part := range strings.Split(name, "_") {
+	for part := range strings.SplitSeq(name, "_") {
 		if part == "" {
 			continue
 		}
