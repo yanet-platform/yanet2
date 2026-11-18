@@ -10,74 +10,24 @@
 use core::{
     ffi::{CStr, c_int},
     fmt,
-    marker::PhantomData,
-    mem::{align_of, forget, size_of},
-    ptr,
 };
 
-use yanet_shm::shm::MAX_ALIGN;
-
-use super::{Brand, Build, BuildError, Kind, MemoryContext, Owned, Owner, Refusal, Scope, refused};
+use super::{Build, BuildError, Kind, Owned, Owner, Refusal, Scope, placement::BlockSlot, refused};
 use crate::{
     bindings,
     classify::{Attribute, Decode, Join, Node, Rules},
 };
 
-/// Owns the storage of a C output, but none of the allocations it may name.
-struct NativeSlot<'b, T, W: Owner> {
-    raw: *mut T,
-    memory: &'b MemoryContext<'b, W>,
-    _brand: Brand<'b>,
-}
-
-impl<'b, T, W: Owner> NativeSlot<'b, T, W> {
-    fn reserve<E: From<BuildError<W::Error>>, K: Kind>(scope: Scope<'b, '_, W, E, K>) -> Result<Self, E> {
-        const { assert!(size_of::<T>() > 0 && align_of::<T>() <= MAX_ALIGN) };
-        let addr = scope.alloc(size_of::<T>())?;
-        // Own the address before asking the owner for its provenance.
-        let mut slot = Self {
-            raw: ptr::without_provenance_mut(addr),
-            memory: scope.memory,
-            _brand: PhantomData,
-        };
-        slot.raw = slot.memory.root().ptr(addr);
-        Ok(slot)
-    }
-
-    fn zero(&self) -> *mut T {
-        // SAFETY: the exclusive slot is aligned for one whole value.
-        unsafe { self.raw.write_bytes(0, 1) };
-        self.raw
+impl<T, W: Owner> BlockSlot<'_, T, W> {
+    fn zero(&mut self) -> *mut T {
+        let raw = self.root_ptr();
+        // SAFETY: the reservation is exclusive and aligned for one whole value.
+        unsafe { raw.write_bytes(0, 1) };
+        raw
     }
 
     fn context(&self) -> *mut bindings::memory_context {
-        self.raw.with_addr(self.memory.live.context().get()).cast()
-    }
-
-    /// # Safety
-    ///
-    /// The writer must have written a whole value at its final address,
-    /// with all owned edges belonging to this build.
-    unsafe fn finish(self) -> Owned<'b, T, W>
-    where
-        T: Build,
-    {
-        let value = Owned {
-            addr: self.raw.addr(),
-            memory: self.memory,
-            _brand: PhantomData,
-            _value: PhantomData,
-        };
-        forget(self);
-        value
-    }
-}
-
-impl<T, W: Owner> Drop for NativeSlot<'_, T, W> {
-    fn drop(&mut self) {
-        // SAFETY: the reservation still owns this unreferenced block of the
-        // original size. The caller handles any allocations named within.
-        unsafe { self.memory.free(self.raw.addr(), size_of::<T>()) };
+        self.raw().with_addr(self.memory().live.context().get()).cast()
     }
 }
 
@@ -88,7 +38,7 @@ impl<T, W: Owner> Drop for NativeSlot<'_, T, W> {
 /// build and ruleset; it is scratch of the build in its memory, which it
 /// returns when dropped.
 struct Stage<'b, W: Owner> {
-    slot: NativeSlot<'b, bindings::classifier, W>,
+    slot: BlockSlot<'b, bindings::classifier, W>,
     rules: u32,
 }
 
@@ -102,13 +52,13 @@ impl<W: Owner> fmt::Debug for Stage<'_, W> {
 }
 
 impl<'b, W: Owner> Stage<'b, W> {
-    fn zero(slot: NativeSlot<'b, bindings::classifier, W>, rules: u32) -> Self {
+    fn zero(mut slot: BlockSlot<'b, bindings::classifier, W>, rules: u32) -> Self {
         slot.zero();
         Self { slot, rules }
     }
 
     fn raw(&self) -> *mut bindings::classifier {
-        self.slot.raw
+        self.slot.raw()
     }
 }
 
@@ -288,7 +238,7 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
             if status == 0 {
                 // SAFETY: the prefix was decoded from this input's stage
                 // and the exclusive node is in its build.
-                unsafe { Decode::write_input(map, input) };
+                unsafe { Decode::write_inputs(map, input) };
             }
             status
         })
@@ -326,7 +276,7 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
         self,
         write: impl FnOnce(*mut bindings::memory_context, *mut T) -> c_int,
     ) -> Result<Owned<'b, T, W>, E> {
-        let slot = NativeSlot::reserve(self)?;
+        let mut slot = BlockSlot::reserve(self)?;
         let value = slot.zero();
         if write(slot.context(), value) != 0 {
             drop(slot);
@@ -335,7 +285,7 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
         }
         // SAFETY: success wrote the whole value, including any input edges,
         // at the final address of the reservation.
-        Ok(unsafe { slot.finish() })
+        Ok(unsafe { slot.assume_init() })
     }
 
     /// As [`Scope::written`], for a routine that also fills a stage over the
@@ -349,7 +299,7 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
         rules: u32,
         write: impl FnOnce(*mut bindings::memory_context, *mut bindings::classifier, *mut T) -> c_int,
     ) -> Result<Branch<'b, T, W>, E> {
-        let stage = Stage::zero(NativeSlot::reserve(self)?, rules);
+        let stage = Stage::zero(BlockSlot::reserve(self)?, rules);
         let value = self.written(|context, value| write(context, stage.raw(), value))?;
         Ok(Branch { value, stage })
     }

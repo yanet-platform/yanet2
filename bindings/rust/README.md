@@ -301,10 +301,10 @@ are unsafe: they must release exactly those resources and must not panic.
 Manual implementations migrate their old `Build::free` bodies to
 `yanet_sys::cp::Free`. The ordinary `Scope` and `*Parts` APIs are unchanged.
 
-`#[derive(ShmLayout)]` certifies the complete field tree once for both
-directions. Normal teardown follows declaration order. A refused or unwinding
-write rolls back initialized fields in reverse order. Fields at the same
-address, such as zero-sized fields, still have separate release rights.
+`#[derive(ShmLayout)]` generates writes and releases from the same field list.
+Normal teardown follows declaration order. On refusal or unwind, the
+current slot rolls back first, followed by the completed fields and then
+the unsubmitted parts, each group in reverse order.
 
 ## Custom configuration owners
 

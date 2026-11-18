@@ -1,13 +1,12 @@
 //! Relative-pointer field types of shared-memory graphs.
 //!
 //! A slot stores `target - slot` (zero means NULL), exactly as the C
-//! `ADDR_OF` family does. Every type here has private fields, no
-//! constructor and no `Copy`/`Clone`: safe code only ever sees a shared
-//! reference to a slot in place, so an offset is never separated from the
-//! address it is relative to and never re-based by a move. Builders write
-//! slots at their destination address. Resolution goes through a context
-//! holding the provenance root (`Resolve`), passed to the edge's method, never
-//! through the slot reference.
+//! `ADDR_OF` family does. Owning edges have private fields and no safe
+//! constructor or `Copy`/`Clone`: safe code only sees them in place, so an
+//! offset is never separated from the address it is relative to. Builders
+//! write edges at their destination address. Resolution goes through a
+//! context holding the provenance root (`Resolve`), passed to the edge's
+//! method, never through the slot reference.
 //!
 //! Owning edges (`ShmBox`, `ShmSlice`) are the configuration field types:
 //! they define the blocks of a configuration graph. `RelPtr` is the slot type
@@ -28,6 +27,12 @@ pub struct RelPtr<T> {
 }
 
 impl<T> RelPtr<T> {
+    /// Wraps a stored offset without granting access to its target.
+    #[doc(hidden)]
+    pub const fn from_offset(offset: isize) -> Self {
+        Self { offset, _target: PhantomData }
+    }
+
     /// Stored offset; the target is the slot address plus the offset.
     #[inline(always)]
     pub fn offset(&self) -> isize {
@@ -51,6 +56,24 @@ pub struct ShmSlice<T> {
 }
 
 impl<T> ShmSlice<T> {
+    /// Forms the metadata to write into a particular slice slot.
+    ///
+    /// # Safety
+    ///
+    /// The value may only be used after placement in that slot. The offset
+    /// is relative to the slot and must name a live, aligned block of exactly
+    /// `len` elements in the issuing context. Each element must satisfy its
+    /// shared-memory invariants at its final address, including any nested
+    /// links. The slot alone owns the block. When empty, both `offset` and
+    /// `len` must be zero.
+    #[doc(hidden)]
+    pub const unsafe fn from_offset(offset: isize, len: usize) -> Self {
+        Self {
+            ptr: RelPtr::from_offset(offset),
+            len: len as u64,
+        }
+    }
+
     /// Byte offset of the element count inside the slot pair.
     pub const LEN_OFFSET: usize = core::mem::offset_of!(ShmSlice<u8>, len);
 

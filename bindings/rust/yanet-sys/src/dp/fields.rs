@@ -528,6 +528,22 @@ pub struct PerWorker<T> {
 }
 
 impl<T: Copy + ShmLayout> PerWorker<T> {
+    /// Forms the metadata for a particular final per-worker field.
+    ///
+    /// # Safety
+    ///
+    /// The value may only be used at that address. A nonzero offset from
+    /// there must name the field's exclusively owned block, allocated in
+    /// the issuing context with exactly [`Self::block_size`] bytes for
+    /// `workers` and initialized at the required alignment and stride.
+    /// Zero offset requires zero workers.
+    pub(crate) const unsafe fn from_offset(offset: isize, workers: u64) -> Self {
+        Self {
+            slots: RelPtr::from_offset(offset),
+            workers,
+        }
+    }
+
     /// Bytes from one worker's slot to the next: the value rounded up to
     /// whole 128-byte lines.
     pub const STRIDE: usize = size_of::<T>().next_multiple_of(SLOT_LINE);
@@ -885,7 +901,7 @@ unsafe impl<T: Copy + ShmLayout + Send> Sync for PerWorker<T> {}
 // are plain values aligned for `T` by the builder.
 unsafe impl<T: Copy + ShmLayout> ShmLayout for PerWorker<T> {}
 
-// The builder writes the offset and count as consecutive raw words.
+// The shared layout is a relative pointer followed by a worker count.
 const _: () = {
     assert!(size_of::<PerWorker<u64>>() == 16);
     assert!(core::mem::offset_of!(PerWorker<u64>, workers) == size_of::<isize>());
@@ -918,6 +934,26 @@ pub struct PerWorkerSlice<T> {
 }
 
 impl<T: Copy + ShmLayout> PerWorkerSlice<T> {
+    /// Forms the metadata for a particular final per-worker slice field.
+    ///
+    /// # Safety
+    ///
+    /// The value may only be used at that address. A nonzero offset from
+    /// there must name the field's exclusively owned table of `workers`
+    /// offsets. Each entry must name a distinct, non-null, exclusively
+    /// owned region with `len` initialized elements. The table and each
+    /// region must be aligned and allocated at their exact block sizes
+    /// in the issuing context. Zero offset requires zero length, but not
+    /// necessarily zero workers.
+    pub(crate) const unsafe fn from_offset(offset: isize, workers: u64, len: usize) -> Self {
+        Self {
+            regions: RelPtr::from_offset(offset),
+            workers,
+            len: len as u64,
+            _element: PhantomData,
+        }
+    }
+
     /// Bytes of the block of one region of the given number of values, zero
     /// when the values take no bytes, `None` when the size overflows.
     ///
@@ -1297,7 +1333,8 @@ unsafe impl<T: Copy + ShmLayout + Send> Sync for PerWorkerSlice<T> {}
 // and the regions hold plain values aligned for `T` by the builder.
 unsafe impl<T: Copy + ShmLayout> ShmLayout for PerWorkerSlice<T> {}
 
-// The builder writes the table offset and two counts as consecutive raw words.
+// The shared layout is a relative pointer followed by a worker count and
+// length.
 const _: () = {
     assert!(size_of::<PerWorkerSlice<u64>>() == 24);
     assert!(core::mem::offset_of!(PerWorkerSlice<u64>, workers) == size_of::<isize>());

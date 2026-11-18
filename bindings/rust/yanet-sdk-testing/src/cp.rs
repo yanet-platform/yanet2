@@ -24,7 +24,7 @@ use yanet_shm::{
 use yanet_sys::{
     cp::{
         BlockAddr, Build, Built, BuiltObject, Context, Freed, Fresh, Header, Init, Live, LiveContext, ModuleKind,
-        ObjectKind, Owner, Place, Record, RecordField, RecordPlace, RecordTaken, Refusal, Retiring,
+        ObjectKind, Owner, Place, Record, RecordPlace, RecordTaken, Refusal, Retiring,
     },
     dp::{Module, ModuleConfig, Object},
 };
@@ -39,10 +39,6 @@ pub struct Interruptible<T>(T);
 // SAFETY: the wrapper has exactly its field's shared-memory representation.
 unsafe impl<T: ShmLayout> ShmLayout for Interruptible<T> {}
 
-impl<T: Build> Interruptible<T> {
-    const FIELD: RecordField<T> = RecordField::at(0);
-}
-
 // SAFETY: the sole field is the whole wrapper, at offset zero.
 unsafe impl<T: Build> Record for Interruptible<T> {
     type RecordParts<'b, W: Owner> = T::Parts<'b, W>;
@@ -54,11 +50,13 @@ unsafe impl<T: Build> Record for Interruptible<T> {
     where
         Self: Build,
     {
-        place.write(Self::FIELD, parts)
+        let guard = place.write_field::<T>(0, parts)?;
+        core::mem::forget(guard);
+        Ok(place.finish())
     }
 
-    fn free_fields<W: Owner>(value: RecordTaken<'_, Self, W>) {
-        value.free(Self::FIELD);
+    fn free_fields<W: Owner>(mut value: RecordTaken<'_, Self, W>) {
+        value.free_field::<T>(0);
     }
 }
 

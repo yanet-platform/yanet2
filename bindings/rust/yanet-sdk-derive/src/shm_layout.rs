@@ -77,25 +77,6 @@ fn bind_generics(generics: &Generics, p: &TokenStream) -> syn::Result<(Generics,
     Ok((bound, args))
 }
 
-// Split by declaration order with logarithmic type depth. Parts are laid out
-// in the opposite order so unsubmitted values drop newest first.
-fn record_tree(fields: &[(TokenStream, TokenStream, TokenStream)]) -> (TokenStream, TokenStream, TokenStream) {
-    match fields {
-        [] => unreachable!("a derived record has at least one field"),
-        [(ty, field, part)] => (ty.clone(), field.clone(), part.clone()),
-        _ => {
-            let (left, right) = fields.split_at(fields.len() / 2);
-            let (left_ty, left_fields, left_parts) = record_tree(left);
-            let (right_ty, right_fields, right_parts) = record_tree(right);
-            (
-                quote!((#left_ty, #right_ty)),
-                quote!((#left_fields, #right_fields)),
-                quote!((#right_parts, #left_parts)),
-            )
-        }
-    }
-}
-
 pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     let name = &input.ident;
     let Data::Struct(data) = &input.data else {
@@ -116,7 +97,6 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     let aligns = check_repr(input)?;
     let sdk = format_ident!("__yanet_sdk_for_{}", name);
     let core = format_ident!("__yanet_core_for_{}", name);
-    let layout = format_ident!("__LayoutFor{}", name);
     let p = quote!(#sdk::__private);
 
     let generic = !input.generics.params.is_empty();
@@ -124,10 +104,13 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
     let predicates: Vec<_> = where_clause.iter().flat_map(|w| w.predicates.iter()).collect();
     let ty = quote!(#name #ty_generics);
+    let addr = format_ident!("__addr");
 
     let mut bounds = Vec::new();
     let mut parts_fields = Vec::new();
-    let mut record_fields = Vec::new();
+    let mut writes = Vec::new();
+    let mut commits = Vec::new();
+    let mut releases = Vec::new();
     let mut debug_bounds = Vec::new();
     let mut idents = Vec::new();
     let mut field_idents = Vec::new();
@@ -143,16 +126,18 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         parts_fields.push(quote_spanned!(field_ty.span()=> #vis #ident: <#field_ty as #p::Build>::Parts<'b, __W>));
         debug_bounds
             .push(quote_spanned!(field_ty.span()=> <#field_ty as #p::Build>::Parts<'b, __W>: #core::fmt::Debug));
-        let descriptor = quote_spanned!(field_ty.span()=> #p::RecordField<#field_ty>);
-        let field = quote_spanned! {field_ty.span()=>
-            #p::RecordField::<#field_ty>::at(#core::mem::offset_of!(Self, #ident))
-        };
-        record_fields.push((descriptor, field, quote!(#binding)));
+        let offset = quote!(#core::mem::offset_of!(Self, #ident));
+        writes.push(quote_spanned! {field_ty.span()=>
+            let #binding = #addr.write_field::<#field_ty>(#offset, #binding)?;
+        });
+        commits.push(quote!(#core::mem::forget(#binding);));
+        releases.push(quote_spanned! {field_ty.span()=>
+            #addr.free_field::<#field_ty>(#offset);
+        });
         idents.push(quote!(#ident: #binding));
         field_idents.push(ident);
         field_names.push(ident.to_string());
     }
-    let (record_type, record_fields, record_parts) = record_tree(&record_fields);
     let drop_msg = format!("ShmLayout: `{name}` needs drop; shared-memory types are never dropped");
     let align_msg = format!("ShmLayout: `{name}` is aligned to more than the block allocator's MAX_ALIGN");
     let vis = &input.vis;
@@ -235,45 +220,30 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
             }
         }
 
-        const _: () = {
-            // A public record can have fields whose types are private.
-            #[allow(non_camel_case_types)]
-            trait #layout {
-                type Fields;
-                const FIELDS: Self::Fields;
+        // SAFETY: both paths name each actual field once, from the same
+        // type and offset. Locals roll back completed fields before unused
+        // parts. A successful write transfers all fields to the record.
+        unsafe impl #impl_generics #p::Record for #ty #where_clause {
+            type RecordParts<'b, __W: #p::Owner> = #parts_name<'b, __W, #(#args),*>;
+
+            fn write_fields<'slot, 'b, __W: #p::Owner>(
+                __parts: Self::RecordParts<'b, __W>,
+                #addr: #p::RecordPlace<'slot, 'b, Self, __W>,
+            ) -> #core::result::Result<#p::Init<'slot, Self>, #p::Refusal>
+            where
+                Self: #p::Build,
+            {
+                const { #instance_checks }
+                let #parts_name { #(#idents),* } = __parts;
+                #(#writes)*
+                #(#commits)*
+                #core::result::Result::Ok(#addr.finish())
             }
 
-            impl #impl_generics #layout for #ty #where_clause {
-                type Fields = #record_type;
-                const FIELDS: Self::Fields = {
-                    #instance_checks
-                    #record_fields
-                };
+            fn free_fields<__W: #p::Owner>(mut #addr: #p::RecordTaken<'_, Self, __W>) {
+                #(#releases)*
             }
-
-            // SAFETY: the tree names every actual field once in declaration
-            // order, with its own type and aligned offset, even for zero-sized
-            // fields. The written fields form the entire value, including all
-            // registrations and owning edges, and teardown releases each once.
-            unsafe impl #impl_generics #p::Record for #ty #where_clause {
-                type RecordParts<'b, __W: #p::Owner> = #parts_name<'b, __W, #(#args),*>;
-
-                fn write_fields<'slot, 'b, __W: #p::Owner>(
-                    __parts: Self::RecordParts<'b, __W>,
-                    __addr: #p::RecordPlace<'slot, 'b, Self, __W>,
-                ) -> #core::result::Result<#p::Init<'slot, Self>, #p::Refusal>
-                where
-                    Self: #p::Build,
-                {
-                    let #parts_name { #(#idents),* } = __parts;
-                    __addr.write(<Self as #layout>::FIELDS, #record_parts)
-                }
-
-                fn free_fields<__W: #p::Owner>(__addr: #p::RecordTaken<'_, Self, __W>) {
-                    __addr.free(<Self as #layout>::FIELDS);
-                }
-            }
-        };
+        }
 
         impl #impl_generics #p::Build for #ty #where_clause {
             type Parts<'b, __W: #p::Owner> = #parts_name<'b, __W, #(#args),*>;

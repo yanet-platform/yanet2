@@ -362,6 +362,16 @@ const _: () = {
 
 /// The shared-memory impls of the nodes that hold their inputs.
 macro_rules! holders {
+    (@free $taken:ident;) => {};
+    (@free $taken:ident; $edge:ident: $ty:ident $(, $rest:ident: $rest_ty:ident)*) => {{
+        holders!(@free $taken; $($rest: $rest_ty),*);
+        // SAFETY: this is a distinct, initialized box field, outside the
+        // finalized prefix and projected only once.
+        let edge = unsafe { $taken.field::<ShmBox<$ty>>(offset_of!(Self, $edge)) };
+        ShmBox::<$ty>::free(edge);
+    }};
+
+    // The fields are listed in write order and released in reverse order.
     ($($name:ident<$($param:ident),*> { $table:ident: $prefix:ty; $($edge:ident: $ty:ident),* })*) => {$(
         // SAFETY: a `#[repr(C)]` struct of an opaque C object, which accepts
         // every pattern, and offset words, without padding (asserted above);
@@ -388,11 +398,25 @@ macro_rules! holders {
                 // SAFETY: this is the initialized C prefix, projected once.
                 let prefix = unsafe { taken.field::<$prefix>(offset_of!(Self, $table)) };
                 <$prefix>::free(prefix);
+                holders!(@free taken; $($edge: $ty),*);
+            }
+        }
+
+        impl<$($param: Node),*> $name<$($param),*> {
+            /// Installs the inputs into their final owning fields.
+            ///
+            /// # Safety
+            ///
+            /// The output is exclusive, aligned and has provenance for the
+            /// inputs' build. Its prefix was built from their corresponding
+            /// stages, and none of its edges has been installed yet.
+            pub(crate) unsafe fn write_inputs<'b, W: Owner>(out: *mut Self, $($edge: Owned<'b, $ty, W>),*) {
                 $(
-                    // SAFETY: this is a distinct, initialized box field,
-                    // outside the finalized prefix and projected only once.
-                    let edge = unsafe { taken.field::<ShmBox<$ty>>(offset_of!(Self, $edge)) };
-                    ShmBox::<$ty>::free(edge);
+                    // SAFETY: out covers this field in the reserved node.
+                    let field = unsafe { &raw mut (*out).$edge };
+                    // SAFETY: the field is an exclusive box slot in this
+                    // build, apart from the input block.
+                    unsafe { $edge.write_box(field) };
                 )*
             }
         }
@@ -400,8 +424,8 @@ macro_rules! holders {
 }
 
 holders! {
-    Join<L, R> { table: Joint; right: R, left: L }
-    Rules<L, R> { table: RuleTable; right: R, left: L }
+    Join<L, R> { table: Joint; left: L, right: R }
+    Rules<L, R> { table: RuleTable; left: L, right: R }
     Decode<N> { map: RuleMap; input: N }
 }
 
@@ -417,47 +441,6 @@ mod sealed {
     impl Sealed for super::LineAttr {}
 
     impl<L, R> Sealed for super::Join<L, R> {}
-}
-
-impl<L: Node, R: Node> Join<L, R> {
-    /// # Safety
-    ///
-    /// The output is an exclusive, aligned node in the inputs' build. Its
-    /// prefix was joined from their stages and its edges are still unowned.
-    pub(crate) unsafe fn write_inputs<'b, W: Owner>(out: *mut Self, left: Owned<'b, L, W>, right: Owned<'b, R, W>) {
-        // SAFETY: this is the exclusive left slot in the input's build.
-        // The projection does not read the slot or its native prefix.
-        unsafe { left.write_box(&raw mut (*out).left) };
-        // SAFETY: the right slot is also exclusive and disjoint from the
-        // already initialized left slot.
-        unsafe { right.write_box(&raw mut (*out).right) };
-    }
-}
-
-impl<L: Node, R: Node> Rules<L, R> {
-    /// # Safety
-    ///
-    /// The output is an exclusive, aligned node in the inputs' build. Its
-    /// prefix was joined from their stages and its edges are still unowned.
-    pub(crate) unsafe fn write_inputs<'b, W: Owner>(out: *mut Self, left: Owned<'b, L, W>, right: Owned<'b, R, W>) {
-        // SAFETY: this is the exclusive left slot in the input's build.
-        // The projection does not read the slot or its native prefix.
-        unsafe { left.write_box(&raw mut (*out).left) };
-        // SAFETY: the right slot is also exclusive and disjoint from the
-        // already initialized left slot.
-        unsafe { right.write_box(&raw mut (*out).right) };
-    }
-}
-
-impl<N: Node> Decode<N> {
-    /// # Safety
-    ///
-    /// The output is an exclusive, aligned node in the input's build. Its
-    /// prefix was decoded from that input's stage and its edge is unowned.
-    pub(crate) unsafe fn write_input<'b, W: Owner>(out: *mut Self, input: Owned<'b, N, W>) {
-        // SAFETY: the field is an exclusive slot of this build.
-        unsafe { input.write_box(&raw mut (*out).input) };
-    }
 }
 
 #[cfg(test)]

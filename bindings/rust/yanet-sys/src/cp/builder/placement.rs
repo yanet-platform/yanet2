@@ -1,9 +1,10 @@
 //! Exclusive loans of final-address storage during a build.
 
-use core::{fmt, marker::PhantomData, mem::forget};
+use core::{fmt, marker::PhantomData, mem::forget, ptr};
 
 use super::{
-    Brand, Build, BuildError, Free, Kind, MemoryContext, OwnedSlice, Owner, Refusal, Scope, ShmLayout, ShmRoot, refused,
+    Brand, Build, BuildError, Free, Kind, MemoryContext, Owned, OwnedSlice, Owner, Refusal, Scope, ShmLayout, ShmRoot,
+    refused,
 };
 
 type Invariant<T> = PhantomData<fn(T) -> T>;
@@ -103,30 +104,19 @@ impl<'slot, 'b, T: Build, W: Owner, const N: usize> Place<'slot, 'b, [T; N], W> 
     }
 }
 
-/// One entry in a derived record's layout, in declaration order.
-#[derive(Debug)]
-pub struct RecordField<T> {
-    offset: usize,
-    _value: Invariant<T>,
-}
-
-impl<T> RecordField<T> {
-    /// Describes a field of type `T` at this byte offset from its parent.
-    pub const fn at(offset: usize) -> Self {
-        Self { offset, _value: PhantomData }
-    }
-}
-
-/// The compile-time layout used for both construction and release.
+/// Construction and release of the fields of a shared-memory record.
 ///
 /// # Safety
 ///
-/// Both callbacks must use their capability with the same tree. The tree
-/// lists every actual field of `Self` once in declaration order, at its
-/// real offset and with its real type. Every entry must be aligned at any
-/// valid address of `Self`, even when zero-sized. Initializing the listed
-/// fields must satisfy all of [`Place::assume_init`] for the whole value.
-/// The release callback must uphold the [`Free`] contract.
+/// Both callbacks must visit fields in declaration order, with each field's
+/// actual type and aligned offset. A release and a committed write must
+/// visit every field exactly once. A failed write may visit only a prefix.
+/// On failure, the initialized field guards must run before the remaining
+/// parts. Commit only after all guards are disarmed and their ownership
+/// transferred to the record.
+///
+/// A complete write must satisfy [`Place::assume_init`] and release must
+/// satisfy [`Free`]. Capabilities and guards may not escape either callback.
 pub unsafe trait Record: ShmLayout {
     /// The record's parts in the author-facing form.
     type RecordParts<'b, W: Owner>;
@@ -166,10 +156,35 @@ unsafe impl<T: Record> Free for T {
 pub struct RecordPlace<'slot, 'b, T: Build, W: Owner>(Place<'slot, 'b, T, W>);
 
 impl<'slot, 'b, T: Build, W: Owner> RecordPlace<'slot, 'b, T, W> {
-    /// Writes the fields certified by the record implementation.
+    /// Writes one field and guards it until the record takes ownership.
     #[inline]
-    pub fn write<F: fields::List>(self, fields: F, parts: F::Parts<'b, W>) -> Result<Init<'slot, T>, Refusal> {
-        fields::write_record(fields, self, parts)
+    pub fn write_field<U: Build>(
+        &self,
+        offset: usize,
+        parts: U::Parts<'b, W>,
+    ) -> Result<impl Sized + use<'slot, 'b, T, U, W>, Refusal> {
+        let addr = self.0.addr + offset;
+        let memory = self.0.memory;
+        Slot::<U, W> {
+            addr,
+            memory,
+            initialized: false,
+            _value: PhantomData,
+        }
+        .write(parts)?;
+        Ok(Run::<U, W> {
+            memory,
+            addr,
+            written: 1,
+            _element: PhantomData,
+        })
+    }
+
+    /// Commits the whole record after its field guards are disarmed.
+    #[inline]
+    pub fn finish(self) -> Init<'slot, T> {
+        // SAFETY: the Record implementation certifies the complete transfer.
+        unsafe { self.0.assume_init() }
     }
 }
 
@@ -179,157 +194,14 @@ impl<'slot, 'b, T: Build, W: Owner> RecordPlace<'slot, 'b, T, W> {
 pub struct RecordTaken<'a, T: ShmLayout, W: Owner>(Taken<'a, T, W>);
 
 impl<T: ShmLayout, W: Owner> RecordTaken<'_, T, W> {
-    /// Releases the certified fields in declaration order.
+    /// Releases one field of the record.
     #[inline]
-    pub fn free<F: fields::List>(self, fields: F) {
-        fields::release_record(fields, self);
-    }
-}
-
-mod fields {
-    use core::{marker::PhantomData, mem::forget};
-
-    use super::{
-        Build, Init, MemoryContext, Owner, RecordField, RecordPlace, RecordTaken, Refusal, Run, ShmLayout, Slot, Taken,
-    };
-
-    pub struct Written<'b, T: Build, W: Owner> {
-        _guard: Run<'b, T, W>,
-    }
-
-    /// Exclusive write destinations for one certified subtree.
-    pub struct Write<'b, F, W: Owner> {
-        fields: F,
-        addr: usize,
-        memory: &'b MemoryContext<'b, W>,
-    }
-
-    #[inline]
-    pub(super) fn write_record<'slot, 'b, F: List, T: Build, W: Owner>(
-        fields: F,
-        RecordPlace(place): RecordPlace<'slot, 'b, T, W>,
-        parts: F::Parts<'b, W>,
-    ) -> Result<Init<'slot, T>, Refusal> {
-        let (written, _) = F::write(
-            Write {
-                fields,
-                addr: place.addr,
-                memory: place.memory,
-            },
-            parts,
-            ((), ()),
-        )?;
-        forget(written);
-        // SAFETY: the certified traversal initialized the complete record.
-        Ok(unsafe { place.assume_init() })
-    }
-
-    /// Exclusive release rights for one certified subtree.
-    pub struct Release<'a, F, W: Owner> {
-        fields: F,
-        addr: usize,
-        memory: &'a MemoryContext<'a, W>,
-    }
-
-    #[inline]
-    pub(super) fn release_record<F: List, T: ShmLayout, W: Owner>(
-        fields: F,
-        RecordTaken(value): RecordTaken<'_, T, W>,
-    ) {
-        F::release(Release {
-            fields,
-            addr: value.addr,
-            memory: value.memory,
+    pub fn free_field<U: Free>(&mut self, offset: usize) {
+        U::free(Taken {
+            addr: self.0.addr + offset,
+            memory: self.0.memory,
+            _value: PhantomData,
         });
-    }
-
-    type Staged<G, P, L> = Result<(G, (P, L)), Refusal>;
-
-    pub trait List {
-        type Parts<'b, W: Owner>;
-        type Written<'b, W: Owner>;
-
-        /// Stages initialized fields in reverse teardown order. `state`
-        /// owns prior writes followed by unsubmitted parts after this group.
-        fn write<'b, W: Owner, P, L>(
-            destination: Write<'b, Self, W>,
-            parts: Self::Parts<'b, W>,
-            state: (P, L),
-        ) -> Staged<Self::Written<'b, W>, P, L>
-        where
-            Self: Sized;
-
-        /// Releases the listed fields in declaration order.
-        fn release<W: Owner>(release: Release<'_, Self, W>)
-        where
-            Self: Sized;
-    }
-
-    impl<T: Build> List for RecordField<T> {
-        type Parts<'b, W: Owner> = T::Parts<'b, W>;
-        type Written<'b, W: Owner> = Written<'b, T, W>;
-
-        fn write<'b, W: Owner, P, L>(
-            Write { fields, addr, memory }: Write<'b, Self, W>,
-            parts: Self::Parts<'b, W>,
-            state: (P, L),
-        ) -> Staged<Self::Written<'b, W>, P, L> {
-            let addr = addr + fields.offset;
-            // The current slot rolls back before prior writes and unused parts.
-            Slot::<T, W> {
-                addr,
-                memory,
-                initialized: false,
-                _value: PhantomData,
-            }
-            .write(parts)?;
-            let guard = Run {
-                memory,
-                addr,
-                written: 1,
-                _element: PhantomData,
-            };
-            Ok((Written { _guard: guard }, state))
-        }
-
-        fn release<W: Owner>(Release { fields, addr, memory }: Release<'_, Self, W>) {
-            T::free(Taken {
-                addr: addr + fields.offset,
-                memory,
-                _value: PhantomData,
-            });
-        }
-    }
-
-    impl<A: List, B: List> List for (A, B) {
-        // Each tuple drops later fields first within its group.
-        type Parts<'b, W: Owner> = (B::Parts<'b, W>, A::Parts<'b, W>);
-        type Written<'b, W: Owner> = (B::Written<'b, W>, A::Written<'b, W>);
-
-        fn write<'b, W: Owner, P, L>(
-            Write { fields: (left, right), addr, memory }: Write<'b, Self, W>,
-            (right_parts, left_parts): Self::Parts<'b, W>,
-            (prior, later): (P, L),
-        ) -> Staged<Self::Written<'b, W>, P, L> {
-            // Hand off the rest of the rollback state before starting a group.
-            let (left, (prior, (later, right_parts))) = A::write(
-                Write { fields: left, addr, memory },
-                left_parts,
-                (prior, (later, right_parts)),
-            )?;
-            let (right, ((left, prior), later)) = B::write(
-                Write { fields: right, addr, memory },
-                right_parts,
-                ((left, prior), later),
-            )?;
-            Ok(((right, left), (prior, later)))
-        }
-
-        #[inline(always)]
-        fn release<W: Owner>(Release { fields: (left, right), addr, memory }: Release<'_, Self, W>) {
-            A::release(Release { fields: left, addr, memory });
-            B::release(Release { fields: right, addr, memory });
-        }
     }
 }
 
@@ -488,6 +360,83 @@ impl<T: Build, W: Owner> Drop for Slot<'_, T, W> {
                 _value: PhantomData,
             });
         }
+    }
+}
+
+/// Owns one block at its final address until its Rust or C writer completes.
+pub(super) struct BlockSlot<'b, T, W: Owner> {
+    raw: *mut T,
+    memory: &'b MemoryContext<'b, W>,
+    _brand: Brand<'b>,
+}
+
+impl<'b, T, W: Owner> BlockSlot<'b, T, W> {
+    pub(super) fn reserve<E: From<BuildError<W::Error>>, K: Kind>(scope: Scope<'b, '_, W, E, K>) -> Result<Self, E> {
+        const { assert!(size_of::<T>() != 0, "a block of a zero-sized type") };
+        const { assert!(align_of::<T>() <= yanet_shm::shm::MAX_ALIGN) };
+        let addr = scope.alloc(size_of::<T>())?;
+        Ok(Self {
+            raw: ptr::without_provenance_mut(addr),
+            memory: scope.memory,
+            _brand: PhantomData,
+        })
+    }
+
+    // Native writers keep a pointer with provenance for subsequent C calls.
+    // The reservation already owns the address if root lookup unwinds.
+    pub(super) fn root_ptr(&mut self) -> *mut T {
+        self.raw = self.memory.root().ptr(self.raw.addr());
+        self.raw
+    }
+
+    pub(super) fn raw(&self) -> *mut T {
+        self.raw
+    }
+
+    pub(super) fn memory(&self) -> &'b MemoryContext<'b, W> {
+        self.memory
+    }
+
+    pub(super) fn write(self, parts: T::Parts<'b, W>) -> Result<Owned<'b, T, W>, Refusal>
+    where
+        T: Build,
+    {
+        Slot::<T, W> {
+            addr: self.raw.addr(),
+            memory: self.memory,
+            initialized: false,
+            _value: PhantomData,
+        }
+        .write(parts)?;
+        // SAFETY: the slot returned its receipt, transferring one complete
+        // value.
+        Ok(unsafe { self.assume_init() })
+    }
+
+    /// # Safety
+    ///
+    /// The writer completed one whole value at this address, with all its
+    /// resources exclusively owned here and releasable in this context.
+    pub(super) unsafe fn assume_init(self) -> Owned<'b, T, W>
+    where
+        T: Build,
+    {
+        let value = Owned {
+            addr: self.raw.addr(),
+            memory: self.memory,
+            _brand: PhantomData,
+            _value: PhantomData,
+        };
+        forget(self);
+        value
+    }
+}
+
+impl<T, W: Owner> Drop for BlockSlot<'_, T, W> {
+    fn drop(&mut self) {
+        // SAFETY: the reservation still owns the block at its original size.
+        // The writer rolls back any resources inside it before returning.
+        unsafe { self.memory.free(self.raw.addr(), size_of::<T>()) };
     }
 }
 

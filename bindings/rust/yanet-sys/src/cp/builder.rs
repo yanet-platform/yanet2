@@ -62,8 +62,8 @@ pub use classify::Branch;
 
 mod placement;
 
-pub use placement::{Init, Place, Record, RecordField, RecordPlace, RecordTaken, Taken};
-use placement::{Run, SliceWriter};
+use placement::{BlockSlot, Run, SliceWriter};
+pub use placement::{Init, Place, Record, RecordPlace, RecordTaken, Taken};
 
 /// Invariant lifetime brand: values of two builds never unify.
 type Brand<'b> = PhantomData<fn(&'b ()) -> &'b ()>;
@@ -201,49 +201,6 @@ impl<'o, W: Owner> MemoryContext<'o, W> {
     }
 }
 
-macro_rules! plain_build {
-    ($($ty:ty),* $(,)?) => {$(
-        // SAFETY: this leaf owns no resources.
-        unsafe impl Free for $ty {
-            fn free<W: Owner>(_: Taken<'_, Self, W>) {}
-        }
-
-        impl Build for $ty {
-            type Parts<'b, W: Owner> = Self;
-
-            fn write<'slot, 'b, W: Owner>(
-                parts: Self,
-                place: Place<'slot, 'b, Self, W>,
-            ) -> Result<Init<'slot, Self>, Refusal> {
-                // SAFETY: this value has no owning or address-relative fields.
-                Ok(unsafe { place.put(parts) })
-            }
-        }
-    )*};
-}
-
-plain_build! {
-    u8, u16, u32, u64, i8, i16, i32, i64,
-    AtomicU8, AtomicU16, AtomicU32, AtomicU64,
-    AtomicI8, AtomicI16, AtomicI32, AtomicI64,
-    Ipv4Addr, Ipv6Addr,
-    (),
-}
-
-// SAFETY: the lock and the copyable payload own no resources.
-unsafe impl<T: Copy + ShmLayout> Free for Mutex<T> {
-    fn free<W: Owner>(_: Taken<'_, Self, W>) {}
-}
-
-impl<T: Copy + ShmLayout> Build for Mutex<T> {
-    type Parts<'b, W: Owner> = T;
-
-    fn write<'slot, 'b, W: Owner>(parts: T, place: Place<'slot, 'b, Self, W>) -> Result<Init<'slot, Self>, Refusal> {
-        // SAFETY: the lock is free and the copyable payload owns no edges.
-        Ok(unsafe { place.put(Self::new(parts)) })
-    }
-}
-
 // SAFETY: the array owns precisely the resources of its elements.
 unsafe impl<T: Free, const N: usize> Free for [T; N] {
     fn free<W: Owner>(value: Taken<'_, Self, W>) {
@@ -307,118 +264,178 @@ impl<T: Build> Build for ShmSlice<T> {
         parts: Self::Parts<'b, W>,
         place: Place<'slot, 'b, Self, W>,
     ) -> Result<Init<'slot, Self>, Refusal> {
-        let (memory, addr) = (place.memory(), place.addr());
-        let root = memory.root();
-        let (target, len) = parts.into_raw();
-        // SAFETY: these are the offset and count of this exclusive slot.
-        // The slice takes ownership of the block returned by the parts.
-        unsafe {
-            root.ptr::<isize>(addr).write(offset_to(target, addr));
-            root.ptr::<u64>(addr + ShmSlice::<T>::LEN_OFFSET).write(len as u64);
-            Ok(place.assume_init())
+        let offset = offset_to(parts.addr, place.addr());
+        // SAFETY: the parts own the block (or an empty slice) in this build;
+        // the offset is relative to the final slot.
+        let slice = unsafe { Self::from_offset(offset, parts.len) };
+        // SAFETY: the slot is exclusive and receives the edge at the address
+        // it was prepared for. Keep the parts armed until the write succeeds.
+        let init = unsafe { place.put(slice) };
+        forget(parts);
+        Ok(init)
+    }
+}
+
+mod values {
+    use core::marker::PhantomData;
+
+    use super::{
+        AtomicI8, AtomicI16, AtomicI32, AtomicI64, AtomicU8, AtomicU16, AtomicU32, AtomicU64, Brand, Build, Counter,
+        CounterLayout, CounterRegistrar, Device, Free, Init, Ipv4Addr, Ipv6Addr, Mutex, Object, ObjectCounter,
+        ObjectLink, Owner, Place, Refusal, Registered, ShmLayout, TaggedCounter, TaggedCounters, Taken,
+    };
+
+    // Only the writers below form values: address-independent leaves or
+    // a registration with the brand of the scope that registered it.
+    struct Value<'b, T>(T, Brand<'b>);
+
+    impl<'b, T: Build> Value<'b, T> {
+        fn write<'slot, W: Owner>(self, place: Place<'slot, 'b, T, W>) -> Init<'slot, T> {
+            let Self(value, _) = self;
+            // SAFETY: the private writers form values that own nothing and
+            // need no relocation, and preserve the brand for registrations.
+            unsafe { place.put(value) }
         }
     }
-}
 
-// SAFETY: the header, not the field, owns the registration.
-unsafe impl<T: CounterLayout> Free for Counter<T> {
-    fn free<W: Owner>(_: Taken<'_, Self, W>) {}
-}
+    macro_rules! plain_build {
+        ($($ty:ty),* $(,)?) => {$(
+            // SAFETY: this leaf owns nothing.
+            unsafe impl Free for $ty {
+                fn free<W: Owner>(_: Taken<'_, Self, W>) {}
+            }
 
-impl<T: CounterLayout> Build for Counter<T> {
-    type Parts<'b, W: Owner> = Registered<'b, Counter<T>>;
+            impl Build for $ty {
+                type Parts<'b, W: Owner> = Self;
 
-    fn write<'slot, 'b, W: Owner>(
-        parts: Self::Parts<'b, W>,
-        place: Place<'slot, 'b, Self, W>,
-    ) -> Result<Init<'slot, Self>, Refusal> {
-        // SAFETY: the parts carry this build's correctly typed registration.
-        Ok(unsafe { place.put(Self::from_id(parts.index)) })
+                fn write<'slot, 'b, W: Owner>(
+                    parts: Self,
+                    place: Place<'slot, 'b, Self, W>,
+                ) -> Result<Init<'slot, Self>, Refusal> {
+                    Ok(Value(parts, PhantomData).write(place))
+                }
+            }
+        )*};
     }
-}
 
-// SAFETY: the header, not the field, owns the registration.
-unsafe impl<T: CounterLayout> Free for ObjectCounter<T> {
-    fn free<W: Owner>(_: Taken<'_, Self, W>) {}
-}
-
-impl<T: CounterLayout> Build for ObjectCounter<T> {
-    type Parts<'b, W: Owner> = Registered<'b, ObjectCounter<T>>;
-
-    fn write<'slot, 'b, W: Owner>(
-        parts: Self::Parts<'b, W>,
-        place: Place<'slot, 'b, Self, W>,
-    ) -> Result<Init<'slot, Self>, Refusal> {
-        // SAFETY: the parts carry this build's correctly typed registration.
-        Ok(unsafe { place.put(Self::from_id(parts.index)) })
+    plain_build! {
+        u8, u16, u32, u64, i8, i16, i32, i64,
+        AtomicU8, AtomicU16, AtomicU32, AtomicU64,
+        AtomicI8, AtomicI16, AtomicI32, AtomicI64,
+        Ipv4Addr, Ipv6Addr,
+        (),
     }
-}
 
-// SAFETY: the header, not the field, owns both registrations.
-unsafe impl<T: CounterLayout> Free for TaggedCounter<T> {
-    fn free<W: Owner>(_: Taken<'_, Self, W>) {}
-}
-
-impl<T: CounterLayout> Build for TaggedCounter<T> {
-    type Parts<'b, W: Owner> = Registered<'b, TaggedCounter<T>>;
-
-    fn write<'slot, 'b, W: Owner>(
-        parts: Self::Parts<'b, W>,
-        place: Place<'slot, 'b, Self, W>,
-    ) -> Result<Init<'slot, Self>, Refusal> {
-        // SAFETY: the parts carry this build's correctly typed registration.
-        Ok(unsafe { place.put(Self::from_ids(parts.registry, parts.index)) })
+    // SAFETY: the lock and copyable payload own nothing.
+    unsafe impl<T: Copy + ShmLayout> Free for Mutex<T> {
+        fn free<W: Owner>(_: Taken<'_, Self, W>) {}
     }
-}
 
-// SAFETY: the header, not the field, owns the registry and its counters.
-unsafe impl<T: CounterLayout> Free for TaggedCounters<T> {
-    fn free<W: Owner>(_: Taken<'_, Self, W>) {}
-}
+    impl<T: Copy + ShmLayout> Build for Mutex<T> {
+        type Parts<'b, W: Owner> = T;
 
-impl<T: CounterLayout> Build for TaggedCounters<T> {
-    type Parts<'b, W: Owner> = CounterRegistrar<'b, T, W>;
-
-    fn write<'slot, 'b, W: Owner>(
-        parts: Self::Parts<'b, W>,
-        place: Place<'slot, 'b, Self, W>,
-    ) -> Result<Init<'slot, Self>, Refusal> {
-        // SAFETY: the parts describe this build's correctly typed counters.
-        Ok(unsafe { place.put(Self::from_registration(parts.registry, parts.len)) })
+        fn write<'slot, 'b, W: Owner>(
+            parts: T,
+            place: Place<'slot, 'b, Self, W>,
+        ) -> Result<Init<'slot, Self>, Refusal> {
+            Ok(Value(Self::new(parts), PhantomData).write(place))
+        }
     }
-}
 
-// SAFETY: the header, not the field, owns the registration.
-unsafe impl Free for Device {
-    fn free<W: Owner>(_: Taken<'_, Self, W>) {}
-}
-
-impl Build for Device {
-    type Parts<'b, W: Owner> = Registered<'b, Device>;
-
-    fn write<'slot, 'b, W: Owner>(
-        parts: Self::Parts<'b, W>,
-        place: Place<'slot, 'b, Self, W>,
-    ) -> Result<Init<'slot, Self>, Refusal> {
-        // SAFETY: the parts carry this build's device registration.
-        Ok(unsafe { place.put(Self::from_index(parts.index)) })
+    // SAFETY: the header, not the field, owns the registration.
+    unsafe impl<T: CounterLayout> Free for Counter<T> {
+        fn free<W: Owner>(_: Taken<'_, Self, W>) {}
     }
-}
 
-// SAFETY: the header, not the field, owns the link registration.
-unsafe impl<O: Object> Free for ObjectLink<O> {
-    fn free<W: Owner>(_: Taken<'_, Self, W>) {}
-}
+    impl<T: CounterLayout> Build for Counter<T> {
+        type Parts<'b, W: Owner> = Registered<'b, Self>;
 
-impl<O: Object> Build for ObjectLink<O> {
-    type Parts<'b, W: Owner> = Registered<'b, ObjectLink<O>>;
+        fn write<'slot, 'b, W: Owner>(
+            parts: Self::Parts<'b, W>,
+            place: Place<'slot, 'b, Self, W>,
+        ) -> Result<Init<'slot, Self>, Refusal> {
+            Ok(Value(Self::from_id(parts.index), parts._brand).write(place))
+        }
+    }
 
-    fn write<'slot, 'b, W: Owner>(
-        parts: Self::Parts<'b, W>,
-        place: Place<'slot, 'b, Self, W>,
-    ) -> Result<Init<'slot, Self>, Refusal> {
-        // SAFETY: the parts carry this build's correctly typed link.
-        Ok(unsafe { place.put(Self::from_index(parts.index)) })
+    // SAFETY: the header, not the field, owns the registration.
+    unsafe impl<T: CounterLayout> Free for ObjectCounter<T> {
+        fn free<W: Owner>(_: Taken<'_, Self, W>) {}
+    }
+
+    impl<T: CounterLayout> Build for ObjectCounter<T> {
+        type Parts<'b, W: Owner> = Registered<'b, Self>;
+
+        fn write<'slot, 'b, W: Owner>(
+            parts: Self::Parts<'b, W>,
+            place: Place<'slot, 'b, Self, W>,
+        ) -> Result<Init<'slot, Self>, Refusal> {
+            Ok(Value(Self::from_id(parts.index), parts._brand).write(place))
+        }
+    }
+
+    // SAFETY: the header, not the field, owns both registrations.
+    unsafe impl<T: CounterLayout> Free for TaggedCounter<T> {
+        fn free<W: Owner>(_: Taken<'_, Self, W>) {}
+    }
+
+    impl<T: CounterLayout> Build for TaggedCounter<T> {
+        type Parts<'b, W: Owner> = Registered<'b, Self>;
+
+        fn write<'slot, 'b, W: Owner>(
+            parts: Self::Parts<'b, W>,
+            place: Place<'slot, 'b, Self, W>,
+        ) -> Result<Init<'slot, Self>, Refusal> {
+            Ok(Value(Self::from_ids(parts.registry, parts.index), parts._brand).write(place))
+        }
+    }
+
+    // SAFETY: the header, not the field, owns the registry and its counters.
+    unsafe impl<T: CounterLayout> Free for TaggedCounters<T> {
+        fn free<W: Owner>(_: Taken<'_, Self, W>) {}
+    }
+
+    impl<T: CounterLayout> Build for TaggedCounters<T> {
+        type Parts<'b, W: Owner> = CounterRegistrar<'b, T, W>;
+
+        fn write<'slot, 'b, W: Owner>(
+            parts: Self::Parts<'b, W>,
+            place: Place<'slot, 'b, Self, W>,
+        ) -> Result<Init<'slot, Self>, Refusal> {
+            Ok(Value(Self::from_registration(parts.registry, parts.len), parts._brand).write(place))
+        }
+    }
+
+    // SAFETY: the header, not the field, owns the registration.
+    unsafe impl Free for Device {
+        fn free<W: Owner>(_: Taken<'_, Self, W>) {}
+    }
+
+    impl Build for Device {
+        type Parts<'b, W: Owner> = Registered<'b, Self>;
+
+        fn write<'slot, 'b, W: Owner>(
+            parts: Self::Parts<'b, W>,
+            place: Place<'slot, 'b, Self, W>,
+        ) -> Result<Init<'slot, Self>, Refusal> {
+            Ok(Value(Self::from_index(parts.index), parts._brand).write(place))
+        }
+    }
+
+    // SAFETY: the header, not the field, owns the link registration.
+    unsafe impl<O: Object> Free for ObjectLink<O> {
+        fn free<W: Owner>(_: Taken<'_, Self, W>) {}
+    }
+
+    impl<O: Object> Build for ObjectLink<O> {
+        type Parts<'b, W: Owner> = Registered<'b, Self>;
+
+        fn write<'slot, 'b, W: Owner>(
+            parts: Self::Parts<'b, W>,
+            place: Place<'slot, 'b, Self, W>,
+        ) -> Result<Init<'slot, Self>, Refusal> {
+            Ok(Value(Self::from_index(parts.index), parts._brand).write(place))
+        }
     }
 }
 
@@ -443,16 +460,15 @@ impl<T: Copy + ShmLayout> Build for PerWorker<T> {
         parts: Self::Parts<'b, W>,
         place: Place<'slot, 'b, Self, W>,
     ) -> Result<Init<'slot, Self>, Refusal> {
-        let (memory, addr) = (place.memory(), place.addr());
-        let root = memory.root();
-        let (target, workers) = parts.into_raw();
-        // SAFETY: these are the offset and worker count of this exclusive
-        // slot. The field takes ownership of the block, if there is one.
-        unsafe {
-            root.ptr::<isize>(addr).write(offset_to(target, addr));
-            root.ptr::<u64>(addr + size_of::<isize>()).write(workers);
-            Ok(place.assume_init())
-        }
+        let offset = offset_to(parts.addr, place.addr());
+        // SAFETY: the parts own the initialized slot block in this build;
+        // the offset is relative to the final slot.
+        let slots = unsafe { Self::from_offset(offset, parts.workers) };
+        // SAFETY: the exclusive slot receives the edge at the address it
+        // was prepared for. Keep the parts armed until the write succeeds.
+        let init = unsafe { place.put(slots) };
+        forget(parts);
+        Ok(init)
     }
 }
 
@@ -476,17 +492,15 @@ impl<T: Copy + ShmLayout> Build for PerWorkerSlice<T> {
         parts: Self::Parts<'b, W>,
         place: Place<'slot, 'b, Self, W>,
     ) -> Result<Init<'slot, Self>, Refusal> {
-        let (memory, addr) = (place.memory(), place.addr());
-        let root = memory.root();
-        let (table, workers, len) = parts.into_raw();
-        // SAFETY: these are the table offset and counts of this exclusive
-        // slot. The field takes ownership of the table and its regions.
-        unsafe {
-            root.ptr::<isize>(addr).write(offset_to(table, addr));
-            root.ptr::<u64>(addr + size_of::<isize>()).write(workers);
-            root.ptr::<u64>(addr + 2 * size_of::<isize>()).write(len as u64);
-            Ok(place.assume_init())
-        }
+        let offset = offset_to(parts.table, place.addr());
+        // SAFETY: the parts own the initialized table and regions in this
+        // build; the offset is relative to the final slot.
+        let regions = unsafe { Self::from_offset(offset, parts.workers, parts.len) };
+        // SAFETY: the exclusive slot receives the edge at the address it
+        // was prepared for. Keep the parts armed until the write succeeds.
+        let init = unsafe { place.put(regions) };
+        forget(parts);
+        Ok(init)
     }
 }
 
@@ -1024,16 +1038,7 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
     /// The memory is exhausted, or the write of the value is refused; the
     /// blocks in the parts and the block of the value are returned.
     pub fn boxed<T: Build>(self, parts: T::Parts<'b, W>) -> Result<Owned<'b, T, W>, E> {
-        const { assert!(size_of::<T>() != 0, "a block of a zero-sized type") };
-        let mut writer = SliceWriter::<T, W>::reserve(self, core::num::NonZeroUsize::MIN)?;
-        writer.write_next(parts).map_err(refused::<W, E>)?;
-        let (addr, _) = writer.finish().into_raw();
-        Ok(Owned {
-            addr,
-            memory: self.memory,
-            _brand: PhantomData,
-            _value: PhantomData,
-        })
+        BlockSlot::reserve(self)?.write(parts).map_err(refused::<W, E>)
     }
 
     /// Allocates one block of the given number of elements, each written in
@@ -1373,15 +1378,6 @@ impl<T: Build, W: Owner> Drop for Owned<'_, T, W> {
     }
 }
 
-impl<T: Build, W: Owner> OwnedSlice<'_, T, W> {
-    /// Hands the block over to the field it is written into: its address and
-    /// element count, without returning it.
-    fn into_raw(self) -> (usize, usize) {
-        let this = ManuallyDrop::new(self);
-        (this.addr, this.len)
-    }
-}
-
 impl<T: Build, W: Owner> Drop for OwnedSlice<'_, T, W> {
     fn drop(&mut self) {
         if self.addr != 0 {
@@ -1393,15 +1389,6 @@ impl<T: Build, W: Owner> Drop for OwnedSlice<'_, T, W> {
     }
 }
 
-impl<T: Copy + ShmLayout, W: Owner> OwnedSlots<'_, T, W> {
-    /// Hands the block over to the field it is written into: its address and
-    /// slot count, without returning it.
-    fn into_raw(self) -> (usize, u64) {
-        let this = ManuallyDrop::new(self);
-        (this.addr, this.workers)
-    }
-}
-
 impl<T: Copy + ShmLayout, W: Owner> Drop for OwnedSlots<'_, T, W> {
     fn drop(&mut self) {
         if self.addr != 0 {
@@ -1410,15 +1397,6 @@ impl<T: Copy + ShmLayout, W: Owner> Drop for OwnedSlots<'_, T, W> {
             // but this value owns it.
             unsafe { self.memory.free(self.addr, slot_block::<T>(self.workers)) }
         }
-    }
-}
-
-impl<T: Copy + ShmLayout, W: Owner> OwnedRegions<'_, T, W> {
-    /// Hands the blocks over to the field they are written into: the table's
-    /// address, the worker count and the length, without returning them.
-    fn into_raw(self) -> (usize, u64, usize) {
-        let this = ManuallyDrop::new(self);
-        (this.table, this.workers, this.len)
     }
 }
 
