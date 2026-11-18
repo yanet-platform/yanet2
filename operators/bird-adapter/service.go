@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/netip"
 	"time"
@@ -764,7 +765,14 @@ func (m *importAttempt) Run(export *bird.Export) error {
 
 // Send sends one update on the attempt's stream.
 func (m *importAttempt) Send(update *routepb.Update) error {
-	if err := m.stream.Send(update); err != nil {
+	err := m.stream.Send(update)
+	if errors.Is(err, io.EOF) {
+		// The receiver records the final RPC status when the server closes
+		// the stream. A send-side EOF carries no status of its own.
+		<-m.ctx.Done()
+		return context.Cause(m.ctx)
+	}
+	if err != nil {
 		return err
 	}
 	m.lastSend = time.Now()
