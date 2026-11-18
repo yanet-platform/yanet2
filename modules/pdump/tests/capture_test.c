@@ -725,9 +725,8 @@ run_rate_shared_workers_and_independent_configs_body(
 	independent.snaplen = fx->config.snaplen;
 	independent.rate_skipped_counter_id =
 		fx->config.rate_skipped_counter_id;
-	SET_OFFSET_OF(
-		&independent.ebpf_program, ADDR_OF(&fx->config.ebpf_program)
-	);
+	SET_OFFSET_OF(&independent.filter_ins, ADDR_OF(&fx->config.filter_ins));
+	independent.filter_ins_count = fx->config.filter_ins_count;
 	SET_OFFSET_OF(&independent.rate_bucket, &bucket);
 	other.abs_cp_module = &independent.cp_module;
 	fx->module->commit_ectx_handler(&other, &independent.cp_module);
@@ -844,10 +843,12 @@ run_pdump_capture_case(
 	snprintf(ring_name, sizeof(ring_name), "ring-%s", tc->name);
 
 	yanet_error *err = NULL;
-	struct rte_bpf *bpf =
-		pdump_test_compile_accept_ip_filter(tc->snaplen, &err);
+	uint32_t filter_ins_count = 0;
+	struct ebpf_insn *filter_ins = pdump_test_compile_accept_ip_filter(
+		tc->snaplen, &filter_ins_count, &err
+	);
 	TEST_ASSERT_NOT_NULL(
-		bpf,
+		filter_ins,
 		"failed to compile the ip filter: %s",
 		err ? yanet_error_message(err) : "?"
 	);
@@ -861,7 +862,8 @@ run_pdump_capture_case(
 		.worker_idx = tc->worker_idx,
 		.rate_pps = tc->rate_pps,
 		.module = module,
-		.bpf = bpf,
+		.filter_ins = filter_ins,
+		.filter_ins_count = filter_ins_count,
 		.gen = gen,
 	};
 
@@ -876,7 +878,7 @@ run_pdump_capture_case(
 
 	pdump_test_free_front(&pf);
 	pdump_test_fixture_destroy(&fx);
-	free(bpf);
+	free(filter_ins);
 
 	return res;
 }

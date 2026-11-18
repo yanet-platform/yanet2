@@ -1,7 +1,6 @@
 #include <errno.h>
 #include <pcap/pcap.h>
 
-#include <bpf_impl.h>
 #include <rte_bpf.h>
 
 #include "yanet_build_config.h"
@@ -96,7 +95,8 @@ pdump_module_config_data_init(
 	(void)memory_context;
 
 	config->filter = NULL;
-	config->ebpf_program = NULL;
+	config->filter_ins = NULL;
+	config->filter_ins_count = 0;
 	config->mode = PDUMP_INPUT;
 	config->snaplen = default_snaplen;
 	config->ring_link_idx = PDUMP_RING_LINK_NONE;
@@ -127,9 +127,13 @@ pdump_module_config_destroy(struct cp_module *module) {
 		);
 	}
 
-	struct rte_bpf *ebpf = ADDR_OF(&config->ebpf_program);
-	if (ebpf != NULL) {
-		memory_bfree(&agent->memory_context, ebpf, ebpf->sz);
+	struct ebpf_insn *filter_ins = ADDR_OF(&config->filter_ins);
+	if (filter_ins != NULL) {
+		memory_bfree(
+			&agent->memory_context,
+			filter_ins,
+			(size_t)config->filter_ins_count * sizeof(*filter_ins)
+		);
 	}
 
 	cp_module_fini(module);
@@ -248,33 +252,38 @@ pdump_module_config_set_filter(
 		return -1;
 	}
 
+	// Loading runs DPDK's verifier, the only check of the program: the
+	// dataplane interpreter trusts it, jump targets included.
+	//
+	// The loaded copy is dropped. It holds the instructions unchanged, so
+	// the converter's own array is the verified program, and the
+	// configuration keeps only that array: the dataplane builds its own
+	// descriptor around it.
 	struct rte_bpf *bpf_on_heap = rte_bpf_load(params);
-	free(params); // we do not need it anymore
 	if (bpf_on_heap == NULL) {
+		free(params);
 		pdump_log(RTE_LOG_ERR, "failed to load bpf");
 		errno = per_lcore__rte_errno;
 		return -1;
 	}
+	rte_bpf_destroy(bpf_on_heap);
 
-	// Allocate space in shared memory for struct rte_bpf and EBPF code
-	uint64_t buf_sz = bpf_on_heap->sz;
-	uint8_t *buf = memory_balloc(&agent->memory_context, buf_sz);
-	if (buf == NULL) {
+	uint32_t ins_count = params->nb_ins;
+	size_t ins_size = (size_t)ins_count * sizeof(struct ebpf_insn);
+	struct ebpf_insn *ins = memory_balloc(&agent->memory_context, ins_size);
+	if (ins == NULL) {
+		free(params);
 		pdump_log(
 			RTE_LOG_ERR, "failed to ballocate memory for eBPF code"
 		);
-		rte_bpf_destroy(bpf_on_heap);
 		errno = ENOMEM;
 		return -1;
 	}
-
-	// Copy struct rte_bpf and instructions which lie in memory immediately
-	// following the struct
-	memcpy(buf, bpf_on_heap, buf_sz);
-	rte_bpf_destroy(bpf_on_heap); // We do not need it anymore
+	memcpy(ins, params->ins, ins_size);
+	free(params);
 
 	if (pdump_module_config_update_filter_str(module, filter) == -1) {
-		memory_bfree(&agent->memory_context, buf, buf_sz);
+		memory_bfree(&agent->memory_context, ins, ins_size);
 		pdump_log(
 			RTE_LOG_ERR, "failed to ballocate memory for filter str"
 		);
@@ -282,30 +291,17 @@ pdump_module_config_set_filter(
 		return -1;
 	};
 
-	struct rte_bpf *bpf = (struct rte_bpf *)buf;
-	// Currently not supported
-	bpf->jit.func = NULL;
-	bpf->jit.sz = 0;
-
-	struct ebpf_insn *ins;
-	struct rte_bpf_xsym *xsyms;
-
-	size_t bsz = sizeof(bpf[0]);
-	size_t xsz = bpf->prm.nb_xsym * sizeof(xsyms[0]);
-
-	xsyms = (struct rte_bpf_xsym *)(buf + bsz);
-	SET_OFFSET_OF(&bpf->prm.xsym, xsyms);
-
-	ins = (struct ebpf_insn *)(buf + bsz + xsz);
-	SET_OFFSET_OF(&bpf->prm.ins, ins);
-
-	// Free old eBPF program before setting new one
-	struct rte_bpf *old_ebpf = ADDR_OF(&config->ebpf_program);
-	if (old_ebpf != NULL) {
-		memory_bfree(&agent->memory_context, old_ebpf, old_ebpf->sz);
+	struct ebpf_insn *old_ins = ADDR_OF(&config->filter_ins);
+	if (old_ins != NULL) {
+		memory_bfree(
+			&agent->memory_context,
+			old_ins,
+			(size_t)config->filter_ins_count * sizeof(*old_ins)
+		);
 	}
 
-	SET_OFFSET_OF(&config->ebpf_program, bpf);
+	SET_OFFSET_OF(&config->filter_ins, ins);
+	config->filter_ins_count = ins_count;
 
 	return 0;
 }

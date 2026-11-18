@@ -7,7 +7,7 @@
 #include "limit.h"
 #include "mode.h"
 
-struct rte_bpf;
+struct ebpf_insn;
 
 // Sentinel for "no ring linked". A link index past the configured links
 // resolves to nothing, so a config with no link at this slot resolves to
@@ -18,7 +18,13 @@ struct pdump_module_config {
 	struct cp_module cp_module;
 
 	char *filter;
-	struct rte_bpf *ebpf_program;
+	// The compiled filter: eBPF instructions in DPDK's encoding.
+	//
+	// The dataplane wraps them in its own interpreter descriptor per
+	// execution context, so the configuration holds no DPDK-private
+	// layout. NULL with a zero count while no filter is set.
+	struct ebpf_insn *filter_ins;
+	uint32_t filter_ins_count;
 	enum pdump_mode mode;
 	uint32_t snaplen;
 	struct token_bucket *rate_bucket;
