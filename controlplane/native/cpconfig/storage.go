@@ -272,11 +272,20 @@ func newTagSet(pairs ...string) tagSet {
 	return m
 }
 
-// Add appends the tags of key and value pairs in place.
+// Add inserts the tags of key and value pairs in place, keeping the set
+// sorted by key as a registered set must be, so that normalising it only
+// confirms the order; a repeated key is left for normalising to refuse.
 func (m *tagSet) Add(pairs ...string) {
 	for idx := 0; idx+1 < len(pairs); idx += 2 {
-		shm.CopyString(m.Tags[m.Count].Key[:], pairs[idx])
-		shm.CopyString(m.Tags[m.Count].Value[:], pairs[idx+1])
+		key := pairs[idx]
+		at := m.Count
+		for at > 0 && string(shm.Bytes(m.Tags[at-1].Key[:])) > key {
+			at--
+		}
+		copy(m.Tags[at+1:m.Count+1], m.Tags[at:m.Count])
+		m.Tags[at] = layout.CounterTag{}
+		shm.CopyString(m.Tags[at].Key[:], key)
+		shm.CopyString(m.Tags[at].Value[:], pairs[idx+1])
 		m.Count++
 	}
 }
