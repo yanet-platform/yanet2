@@ -108,3 +108,54 @@ func linkDevice(module *layout.CpModule, name string) (uint64, error) {
 	module.DeviceCount++
 	return index, nil
 }
+
+// LinkDevice returns the index of the device of that name among the
+// devices a module links, appending it when missing, as
+// cp_module_link_device does.
+func LinkDevice(module *layout.CpModule, name string) (uint64, error) {
+	return linkDevice(module, name)
+}
+
+// ModuleCounterRegistry returns the module's counter registry of a tag
+// and its index among the module's runtime registries, adding an empty
+// one when missing, as cp_module_counter_registry does. A registry holds
+// self-relative offsets, so each lives in its own block and growing only
+// moves the array of pointers to them.
+func ModuleCounterRegistry(module *layout.CpModule, tag string) (*layout.CounterRegistry, uint64, error) {
+	entries := runtimeRegistries(module)
+	for idx := range entries {
+		if entry := entries[idx].Get(); shm.Equal(entry.Tag[:], tag) {
+			return &entry.Registry, uint64(idx), nil
+		}
+	}
+	context := &module.Entity.MemoryContext
+	entrySize := unsafe.Sizeof(layout.CpModuleCounterRegistry{})
+	block := shmalloc.ContextAlloc(context, entrySize)
+	if block == nil {
+		return nil, 0, fmt.Errorf("allocate counter registry %q of module %q: %w", tag, shm.String(module.Name[:]), ErrNoMemory)
+	}
+	entry := (*layout.CpModuleCounterRegistry)(block)
+	*entry = layout.CpModuleCounterRegistry{}
+	shm.CopyString(entry.Tag[:], tag)
+	counterRegistryInit(&entry.Registry, context)
+
+	pointerSize := unsafe.Sizeof(shm.Ptr[layout.CpModuleCounterRegistry]{})
+	count := len(entries)
+	grown := shmalloc.ContextAlloc(context, pointerSize*uintptr(count+1))
+	if grown == nil {
+		counterRegistryFini(&entry.Registry)
+		shmalloc.ContextFree(context, block, entrySize)
+		return nil, 0, fmt.Errorf("allocate counter registries of module %q: %w", shm.String(module.Name[:]), ErrNoMemory)
+	}
+	pointers := unsafe.Slice((*shm.Ptr[layout.CpModuleCounterRegistry])(grown), count+1)
+	for idx := range entries {
+		pointers[idx].Set(entries[idx].Get())
+	}
+	pointers[count].Set(entry)
+	if count > 0 {
+		shmalloc.ContextFree(context, unsafe.Pointer(module.RuntimeCounterRegistries.Get()), pointerSize*uintptr(count))
+	}
+	module.RuntimeCounterRegistries.Set(&pointers[0])
+	module.RuntimeCounterRegistryCount = uint64(count + 1)
+	return &entry.Registry, uint64(count), nil
+}
