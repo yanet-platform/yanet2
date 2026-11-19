@@ -62,6 +62,7 @@ CLI_MODULES := \
 	route-mpls \
 	forward \
 	nat64 \
+	nat64s \
 	pdump \
 	ring \
 	unrdup \

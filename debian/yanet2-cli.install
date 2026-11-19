@@ -12,6 +12,7 @@ usr/bin/yanet-cli-decap
 usr/bin/yanet-cli-dscp
 usr/bin/yanet-cli-forward
 usr/bin/yanet-cli-nat64
+usr/bin/yanet-cli-nat64s
 usr/bin/yanet-cli-route
 usr/bin/yanet-cli-route-mpls
 usr/bin/yanet-cli-pdump
