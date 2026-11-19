@@ -51,32 +51,43 @@ repository files, run git writes, or exceed the caller's build/test posture.
   `needs-architect` and explicit decision points. If the closing outcome,
   privacy boundary, or repository cannot be established, ask one blocking
   question instead of guessing.
-- A user-observed unexpected symptom is a Bug without a known root cause. A
-  static hypothesis not otherwise proven is a Task whose outcome is confirmation.
+- A user-reported unexpected symptom is a Bug even without a known cause or a
+  reliable reproduction. Do not investigate or speculate about its cause when
+  drafting, filing, or triaging it. A static hypothesis alone is an
+  investigation Task, not a Bug.
 
 ## Issue contract
 
 - Title is `<type>(<scope>): <lowercase brief>` using an allowed commit type.
   Bugs normally use `fix`, Features `feat`, and Tasks the semantic type. An epic
   keeps the semantic type and gains label `epic`; never use `epic(scope)`.
-- Body schemas, omitting empty optional sections:
-  - Bug: `Motivation` (observed vs expected behavior, impact), `Evidence`
-    (reproduction steps, environment, logs, code references), `Scope`,
-    `Acceptance`.
-  - Feature: `Motivation`, `Outcome`, `Scope`, `Acceptance`.
-  - Task: `Motivation`, `Closing outcome`, `Scope`, `Acceptance`.
+- Lead with why the work is needed. Include known reproduction steps for a
+  Bug. For other issue types, a reproducer is optional.
+  Use the matching body schema; omit empty optional sections:
+  - Bug: `Motivation` (symptom and known impact), `Evidence` (environment,
+    inputs, shortest known reproduction steps, actual result), `Scope`,
+    `Acceptance`. If reproduction is intermittent or the steps are unknown,
+    say so and record only the conditions actually observed.
+  - Feature: `Motivation` (whose need is unmet and what limits them today),
+    `Outcome` (the capability they need), `Scope`, `Acceptance`.
+  - Task: `Motivation`, `Closing outcome`, `Scope`, `Acceptance`. For a
+    refactor, name the concrete cost or risk of maintaining the current code.
   - Container: `Goal`, `Scope`, `Children`, `Done`.
-- A leaf body describes the problem and how to observe or reproduce it, never
-  how to fix it. No body proposes a solution path, design, candidate change, or
-  the files to edit, even when one seems obvious: there is usually more than
-  one, and choosing is the job of whoever closes the issue. A contract the user
-  has already decided is part of the outcome, not a proposal. A proven cause
-  belongs in Evidence, but a fix does not. `Scope` bounds the affected
-  behavior, and `Outcome`/`Acceptance` state observable results rather than
-  implementation steps. Add Constraints, Out of scope, or Source only when
-  informative. Acceptance is a short checklist; investigations close on a
-  verdict plus evidence/repro, and decisions close on a recorded choice plus
-  affected contracts.
+- Titles, bodies, and epic children describe the problem or observable outcome.
+  Do not propose solutions, list candidate designs, or name files to edit. A
+  contract the user has explicitly decided is a requirement; a suggestion is
+  not. `Scope` bounds the affected behavior. Add Constraints, Out of scope, or
+  Source only when informative.
+- `Acceptance` is a short checklist of observable pass/fail conditions. One
+  criterion suffices for one expected result:
+  - Bug: state the expected result in the scenario from `Evidence`; do not
+    repeat the steps.
+  - Feature: state what the user can accomplish in the stated use case.
+  - Refactor: state how a maintainer can tell the cost or risk was reduced and
+    which relevant contracts must still hold. This may be verifiable by code
+    inspection rather than at runtime.
+  - Investigation: an evidence-backed verdict whether the hypothesis holds or
+    not. Decision: a recorded choice plus affected contracts.
 - Distinguish reproduced, code-proven, user-reported, and hypothetical claims.
   Use stable blob links and explain what each proves. Do not invent impact,
   cause, or tests. The issue must stand without inaccessible links.
