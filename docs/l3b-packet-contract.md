@@ -565,6 +565,21 @@ Both IPIP and GRE use this matrix, independent of the shared helper's future
 implementation. Encapsulation itself performs no additional TTL/Hop Limit
 decrement; a separate routing hop is outside this rule.
 
+**Known forwarding deviation:** l3b keeps the inner TTL/Hop Limit unchanged
+at encapsulation, as in the inspected YANET1 balancer path. A subsequent route
+step acts on the outer header, not the inner one. Without a prior step consuming
+the inner hop for this forwarding operation, this differs from the original-header
+decrement specified for IPv4-in-IPv4 IPIP by [RFC 2003 §3.1](https://www.rfc-editor.org/rfc/rfc2003.html#section-3.1),
+for configured IPv6-in-IPv4 IPIP by [RFC 4213 §3.3](https://www.rfc-editor.org/rfc/rfc4213.html#section-3.3),
+and for forwarding into IPv6 tunnels by [RFC 2473 §3.1](https://www.rfc-editor.org/rfc/rfc2473.html#section-3.1).
+Copying the outer IPv6 Hop Limit also differs from the independent setting
+described in [RFC 2473 §6.3](https://www.rfc-editor.org/rfc/rfc2473.html#section-6.3).
+The compatibility choice adds neither an inner decrement nor a mandatory
+pre-encapsulation route step. It adds no l3b lifetime admission check, including
+for IPv4 TTL 0, which RFC 2003 §3.1 forbids encapsulating. An outer expiry drop
+on a downstream route path does not imply the same outcome on a path without
+that check.
+
 | Inner -> outer | Outer TTL / Hop Limit | IPv4 ID and fragmentation field | IPv6 flow label |
 | --- | --- | --- | --- |
 | IPv4 -> IPv4 | Copy inner TTL | Copy inner ID and fragmentation field | N/A |

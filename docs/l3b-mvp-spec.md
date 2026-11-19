@@ -120,6 +120,9 @@ Every retained wire assertion additionally preserves inner bytes/ports, family-c
 tunnel type, source derivation and successful-output byte count. VLAN/MAC/next-hop
 and later TTL decrement belong to route/pipeline setup. Ordinary expected outer hop63
 follows handoff hop64 and one route hop; Echo uses the separate initial65 rule.
+The legacy ordinary fixture preserves inner hop64 throughout. See the [packet
+contract's forwarding deviation](l3b-packet-contract.md#l3b-to-real-outer-headers)
+for why the outer route decrement is not proof of inner-hop RFC conformance.
 Fixtures with zero TC/flow label or IPv4 ID1 do not distinguish general header rules.
 Exact source selection sequences are not proof of current target placement or shares.
 

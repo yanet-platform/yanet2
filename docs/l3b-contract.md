@@ -3100,7 +3100,8 @@ Required discriminating vectors include:
   or0,1,100,500,60000,4294967295ms. With all settings absent, TCP classes and
   udp/other resolve60000ms. For each TCP class exercise all five priority levels,
   absent/null and explicit0 at each configurable level. Global tcp=60000,
-  tcp_syn=5000 and VS tcp=10000 give10000 for every class; VS tcp_syn=0 gives
+  tcp_syn=5000 and VS tcp=10000 give 10000 ms for all three TCP classes. UDP
+  and other keep their independent defaults. VS tcp_syn=0 gives
   syn=0,established=time_wait=10000. Without VS tcp,global tcp_syn=5000 applies;
   VS tcp_established alone never affects syn/time_wait. Test global/VS containers
   absent/null/{}; reject4294967296,negative/wrong-type TTL without state change.

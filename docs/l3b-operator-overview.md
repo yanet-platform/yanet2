@@ -197,11 +197,13 @@ admin-disabled; old sessions never attach to them.
 
 A session is an affinity pin,not TCP state. RST does not immediately delete it;
 IPVS state/direction-specific behavior is not copied. Classes are syn,established,
-time_wait,udp,other. `tcp` is fallback,not a class. Each VS independently resolves
+time_wait,udp,other. `tcp` is fallback,not a class. For each of the three TCP
+classes, each VS independently resolves
 per-VS class → per-VS tcp → global class → global tcp →60000ms. Global fields are
 in l3b.policy.session_timeouts. Absent/null inherits; explicit0 stops. Classes do
 not inherit each other. Global tcp=60000,tcp_syn=5000 plus VS tcp=10000 yields
-10000 for every class; VS tcp_syn=0 changes only syn. UDP/other default60000.
+10000 ms for all three TCP classes. VS tcp_syn=0 changes only syn. UDP and
+other independently default to 60000 ms.
 Resolve at create/full replacement; global changes alone rewrite neither accepted
 VS nor old deadlines. Front/back share one VS policy,not parent Service ACL policy.
 
