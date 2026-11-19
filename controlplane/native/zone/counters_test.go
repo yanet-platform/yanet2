@@ -43,8 +43,10 @@ func Test_Instance_CountersMatchCgoReader(t *testing.T) {
 	_, err = harness.HandlePacketsOnWorker(1, xpacket.LayersToPacket(t, &eth, &ip, &icmp))
 	require.NoError(t, err)
 	native := nativeStorage(t, harness).Instances[0]
+	pinned := native.Pin()
+	t.Cleanup(pinned.Release)
 	cgo := harness.SharedMemory().DPConfig(0)
-	module, err := native.Counters([]zone.CounterTag{{Key: "module_name", Value: "first"}, {Key: "kind", Value: "module"}})
+	module, err := pinned.Counters([]zone.CounterTag{{Key: "module_name", Value: "first"}, {Key: "kind", Value: "module"}})
 	require.NoError(t, err)
 	require.NotEmpty(t, module)
 	counted := slices.ContainsFunc(module[0].Counters, func(counter zone.Counter) bool {
@@ -85,7 +87,7 @@ func Test_Instance_CountersMatchCgoReader(t *testing.T) {
 				}
 				want = append(want, converted)
 			}
-			got, err := native.Counters(tc.predicates)
+			got, err := pinned.Counters(tc.predicates)
 			require.NoError(t, err)
 			require.Equal(t, want, got)
 		})
@@ -97,7 +99,9 @@ func Test_Instance_CountersMatchCgoReader(t *testing.T) {
 func Test_Instance_CountersRefusesRepeatedKey(t *testing.T) {
 	harness, _ := newPublishedHarness(t)
 	native := nativeStorage(t, harness).Instances[0]
-	_, err := native.Counters([]zone.CounterTag{{Key: "kind", Value: "module"}, {Key: "kind", Value: "device"}})
+	pinned := native.Pin()
+	t.Cleanup(pinned.Release)
+	_, err := pinned.Counters([]zone.CounterTag{{Key: "kind", Value: "module"}, {Key: "kind", Value: "device"}})
 	require.Error(t, err)
 }
 
@@ -106,11 +110,13 @@ func Test_Instance_CountersRefusesRepeatedKey(t *testing.T) {
 func Test_Instance_CountersRefusesTooManyTags(t *testing.T) {
 	harness, _ := newPublishedHarness(t)
 	native := nativeStorage(t, harness).Instances[0]
+	pinned := native.Pin()
+	t.Cleanup(pinned.Release)
 	predicates := make([]zone.CounterTag, len(layout.CpCounterStorage{}.Tags)+1)
 	for idx := range predicates {
 		predicates[idx] = zone.CounterTag{Key: fmt.Sprintf("key%d", idx), Value: "*"}
 	}
-	_, err := native.Counters(predicates)
+	_, err := pinned.Counters(predicates)
 	require.Error(t, err)
 }
 

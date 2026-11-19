@@ -56,10 +56,10 @@ func (m *Instance) CurrentTime() (uint64, bool) {
 }
 
 // Counters returns the counters of every storage whose tags satisfy the
-// predicates, read from each worker's contexts of the published
-// generation as yanet_get_counters_by_tags_per_worker reads them, and
-// merges a tag set's storages on all workers into one group.
-func (m *Instance) Counters(predicates []CounterTag) ([]CounterGroup, error) {
+// predicates, read from each worker's contexts of the pinned generation
+// as yanet_get_counters_by_tags_per_worker reads them, and merges a tag
+// set's storages on all workers into one group.
+func (m *Generation) Counters(predicates []CounterTag) ([]CounterGroup, error) {
 	if len(predicates) > len(layout.CpCounterStorage{}.Tags) {
 		return nil, fmt.Errorf("%d counter tags, more than %d", len(predicates), len(layout.CpCounterStorage{}.Tags))
 	}
@@ -75,13 +75,11 @@ func (m *Instance) Counters(predicates []CounterTag) ([]CounterGroup, error) {
 		}
 	}
 
-	pinned := m.Pin()
-	defer pinned.Release()
-	gen := pinned.Gen
+	gen := m.Gen
 	if gen == nil {
 		return nil, nil
 	}
-	workerCount := int(m.Dp.WorkerCount)
+	workerCount := int(gen.DpConfig.Get().WorkerCount)
 	var roots []shm.Ptr[layout.ConfigGenEctx]
 	if first := gen.ConfigGenEctxs.Get(); first != nil {
 		roots = unsafe.Slice(first, gen.ConfigGenEctxCount)

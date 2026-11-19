@@ -8,7 +8,22 @@ import (
 
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
 	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
+	"github.com/yanet-platform/yanet2/controlplane/native/zone"
 )
+
+// ReleaseGeneration drops the reference a pin of the instance's
+// configuration took, as cp_config_gen_release does, and frees the
+// generation when a publication retired it meanwhile.
+func ReleaseGeneration(cp *layout.CpConfig, pinned *zone.Generation) {
+	gen := pinned.Gen
+	if gen == nil {
+		return
+	}
+	pinned.Gen = nil
+	shmalloc.Lock(&cp.BlockAllocator)
+	defer shmalloc.Unlock(&cp.BlockAllocator)
+	retire(cp, gen)
+}
 
 // retire drops the publication's reference to a replaced generation and
 // frees it when no reader pins it any more. The caller holds the
