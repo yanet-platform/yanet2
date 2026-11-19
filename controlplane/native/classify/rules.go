@@ -17,7 +17,8 @@ const InvalidRule = ^uint32(0)
 
 // JoinRules joins a joint and a stage into the rule table of their
 // classes in a zeroed table in shared memory, as classify_join_rules
-// does; a failed join leaves the table zeroed.
+// does; a failed join releases what it wrote and clears the table's
+// pointers, its dimensions left as rule_table_free leaves them.
 //
 // A member rule with a group on both sides belongs to the pair of its
 // groups; the pairs are numbered by first appearance, each with its

@@ -11,9 +11,9 @@ type listKey struct {
 	Length int
 }
 
-// internLists numbers the lists of count rules by their storage, as
-// hbfng's ByAddress does: rules whose lists share an address and a
-// length share a number, in the order the lists first appear.
+// internLists numbers the lists of count rules by their storage: rules
+// whose lists share an address and a length share a number, in the order
+// the lists first appear, without reading what the lists hold.
 //
 // It returns every distinct list once and the number of every rule's
 // list, none for an absent rule. Rules repeat few lists many times over -

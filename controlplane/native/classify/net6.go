@@ -20,8 +20,9 @@ import (
 // rather than a final value (FILTER_NET6_ROW_MARK).
 const Net6RowMark = 0x40000000
 
-// errDeepNesting reports networks nested deeper than the 65 prefix
-// lengths of a half allow, which only masks that are not prefixes reach.
+// errDeepNesting reports networks nested deeper than the sweep's 65
+// levels, one a prefix length of a half; the halves are prefixes, so it
+// guards the fixed level array rather than any ruleset.
 var errDeepNesting = errors.New("the networks nest too deep")
 
 // Net6Network is an IPv6 network as a rule spells it: an address and a
@@ -81,7 +82,8 @@ func newHalf(addr, mask uint64) (half, error) {
 
 // CompileNet6 compiles the IPv6 network attribute of a ruleset into a
 // zeroed attribute in shared memory, as classify_net6_compile does, and
-// returns its stage; a failed compile leaves the attribute zeroed.
+// returns its stage; a failed compile releases what it wrote and zeroes
+// the attribute, as C does.
 //
 // Each half of the address space is cut into classes on its own, as the
 // IPv4 one is; a network covers an interval of high classes by an
@@ -98,6 +100,7 @@ func CompileNet6(rules []Net6Rule, attr *layout.ClassifyAttrNet6, context *layou
 	stage, err := compileNet6(rules, attr, context, name)
 	if err != nil {
 		FreeNet6(attr)
+		clear(unsafe.Slice((*byte)(unsafe.Pointer(attr)), unsafe.Sizeof(*attr)))
 		return nil, err
 	}
 	return stage, nil
