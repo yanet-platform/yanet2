@@ -92,3 +92,15 @@ test(
   depends: loader_probe_plugin,
   suite: 'dataplane_ut',
 )
+
+nat64state_ops_test = executable(
+  'nat64state_ops_test',
+  ['nat64state_ops_test.c'],
+  dependencies: [
+    lib_dataplane_ut_dep,
+    lib_fwstate_registry_dep,
+    libdpdk_test_dep,
+  ],
+  include_directories: yanet_rootdir,
+)
+test('nat64state_ops', nat64state_ops_test, suite: 'dataplane_ut')
