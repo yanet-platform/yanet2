@@ -208,7 +208,8 @@ async fn read_dump(service: &mut PdumpService, cmd: ReadCmd) -> Result<(), Error
     drop(tx);
 
     // Spawn outside the reader_set to get unpinable join handler.
-    let mut write_jh = tokio::task::spawn_blocking(move || writer::pdump_write(dump_writer, rx, cmd.num));
+    let mut write_jh =
+        tokio::task::spawn_blocking(move || writer::pdump_write(dump_writer, rx, cmd.num, std::io::stderr()));
 
     let mut finished = None;
     tokio::select! {

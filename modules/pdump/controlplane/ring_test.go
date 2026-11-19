@@ -278,6 +278,82 @@ func Test_Ring_RunReaders_DropsMalformedRecordAndContinues(t *testing.T) {
 		"the session must log its final drop count exactly once, when it stops")
 }
 
+// Test_Ring_RunReaders_ReportsLostRecords verifies that each delivered
+// record carries the number of records its ring lost since the previous
+// delivered record, including the gaps before a dropped malformed record.
+func Test_Ring_RunReaders_ReportsLostRecords(t *testing.T) {
+	badMeta := newRecordMeta(1, 0)
+	badMeta[0] ^= 0xFF // corrupt the magic
+
+	cases := []struct {
+		name   string
+		frames [][]byte
+		lost   []uint64
+	}{
+		{
+			name: "consecutive records lose nothing",
+			frames: [][]byte{
+				newRecordFrame(newRecordMeta(1, 0), []byte("a"), 7),
+				newRecordFrame(newRecordMeta(1, 0), []byte("b"), 8),
+			},
+			lost: []uint64{0, 0},
+		},
+		{
+			name: "sequence gap counts the skipped records",
+			frames: [][]byte{
+				newRecordFrame(newRecordMeta(1, 0), []byte("a"), 7),
+				newRecordFrame(newRecordMeta(1, 0), []byte("b"), 10),
+			},
+			lost: []uint64{0, 2},
+		},
+		{
+			name: "a gap after leading malformed metadata is outside the capture",
+			frames: [][]byte{
+				newRecordFrame(badMeta, nil, 7),
+				newRecordFrame(newRecordMeta(1, 0), []byte("a"), 10),
+				newRecordFrame(newRecordMeta(1, 0), []byte("b"), 13),
+			},
+			lost: []uint64{0, 2},
+		},
+		{
+			name: "gap before a malformed record moves to the next delivered one",
+			frames: [][]byte{
+				newRecordFrame(newRecordMeta(1, 0), []byte("a"), 7),
+				newRecordFrame(badMeta, nil, 9),
+				newRecordFrame(newRecordMeta(1, 0), []byte("b"), 12),
+			},
+			lost: []uint64{0, 3},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sig := newSignalingSource()
+
+			ctx, cancel := context.WithCancel(t.Context())
+			recordCh := make(chan *pdumppb.Record, len(tc.frames))
+			var group errgroup.Group
+			group.Go(func() error {
+				return runReaders(ctx, []cring.RecordSource{sig}, 64, zap.NewNop(), recordCh)
+			})
+
+			sig.waitStarted(t)
+			for _, frame := range tc.frames {
+				sig.push(frame)
+			}
+
+			lost := make([]uint64, 0, len(tc.lost))
+			for range tc.lost {
+				lost = append(lost, (<-recordCh).GetLostBefore())
+			}
+			require.Equal(t, tc.lost, lost)
+
+			cancel()
+			require.ErrorIs(t, group.Wait(), context.Canceled)
+		})
+	}
+}
+
 // raceSourcePlainWrite is a fake ring source whose write position is a
 // plain, unsynchronized field: a stand-in for memory a caller may reuse
 // or free the moment a read session returns.

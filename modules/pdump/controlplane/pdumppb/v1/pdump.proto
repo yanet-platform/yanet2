@@ -57,6 +57,16 @@ message RecordMeta {
 message Record {
   RecordMeta meta = 1;
   bytes data = 2;
+  // Number of records the stream lost from this record's ring since the
+  // previous record it delivered from that ring.
+  //
+  // Each worker writes its own ring. Every sequence gap caused by overwrite
+  // or by skipping records after a corrupt frame is measured modulo 2^32.
+  // Gaps accumulate across records dropped for malformed metadata, starting
+  // with the first delivery. That delivery reports zero. Losses after the
+  // final delivery are unreported. Neither records the ring writer rejects
+  // nor records dropped for malformed metadata count as losses.
+  uint64 lost_before = 3;
 }
 
 message ListConfigsRequest {}

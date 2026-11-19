@@ -536,6 +536,124 @@ func Test_Reader_Read_EvictionBetweenReadsDropsCarriedPartial(t *testing.T) {
 	require.Equal(t, payload, records[0].Bytes)
 }
 
+// Test_Reader_Read_ConsecutiveRecordsReportNoLoss verifies that records read
+// without any eviction, whole or carried over between reads, all report no
+// lost records.
+func Test_Reader_Read_ConsecutiveRecordsReportNoLoss(t *testing.T) {
+	agent := newTestAgent(t, 1)
+	object := newRingObject(t, agent, "no-loss", 256)
+	writer := newWriter(t, object, 0)
+	reader := openReader(t, object, 0)
+
+	var records []cring.Record
+	for _, payload := range []string{"one", "two", "three"} {
+		_, err := writer.WriteRecord([]byte(payload))
+		require.NoError(t, err)
+	}
+	// Small reads split records across calls.
+	for reader.HasMore() {
+		records = append(records, reader.Read(6)...)
+	}
+	for _, payload := range []string{"four", "five"} {
+		_, err := writer.WriteRecord([]byte(payload))
+		require.NoError(t, err)
+	}
+	records = append(records, reader.Read(1024)...)
+
+	require.Len(t, records, 5)
+	for _, rec := range records {
+		require.Zero(t, rec.Lost, "record %d", rec.Seqno)
+	}
+}
+
+// Test_Reader_Read_FirstRecordReportsNoLoss verifies that the first record a
+// reader returns reports no loss, even when the writer numbered records
+// before it that the reader never saw.
+func Test_Reader_Read_FirstRecordReportsNoLoss(t *testing.T) {
+	agent := newTestAgent(t, 1)
+	object := newRingObject(t, agent, "first-record", 256)
+	writer := newWriter(t, object, 0)
+
+	for range 3 {
+		_, err := writer.WriteRecord([]byte("history"))
+		require.NoError(t, err)
+	}
+	reader, err := cring.NewReaderFromTail(0, object.Capacity(), source(t, object, 0))
+	require.NoError(t, err)
+
+	seqno, err := writer.WriteRecord([]byte("first"))
+	require.NoError(t, err)
+	require.Equal(t, uint32(3), seqno)
+
+	records := reader.Read(1024)
+	require.Len(t, records, 1)
+	require.Zero(t, records[0].Lost)
+}
+
+// Test_Reader_Read_OverwriteCountsEvictedRecords verifies that records the
+// writer evicts before the reader reads them are counted on the next
+// returned record.
+//
+// Every record written after the last read is either returned or counted
+// as lost, never both, and at least one is lost.
+func Test_Reader_Read_OverwriteCountsEvictedRecords(t *testing.T) {
+	agent := newTestAgent(t, 1)
+	object := newRingObject(t, agent, "overwrite-loss", 64)
+	writer := newWriter(t, object, 0)
+	reader := openReader(t, object, 0)
+
+	_, err := writer.WriteRecord([]byte("AAAAAAAA"))
+	require.NoError(t, err)
+	require.Len(t, reader.Read(1024), 1)
+
+	// Each record takes 16 bytes, so the 64-byte ring holds at most four
+	// of the six written here.
+	const written = 6
+	for range written {
+		_, err = writer.WriteRecord([]byte("BBBBBBBB"))
+		require.NoError(t, err)
+	}
+
+	records := reader.Read(1024)
+	require.NotEmpty(t, records)
+	require.Positive(t, records[0].Lost, "the eviction must be reported")
+	for _, rec := range records[1:] {
+		require.Zero(t, rec.Lost, "record %d follows a returned record", rec.Seqno)
+	}
+	require.Equal(t, written, int(records[0].Lost)+len(records))
+}
+
+// Test_Reader_Read_CorruptFrameCountsSkippedRecords verifies that the
+// records a corrupt frame makes the reader skip are counted on the next
+// returned record.
+func Test_Reader_Read_CorruptFrameCountsSkippedRecords(t *testing.T) {
+	agent := newTestAgent(t, 1)
+	object := newRingObject(t, agent, "corrupt-loss", 128)
+	writer := newWriter(t, object, 0)
+	reader := openReader(t, object, 0)
+
+	// "good-one" makes a 16-byte record, so the next one starts at
+	// offset 16.
+	_, err := writer.WriteRecord([]byte("good-one"))
+	require.NoError(t, err)
+	require.Len(t, reader.Read(1024), 1)
+
+	_, err = writer.WriteRecord([]byte("bad-frame"))
+	require.NoError(t, err)
+	writer.CorruptTotalLen(16, 0xffffffff)
+	_, err = writer.WriteRecord([]byte("skipped"))
+	require.NoError(t, err)
+	require.Empty(t, reader.Read(1024))
+
+	_, err = writer.WriteRecord([]byte("after"))
+	require.NoError(t, err)
+
+	records := reader.Read(1024)
+	require.Len(t, records, 1)
+	require.Equal(t, []byte("after"), records[0].Bytes)
+	require.Equal(t, uint32(2), records[0].Lost, "the corrupt record and the one behind it are lost")
+}
+
 // Test_Reader_Read_SteadyStateAllocatesOnlyReturnedRecords verifies that a
 // read after warm-up allocates only for the records it returns.
 func Test_Reader_Read_SteadyStateAllocatesOnlyReturnedRecords(t *testing.T) {
@@ -622,6 +740,8 @@ func Test_Reader_NewReaderFromTail_SkipsRecordsWrittenBeforeIt(t *testing.T) {
 // never returns a torn record while the C writer overwrites at full speed.
 //
 // The ring is small, so it stays full and the writer evicts all the time.
+// Every record from the first one returned on is either returned or
+// counted as lost, so the loss count is exact under the race too.
 func Test_Reader_Stress_ConcurrentWriterNeverTears(t *testing.T) {
 	if testing.Short() {
 		t.Skip("the concurrent stress is skipped in short mode")
@@ -639,10 +759,15 @@ func Test_Reader_Stress_ConcurrentWriterNeverTears(t *testing.T) {
 	stress, err := writer.StartStress(records)
 	require.NoError(t, err)
 
-	var returned, torn uint64
+	var returned, torn, lost uint64
+	var firstSeqno uint32
 	check := func(records []cring.Record) {
 		for _, rec := range records {
+			if returned == 0 {
+				firstSeqno = rec.Seqno
+			}
 			returned++
+			lost += uint64(rec.Lost)
 			if !ringtest.StressRecordValid(rec.Seqno, rec.Bytes) {
 				torn++
 				if torn <= 10 {
@@ -661,10 +786,13 @@ func Test_Reader_Stress_ConcurrentWriterNeverTears(t *testing.T) {
 	written := stress.Written()
 	stress.Wait()
 
-	t.Logf("written=%d returned=%d torn=%d", written, returned, torn)
+	t.Logf("written=%d returned=%d lost=%d torn=%d", written, returned, lost, torn)
 	require.Equal(t, uint64(records), written, "the writer must commit every record")
 	require.NotZero(t, returned, "the reader must keep up with some records")
 	require.Zero(t, torn, "no torn record may ever be returned")
+	require.Equal(t, written-uint64(firstSeqno), returned+lost,
+		"every record from the first returned one on must be returned or counted as lost",
+	)
 }
 
 // benchReadBudget is the byte limit of one read in the benchmarks.
@@ -769,6 +897,54 @@ func (m *memSource) CopyRange(dst []byte, start, size uint64) {
 	mask := uint64(len(m.data) - 1)
 	for idx := range dst {
 		dst[idx] = m.data[(start+uint64(idx))&mask]
+	}
+}
+
+// emptyRecords returns a source holding one empty record per given sequence
+// number, laid out from offset 0 and all published.
+func emptyRecords(seqnos ...uint32) *memSource {
+	src := &memSource{data: make([]byte, 64)}
+	for idx, seqno := range seqnos {
+		offset := idx * int(cring.RecordFrameSize)
+		binary.LittleEndian.PutUint32(src.data[offset:], cring.RecordFrameSize)
+		binary.LittleEndian.PutUint32(src.data[offset+4:], seqno)
+	}
+	src.write = uint64(len(seqnos)) * uint64(cring.RecordFrameSize)
+	return src
+}
+
+// Test_Reader_Read_LostAcrossSeqnoWrap verifies that the loss count wraps
+// with the writer's 32-bit sequence number.
+func Test_Reader_Read_LostAcrossSeqnoWrap(t *testing.T) {
+	cases := []struct {
+		name   string
+		seqnos []uint32
+		lost   []uint32
+	}{
+		{
+			name:   "consecutive across the wrap report no loss",
+			seqnos: []uint32{0xfffffffe, 0xffffffff, 0, 1},
+			lost:   []uint32{0, 0, 0, 0},
+		},
+		{
+			name:   "gap across the wrap counts only the skipped numbers",
+			seqnos: []uint32{0xfffffffe, 2},
+			lost:   []uint32{0, 3},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reader, err := cring.NewReader(0, 64, emptyRecords(tc.seqnos...))
+			require.NoError(t, err)
+
+			records := reader.Read(1024)
+			lost := make([]uint32, 0, len(records))
+			for _, rec := range records {
+				lost = append(lost, rec.Lost)
+			}
+			require.Equal(t, tc.lost, lost)
+		})
 	}
 }
 
