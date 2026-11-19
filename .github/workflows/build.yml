@@ -124,7 +124,7 @@ jobs:
           persist-credentials: false
           submodules: true
 
-      - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
+      - uses: hendrikmuhs/ccache-action@dbeefd73e8e2ffc1bbc412570072735eb4db3607 # v1.2.25
         name: ccache
         with:
           key: ${{ runner.os }}-build-asan-test-image-cache
@@ -169,7 +169,7 @@ jobs:
           persist-credentials: false
           submodules: true
 
-      - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
+      - uses: hendrikmuhs/ccache-action@dbeefd73e8e2ffc1bbc412570072735eb4db3607 # v1.2.25
         name: ccache
         with:
           key: ${{ runner.os }}-test-release-arm64-image-cache
@@ -279,7 +279,7 @@ jobs:
           persist-credentials: false
           submodules: true
 
-      - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
+      - uses: hendrikmuhs/ccache-action@dbeefd73e8e2ffc1bbc412570072735eb4db3607 # v1.2.25
         name: ccache
         with:
           key: ${{ runner.os }}-build-tsan-test-image-cache
@@ -325,7 +325,7 @@ jobs:
 
       # The release test job compiles the whole tree and is the one that saves
       # this cache.
-      - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
+      - uses: hendrikmuhs/ccache-action@dbeefd73e8e2ffc1bbc412570072735eb4db3607 # v1.2.25
         name: ccache
         with:
           key: ${{ runner.os }}-build-release-artifacts-image-cache
@@ -461,7 +461,7 @@ jobs:
           submodules: true
 
       # The artifacts job compiles part of this tree and restores this cache.
-      - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
+      - uses: hendrikmuhs/ccache-action@dbeefd73e8e2ffc1bbc412570072735eb4db3607 # v1.2.25
         name: ccache
         with:
           key: ${{ runner.os }}-build-release-artifacts-image-cache
