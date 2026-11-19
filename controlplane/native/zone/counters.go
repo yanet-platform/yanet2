@@ -102,8 +102,8 @@ func (m *Instance) Counters(predicates []CounterTag) ([]CounterGroup, error) {
 		for itemIdx := range items {
 			item := &items[itemIdx]
 			present := item.Tags[:item.TagCount]
-			// A storage without counters, as an object's of none, makes no
-			// group.
+			// A storage that holds no counters, as an object without
+			// counters registers, makes no group.
 			if !tagsMatch(predicates, present) || item.Storage.Get().Registry.Get().Count == 0 {
 				continue
 			}
