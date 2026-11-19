@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "nat64state.h"
 #include "types.h"
 
 // Install fwstate's fwmap callbacks into the statemap registry; idempotent,
@@ -139,4 +140,65 @@ fwmap_fw6_key_equal(const void *a, const void *b, size_t size) {
 	       k1->hdr.dst_port == k2->hdr.dst_port &&
 	       memcmp(k1->src_addr, k2->src_addr, sizeof(k1->src_addr)) == 0 &&
 	       memcmp(k1->dst_addr, k2->dst_addr, sizeof(k1->dst_addr)) == 0;
+}
+
+// == Value merge for the stateful NAT64 session tables.
+//
+// A session's identity (the pool allocation on the lan side, the original
+// IPv6 source on the wan side) is chosen once at flow creation and must
+// survive every later refresh: a refresh carries the mapping it read back
+// from the table, but a racing first packet on another worker may have
+// installed a different one — the older copy in the slot wins.
+
+// In-layer update for a nat64state session entry.
+static inline void
+fwmap_update_value_nat64state(
+	void *dst, const void *src, bool dst_empty, size_t size
+) {
+	assert(size == sizeof(struct nat64state_value));
+	const struct nat64state_value *s = (const struct nat64state_value *)src;
+	struct nat64state_value *d = (struct nat64state_value *)dst;
+
+	if (dst_empty) {
+		*d = *s;
+		return;
+	}
+
+	struct nat64state_value old = *d;
+	*d = *s;
+	// The connection age is preserved across refreshes.
+	d->created_at = old.created_at;
+	// The session identity never changes after creation: the stored
+	// allocation and client address win over whatever a racing refresh
+	// carries, whatever their bytes.
+	d->ip4 = old.ip4;
+	d->port = old.port;
+	memcpy(d->src6, old.src6, sizeof(d->src6));
+	memcpy(d->prefix, old.prefix, sizeof(d->prefix));
+	// Establishment latches: an ACK seen by any refresh keeps the
+	// session on the established timeout.
+	d->tcp_established = d->tcp_established || old.tcp_established;
+}
+
+// Cross-layer promotion of a nat64state entry from a stale layer into a
+// fresh slot of the active layer, with the same identity-wins merge.
+static inline void
+fwmap_promote_value_nat64state(
+	void *dst, const void *new_value, const void *old_value, size_t size
+) {
+	assert(size == sizeof(struct nat64state_value));
+
+	struct nat64state_value *d = (struct nat64state_value *)dst;
+	const struct nat64state_value *new_v =
+		(const struct nat64state_value *)new_value;
+	const struct nat64state_value *old_v =
+		(const struct nat64state_value *)old_value;
+
+	*d = *new_v;
+	d->created_at = old_v->created_at;
+	d->ip4 = old_v->ip4;
+	d->port = old_v->port;
+	memcpy(d->src6, old_v->src6, sizeof(d->src6));
+	memcpy(d->prefix, old_v->prefix, sizeof(d->prefix));
+	d->tcp_established = new_v->tcp_established || old_v->tcp_established;
 }
