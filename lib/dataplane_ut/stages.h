@@ -9,6 +9,12 @@
 int
 dataplane_ut_begin_round(struct dataplane_ut *ut, size_t worker_idx);
 
+// Run only the due-entry sweep of the current round, moving due entries
+// onto the ready list without running them; the round-state contract of
+// dataplane_ut_begin_round applies afterwards.
+int
+dataplane_ut_arm_due(struct dataplane_ut *ut, size_t worker_idx);
+
 struct dataplane_ut_stage {
 	size_t worker_idx;
 	uint16_t device_id;

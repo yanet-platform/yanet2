@@ -7,6 +7,7 @@ struct cp_config_gen;
 struct config_gen_ectx;
 struct device_entry_ectx;
 struct packet_front;
+struct rlist;
 
 // Decide the egress of the packets that finished an output entry.
 //
@@ -20,6 +21,21 @@ worker_entry_terminal_egress(
 	struct config_gen_ectx *config_gen_ectx,
 	struct device_entry_ectx *entry_ectx,
 	struct packet_front *packet_front
+);
+
+// Move the entries whose deadline has arrived onto the ready list.
+//
+// The sweep of one round: the caller has already drained the generation's
+// home list onto the untouched list, and current_time_ns is the round's
+// time. Entries due at or before the time move onto the ready list; the
+// cached earliest deadline is recomputed from the deadlines that survive
+// on the untouched list. Exposed separately from the round so the
+// dataplane_ut harness can drive the sweep without the rest of the round.
+void
+worker_pipeline_round_arm_due(
+	struct config_gen_ectx *config_gen_ectx,
+	struct rlist *untouched,
+	uint64_t current_time_ns
 );
 
 // Drain the device entry schedules through the pipeline.

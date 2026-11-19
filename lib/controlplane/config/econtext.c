@@ -1372,6 +1372,7 @@ device_ectx_create(
 	// need theirs before their own pipelines are built.
 	device_ectx->device_id = (uint16_t)device_idx;
 	SET_OFFSET_OF(&device_ectx->cp_device, cp_device);
+	SET_OFFSET_OF(&device_ectx->config_gen_ectx, config_gen_ectx);
 
 	struct counter_storage *old_counter_storage = NULL;
 	struct config_gen_ectx *old_ectx =

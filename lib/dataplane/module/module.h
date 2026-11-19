@@ -47,7 +47,12 @@
 // 48: struct dp_worker_assignment gained the assignment's rx service
 // weight; the list stays part of dp_worker's plugin-visible contract.
 // 49: struct dp_worker gained the rx_chained_drops counter pointer.
-#define YANET_MODULE_ABI_VERSION 50
+// 50: struct device_entry_ectx gained deadline_ns; struct config_gen_ectx
+// gained nearest_deadline_ns and the current_entry back-reference for the
+// device-entry deadline scheduler.
+// 51: struct device_ectx gained the config_gen_ectx offset/absolute pair,
+// so device handlers reach the executing entry they may arm.
+#define YANET_MODULE_ABI_VERSION 52
 
 // Symbol name a module .so exports carrying its compiled-against
 // YANET_MODULE_ABI_VERSION, as a uint32_t global.

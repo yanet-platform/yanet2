@@ -12,6 +12,7 @@
 #include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/packet/packet.h"
 #include "lib/dataplane/pipeline/econtext.h"
+#include "lib/dataplane/pipeline/schedule.h"
 #include "lib/dataplane/worker/worker.h"
 
 #include <rte_mbuf.h>
@@ -77,13 +78,15 @@ trafgen_emit_frame(
 
 // Replay the loaded frames on the device input path, pacing to the target rate.
 //
-// The device registry force-polls every device input handler once per worker
-// tick, so the generator sources fresh traffic even when no packet arrives from
-// a NIC. The emitted packets land in packet_front->output and are demultiplexed
-// into the device's configured input pipelines by the pipeline runtime. A
-// per-worker token bucket accrues elapsed_ns * rate_pps and releases one packet
-// per 1e9 * worker_count credit, which divides rate_pps evenly across all
-// workers.
+// The generator drives its own invocations: every run re-arms the executing
+// input entry for the next packet's worth of bucket time, so it sources fresh
+// traffic with or without the worker's per-tick force-poll and without any
+// packet arriving from a NIC. The emitted packets land in packet_front->output
+// and are demultiplexed into the device's configured input pipelines by the
+// pipeline runtime. A per-worker token bucket accrues elapsed_ns * rate_pps and
+// releases one packet per 1e9 * worker_count credit, which divides rate_pps
+// evenly across all workers; an early or late wakeup only shifts the bucket,
+// never the pacing.
 static void
 trafgen_input_handle(
 	struct dp_worker *dp_worker,
@@ -106,45 +109,68 @@ trafgen_input_handle(
 	struct trafgen_worker_state *state =
 		ADDR_OF(&config->worker_states) + dp_worker->idx;
 
-	uint64_t now = dp_worker->current_time;
-	if (state->last_time == 0) {
-		// First tick after (re)load: anchor the clock, emit nothing.
-		state->last_time = now;
-		return;
-	}
-	uint64_t elapsed = now > state->last_time ? now - state->last_time : 0;
-	state->last_time = now;
-
 	// One packet costs 1e9 * worker_count credit, so each worker emits
 	// rate_pps / worker_count packets per second.
 	uint64_t threshold = TRAFGEN_NS_PER_SEC * config->worker_count;
-	uint64_t max_burst = TRAFGEN_MAX_BURST;
-	uint64_t credit_cap = threshold * max_burst;
+	uint64_t rate = config->rate_pps;
 
-	uint64_t credit = state->credit + elapsed * config->rate_pps;
-	if (credit > credit_cap) {
-		credit = credit_cap;
-	}
+	uint64_t now = dp_worker->current_time;
 
+	uint64_t credit = state->credit;
 	uint64_t cursor = state->cursor;
-	uint64_t emitted = 0;
-	while (credit >= threshold && emitted < max_burst) {
-		uint32_t frame_idx = cursor % config->frame_count;
-		cursor += 1;
+	if (state->last_time == 0) {
+		// First tick after (re)load: anchor the clock, emit nothing.
+		state->last_time = now;
+	} else {
+		uint64_t elapsed =
+			now > state->last_time ? now - state->last_time : 0;
+		state->last_time = now;
 
-		int rc = trafgen_emit_frame(
-			dp_worker, config, packet_front, frame_idx
-		);
-		if (rc < 0) {
-			// Mbuf pool exhausted; keep the unspent credit.
-			break;
+		uint64_t max_burst = TRAFGEN_MAX_BURST;
+		uint64_t credit_cap = threshold * max_burst;
+
+		credit += elapsed * rate;
+		if (credit > credit_cap) {
+			credit = credit_cap;
 		}
-		credit -= threshold;
-		emitted += 1;
+
+		uint64_t emitted = 0;
+		while (credit >= threshold && emitted < max_burst) {
+			uint32_t frame_idx = cursor % config->frame_count;
+			cursor += 1;
+
+			int rc = trafgen_emit_frame(
+				dp_worker, config, packet_front, frame_idx
+			);
+			if (rc < 0) {
+				// Mbuf pool exhausted; keep the unspent credit.
+				break;
+			}
+			credit -= threshold;
+			emitted += 1;
+		}
 	}
 
 	state->cursor = cursor;
 	state->credit = credit;
+
+	// The generator drives its own invocations: arm the executing input
+	// entry for the first moment the bucket can afford its next packet,
+	// so it sources fresh traffic with or without the worker's per-tick
+	// force-poll. A bucket that is already full — the pool refused a
+	// burst — arms for now, so the next sweep retries the allocation. A
+	// run without an executing entry — outside any round — has nothing
+	// to arm and stays on the force-poll.
+	struct device_entry_ectx *entry =
+		device_ectx_current_entry(device_ectx);
+	if (entry != NULL) {
+		uint64_t remaining =
+			credit < threshold ? threshold - credit : 0;
+		uint64_t delay = (remaining + rate - 1) / rate;
+		device_entry_ectx_arm(
+			device_ectx->abs_config_gen_ectx, entry, now + delay
+		);
+	}
 }
 
 // Pass packets routed to this device for transmission straight through.
