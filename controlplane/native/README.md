@@ -15,7 +15,7 @@ against C byte for byte.
 | `zone` | Maps the storage, finds instances, pins generations, reads topology, modules, agents | no |
 | `shmalloc` | Block allocator and memory contexts of `common/memory*.h` | `-asan` builds only |
 | `agent` | `agent_attach`, agent registry, sweep of superseded agents | no |
-| `cpconfig` | Module configurations, generation copy and upsert, workers' execution contexts, counter storages, publication, teardown of retired generations | no |
+| `cpconfig` | Module configurations and objects, generation copy, upsert and delete, workers' execution contexts, counter storages, publication, teardown of retired generations | no |
 | `lpm` | Prefix trees of `common/lpm.h` | no |
 | `decap` | Decap module configurations | no |
 | `cmd/yanet-native` | Static inspector of a running dataplane | no |
@@ -115,7 +115,8 @@ same bytes.
 - Modules beyond blackhole and decap need their configuration builders ported, each
   against its C api with the same comparison.
 - Byte-identical results cover the topologies the tests build: one device, blackhole and
-  decap modules, no objects, no runtime counter registries and no module device links.
+  decap modules, ring objects with counters and links, deletes of modules and objects; no
+  runtime counter registries and no module device links.
 - Error paths are not compared with C. A failed update frees its new generation, but a
   registry copy that fails part-way, or a worker's context that fails part-way, leaves
   what it allocated; several context allocations are not checked for exhaustion.

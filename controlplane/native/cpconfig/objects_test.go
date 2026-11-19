@@ -173,6 +173,56 @@ func Test_UpdateObjects_RefusesRepeatedObject(t *testing.T) {
 	require.Same(t, published, instance.Cp.CpConfigGen.Get())
 }
 
+// Test_DeleteObject_MatchesC verifies that deleting a published object
+// from Go leaves the storage as cp_config_delete_object does: its
+// registry slot freed, its owner's loaded count dropped and every
+// worker's context rebuilt without it.
+func Test_DeleteObject_MatchesC(t *testing.T) {
+	memory := newPublishedFixture(t)
+	cPublishObject(t, memory, "state")
+	cPublishObject(t, memory, "other")
+	instance := memory.Instance()
+	memory.CompareWithC(t,
+		func() {
+			require.NoError(t, memory.cAgent.DeleteObject("ring", "state"))
+		},
+		func() {
+			require.NoError(t, cpconfig.DeleteObject(instance, "ring", "state", cpconfig.WithDelivery(nativetest.Deliver)))
+		},
+	)
+}
+
+// Test_DeleteObject_RefusesMissingObject verifies that deleting an object
+// the published generation does not hold is refused as not found and the
+// published generation stays.
+func Test_DeleteObject_RefusesMissingObject(t *testing.T) {
+	memory := newPublishedFixture(t)
+	instance := memory.Instance()
+	published := instance.Cp.CpConfigGen.Get()
+	err := cpconfig.DeleteObject(instance, "ring", "missing", cpconfig.WithDelivery(nativetest.Deliver))
+	require.ErrorIs(t, err, cpconfig.ErrNotFound)
+	require.Same(t, published, instance.Cp.CpConfigGen.Get())
+}
+
+// Test_DeleteObject_RefusesLinkedObject verifies that deleting an object
+// a published module links is refused as linked, as C refuses it, and
+// the published generation stays.
+func Test_DeleteObject_RefusesLinkedObject(t *testing.T) {
+	memory := newPublishedFixture(t)
+	cPublishObject(t, memory, "state")
+	instance := memory.Instance()
+	module, err := cpconfig.NewBlackhole(memory.owner, "a")
+	require.NoError(t, err)
+	_, err = cpconfig.LinkObject(module, "ring", "state")
+	require.NoError(t, err)
+	require.NoError(t, cpconfig.UpdateModules(instance, []*layout.CpModule{module}, cpconfig.WithDelivery(nativetest.Deliver)))
+	published := instance.Cp.CpConfigGen.Get()
+	require.Error(t, memory.cAgent.DeleteObject("ring", "state"))
+	err = cpconfig.DeleteObject(instance, "ring", "state", cpconfig.WithDelivery(nativetest.Deliver))
+	require.ErrorIs(t, err, cpconfig.ErrObjectLinked)
+	require.Same(t, published, instance.Cp.CpConfigGen.Get())
+}
+
 // Test_LinkObject_ReturnsTheExistingLink verifies that linking a module to
 // an object it links already returns that link and appends none.
 func Test_LinkObject_ReturnsTheExistingLink(t *testing.T) {

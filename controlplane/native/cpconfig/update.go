@@ -3,6 +3,7 @@
 package cpconfig
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -37,10 +38,51 @@ func WithDelivery(deliver Deliver) UpdateOption {
 	}
 }
 
+// ErrNotFound marks a delete of a module or an object the published
+// generation does not hold.
+var ErrNotFound = errors.New("not found")
+
 // UpdateModules publishes a generation in which the module
 // configurations replace those of their types and names, as
 // cp_config_update_modules does, and returns once every worker runs it.
 func UpdateModules(instance *zone.Instance, modules []*layout.CpModule, options ...UpdateOption) error {
+	return publishGeneration(instance, options, func(cp *layout.CpConfig, dp *layout.DpConfig, old *layout.CpConfigGen) (*layout.CpConfigGen, error) {
+		owners, err := holdEntities(cp, "module", len(modules), func(idx int) entityRef {
+			module := modules[idx]
+			return entityRef{Owner: module.Entity.Agent.Get(), Type: shm.String(module.Type[:]), Name: shm.String(module.Name[:])}
+		})
+		if err != nil {
+			return nil, err
+		}
+		defer releaseOwners(owners)
+		return buildFrom(cp, dp, old, func(gen *layout.CpConfigGen) error {
+			return putModules(gen, modules)
+		})
+	})
+}
+
+// DeleteModule publishes a generation without the module configuration
+// of a type and name, as cp_config_delete_module does, and returns once
+// every worker runs it.
+func DeleteModule(instance *zone.Instance, moduleType, name string, options ...UpdateOption) error {
+	return publishGeneration(instance, options, func(cp *layout.CpConfig, dp *layout.DpConfig, old *layout.CpConfigGen) (*layout.CpConfigGen, error) {
+		return buildFrom(cp, dp, old, func(gen *layout.CpConfigGen) error {
+			if !entityRegistryReplace(&gen.ModuleRegistry.EntityRegistry, moduleKeys, moduleKeyHash(moduleType, name),
+				moduleEqual(moduleType, name), nil,
+			) {
+				return fmt.Errorf("module %s:%s: %w", moduleType, name, ErrNotFound)
+			}
+			return nil
+		})
+	})
+}
+
+// publishGeneration builds a generation from the published one under the
+// configuration lock, publishes it, and retires the one it replaces; like
+// every hold of the lock in C, it sweeps the superseded agents on leaving.
+func publishGeneration(instance *zone.Instance, options []UpdateOption,
+	build func(cp *layout.CpConfig, dp *layout.DpConfig, old *layout.CpConfigGen) (*layout.CpConfigGen, error),
+) error {
 	opts := &updateOptions{}
 	for _, option := range options {
 		option(opts)
@@ -54,16 +96,8 @@ func UpdateModules(instance *zone.Instance, modules []*layout.CpModule, options 
 		shm.UnlockByte(&cp.AgentLock.Locked)
 	}()
 
-	owners, err := holdEntities(cp, "module", len(modules), func(idx int) entityRef {
-		module := modules[idx]
-		return entityRef{Owner: module.Entity.Agent.Get(), Type: shm.String(module.Type[:]), Name: shm.String(module.Name[:])}
-	})
-	if err != nil {
-		return err
-	}
 	old := cp.CpConfigGen.Get()
-	gen, err := buildGeneration(cp, dp, old, modules)
-	releaseOwners(owners)
+	gen, err := build(cp, dp, old)
 	if err != nil {
 		return err
 	}
@@ -71,22 +105,35 @@ func UpdateModules(instance *zone.Instance, modules []*layout.CpModule, options 
 	return nil
 }
 
-// buildGeneration copies a generation, puts the module configurations
-// into the copy and builds its workers' contexts, or frees what it built.
+// buildFrom copies a generation, changes the copy and builds its workers'
+// contexts, or frees what it built.
 //
 // It holds the instance's allocator lock once for all of it, rather than
 // once per block as each allocation would.
-func buildGeneration(cp *layout.CpConfig, dp *layout.DpConfig, old *layout.CpConfigGen, modules []*layout.CpModule) (*layout.CpConfigGen, error) {
+func buildFrom(cp *layout.CpConfig, dp *layout.DpConfig, old *layout.CpConfigGen, change func(gen *layout.CpConfigGen) error) (*layout.CpConfigGen, error) {
 	shmalloc.Lock(&cp.BlockAllocator)
 	defer shmalloc.Unlock(&cp.BlockAllocator)
 	gen, err := newGeneration(cp, old)
 	if err != nil {
 		return nil, err
 	}
+	if err := change(gen); err != nil {
+		freeGeneration(cp, gen)
+		return nil, err
+	}
+	if err := attachWorkerContexts(gen, old, dp); err != nil {
+		freeGeneration(cp, gen)
+		return nil, err
+	}
+	return gen, nil
+}
+
+// putModules puts module configurations into a generation and checks
+// that it holds every object they link.
+func putModules(gen *layout.CpConfigGen, modules []*layout.CpModule) error {
 	for _, module := range modules {
 		if err := upsertModule(&gen.ModuleRegistry, module); err != nil {
-			freeGeneration(cp, gen)
-			return nil, fmt.Errorf("upsert module %s:%s: %w", shm.String(module.Type[:]), shm.String(module.Name[:]), err)
+			return fmt.Errorf("upsert module %s:%s: %w", shm.String(module.Type[:]), shm.String(module.Name[:]), err)
 		}
 	}
 	for _, module := range modules {
@@ -95,16 +142,11 @@ func buildGeneration(cp *layout.CpConfig, dp *layout.DpConfig, old *layout.CpCon
 		}
 		for _, linked := range unsafe.Slice(module.Objects.Get(), module.ObjectCount) {
 			if _, ok := lookupObject(gen, shm.String(linked.Type[:]), shm.String(linked.Name[:])); !ok {
-				freeGeneration(cp, gen)
-				return nil, fmt.Errorf("linked object %s:%s not found", shm.String(linked.Type[:]), shm.String(linked.Name[:]))
+				return fmt.Errorf("linked object %s:%s not found", shm.String(linked.Type[:]), shm.String(linked.Name[:]))
 			}
 		}
 	}
-	if err := attachWorkerContexts(gen, old, dp); err != nil {
-		freeGeneration(cp, gen)
-		return nil, err
-	}
-	return gen, nil
+	return nil
 }
 
 // attachWorkerContexts builds the workers' contexts of a generation and

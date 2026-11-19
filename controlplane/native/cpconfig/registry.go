@@ -395,12 +395,16 @@ func registryAcquireSlot(registry *layout.Registry) (uint64, bool) {
 }
 
 // registryReplace puts item in the slot of the key, or a free slot when
-// the key is absent, and drops the displaced item's reference.
+// the key is absent, and drops the displaced item's reference; a nil item
+// deletes the key's item, and fails when the key is absent.
 func registryReplace(registry *layout.Registry, keys *registryKeys, hash uint64,
 	equal func(item *layout.RegistryItem) bool, item *layout.RegistryItem,
 ) bool {
 	index, found := registryLookup(registry, hash, equal)
 	if !found {
+		if item == nil {
+			return false
+		}
 		var ok bool
 		if index, ok = registryAcquireSlot(registry); !ok {
 			return false
@@ -411,13 +415,19 @@ func registryReplace(registry *layout.Registry, keys *registryKeys, hash uint64,
 		}
 	}
 	old := registryGet(registry, index)
-	atomic.AddUint64(&item.Refcnt, 1)
-	registrySet(registry, index, item)
-	if old == nil {
-		hashIndexInsert(&registry.KeyIndex, registryHashFold(keys.ItemHash(item)), uint32(index))
+	if item != nil {
+		atomic.AddUint64(&item.Refcnt, 1)
+		registrySet(registry, index, item)
 	} else {
+		registryFreePush(registry, index)
+	}
+	if old != nil {
 		hashIndexRemove(&registry.KeyIndex, registryHashFold(keys.ItemHash(old)), uint32(index))
+	}
+	if item != nil {
 		hashIndexInsert(&registry.KeyIndex, registryHashFold(keys.ItemHash(item)), uint32(index))
+	}
+	if old != nil {
 		atomic.AddUint64(&old.Refcnt, ^uint64(0))
 	}
 	return true
@@ -457,8 +467,10 @@ func entityRegistryReplace(registry *layout.CpEntityRegistry, keys *registryKeys
 	if !registryReplace(&registry.Registry, keys, hash, equal, item) {
 		return false
 	}
-	if owner := entityOwner(item); owner != nil {
-		atomic.AddUint64(&owner.LoadedEntityCount, 1)
+	if item != nil {
+		if owner := entityOwner(item); owner != nil {
+			atomic.AddUint64(&owner.LoadedEntityCount, 1)
+		}
 	}
 	if old != nil {
 		if owner := entityOwner(old); owner != nil {

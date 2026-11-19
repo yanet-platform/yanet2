@@ -123,6 +123,35 @@ func Test_UpdateModules_MatchesC(t *testing.T) {
 	}
 }
 
+// Test_DeleteModule_MatchesC verifies that deleting a published module
+// configuration no chain uses from Go leaves the storage as
+// cp_config_delete_module does: its registry slot freed, its owner's
+// loaded count dropped and every worker's context rebuilt without it.
+func Test_DeleteModule_MatchesC(t *testing.T) {
+	memory := newPublishedFixture(t)
+	instance := memory.Instance()
+	memory.CompareWithC(t,
+		func() {
+			require.NoError(t, memory.cAgent.DeleteModuleConfig("blackhole", "b"))
+		},
+		func() {
+			require.NoError(t, cpconfig.DeleteModule(instance, "blackhole", "b", cpconfig.WithDelivery(nativetest.Deliver)))
+		},
+	)
+}
+
+// Test_DeleteModule_RefusesMissingModule verifies that deleting a module
+// configuration the published generation does not hold is refused as not
+// found and the published generation stays.
+func Test_DeleteModule_RefusesMissingModule(t *testing.T) {
+	memory := newPublishedFixture(t)
+	instance := memory.Instance()
+	published := instance.Cp.CpConfigGen.Get()
+	err := cpconfig.DeleteModule(instance, "blackhole", "missing", cpconfig.WithDelivery(nativetest.Deliver))
+	require.ErrorIs(t, err, cpconfig.ErrNotFound)
+	require.Same(t, published, instance.Cp.CpConfigGen.Get())
+}
+
 // Benchmark_UpdateModules_Blackhole measures building one blackhole
 // configuration and publishing it until every worker runs it, through
 // the cgo control plane and through the native one, both delivering the

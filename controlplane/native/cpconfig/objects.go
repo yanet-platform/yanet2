@@ -3,8 +3,8 @@
 package cpconfig
 
 import (
+	"errors"
 	"fmt"
-	"os"
 	"unsafe"
 
 	"github.com/yanet-platform/yanet2/controlplane/native/agent"
@@ -146,54 +146,72 @@ func upsertObject(registry *layout.CpObjectRegistry, object *layout.CpObject) er
 // those of their types and names, as cp_config_update_objects does, and
 // returns once every worker runs it.
 func UpdateObjects(instance *zone.Instance, objects []*layout.CpObject, options ...UpdateOption) error {
-	opts := &updateOptions{}
-	for _, option := range options {
-		option(opts)
-	}
-	cp, dp := instance.Cp, instance.Dp
-	lock := shm.LockPid(&cp.ConfigLock, int32(os.Getpid()))
-	defer lock.Unlock()
-	defer func() {
-		shm.LockByte(&cp.AgentLock.Locked)
-		agent.SweepLocked(cp)
-		shm.UnlockByte(&cp.AgentLock.Locked)
-	}()
-
-	owners, err := holdEntities(cp, "object", len(objects), func(idx int) entityRef {
-		object := objects[idx]
-		return entityRef{Owner: object.Entity.Agent.Get(), Type: shm.String(object.Type[:]), Name: shm.String(object.Name[:])}
+	return publishGeneration(instance, options, func(cp *layout.CpConfig, dp *layout.DpConfig, old *layout.CpConfigGen) (*layout.CpConfigGen, error) {
+		owners, err := holdEntities(cp, "object", len(objects), func(idx int) entityRef {
+			object := objects[idx]
+			return entityRef{Owner: object.Entity.Agent.Get(), Type: shm.String(object.Type[:]), Name: shm.String(object.Name[:])}
+		})
+		if err != nil {
+			return nil, err
+		}
+		defer releaseOwners(owners)
+		return buildFrom(cp, dp, old, func(gen *layout.CpConfigGen) error {
+			for _, object := range objects {
+				if err := upsertObject(&gen.ObjectRegistry, object); err != nil {
+					return fmt.Errorf("upsert object %s:%s: %w", shm.String(object.Type[:]), shm.String(object.Name[:]), err)
+				}
+			}
+			return nil
+		})
 	})
-	if err != nil {
-		return err
-	}
-	old := cp.CpConfigGen.Get()
-	gen, err := buildObjectGeneration(cp, dp, old, objects)
-	releaseOwners(owners)
-	if err != nil {
-		return err
-	}
-	install(cp, dp, gen, old, opts.Deliver)
-	return nil
 }
 
-// buildObjectGeneration copies a generation, puts the objects into the
-// copy and builds its workers' contexts, or frees what it built.
-func buildObjectGeneration(cp *layout.CpConfig, dp *layout.DpConfig, old *layout.CpConfigGen, objects []*layout.CpObject) (*layout.CpConfigGen, error) {
-	shmalloc.Lock(&cp.BlockAllocator)
-	defer shmalloc.Unlock(&cp.BlockAllocator)
-	gen, err := newGeneration(cp, old)
-	if err != nil {
-		return nil, err
-	}
-	for _, object := range objects {
-		if err := upsertObject(&gen.ObjectRegistry, object); err != nil {
-			freeGeneration(cp, gen)
-			return nil, fmt.Errorf("upsert object %s:%s: %w", shm.String(object.Type[:]), shm.String(object.Name[:]), err)
+// ErrObjectLinked marks a delete of an object a module of the published
+// generation links: the module is updated or deleted first.
+var ErrObjectLinked = errors.New("object is linked by a module")
+
+// DeleteObject publishes a generation without the object of a type and
+// name, as cp_config_delete_object does, and returns once every worker
+// runs it; it refuses an object a module of the published generation
+// links, whose workers' contexts would not build without it.
+func DeleteObject(instance *zone.Instance, objectType, name string, options ...UpdateOption) error {
+	return publishGeneration(instance, options, func(cp *layout.CpConfig, dp *layout.DpConfig, old *layout.CpConfigGen) (*layout.CpConfigGen, error) {
+		if _, found := lookupObject(old, objectType, name); !found {
+			return nil, fmt.Errorf("object %s:%s: %w", objectType, name, ErrNotFound)
+		}
+		if module := linkingModule(old, objectType, name); module != nil {
+			return nil, fmt.Errorf("object %s:%s, linked by module %s:%s: %w",
+				objectType, name, shm.String(module.Type[:]), shm.String(module.Name[:]), ErrObjectLinked)
+		}
+		return buildFrom(cp, dp, old, func(gen *layout.CpConfigGen) error {
+			if !entityRegistryReplace(&gen.ObjectRegistry.EntityRegistry, objectKeys, hashStringPair(name, objectType),
+				objectEqual(objectType, name), nil,
+			) {
+				return fmt.Errorf("object %s:%s: %w", objectType, name, ErrNotFound)
+			}
+			return nil
+		})
+	})
+}
+
+// linkingModule returns a module of a generation that links the object
+// of a type and name, or nil.
+func linkingModule(gen *layout.CpConfigGen, objectType, name string) *layout.CpModule {
+	registry := &gen.ModuleRegistry.EntityRegistry.Registry
+	for idx := range registry.Capacity {
+		item := registryGet(registry, idx)
+		if item == nil {
+			continue
+		}
+		module := containerOf[layout.CpModule](item, 0)
+		if module.ObjectCount == 0 {
+			continue
+		}
+		for _, linked := range unsafe.Slice(module.Objects.Get(), module.ObjectCount) {
+			if shm.Equal(linked.Type[:], objectType) && shm.Equal(linked.Name[:], name) {
+				return module
+			}
 		}
 	}
-	if err := attachWorkerContexts(gen, old, dp); err != nil {
-		freeGeneration(cp, gen)
-		return nil, err
-	}
-	return gen, nil
+	return nil
 }
