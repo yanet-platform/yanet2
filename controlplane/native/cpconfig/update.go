@@ -54,7 +54,16 @@ func UpdateModules(instance *zone.Instance, modules []*layout.CpModule, options 
 		shm.UnlockByte(&cp.AgentLock.Locked)
 	}()
 
-	owners, err := holdOwners(cp, modules)
+	entities := make([]entityRef, len(modules))
+	for idx, module := range modules {
+		entities[idx] = entityRef{
+			Kind:  "module",
+			Owner: module.Entity.Agent.Get(),
+			Type:  shm.String(module.Type[:]),
+			Name:  shm.String(module.Name[:]),
+		}
+	}
+	owners, err := holdEntities(cp, entities)
 	if err != nil {
 		return err
 	}
@@ -97,44 +106,56 @@ func buildGeneration(cp *layout.CpConfig, dp *layout.DpConfig, old *layout.CpCon
 			}
 		}
 	}
-	roots, err := buildWorkerContexts(gen, old, dp.WorkerCount)
-	if err != nil {
+	if err := attachWorkerContexts(gen, old, dp); err != nil {
 		freeGeneration(cp, gen)
 		return nil, err
 	}
-	gen.ConfigGenEctxs.Set(roots)
-	gen.ConfigGenEctxCount = dp.WorkerCount
 	return gen, nil
 }
 
-// holdOwners checks that every module's agent is still current and holds
-// it against reclamation until the upserts count it; it refuses a module
-// that appears twice.
-func holdOwners(cp *layout.CpConfig, modules []*layout.CpModule) ([]*layout.Agent, error) {
+// attachWorkerContexts builds the workers' contexts of a generation and
+// attaches them to it.
+func attachWorkerContexts(gen, old *layout.CpConfigGen, dp *layout.DpConfig) error {
+	roots, err := buildWorkerContexts(gen, old, dp.WorkerCount)
+	if err != nil {
+		return err
+	}
+	gen.ConfigGenEctxs.Set(roots)
+	gen.ConfigGenEctxCount = dp.WorkerCount
+	return nil
+}
+
+// entityRef is a module or an object an update publishes: what it is,
+// its owning agent and its identity.
+type entityRef struct {
+	Kind  string
+	Owner *layout.Agent
+	Type  string
+	Name  string
+}
+
+// holdEntities checks that every entity's agent is still current and
+// holds it against reclamation until the upserts count it; it refuses an
+// entity that appears twice.
+func holdEntities(cp *layout.CpConfig, entities []entityRef) ([]*layout.Agent, error) {
 	shm.LockByte(&cp.AgentLock.Locked)
 	defer shm.UnlockByte(&cp.AgentLock.Locked)
-	owners := make([]*layout.Agent, 0, len(modules))
-	for _, module := range modules {
-		owner := module.Entity.Agent.Get()
-		if owner != nil && !agent.IsCurrent(cp, owner) {
+	owners := make([]*layout.Agent, 0, len(entities))
+	for _, entity := range entities {
+		if entity.Owner != nil && !agent.IsCurrent(cp, entity.Owner) {
 			releaseOwners(owners)
-			return nil, fmt.Errorf("module %s:%s is owned by a superseded agent",
-				shm.String(module.Type[:]), shm.String(module.Name[:]),
-			)
+			return nil, fmt.Errorf("%s %s:%s is owned by a superseded agent", entity.Kind, entity.Type, entity.Name)
 		}
-		if owner != nil {
-			atomic.AddUint64(&owner.LoadedEntityCount, 1)
+		if entity.Owner != nil {
+			atomic.AddUint64(&entity.Owner.LoadedEntityCount, 1)
 		}
-		owners = append(owners, owner)
+		owners = append(owners, entity.Owner)
 	}
-	for idx, module := range modules {
-		for _, previous := range modules[:idx] {
-			if shm.String(module.Type[:]) == shm.String(previous.Type[:]) &&
-				shm.String(module.Name[:]) == shm.String(previous.Name[:]) {
+	for idx, entity := range entities {
+		for _, previous := range entities[:idx] {
+			if entity.Type == previous.Type && entity.Name == previous.Name {
 				releaseOwners(owners)
-				return nil, fmt.Errorf("module %s:%s appears more than once in one update",
-					shm.String(module.Type[:]), shm.String(module.Name[:]),
-				)
+				return nil, fmt.Errorf("%s %s:%s appears more than once in one update", entity.Kind, entity.Type, entity.Name)
 			}
 		}
 	}

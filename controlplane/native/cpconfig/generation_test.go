@@ -24,7 +24,8 @@ import (
 
 // publishedFixture is a dataplane whose generation the cgo control plane
 // filled: three blackhole configurations, a function, two pipelines and a
-// device, owned by the agent "owner".
+// device, owned by the agent "owner"; the ring object type is loaded,
+// no object published.
 type publishedFixture struct {
 	*nativetest.Fixture
 	cAgent *ffi.Agent
@@ -38,6 +39,7 @@ func newPublishedFixture(t testing.TB) *publishedFixture {
 		Devices:       []string{"port0"},
 		Modules:       []string{"blackhole"},
 		DevicesToLoad: []string{"plain"},
+		ObjectsToLoad: []string{"ring"},
 	})
 	cAgent, err := memory.Harness.SharedMemory().AgentAttach("owner", 0, 16*datasize.MB)
 	require.NoError(t, err)
