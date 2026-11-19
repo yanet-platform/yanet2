@@ -593,6 +593,7 @@ const PdumpPage: React.FC = () => {
                                         isCapturing={capture.isCapturing}
                                         isCaptureActive={capture.liveConfig === currentConfig}
                                         packetCount={packets.length}
+                                        lostRecords={capture.lossByConfig[currentConfig] ?? 0}
                                         ppsHistory={ppsHistory}
                                         onStartCapture={() => handleStartCapture(currentConfig)}
                                         onStopCapture={handleStopCapture}

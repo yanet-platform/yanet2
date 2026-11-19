@@ -44,6 +44,7 @@ export interface RecordMeta {
 export interface PdumpRecord {
     meta?: RecordMeta;
     data?: string; // base64 encoded
+    lost_before?: number | string;
 }
 
 const pdumpService = createService('modules.pdump.controlplane.pdumppb.v1.PdumpService');
