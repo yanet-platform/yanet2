@@ -154,12 +154,11 @@ func (m *Reader) HasMore() bool {
 //
 // After the copy, Read moves its position forward and loads the readable
 // position again. If the writer evicted bytes during the copy, Read drops
-// them, so the caller never gets an overwritten record; the next returned
-// record counts every record dropped this way as lost. A record length
-// outside [frame size, capacity] is corruption. Read then returns the
-// records before it, drops the rest of the buffer, and resumes at the write
-// position it loaded at the start. A normal call allocates one slice and
-// one payload block, and nothing when no record is complete.
+// them. After the first returned record, sequence gaps report losses
+// modulo 2^32. A length outside [frame size, capacity] indicates corruption.
+// The reader returns records before the corrupt frame and resumes at the
+// write position it loaded at the start. A normal call allocates one slice
+// and one payload block, and nothing when no record is complete.
 func (m *Reader) Read(maxBytes uint32) []Record {
 	write, readable := m.src.Indices()
 

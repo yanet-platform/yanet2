@@ -71,8 +71,8 @@ func parseRecordMeta(payload []byte) (meta *pdumppb.RecordMeta, data []byte, ok 
 // mismatched header is dropped, not treated as fatal, since the writer's
 // own alignment keeps later records on frame boundaries; a session logs
 // only its first such drop, plus a total when it stops, instead of one
-// line per record. Every sent record counts the records its ring lost
-// since the previous record sent from that ring.
+// line per record. After the first delivery from a ring, sequence gaps
+// accumulate across malformed records until the next delivery.
 func runReaders(
 	ctx context.Context,
 	sources []cring.RecordSource,
@@ -108,12 +108,13 @@ func runReaders(
 				}
 			}()
 
-			// Records lost before a record this session dropped as malformed
-			// are still owed to the next record it delivers.
 			var lost uint64
+			var delivered bool
 			for {
 				for _, rec := range reader.Read(readChunkBytes) {
-					lost += uint64(rec.Lost)
+					if delivered {
+						lost += uint64(rec.Lost)
+					}
 					meta, data, ok := parseRecordMeta(rec.Bytes)
 					if !ok {
 						if malformed == 0 {
@@ -127,6 +128,7 @@ func runReaders(
 					case <-ctx.Done():
 						return ctx.Err()
 					case recordCh <- &pdumppb.Record{Meta: meta, Data: data, LostBefore: lost}:
+						delivered = true
 						lost = 0
 					}
 				}

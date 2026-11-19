@@ -307,6 +307,15 @@ func Test_Ring_RunReaders_ReportsLostRecords(t *testing.T) {
 			lost: []uint64{0, 2},
 		},
 		{
+			name: "a gap after leading malformed metadata is outside the capture",
+			frames: [][]byte{
+				newRecordFrame(badMeta, nil, 7),
+				newRecordFrame(newRecordMeta(1, 0), []byte("a"), 10),
+				newRecordFrame(newRecordMeta(1, 0), []byte("b"), 13),
+			},
+			lost: []uint64{0, 2},
+		},
+		{
 			name: "gap before a malformed record moves to the next delivered one",
 			frames: [][]byte{
 				newRecordFrame(newRecordMeta(1, 0), []byte("a"), 7),

@@ -239,18 +239,17 @@ impl PdumpWriter {
     }
 }
 
-/// Shortest time between two loss reports on stderr.
+/// Minimum interval between running loss reports on stderr.
 const LOSS_REPORT_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Failure of the capture's writing side, carried out of the blocking task.
 pub type WriteError = Box<dyn Error + Send + Sync>;
 
-/// Writes captured records until a limit, the stream or a failure ends the
-/// capture, always flushing. An output that goes away is not a failure.
+/// Writes captured records and flushes the output when the capture ends.
+/// A closed output pipe ends the capture successfully.
 ///
-/// The running and final totals of lost records are reported on the loss
-/// sink, never as text in the output: a running total at most once per
-/// interval, and the capture's total at its end. A failed report is ignored.
+/// Loss totals go to the diagnostic sink during capture and at its end.
+/// In the CLI, a closed stderr pipe can end the capture via SIGPIPE.
 pub fn pdump_write<W>(
     mut writer: PdumpWriter,
     mut rx: mpsc::Receiver<pdumppb::Record>,
@@ -261,7 +260,7 @@ where
     W: Write,
 {
     let mut count = 0;
-    let mut lost = 0;
+    let mut lost = 0_u64;
     let mut reported_at: Option<Instant> = None;
     let captured = loop {
         if let Some(limit) = packet_limit
@@ -277,7 +276,7 @@ where
         };
 
         if rec.lost_before > 0 {
-            lost += rec.lost_before;
+            lost = lost.saturating_add(rec.lost_before);
             if reported_at.is_none_or(|at| at.elapsed() >= LOSS_REPORT_INTERVAL) {
                 let _ = writeln!(losses, "lost {lost} records so far");
                 reported_at = Some(Instant::now());
@@ -285,35 +284,28 @@ where
         }
 
         if let Err(err) = writer.write(rec) {
-            if is_broken_pipe(err.as_ref()) {
-                log::debug!("the output is closed, stopping the capture");
-
-                break Ok(());
-            }
-
-            break Err(WriteError::from(format!(
-                "failed to write record: {}",
-                root_cause(err.as_ref())
-            )));
+            break Err(("failed to write record", err));
         };
 
         count += 1;
     };
 
-    let flushed = match writer.write_lost(lost).and_then(|()| writer.flush()) {
-        Ok(()) => Ok(()),
-        Err(err) if is_broken_pipe(err.as_ref()) => Ok(()),
-        Err(err) => Err(WriteError::from(format!(
-            "failed to flush the output: {}",
-            root_cause(err.as_ref())
-        ))),
-    };
+    let finalized = captured.and_then(|()| {
+        writer
+            .write_lost(lost)
+            .map_err(|err| ("failed to write capture statistics", err))
+    });
+    let result = finalized.and(writer.flush().map_err(|err| ("failed to flush the output", err)));
 
     if lost > 0 {
         let _ = writeln!(losses, "lost {lost} records in this capture");
     }
 
-    captured.and(flushed)
+    match result {
+        Ok(()) => Ok(()),
+        Err((_, err)) if is_broken_pipe(err.as_ref()) => Ok(()),
+        Err((action, err)) => Err(WriteError::from(format!("{action}: {}", root_cause(err.as_ref())))),
+    }
 }
 
 /// Reports whether the output went away, which ends a capture piped into a
@@ -470,6 +462,14 @@ mod test {
     }
 
     #[test]
+    fn test_pcapng_loss_total_saturates() {
+        let [stats] = pcapng_statistics(&[(10, u64::MAX), (20, 1)])
+            .try_into()
+            .expect("one statistics block");
+        assert!(stats.options.contains(&InterfaceStatisticsOption::IsbIfDrop(u64::MAX)));
+    }
+
+    #[test]
     fn test_pcapng_statistics_use_latest_capture_timestamp_for_out_of_order_records() {
         let [stats] = pcapng_statistics(&[(10, 0), (35, 0), (20, 4)])
             .try_into()
@@ -480,6 +480,29 @@ mod test {
     #[test]
     fn test_pcapng_without_losses_has_no_statistics_block() {
         assert!(pcapng_statistics(&[(10, 0), (20, 0)]).is_empty());
+    }
+
+    #[test]
+    fn test_pcapng_failed_record_ends_capture_without_appending_statistics() {
+        let file = NamedTempFile::new().expect("must create a temp file");
+        let path = file.path().to_str().expect("temp path must be valid UTF-8");
+        let writer = PdumpWriter::new(DumpOutputFormat::PcapNg, path).expect("must open");
+        let (tx, rx) = mpsc::channel(2);
+        tx.try_send(lossy_record(3)).expect("must accept the record");
+        tx.try_send(pdumppb::Record::default()).expect("must accept the record");
+        drop(tx);
+        pdump_write(writer, rx, None, io::sink()).expect_err("missing metadata must end the capture");
+
+        let mut reader = PcapNgReader::new(file.reopen().expect("must reopen")).expect("must parse the header");
+        let mut packets = 0;
+        while let Some(block) = reader.next_block() {
+            match block.expect("must parse block").0 {
+                Block::EnhancedPacket(_) => packets += 1,
+                Block::InterfaceStatistics(_) => panic!("incomplete capture has a statistics block"),
+                _ => {}
+            }
+        }
+        assert_eq!(1, packets);
     }
 
     #[test]
@@ -509,10 +532,11 @@ mod test {
         thread::scope(|scope| {
             let capture = scope.spawn(|| pdump_write(writer, rx, None, &mut losses));
             tx.blocking_send(lossy_record(1)).expect("the writer must run");
-            // With a one-slot channel this send returns only after the writer
-            // took the first record, so the wait below starts after it.
+            // Taking the second record frees the slot for the third only after
+            // the first loss report and its timestamp are complete.
             tx.blocking_send(lossy_record(0)).expect("the writer must run");
-            thread::sleep(2 * LOSS_REPORT_INTERVAL);
+            tx.blocking_send(lossy_record(0)).expect("the writer must run");
+            thread::sleep(LOSS_REPORT_INTERVAL);
             tx.blocking_send(lossy_record(2)).expect("the writer must run");
             drop(tx);
             capture

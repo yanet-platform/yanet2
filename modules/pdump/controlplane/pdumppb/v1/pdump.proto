@@ -60,15 +60,12 @@ message Record {
   // Number of records the stream lost from this record's ring since the
   // previous record it delivered from that ring.
   //
-  // The ring is the one the worker in meta.worker_idx writes. A record is
-  // lost when the dataplane overwrote it before the stream read it, or when
-  // a corrupt frame made the reader skip it: the reader then also drops the
-  // intact records behind that frame up to the write position. Losses are
-  // reported on the next record delivered from the same ring, so losses
-  // after the last delivered record before the stream ends, and before the
-  // first one, are never reported. Records the ring writer rejects take no
-  // sequence number and are never counted. Records dropped for malformed
-  // metadata are not losses.
+  // Each worker writes its own ring. Every sequence gap caused by overwrite
+  // or by skipping records after a corrupt frame is measured modulo 2^32.
+  // Gaps accumulate across records dropped for malformed metadata, starting
+  // with the first delivery. That delivery reports zero. Losses after the
+  // final delivery are unreported. Neither records the ring writer rejects
+  // nor records dropped for malformed metadata count as losses.
   uint64 lost_before = 3;
 }
 
