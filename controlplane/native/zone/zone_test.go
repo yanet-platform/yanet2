@@ -36,6 +36,7 @@ func newPublishedHarness(t *testing.T) (*dataplaneut.Harness, *ffi.Agent) {
 		Devices:       []string{"port0"},
 		Modules:       []string{"blackhole"},
 		DevicesToLoad: []string{"plain"},
+		ObjectsToLoad: []string{"ring"},
 	})
 	require.NoError(t, err)
 	t.Cleanup(harness.Free)

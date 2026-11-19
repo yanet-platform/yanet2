@@ -60,6 +60,9 @@ func (m *Instance) CurrentTime() (uint64, bool) {
 // generation as yanet_get_counters_by_tags_per_worker reads them, and
 // merges a tag set's storages on all workers into one group.
 func (m *Instance) Counters(predicates []CounterTag) ([]CounterGroup, error) {
+	if len(predicates) > len(layout.CpCounterStorage{}.Tags) {
+		return nil, fmt.Errorf("%d counter tags, more than %d", len(predicates), len(layout.CpCounterStorage{}.Tags))
+	}
 	predicates = slices.Clone(predicates)
 	slices.SortFunc(predicates, func(left, right CounterTag) int { return cmp.Compare(left.Key, right.Key) })
 	for idx := range predicates {
@@ -99,7 +102,9 @@ func (m *Instance) Counters(predicates []CounterTag) ([]CounterGroup, error) {
 		for itemIdx := range items {
 			item := &items[itemIdx]
 			present := item.Tags[:item.TagCount]
-			if !tagsMatch(predicates, present) {
+			// A storage without counters, as an object's of none, makes no
+			// group.
+			if !tagsMatch(predicates, present) || item.Storage.Get().Registry.Get().Count == 0 {
 				continue
 			}
 			key := tagSetKey(present)
