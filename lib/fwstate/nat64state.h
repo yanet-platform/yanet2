@@ -104,7 +104,9 @@ struct nat64state_value {
 	uint32_t ip4;
 	/** Pool port (host order) of the lan-side allocation */
 	uint16_t port;
-	uint16_t _pad2;
+	/** Original client source port (host order) the wan-side reverse
+	 * mapping restores on return traffic */
+	uint16_t cli_port;
 	/** Original IPv6 client address of the wan-side reverse mapping */
 	uint8_t src6[16];
 	/** The NAT64 prefix (12 bytes) the outbound packet used */

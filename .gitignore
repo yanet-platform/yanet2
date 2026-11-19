@@ -206,6 +206,7 @@ deploy/packages/
 !/modules/l3b/
 !/modules/mirror/
 !/modules/nat64/
+!/modules/nat64s/
 !/modules/pdump/
 !/modules/route/
 !/modules/route-mpls/

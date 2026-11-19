@@ -1,0 +1,87 @@
+syntax = "proto3";
+
+package modules.nat64s.controlplane.nat64spb.v1;
+
+import "common/commonpb/v1/ipv4addr.proto";
+import "common/commonpb/v1/ipv6prefix.proto";
+
+option go_package = "github.com/yanet-platform/yanet2/modules/nat64s/controlplane/nat64spb/v1;nat64spb";
+
+// NAT64sService is a control-plane service for the stateful NAT64 module.
+service NAT64sService {
+  rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse) {}
+
+  // ShowConfig returns the current configuration of the named config.
+  rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse) {}
+
+  // UpdateConfig replaces the whole named configuration with the one the
+  // request carries.
+  rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse) {}
+
+  // DeleteConfig removes the named config when it is no longer referenced
+  // by any pipeline.
+  rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse) {}
+}
+
+message ListConfigsRequest {}
+
+// ListConfigsResponse contains existing configurations.
+message ListConfigsResponse { repeated string configs = 1; }
+
+// ShowConfigRequest requests the current configuration.
+message ShowConfigRequest { string name = 1; }
+
+// MTUConfig contains MTU configuration values.
+message MTUConfig {
+  uint32 ipv4_mtu = 1; // MTU value for IPv4
+  uint32 ipv6_mtu = 2; // MTU value for IPv6
+}
+
+// PortRange is the translated source-port window, inclusive lower bound,
+// exclusive upper one; an empty range selects the default of 1024..65535.
+message PortRange {
+  uint32 lo = 1;
+  uint32 hi = 2;
+}
+
+// Config represents the whole configuration of one named config.
+message Config {
+  // NAT64 prefixes of the instance, each of which MUST be a /96. A
+  // session uses the one its destination embeds under and keeps it for
+  // its return traffic.
+  repeated common.commonpb.v1.IPv6Prefix prefixes = 1;
+  // Public IPv4 pool the lan-side flows translate to.
+  repeated common.commonpb.v1.IPv4Address pool = 2;
+  // The session timeout in seconds, shared by every session; zero
+  // selects the default.
+  uint32 timeout = 3;
+  // The timeout in seconds of a TCP session that has carried an ACK —
+  // the idle established connection's longer lifetime; zero selects the
+  // default.
+  uint32 tcp_established_timeout = 8;
+  MTUConfig mtu = 4;
+  PortRange port_range = 5;
+  // Name of the linked nat64state_map object, the instance's session
+  // tables; empty links none.
+  string map = 7;
+}
+
+// ShowConfigResponse contains the current configuration.
+message ShowConfigResponse { Config config = 1; }
+
+// UpdateConfigRequest carries the whole desired configuration of the named
+// config.
+message UpdateConfigRequest {
+  string name = 1;
+  // Configuration that replaces the whole published one; required.
+  Config config = 2;
+}
+
+// UpdateConfigResponse is the response to an UpdateConfig call.
+message UpdateConfigResponse {}
+
+// DeleteConfigRequest names the config to remove.
+message DeleteConfigRequest { string name = 1; }
+
+// DeleteConfigResponse is the response to a DeleteConfig call.
+message DeleteConfigResponse {}
