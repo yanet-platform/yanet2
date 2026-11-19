@@ -33,6 +33,7 @@ func freeBody(config *layout.AclModuleConfig) {
 	classify.FreeDecode(&config.FilterL2.RuleMap)
 	config.FilterL2 = layout.AclFilterL2{}
 	classify.FreeJoin(&config.FilterIp4.RootJoint)
+	classify.FreeJoin(&config.FilterIp4.PlainProtoJoint)
 	classify.FreeDecode(&config.FilterIp4.RuleMap)
 	config.FilterIp4 = layout.AclFilterIp4{}
 	classify.FreeRuleTable(&config.FilterIp4Tcp.RootJoint)
@@ -44,6 +45,7 @@ func freeBody(config *layout.AclModuleConfig) {
 	classify.FreeRuleTable(&config.FilterIp4Icmp.RootJoint)
 	config.FilterIp4Icmp = layout.AclFilterIp4Icmp{}
 	classify.FreeJoin(&config.FilterIp6.RootJoint)
+	classify.FreeJoin(&config.FilterIp6.PlainProtoJoint)
 	classify.FreeDecode(&config.FilterIp6.RuleMap)
 	config.FilterIp6 = layout.AclFilterIp6{}
 	classify.FreeRuleTable(&config.FilterIp6Tcp.RootJoint)
@@ -66,6 +68,8 @@ func freeBody(config *layout.AclModuleConfig) {
 	classify.FreeJoin(&core4.ProtoJoint)
 	*core4 = layout.AclClassifierCore4{}
 	classify.FreeFragment(&config.ClassifierFrag4.FragAttr)
+	classify.FreeLine(&config.ClassifierPlain4.IpprotoAttr)
+	config.ClassifierPlain4 = layout.AclClassifierPlain{}
 	freePorts(&config.ClassifierPorts4)
 	freeTCP(&config.ClassifierTcp4)
 	classify.FreeLine(&config.ClassifierIcmp4.TypeAttr)
@@ -81,6 +85,8 @@ func freeBody(config *layout.AclModuleConfig) {
 	classify.FreeJoin(&core6.ProtoJoint)
 	*core6 = layout.AclClassifierCore6{}
 	classify.FreeFragment(&config.ClassifierFrag6.FragAttr)
+	classify.FreeLine(&config.ClassifierPlain6.IpprotoAttr)
+	config.ClassifierPlain6 = layout.AclClassifierPlain{}
 	freePorts(&config.ClassifierPorts6)
 	freeTCP(&config.ClassifierTcp6)
 	classify.FreeLine(&config.ClassifierIcmp6.TypeAttr)

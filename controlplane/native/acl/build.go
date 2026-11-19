@@ -31,6 +31,10 @@ const (
 
 	fwstateMapV4 = "fwstate_map_v4"
 	fwstateMapV6 = "fwstate_map_v6"
+
+	// plainDomain is the domain of the plain path\'s protocol leaf: the
+	// authored 16 bit encoding, the IP protocol number in the high byte.
+	plainDomain = 0x10000
 )
 
 // The target actions the dataplane runs (ACTION_*), by the rule action
@@ -204,6 +208,7 @@ type rule struct {
 	Src4, Dst4          []netip.Prefix
 	Src6, Dst6          []classify.Net6Network
 	IPProto             []classify.LineRange
+	PlainIPProto        []classify.LineRange
 	TCPFlags, ICMPTypes []classify.LineRange
 	SrcPorts, DstPorts  []classify.PortRange
 	Fragment            classify.Fragment
@@ -246,6 +251,7 @@ func newRuleset(module *layout.CpModule, rules []cacl.ACLRule) (*ruleset, error)
 		converted.IPProto = lineRanges(split.IpProto)
 		converted.TCPFlags = lineRanges(split.TCPFlags)
 		converted.ICMPTypes = lineRanges(split.ICMPTypes)
+		converted.PlainIPProto = encodedRanges(split.Plain)
 		converted.SrcPorts = portRanges(source.SrcPortRanges)
 		converted.DstPorts = portRanges(source.DstPortRanges)
 		converted.Fragment = fragment(source.Fragment)
@@ -284,6 +290,16 @@ func lineRanges(ranges []cacl.LineRange) []classify.LineRange {
 	out := make([]classify.LineRange, len(ranges))
 	for idx, span := range ranges {
 		out[idx] = classify.LineRange{From: span.From, To: span.To}
+	}
+	return out
+}
+
+// encodedRanges returns protocol ranges in their authored 16 bit
+// encoding as line intervals.
+func encodedRanges(ranges filter.ProtoRanges) []classify.LineRange {
+	out := make([]classify.LineRange, len(ranges))
+	for idx, span := range ranges {
+		out[idx] = classify.LineRange{From: uint32(span.From), To: uint32(span.To)}
 	}
 	return out
 }
@@ -429,6 +445,8 @@ func buildIP4(config *layout.AclModuleConfig, set *ruleset) (*core, error) {
 		Mid:        &classifier.MidJoint,
 		Proto:      &classifier.ProtoJoint,
 		Fragment:   &config.ClassifierFrag4.FragAttr,
+		PlainProto: &config.ClassifierPlain4.IpprotoAttr,
+		PlainMid:   &config.FilterIp4.PlainProtoJoint,
 		Root:       &config.FilterIp4.RootJoint,
 		RuleMap:    &config.FilterIp4.RuleMap,
 		PlainCount: &config.FilterRuleCountIp4,
@@ -464,6 +482,8 @@ func buildIP6(config *layout.AclModuleConfig, set *ruleset) (*core, error) {
 		Mid:        &classifier.MidJoint,
 		Proto:      &classifier.ProtoJoint,
 		Fragment:   &config.ClassifierFrag6.FragAttr,
+		PlainProto: &config.ClassifierPlain6.IpprotoAttr,
+		PlainMid:   &config.FilterIp6.PlainProtoJoint,
 		Root:       &config.FilterIp6.RootJoint,
 		RuleMap:    &config.FilterIp6.RuleMap,
 		PlainCount: &config.FilterRuleCountIp6,
@@ -479,14 +499,17 @@ type coreTables struct {
 	Mid        *layout.ValueTable
 	Proto      *layout.ValueTable
 	Fragment   *layout.ClassifyAttrIpfrag
+	PlainProto *layout.ClassifyAttrLine
+	PlainMid   *layout.ValueTable
 	Root       *layout.ValueTable
 	RuleMap    *layout.Vline
 	PlainCount *uint64
 }
 
 // buildCore joins a family's devices, networks and protocols into its
-// core, then joins the fragment attribute of the plain rules onto it
-// into the plain filter's root and decodes its rule map.
+// core, then joins the plain rules' whole byte protocols onto it and the
+// fragment attribute of the plain rules onto that into the plain
+// filter's root, and decodes its rule map.
 func buildCore(context *layout.MemoryContext, set *ruleset, device, src, dst *classify.Stage, tables coreTables) (*core, error) {
 	nets, err := classify.Join(src, dst, tables.Nets, context, tables.Prefix+":nets_joint")
 	if err != nil {
@@ -506,11 +529,19 @@ func buildCore(context *layout.MemoryContext, set *ruleset, device, src, dst *cl
 	}
 	family := &core{Joint: proto, Stage: proto.Stage()}
 
+	plainProto := classify.CompileLine(set.Lines(set.Plain, func(item *rule) []classify.LineRange { return item.PlainIPProto }), plainDomain)
+	if err := plainProto.Commit(tables.PlainProto, context, tables.Prefix+":plain_ipproto"); err != nil {
+		return nil, err
+	}
+	plainMid, err := classify.Join(family.Stage, &plainProto.Stage, tables.PlainMid, context, tables.Prefix+":plain_proto_joint")
+	if err != nil {
+		return nil, err
+	}
 	fragment := classify.CompileFragment(set.Fragments(set.Plain))
 	if err := fragment.Commit(tables.Fragment, context, tables.Prefix+":ipfrag"); err != nil {
 		return nil, err
 	}
-	root, err := classify.Join(family.Stage, &fragment.Stage, tables.Root, context, tables.Prefix+":root_joint")
+	root, err := classify.Join(plainMid.Stage(), &fragment.Stage, tables.Root, context, tables.Prefix+":root_joint")
 	if err != nil {
 		return nil, err
 	}

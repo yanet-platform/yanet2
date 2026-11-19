@@ -94,6 +94,8 @@ func requireSameConfig(t *testing.T, want, got *layout.AclModuleConfig) {
 	requireSameTable(t, "ip4:mid_joint", &core4w.MidJoint, &core4g.MidJoint)
 	requireSameTable(t, "ip4:proto_joint", &core4w.ProtoJoint, &core4g.ProtoJoint)
 	requireSameTable(t, "ip4:ipfrag", &want.ClassifierFrag4.FragAttr.ValueTable, &got.ClassifierFrag4.FragAttr.ValueTable)
+	requireSameVline(t, "ip4:plain_ipproto", &want.ClassifierPlain4.IpprotoAttr.Line, &got.ClassifierPlain4.IpprotoAttr.Line)
+	requireSameTable(t, "ip4:plain_proto_joint", &want.FilterIp4.PlainProtoJoint, &got.FilterIp4.PlainProtoJoint)
 	requireSameTable(t, "ip4:root_joint", &want.FilterIp4.RootJoint, &got.FilterIp4.RootJoint)
 	requireSameVline(t, "ip4:rules", &want.FilterIp4.RuleMap, &got.FilterIp4.RuleMap)
 	requireSamePaths(t, "ip4",
@@ -114,6 +116,8 @@ func requireSameConfig(t *testing.T, want, got *layout.AclModuleConfig) {
 	requireSameTable(t, "ip6:mid_joint", &core6w.MidJoint, &core6g.MidJoint)
 	requireSameTable(t, "ip6:proto_joint", &core6w.ProtoJoint, &core6g.ProtoJoint)
 	requireSameTable(t, "ip6:ipfrag", &want.ClassifierFrag6.FragAttr.ValueTable, &got.ClassifierFrag6.FragAttr.ValueTable)
+	requireSameVline(t, "ip6:plain_ipproto", &want.ClassifierPlain6.IpprotoAttr.Line, &got.ClassifierPlain6.IpprotoAttr.Line)
+	requireSameTable(t, "ip6:plain_proto_joint", &want.FilterIp6.PlainProtoJoint, &got.FilterIp6.PlainProtoJoint)
 	requireSameTable(t, "ip6:root_joint", &want.FilterIp6.RootJoint, &got.FilterIp6.RootJoint)
 	requireSameVline(t, "ip6:rules", &want.FilterIp6.RuleMap, &got.FilterIp6.RuleMap)
 	requireSamePaths(t, "ip6",
