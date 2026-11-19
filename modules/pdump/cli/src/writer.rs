@@ -2,7 +2,7 @@ use core::{error::Error, time::Duration};
 use std::{
     fs,
     io::{self, Write},
-    time::{Instant, SystemTime, UNIX_EPOCH},
+    time::Instant,
 };
 
 use pcap_file::{
@@ -69,6 +69,7 @@ pub struct Pcap {
 pub struct PcapNg {
     inner: PcapNgWriter<PdumpOutput>,
     interface_id: u32,
+    latest_packet_timestamp: Option<Duration>,
 }
 
 pub enum PdumpWriter {
@@ -127,7 +128,11 @@ impl PdumpWriter {
                 // Interface ID is 0 for the first (and only) interface
                 let interface_id = 0u32;
 
-                PdumpWriter::PcapNg(PcapNg { inner: pcapng_writer, interface_id })
+                PdumpWriter::PcapNg(PcapNg {
+                    inner: pcapng_writer,
+                    interface_id,
+                    latest_packet_timestamp: None,
+                })
             }
         };
         Ok(writer)
@@ -152,18 +157,19 @@ impl PdumpWriter {
     /// Records the capture's total of lost records where the format has a
     /// place for it: a pcapng interface statistics block.
     fn write_lost(&mut self, lost: u64) -> Result<(), Box<dyn Error>> {
-        let PdumpWriter::PcapNg(writer) = self else {
+        let writer = match self {
+            PdumpWriter::PcapNg(writer) if lost > 0 => writer,
+            _ => return Ok(()),
+        };
+        let Some(timestamp) = writer.latest_packet_timestamp else {
             return Ok(());
         };
-        if lost == 0 {
-            return Ok(());
-        }
 
         // Like dumpcap, which stores its capture-buffer drops as isb_ifdrop,
         // and names the counters' source in the block comment.
         let stats = InterfaceStatisticsBlock {
             interface_id: writer.interface_id,
-            timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default(),
+            timestamp,
             options: vec![
                 InterfaceStatisticsOption::Common(CommonOption::Comment(
                     "Records lost in the pdump capture ring".into(),
@@ -227,7 +233,9 @@ impl PdumpWriter {
             options: vec![],
         };
 
-        Ok(writer.inner.write_block(&Block::EnhancedPacket(packet_block))?)
+        let written = writer.inner.write_block(&Block::EnhancedPacket(packet_block))?;
+        writer.latest_packet_timestamp = writer.latest_packet_timestamp.max(Some(ts));
+        Ok(written)
     }
 }
 
@@ -422,16 +430,20 @@ mod test {
         }
     }
 
-    /// Writes records with the given loss counts to a fresh pcapng file through
-    /// `pdump_write` and returns the comments and drops of every interface
-    /// statistics block.
-    fn pcapng_statistics(losses: &[u64]) -> Vec<(Vec<String>, Vec<u64>)> {
+    /// Writes (timestamp in nanoseconds, loss count) pairs to a fresh capture
+    /// and reads back its interface statistics blocks.
+    fn pcapng_statistics(records: &[(u64, u64)]) -> Vec<InterfaceStatisticsBlock<'static>> {
         let file = NamedTempFile::new().expect("must create a temp file");
         let path = file.path().to_str().expect("temp path must be valid UTF-8");
         let writer = PdumpWriter::new(DumpOutputFormat::PcapNg, path).expect("must open");
-        let (tx, rx) = mpsc::channel(losses.len());
-        for &lost_before in losses {
-            tx.try_send(lossy_record(lost_before)).expect("must accept the record");
+        let (tx, rx) = mpsc::channel(records.len());
+        for &(timestamp, lost_before) in records {
+            let record = pdumppb::Record {
+                meta: Some(pdumppb::RecordMeta { timestamp, ..Default::default() }),
+                lost_before,
+                ..Default::default()
+            };
+            tx.try_send(record).expect("must accept the record");
         }
         drop(tx);
         pdump_write(writer, rx, None, io::sink()).expect("must write the records");
@@ -440,18 +452,7 @@ mod test {
         let mut blocks = Vec::new();
         while let Some(block) = reader.next_block() {
             if let (Block::InterfaceStatistics(stats), _) = block.expect("must parse block") {
-                let mut comments = Vec::new();
-                let mut drops = Vec::new();
-                for option in &stats.options {
-                    match option {
-                        InterfaceStatisticsOption::Common(CommonOption::Comment(comment)) => {
-                            comments.push(comment.to_string())
-                        }
-                        InterfaceStatisticsOption::IsbIfDrop(drop) => drops.push(*drop),
-                        _ => {}
-                    }
-                }
-                blocks.push((comments, drops));
+                blocks.push(stats.into_owned());
             }
         }
         blocks
@@ -459,15 +460,26 @@ mod test {
 
     #[test]
     fn test_pcapng_records_total_lost_in_one_statistics_block() {
-        assert_eq!(
-            vec![(vec!["Records lost in the pdump capture ring".to_owned()], vec![8])],
-            pcapng_statistics(&[3, 0, 5])
-        );
+        let [stats] = pcapng_statistics(&[(0, 3), (0, 0), (0, 5)])
+            .try_into()
+            .expect("one statistics block");
+        let comment = CommonOption::Comment("Records lost in the pdump capture ring".into());
+        assert!(stats.options.contains(&InterfaceStatisticsOption::Common(comment)));
+        assert!(stats.options.contains(&InterfaceStatisticsOption::IsbIfDrop(8)));
+        assert_eq!(2, stats.options.len());
+    }
+
+    #[test]
+    fn test_pcapng_statistics_use_latest_capture_timestamp_for_out_of_order_records() {
+        let [stats] = pcapng_statistics(&[(10, 0), (35, 0), (20, 4)])
+            .try_into()
+            .expect("one statistics block");
+        assert_eq!(Duration::from_nanos(35), stats.timestamp);
     }
 
     #[test]
     fn test_pcapng_without_losses_has_no_statistics_block() {
-        assert!(pcapng_statistics(&[0, 0]).is_empty());
+        assert!(pcapng_statistics(&[(10, 0), (20, 0)]).is_empty());
     }
 
     #[test]
