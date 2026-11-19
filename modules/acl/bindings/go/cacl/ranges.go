@@ -103,13 +103,13 @@ func intersects(ranges filter.ProtoRanges, proto uint8) bool {
 // of a covered interior protocol is never constrained - and a range
 // constraining the byte of every protocol it covers keeps no plain
 // span at all.
-func plainRange(r filter.ProtoRange) (filter.ProtoRange, bool) {
-	from := uint32(r.From >> 8)
-	to := uint32(r.To >> 8)
-	if r.From&0xff != 0 {
+func plainRange(protoRange filter.ProtoRange) (filter.ProtoRange, bool) {
+	from := uint32(protoRange.From >> 8)
+	to := uint32(protoRange.To >> 8)
+	if protoRange.From&0xff != 0 {
 		from++
 	}
-	if r.To&0xff != 0xff {
+	if protoRange.To&0xff != 0xff {
 		if to == 0 {
 			return filter.ProtoRange{}, false
 		}
