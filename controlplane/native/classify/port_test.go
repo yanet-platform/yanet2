@@ -146,7 +146,7 @@ func Benchmark_CompilePorts(b *testing.B) {
 	for _, count := range portSizes {
 		rules := randomPortRulesOf(1, count)
 		b.Run(fmt.Sprintf("c/%d rules", count), func(b *testing.B) {
-			context := newContextOf(b, arenaSize)
+			context := newContext(b)
 			cRules := coracle.NewCPortRules(cPortRules(rules))
 			defer cRules.Free()
 			b.ResetTimer()
@@ -154,7 +154,7 @@ func Benchmark_CompilePorts(b *testing.B) {
 			require.NoError(b, err)
 		})
 		b.Run(fmt.Sprintf("native/%d rules", count), func(b *testing.B) {
-			context := newContextOf(b, arenaSize)
+			context := newContext(b)
 			for b.Loop() {
 				ports := classify.CompilePorts(rules)
 				attr := newAttr[layout.ClassifyAttrPort](b, context)

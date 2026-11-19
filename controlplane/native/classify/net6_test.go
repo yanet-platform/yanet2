@@ -210,7 +210,7 @@ func Benchmark_CompileNet6(b *testing.B) {
 	for _, count := range net6Sizes {
 		rules := randomNet6RulesOf(1, count)
 		b.Run(fmt.Sprintf("c/%d rules", count), func(b *testing.B) {
-			context := newContextOf(b, arenaSize)
+			context := newContext(b)
 			cRules := coracle.NewCNet6Rules(cNet6Rules(rules))
 			defer cRules.Free()
 			b.ResetTimer()
@@ -218,7 +218,7 @@ func Benchmark_CompileNet6(b *testing.B) {
 			require.NoError(b, err)
 		})
 		b.Run(fmt.Sprintf("native/%d rules", count), func(b *testing.B) {
-			context := newContextOf(b, arenaSize)
+			context := newContext(b)
 			for b.Loop() {
 				attr := newAttr[layout.ClassifyAttrNet6](b, context)
 				_, err := classify.CompileNet6(rules, attr, context, "ratelimit:src6")

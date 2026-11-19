@@ -192,7 +192,7 @@ func Benchmark_Join(b *testing.B) {
 	for _, count := range joinSizes {
 		left, right := netStages(b, count)
 		b.Run(fmt.Sprintf("c/%d rules", count), func(b *testing.B) {
-			context := newContextOf(b, arenaSize)
+			context := newContext(b)
 			cLeft, err := coracle.NewCStage(unsafe.Pointer(context), cStage(&left))
 			require.NoError(b, err)
 			defer cLeft.Free()
@@ -204,7 +204,7 @@ func Benchmark_Join(b *testing.B) {
 			require.NoError(b, err)
 		})
 		b.Run(fmt.Sprintf("native/%d rules", count), func(b *testing.B) {
-			context := newContextOf(b, arenaSize)
+			context := newContext(b)
 			table := newAttr[layout.ValueTable](b, context)
 			for b.Loop() {
 				_, err := classify.Join(&left, &right, table, context, "ratelimit:nets")

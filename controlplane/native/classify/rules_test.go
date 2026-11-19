@@ -145,7 +145,7 @@ func Benchmark_JoinRules(b *testing.B) {
 		transport := joint(b, &proto.Stage, &port.Stage).Stage()
 		members := randomMembers(rand.New(rand.NewPCG(1, 2)), count)
 		b.Run(fmt.Sprintf("c/%d rules", count), func(b *testing.B) {
-			context := newContextOf(b, arenaSize)
+			context := newContext(b)
 			cLeft, err := coracle.NewCStage(unsafe.Pointer(context), cStage(nets.Stage()))
 			require.NoError(b, err)
 			defer cLeft.Free()
@@ -157,7 +157,7 @@ func Benchmark_JoinRules(b *testing.B) {
 			require.NoError(b, err)
 		})
 		b.Run(fmt.Sprintf("native/%d rules", count), func(b *testing.B) {
-			context := newContextOf(b, arenaSize)
+			context := newContext(b)
 			table := newAttr[layout.RuleTable](b, context)
 			for b.Loop() {
 				require.NoError(b, classify.JoinRules(nets, transport, members, table, context, "ratelimit:rules"))

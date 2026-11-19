@@ -20,30 +20,28 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
 )
 
-// arenaSize is the size of the arena of a production-shaped test or a
-// benchmark, reserved, not touched: a join of production-shaped networks
-// fills most of it.
+// arenaSize is the size of a test arena, reserved, not touched: a join
+// of production-shaped networks fills most of it.
 const arenaSize = 4 << 30
+
+// asanArenaSize is the size of a test arena in an AddressSanitizer
+// build, which poisons the whole arena and so keeps an eighth of it
+// resident as shadow: random rules fit it, and production-shaped ones
+// are not run under the sanitizer.
+const asanArenaSize = 256 << 20
 
 // footprintArenaSize is the size of the arena a footprint is measured
 // over, which the measure fills and reads whole.
 const footprintArenaSize = 1 << 30
 
-// contextSize is the size of the arena of a test of random rules. An
-// AddressSanitizer build poisons the whole arena, keeping an eighth of
-// it resident as shadow.
-const contextSize = 256 << 20
-
 // newContext returns a memory context over a fresh anonymous mapping,
 // with an allocator C and Go both draw from.
 func newContext(t testing.TB) *layout.MemoryContext {
 	t.Helper()
-	return newContextOf(t, contextSize)
-}
-
-// newContextOf returns a memory context over an arena of size bytes.
-func newContextOf(t testing.TB, size int) *layout.MemoryContext {
-	t.Helper()
+	size := arenaSize
+	if shmalloc.RedZone != 0 {
+		size = asanArenaSize
+	}
 	mapping, err := syscall.Mmap(-1, 0, size, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_PRIVATE|syscall.MAP_ANONYMOUS)
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -187,7 +185,7 @@ func Benchmark_CompileLine(b *testing.B) {
 	for _, count := range lineSizes {
 		rules := randomLineRulesOf(1, count)
 		b.Run(fmt.Sprintf("c/%d rules", count), func(b *testing.B) {
-			context := newContextOf(b, arenaSize)
+			context := newContext(b)
 			cRules := coracle.NewCLineRules(cLineRules(rules))
 			defer cRules.Free()
 			b.ResetTimer()
@@ -195,7 +193,7 @@ func Benchmark_CompileLine(b *testing.B) {
 			require.NoError(b, err)
 		})
 		b.Run(fmt.Sprintf("native/%d rules", count), func(b *testing.B) {
-			context := newContextOf(b, arenaSize)
+			context := newContext(b)
 			for b.Loop() {
 				line := classify.CompileLine(rules, classify.LineDomain)
 				attr := newAttr[layout.ClassifyAttrLine](b, context)
