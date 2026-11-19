@@ -28,21 +28,24 @@ const waiters = 1000
 // foreignPid stands for a writer in another process holding the lock.
 const foreignPid = 1 << 30
 
-// threadsCreated returns how many OS threads the Go runtime has created.
+// threadsCreated returns how many OS threads the Go runtime has created,
+// less the ones that exited with a goroutine locked to them; no thread
+// of this test exits.
 func threadsCreated() int {
 	return pprof.Lookup("threadcreate").Count()
 }
 
-// awaitThreads waits until more than target threads were created after
-// since, or the timeout passes, and returns how many were. The runtime
-// hands the processor of a goroutine blocked in a cgo call to a new
-// thread only as often as its monitor gets the CPU, so on a loaded host
-// the threads come slower than on an idle one.
-func awaitThreads(since, target int, timeout time.Duration) int {
-	for deadline := time.Now().Add(timeout); threadsCreated()-since <= target && time.Now().Before(deadline); {
+// awaitThreads waits until more threads than wanted are created past a
+// baseline count, or the timeout passes, and returns how many were.
+//
+// The runtime hands the processor of a goroutine blocked in a cgo call
+// to a new thread only as often as its monitor gets the CPU, so on a
+// loaded host the threads come slower than on an idle one.
+func awaitThreads(baseline, wanted int, timeout time.Duration) int {
+	for deadline := time.Now().Add(timeout); threadsCreated()-baseline <= wanted && time.Now().Before(deadline); {
 		time.Sleep(10 * time.Millisecond)
 	}
-	return threadsCreated() - since
+	return threadsCreated() - baseline
 }
 
 // rawSharedMemory mirrors the C handle struct yanet_shm.
