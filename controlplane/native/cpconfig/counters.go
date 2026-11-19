@@ -26,7 +26,7 @@ const (
 )
 
 // ErrNoMemory reports that an agent's memory is exhausted.
-var ErrNoMemory = errors.New("agent memory exhausted")
+var ErrNoMemory = fmt.Errorf("agent memory: %w", shmalloc.ErrNoMemory)
 
 func counterRegistryInit(registry *layout.CounterRegistry, context *layout.MemoryContext) {
 	registry.MemoryContext.Set(context)

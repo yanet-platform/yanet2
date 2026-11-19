@@ -12,8 +12,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/yanet-platform/yanet2/controlplane/native/agent"
+	"github.com/yanet-platform/yanet2/controlplane/native/cpconfig"
 	"github.com/yanet-platform/yanet2/controlplane/native/internal/coracle"
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
+	"github.com/yanet-platform/yanet2/controlplane/native/lpm"
 	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
 )
 
@@ -337,4 +340,17 @@ func runContexts(t *testing.T, implementation contextImplementation) state {
 // leaves.
 func Test_Context_MatchesC(t *testing.T) {
 	requireSameState(t, runContexts(t, cContext), runContexts(t, goContext))
+}
+
+// Test_ErrNoMemory_EveryPackageWrapsIt verifies that the exhaustion error
+// of every native package is the allocator's, so a caller tells shared
+// memory running out from any other failure with one sentinel.
+func Test_ErrNoMemory_EveryPackageWrapsIt(t *testing.T) {
+	for name, err := range map[string]error{
+		"agent":    agent.ErrNoMemory,
+		"cpconfig": cpconfig.ErrNoMemory,
+		"lpm":      lpm.ErrNoMemory,
+	} {
+		require.ErrorIs(t, err, shmalloc.ErrNoMemory, name)
+	}
 }

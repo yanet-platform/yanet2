@@ -12,12 +12,17 @@
 package shmalloc
 
 import (
+	"errors"
 	"math/bits"
 	"unsafe"
 
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
 	"github.com/yanet-platform/yanet2/controlplane/native/shm"
 )
+
+// ErrNoMemory marks shared memory a build or a publication ran out of;
+// every native package's own exhaustion error wraps it.
+var ErrNoMemory = errors.New("shared memory exhausted")
 
 // PoolCount is the number of block sizes (MEMORY_BLOCK_ALLOCATOR_EXP),
 // taken from the allocator's layout.

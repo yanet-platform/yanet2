@@ -8,6 +8,7 @@ package lpm
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"math/bits"
 	"unsafe"
 
@@ -24,7 +25,7 @@ const (
 )
 
 // ErrNoMemory reports that the tree's memory is exhausted.
-var ErrNoMemory = errors.New("lpm memory exhausted")
+var ErrNoMemory = fmt.Errorf("lpm memory: %w", shmalloc.ErrNoMemory)
 
 // slotValue returns a slot as the tagged value C reads through the union.
 func slotValue(slot *layout.LpmValue) *uint64 {

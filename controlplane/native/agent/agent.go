@@ -8,7 +8,6 @@
 package agent
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"sync/atomic"
@@ -25,7 +24,7 @@ import (
 const NameSize = len(layout.Agent{}.Name)
 
 // ErrNoMemory reports that the control-plane zone has no room left.
-var ErrNoMemory = errors.New("control-plane zone exhausted")
+var ErrNoMemory = fmt.Errorf("control-plane zone: %w", shmalloc.ErrNoMemory)
 
 // Agent is an agent this process attached.
 type Agent struct {

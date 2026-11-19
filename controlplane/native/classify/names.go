@@ -3,13 +3,12 @@
 package classify
 
 import (
-	"errors"
-
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
+	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
 )
 
 // errNoMemory reports that shared memory ran out.
-var errNoMemory = errors.New("shared memory exhausted")
+var errNoMemory = shmalloc.ErrNoMemory
 
 // nameSize is the size of a memory context's name, terminator included
 // (MEMORY_CONTEXT_NAME_SIZE).
