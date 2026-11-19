@@ -163,7 +163,7 @@ impl PdumpWriter {
         // and names the counters' source in the block comment.
         let stats = InterfaceStatisticsBlock {
             interface_id: writer.interface_id,
-            timestamp: SystemTime::now().duration_since(UNIX_EPOCH)?,
+            timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default(),
             options: vec![
                 InterfaceStatisticsOption::Common(CommonOption::Comment(
                     "Records lost in the pdump capture ring".into(),
