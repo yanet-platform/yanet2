@@ -40,8 +40,8 @@ type FragmentAttr struct {
 	Stage  Stage
 }
 
-// regions returns the regions a fragment constraint covers.
-func (m Fragment) regions() []uint32 {
+// Regions returns the regions a fragment constraint covers.
+func (m Fragment) Regions() []uint32 {
 	switch m {
 	case FragmentNone:
 		return []uint32{0}
@@ -78,7 +78,7 @@ func CompileFragment(rules []FragmentRule) *FragmentAttr {
 			continue
 		}
 		regions.NewGeneration()
-		for _, region := range fragment.regions() {
+		for _, region := range fragment.Regions() {
 			attr.Values[region] = regions.Touch(attr.Values[region])
 		}
 	}
@@ -88,7 +88,7 @@ func CompileFragment(rules []FragmentRule) *FragmentAttr {
 	}
 
 	attr.Stage = newStage(groups, len(firsts), count, func(group uint32, builder *stageBuilder) {
-		for _, region := range firsts[group].regions() {
+		for _, region := range firsts[group].Regions() {
 			builder.Reach(attr.Values[region])
 		}
 	})

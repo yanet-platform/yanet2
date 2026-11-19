@@ -324,7 +324,8 @@ func count(mask []bool) uint64 {
 	return total
 }
 
-func (m *ruleset) devices(mask []bool) []classify.DeviceRule {
+// Devices returns the device attribute rules of a projection.
+func (m *ruleset) Devices(mask []bool) []classify.DeviceRule {
 	out := make([]classify.DeviceRule, len(m.Rules))
 	for idx := range m.Rules {
 		out[idx] = classify.DeviceRule{IDs: m.Rules[idx].Devices, Absent: !mask[idx]}
@@ -332,7 +333,8 @@ func (m *ruleset) devices(mask []bool) []classify.DeviceRule {
 	return out
 }
 
-func (m *ruleset) net4s(mask []bool, side func(*rule) []netip.Prefix) []classify.Net4Rule {
+// Net4s returns one side's IPv4 network rules of a projection.
+func (m *ruleset) Net4s(mask []bool, side func(*rule) []netip.Prefix) []classify.Net4Rule {
 	out := make([]classify.Net4Rule, len(m.Rules))
 	for idx := range m.Rules {
 		out[idx] = classify.Net4Rule{Prefixes: side(&m.Rules[idx]), Absent: !mask[idx]}
@@ -340,7 +342,8 @@ func (m *ruleset) net4s(mask []bool, side func(*rule) []netip.Prefix) []classify
 	return out
 }
 
-func (m *ruleset) net6s(mask []bool, side func(*rule) []classify.Net6Network) []classify.Net6Rule {
+// Net6s returns one side's IPv6 network rules of a projection.
+func (m *ruleset) Net6s(mask []bool, side func(*rule) []classify.Net6Network) []classify.Net6Rule {
 	out := make([]classify.Net6Rule, len(m.Rules))
 	for idx := range m.Rules {
 		out[idx] = classify.Net6Rule{Networks: side(&m.Rules[idx]), Absent: !mask[idx]}
@@ -348,7 +351,8 @@ func (m *ruleset) net6s(mask []bool, side func(*rule) []classify.Net6Network) []
 	return out
 }
 
-func (m *ruleset) lines(mask []bool, side func(*rule) []classify.LineRange) []classify.LineRule {
+// Lines returns the line attribute rules of a projection.
+func (m *ruleset) Lines(mask []bool, side func(*rule) []classify.LineRange) []classify.LineRule {
 	out := make([]classify.LineRule, len(m.Rules))
 	for idx := range m.Rules {
 		out[idx] = classify.LineRule{Ranges: side(&m.Rules[idx]), Absent: !mask[idx]}
@@ -356,7 +360,8 @@ func (m *ruleset) lines(mask []bool, side func(*rule) []classify.LineRange) []cl
 	return out
 }
 
-func (m *ruleset) ports(mask []bool, side func(*rule) []classify.PortRange) []classify.PortRule {
+// Ports returns one side's port rules of a projection.
+func (m *ruleset) Ports(mask []bool, side func(*rule) []classify.PortRange) []classify.PortRule {
 	out := make([]classify.PortRule, len(m.Rules))
 	for idx := range m.Rules {
 		out[idx] = classify.PortRule{Ranges: side(&m.Rules[idx]), Absent: !mask[idx]}
@@ -364,7 +369,8 @@ func (m *ruleset) ports(mask []bool, side func(*rule) []classify.PortRange) []cl
 	return out
 }
 
-func (m *ruleset) fragments(mask []bool) []classify.FragmentRule {
+// Fragments returns the fragment attribute rules of a projection.
+func (m *ruleset) Fragments(mask []bool) []classify.FragmentRule {
 	out := make([]classify.FragmentRule, len(m.Rules))
 	for idx := range m.Rules {
 		out[idx] = classify.FragmentRule{Fragment: m.Rules[idx].Fragment, Absent: !mask[idx]}
@@ -377,7 +383,7 @@ func (m *ruleset) fragments(mask []bool) []classify.FragmentRule {
 // acl_module_build_l2 and acl_module_derive_l2 do.
 func buildL2(config *layout.AclModuleConfig, set *ruleset) error {
 	context := &config.CpModule.Entity.MemoryContext
-	device := classify.CompileDevice(set.devices(set.L2))
+	device := classify.CompileDevice(set.Devices(set.L2))
 	if err := device.Commit(&config.ClassifierL2.DevAttr, context, "l2:device"); err != nil {
 		return err
 	}
@@ -397,18 +403,18 @@ type core struct {
 func buildIP4(config *layout.AclModuleConfig, set *ruleset) (*core, error) {
 	context := &config.CpModule.Entity.MemoryContext
 	classifier := &config.ClassifierCore4
-	device := classify.CompileDevice(set.devices(set.Has4))
+	device := classify.CompileDevice(set.Devices(set.Has4))
 	if err := device.Commit(&classifier.DevAttr, context, "ip4:device"); err != nil {
 		return nil, err
 	}
-	src, err := classify.CompileNet4(set.net4s(set.Has4, func(item *rule) []netip.Prefix { return item.Src4 }))
+	src, err := classify.CompileNet4(set.Net4s(set.Has4, func(item *rule) []netip.Prefix { return item.Src4 }))
 	if err != nil {
 		return nil, err
 	}
 	if err := src.Commit(&classifier.Net4SrcAttr, context, "ip4:net4_src"); err != nil {
 		return nil, err
 	}
-	dst, err := classify.CompileNet4(set.net4s(set.Has4, func(item *rule) []netip.Prefix { return item.Dst4 }))
+	dst, err := classify.CompileNet4(set.Net4s(set.Has4, func(item *rule) []netip.Prefix { return item.Dst4 }))
 	if err != nil {
 		return nil, err
 	}
@@ -434,17 +440,17 @@ func buildIP4(config *layout.AclModuleConfig, set *ruleset) (*core, error) {
 func buildIP6(config *layout.AclModuleConfig, set *ruleset) (*core, error) {
 	context := &config.CpModule.Entity.MemoryContext
 	classifier := &config.ClassifierCore6
-	device := classify.CompileDevice(set.devices(set.Has6))
+	device := classify.CompileDevice(set.Devices(set.Has6))
 	if err := device.Commit(&classifier.DevAttr, context, "ip6:device"); err != nil {
 		return nil, err
 	}
-	src, err := classify.CompileNet6(set.net6s(set.Has6, func(item *rule) []classify.Net6Network { return item.Src6 }),
+	src, err := classify.CompileNet6(set.Net6s(set.Has6, func(item *rule) []classify.Net6Network { return item.Src6 }),
 		&classifier.Net6SrcAttr, context, "ip6:net6_src",
 	)
 	if err != nil {
 		return nil, err
 	}
-	dst, err := classify.CompileNet6(set.net6s(set.Has6, func(item *rule) []classify.Net6Network { return item.Dst6 }),
+	dst, err := classify.CompileNet6(set.Net6s(set.Has6, func(item *rule) []classify.Net6Network { return item.Dst6 }),
 		&classifier.Net6DstAttr, context, "ip6:net6_dst",
 	)
 	if err != nil {
@@ -490,7 +496,7 @@ func buildCore(context *layout.MemoryContext, set *ruleset, device, src, dst *cl
 	if err != nil {
 		return nil, err
 	}
-	ipproto := classify.CompileLine(set.lines(tables.Members, func(item *rule) []classify.LineRange { return item.IPProto }), classify.LineDomain)
+	ipproto := classify.CompileLine(set.Lines(tables.Members, func(item *rule) []classify.LineRange { return item.IPProto }), classify.LineDomain)
 	if err := ipproto.Commit(tables.IPProto, context, tables.Prefix+":ipproto"); err != nil {
 		return nil, err
 	}
@@ -500,7 +506,7 @@ func buildCore(context *layout.MemoryContext, set *ruleset, device, src, dst *cl
 	}
 	family := &core{Joint: proto, Stage: proto.Stage()}
 
-	fragment := classify.CompileFragment(set.fragments(set.Plain))
+	fragment := classify.CompileFragment(set.Fragments(set.Plain))
 	if err := fragment.Commit(tables.Fragment, context, tables.Prefix+":ipfrag"); err != nil {
 		return nil, err
 	}
@@ -573,11 +579,11 @@ func buildPaths(module *layout.CpModule, set *ruleset, family *core, tables path
 	context := &module.Entity.MemoryContext
 	name := func(role string) string { return tables.Prefix + ":" + role }
 
-	src := classify.CompilePorts(set.ports(set.PortsRestricted, func(item *rule) []classify.PortRange { return item.SrcPorts }))
+	src := classify.CompilePorts(set.Ports(set.PortsRestricted, func(item *rule) []classify.PortRange { return item.SrcPorts }))
 	if err := src.Commit(&tables.Ports.SrcAttr, context, name("src_port")); err != nil {
 		return err
 	}
-	dst := classify.CompilePorts(set.ports(set.PortsRestricted, func(item *rule) []classify.PortRange { return item.DstPorts }))
+	dst := classify.CompilePorts(set.Ports(set.PortsRestricted, func(item *rule) []classify.PortRange { return item.DstPorts }))
 	if err := dst.Commit(&tables.Ports.DstAttr, context, name("dst_port")); err != nil {
 		return err
 	}
@@ -592,7 +598,7 @@ func buildPaths(module *layout.CpModule, set *ruleset, family *core, tables path
 		return err
 	}
 
-	flags := classify.CompileLine(set.lines(set.TCP, func(item *rule) []classify.LineRange { return item.TCPFlags }), classify.LineDomain)
+	flags := classify.CompileLine(set.Lines(set.TCP, func(item *rule) []classify.LineRange { return item.TCPFlags }), classify.LineDomain)
 	if err := flags.Commit(&tables.TCP.FlagsAttr, context, name("tcp_flags")); err != nil {
 		return err
 	}
@@ -605,7 +611,7 @@ func buildPaths(module *layout.CpModule, set *ruleset, family *core, tables path
 		return err
 	}
 
-	types := classify.CompileLine(set.lines(set.ICMP, func(item *rule) []classify.LineRange { return item.ICMPTypes }), classify.LineDomain)
+	types := classify.CompileLine(set.Lines(set.ICMP, func(item *rule) []classify.LineRange { return item.ICMPTypes }), classify.LineDomain)
 	if err := types.Commit(&tables.ICMP.TypeAttr, context, name("icmp_type")); err != nil {
 		return err
 	}
