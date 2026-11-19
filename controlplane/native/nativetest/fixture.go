@@ -47,6 +47,13 @@ func NewFixture(t testing.TB, config dataplaneut.Config) *Fixture {
 	harness, err := dataplaneut.NewHarness(config)
 	require.NoError(t, err)
 	t.Cleanup(harness.Free)
+	return FixtureOf(t, harness)
+}
+
+// FixtureOf returns a fixture over a harness the caller brought up and
+// frees.
+func FixtureOf(t testing.TB, harness *dataplaneut.Harness) *Fixture {
+	t.Helper()
 	raw := (*rawSharedMemory)(harness.SharedMemory().AsRawPtr())
 	image := unsafe.Slice((*byte)(raw.Base), raw.Size)
 	storage, err := zone.FromMemory(image)
