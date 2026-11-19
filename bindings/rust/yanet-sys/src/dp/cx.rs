@@ -14,7 +14,8 @@ use crate::{
     counters::counter_handle_value,
     dp::{
         attach::{
-            DeviceTarget, ModuleCall, ModuleCommit, ModuleEctx, ObjectCommit, ObjectEctx, WorkerRef, counter_cells,
+            DeviceTarget, ModuleCall, ModuleCommit, ModuleEctx, ObjectCommit, ObjectEctx, PhysicalPort, WorkerRef,
+            counter_cells,
         },
         batch::DeviceRef,
         fields::{Counter, CounterLayout, Device, Gauge, ObjectCounter, ObjectLink, TaggedCounter, TaggedCounters},
@@ -696,6 +697,19 @@ where
 }
 
 impl<'id, M: Module> Cx<'id, M> {
+    /// Physical port backing the current pipeline's device, not necessarily
+    /// the original ingress. A device without direct backing has no port.
+    #[inline]
+    pub fn current_port(&self) -> Option<PhysicalPort<'id>> {
+        self.physical_port(self.ectx.current_device())
+    }
+
+    /// Physical port directly backing a registry device in this generation.
+    #[inline]
+    pub fn physical_port(&self, device: u16) -> Option<PhysicalPort<'id>> {
+        self.ectx.physical_port(self.graph, self.worker, device)
+    }
+
     /// Assembles the context from a type-bound attachment of one call.
     #[inline(always)]
     pub(super) fn new(call: &ModuleCall<'id, M>) -> Self {

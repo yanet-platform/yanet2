@@ -17,7 +17,11 @@ use yanet_packet::{
 
 use crate::{
     bindings,
-    dp::attach::{DeviceTarget, ModuleEctx, PacketFront, WorkerRef},
+    dp::{
+        attach::{DeviceTarget, ModuleEctx, PacketFront, PhysicalPort, WorkerRef},
+        cx::Cx,
+        module::Module,
+    },
 };
 
 /// Length of the Ethernet header, before which no parsed network header
@@ -221,6 +225,12 @@ pub struct DeviceRef<'d> {
 }
 
 impl<'d> DeviceRef<'d> {
+    /// Physical port directly backing this resolved target, if any.
+    #[inline]
+    pub fn physical_port<M: Module>(self, cx: &Cx<'d, M>) -> Option<PhysicalPort<'d>> {
+        cx.physical_port(self.target.id())
+    }
+
     /// Wraps a present target of the running context. C uses `u16::MAX` for
     /// a device absent from the generation.
     #[inline(always)]

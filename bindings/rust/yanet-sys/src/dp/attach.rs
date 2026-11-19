@@ -188,6 +188,52 @@ impl<'id, O: Object> ObjectCommit<'id, O> {
     }
 }
 
+/// RSS data reported by the NIC for one handler call.
+#[derive(Clone, Copy)]
+pub struct Rss<'id> {
+    /// Raw key used by the NIC hash function.
+    pub hash: &'id [u8],
+    /// Redirection entries in NIC order, holding physical RX queue IDs.
+    pub reta: &'id [u16],
+}
+
+/// Physical port data borrowed for one handler call.
+pub struct PhysicalPort<'id> {
+    rss: Option<Rss<'id>>,
+    assignments: &'id [bindings::dp_worker_assignment],
+    rss_queue_count: u64,
+    slot: u32,
+}
+
+impl<'id> PhysicalPort<'id> {
+    /// Number of RSS queues configured across the entire device.
+    ///
+    /// This count is not an upper bound on physical queue IDs.
+    #[inline]
+    pub fn rss_queue_count(&self) -> u64 {
+        self.rss_queue_count
+    }
+
+    /// Raw NIC key and NIC-order redirection table, if RSS state is usable.
+    ///
+    /// The report does not identify which traffic classes the NIC hashes.
+    #[inline]
+    pub fn rss(&self) -> Option<Rss<'id>> {
+        self.rss
+    }
+
+    /// All RX queues this worker polls on this port, in assignment order.
+    ///
+    /// This is independent of the current packet and of RSS participation.
+    #[inline]
+    pub fn rx_queues(&self) -> impl Iterator<Item = u32> + use<'id> {
+        let slot = self.slot;
+        self.assignments
+            .iter()
+            .filter_map(move |assignment| (assignment.device_id == slot).then_some(assignment.queue_id))
+    }
+}
+
 impl ModuleEctx {
     #[inline(always)]
     pub fn as_ptr(&self) -> *mut bindings::module_ectx {
@@ -199,6 +245,57 @@ impl ModuleEctx {
     pub fn recirc_limit(&self) -> u16 {
         let Self(ectx) = self;
         ectx.packet_recirc_limit
+    }
+
+    #[inline]
+    pub fn current_device(&self) -> u16 {
+        let Self(ectx) = self;
+        ectx.registry_device_id
+    }
+
+    #[inline]
+    pub fn physical_port<'id>(
+        &'id self,
+        graph: Graph<'id>,
+        worker: WorkerRef<'id>,
+        device: u16,
+    ) -> Option<PhysicalPort<'id>> {
+        // SAFETY: attach: call, frozen. The shim reads only the live
+        // generation, startup topology and this worker's stable assignments.
+        let view = unsafe { bindings::yanet_sys_dp_physical_port(self.as_ptr(), worker.as_ptr(), device) };
+        if view.slot == u16::MAX {
+            return None;
+        }
+        let root = graph.root();
+        let rss = if view.rss_key.is_null() {
+            None
+        } else {
+            debug_assert!(!view.rss_reta.is_null());
+            debug_assert!(view.rss_key_len > 0 && view.rss_reta_size > 0);
+            // SAFETY: a valid native report supplies two initialized arrays
+            // of these lengths, frozen since startup. Recover their mapping
+            // provenance before borrowing them for this call.
+            unsafe {
+                Some(Rss {
+                    hash: slice::from_raw_parts(root.ptr(view.rss_key.addr()), usize::from(view.rss_key_len)),
+                    reta: slice::from_raw_parts(root.ptr(view.rss_reta.addr()), usize::from(view.rss_reta_size)),
+                })
+            }
+        };
+        let assignments = if view.assignment_count == 0 {
+            &[]
+        } else {
+            debug_assert!(!view.assignments.is_null());
+            // SAFETY: C initialized exactly this many assignments before the
+            // worker started. They stay live and immutable for this call.
+            unsafe { slice::from_raw_parts(root.ptr(view.assignments.addr()), view.assignment_count as usize) }
+        };
+        Some(PhysicalPort {
+            rss,
+            assignments,
+            rss_queue_count: view.rss_queue_count,
+            slot: u32::from(view.slot),
+        })
     }
 
     #[inline(always)]

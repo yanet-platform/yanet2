@@ -23,12 +23,27 @@
 
 struct module_ectx;
 struct module_device_target;
+struct dp_worker;
+struct dp_worker_assignment;
 struct packet;
 struct packet_front;
 struct rte_mbuf;
 
 // Worker index of a module execution context whose worker is not known.
 #define YANET_SYS_DP_WORKER_IDX_NONE 0xFFFFFFFFFFFFFFFFULL
+
+// Absolute addresses and dimensions of one physical port and this worker's
+// assignments. A null key means that no usable RSS report is available.
+struct yanet_sys_dp_port_view {
+	const uint8_t *rss_key;
+	const uint16_t *rss_reta;
+	const struct dp_worker_assignment *assignments;
+	uint64_t rss_queue_count;
+	uint32_t assignment_count;
+	uint16_t rss_key_len;
+	uint16_t rss_reta_size;
+	uint16_t slot;
+};
 
 // Allocates the zeroed descriptor a module plugin's constructor returns, or
 // NULL when out of memory.
@@ -69,6 +84,15 @@ yanet_sys_dp_object_new(
 // YANET_SYS_DP_WORKER_IDX_NONE when the context is not among them.
 YANET_SYS_HIDDEN uint64_t
 yanet_sys_dp_module_worker_idx(struct module_ectx *module_ectx);
+
+// Direct physical backing of a registry device in the current generation.
+// The slot is UINT16_MAX when no direct backing exists.
+YANET_SYS_HIDDEN struct yanet_sys_dp_port_view
+yanet_sys_dp_physical_port(
+	struct module_ectx *module_ectx,
+	const struct dp_worker *worker,
+	uint16_t device
+);
 
 // Routes a packet to a module device target, to its input entry when the
 // selector is non-zero and to its output entry otherwise.
