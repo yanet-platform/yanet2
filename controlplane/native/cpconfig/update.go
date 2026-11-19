@@ -21,7 +21,7 @@ import (
 // dataplane that runs worker rounds on request, under its round lock.
 type Deliver func(dp *layout.DpConfig, gen *layout.CpConfigGen)
 
-// UpdateOption configures UpdateModules.
+// UpdateOption configures UpdateModules and UpdateObjects.
 type UpdateOption func(*updateOptions)
 
 type updateOptions struct {

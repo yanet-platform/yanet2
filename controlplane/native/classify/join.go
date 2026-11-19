@@ -13,9 +13,8 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
 )
 
-// none marks the absence of a number: a free class slot, the list of an
-// absent rule, a network with no enclosing low interval, a sweep level
-// not taken and a region not yet numbered.
+// none marks a number that is absent - of a class, a list, a network, a
+// level, a region or a row - wherever the package keeps one.
 const none = ^uint32(0)
 
 // errTooManyClasses reports a join whose classes outgrow 32-bit ids.
