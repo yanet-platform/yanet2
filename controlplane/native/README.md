@@ -10,7 +10,7 @@ against C byte for byte.
 | Package | Role | cgo |
 |---|---|---|
 | `cmd/shmgen` | Generates Go views of C structures from DWARF, with a layout test | no |
-| `layout` | The generated views (`go generate`), per architecture | no |
+| `layout` | The views the build generates (`make native-layout`), per architecture | no |
 | `shm` | Relative pointers, process-local words, byte and pid locks, C strings | no |
 | `zone` | Maps the storage, finds instances, pins generations, reads topology, modules, agents, counters, dataplane time | no |
 | `shmalloc` | Block allocator and memory contexts of `common/memory*.h` | `-asan` builds only |
@@ -23,9 +23,12 @@ against C byte for byte.
 | `nativetest` | In-process dataplane fixture, the C-then-Go comparison, the test assigner | tests only |
 
 Tests: `make test-only GO_TEST_PACKAGES="./controlplane/native/..."`. The production
-packages build with `CGO_ENABLED=0`. Layouts are generated per architecture, from an amd64
-and an arm64 dataplane, and differ where structures align to cache lines (64 bytes on
-amd64, 128 on arm64); the packages build on linux/amd64 and linux/arm64.
+packages build with `CGO_ENABLED=0` once a configured `build/` has generated the views,
+as the protobuf packages are generated: `make native-layout` compiles one translation unit
+of the structures' headers as the dataplane compiles them and generates the views of the
+architecture built from its DWARF. The layouts differ where structures align to cache
+lines (64 bytes on amd64, 128 on arm64); the packages build on linux/amd64 and
+linux/arm64.
 
 Under `-asan` the allocator does what the C one does in an AddressSanitizer build: red
 zones around every block and the same poisoning of free blocks and link words, through

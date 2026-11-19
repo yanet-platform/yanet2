@@ -135,6 +135,8 @@ gate_go() {
 	if matching '\.proto$' >/dev/null || [ ! -f "${proto%.proto}.pb.go" ]; then
 		step proto-go make --no-print-directory proto-go || return 1
 	fi
+	# The native views of the shared-memory structures are generated too.
+	step native-layout meson compile -C build native-layout || return 1
 	files=$(present '\.go$' | grep -v '\.pb\.go$')
 	if [ -n "$files" ]; then
 		# shellcheck disable=SC2086
