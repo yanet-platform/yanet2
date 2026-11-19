@@ -231,9 +231,11 @@ One public l3b API exposes twenty-three operations; there is no second
 session-table service. The names are contract inventory, not a protobuf
 package, tag or C ABI freeze.
 
-O02–O05, O11, O14 and O16 address a VS, not the Service group; their names use
-`VirtualService`. O18–O23 address the group. Final schemas MUST use distinct
-types and endpoints, not infer object kind from a name. No old-endpoint bypass
+O02–O05, O11, O12, O14 and O16 operate on VSes, not Service groups. O05 lists
+VSes. O12 `ListSessions` addresses one owning VS as specified by F32 and is
+the exception to the `VirtualService` naming pattern. O18–O23 address the
+group. Final schemas MUST use distinct types and endpoints, not infer object
+kind from a name. No old-endpoint bypass
 or permit-kind reinterpretation is allowed under C05.
 
 | ID | Operation | Selected semantics |
@@ -262,15 +264,21 @@ or permit-kind reinterpretation is allowed under C05.
 | O22 | `GetService` | Coherent token-stable accepted Service incarnation and complete F22 export, under F30 byte paging. The member set is obtained separately through Service-filtered O05, never attached as unversioned bytes to this export. Fresh absent is `NotFound`, stale cursor `Aborted`, uncertain authority `Unavailable`. |
 | O23 | `GetServiceStatus` | Bounded live Service policy publication/adoption observation, distinct from O22. Identify Service incarnation, accepted policy token, target policy publication and authoritative relevant worker cohort. Reuse F37 adoption states and idle-worker rules for the shared Service root, not ModuleConfig adoption or a sum of VS statuses. Report NOT_APPLICABLE only with authoritative evidence of no relevant workers. Accepted-policy changes abort continuation; runtime-only changes do not. No new counter ownership or synchronous barrier. |
 
-Successful O02/O06 creation returns the created object's incarnation and first
-mutation token. O03/O07 replacement returns that object's incarnation/token for
-the accepted version; O09/O10/O14 returns the owning VS incarnation/token.
-A normalized no-op returns the same pair without a new version. O04/O15 deletion
+Successful O02/O06/O18 creation returns the created object's incarnation and
+first mutation token (the policy token for O18). O03/O07 replacement returns
+that object's incarnation/token for the accepted version; O09/O10/O14 returns
+the owning VS incarnation/token.
+For these pair-returning mutations, a normalized no-op returns the same pair
+without a new version. O04/O15 deletion
 returns empty success, not a new token. The pair identifies this operation's
 accepted result, not an arbitrary latest version read while sending the reply.
 Another writer may already have made the token stale; conditional mutations still
 validate it. Full configuration and actual session capacity use existing readback,
 not a mandatory full snapshot in every mutation response.
+
+The successful O19 and O20 responses remain open for S1 API schema approval.
+O19's accepted policy-token semantics and O20's deletion semantics do not
+select the response payloads. Do not infer them from O03/O07 or O04/O15.
 
 All existing-object mutations use the complete [section 5 error order](#5-management-surface-permits-and-error-order).
 Create, prepare and read continuations retain their separate rules there.
@@ -378,7 +386,7 @@ retain authored-order target failures and all-or-nothing application.
   bytes. A stale, unknown or wrong-context token is `Aborted` even when the
   desired state is equal, and a structurally valid request against a genuinely
   absent object is `NotFound` before the token is checked. A normalized
-  equality succeeds with the same token and no publication, rebuild or
+  equality succeeds without changing the accepted token or triggering publication, rebuild or
   deadline rewrite.
 - Mutation-owner recovery starts a new management epoch. Every preceding-epoch
   Service policy, VS or ModuleConfig mutation token becomes stale even if configuration is

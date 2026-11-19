@@ -17,7 +17,9 @@ ModuleConfig links VSes into packet processing. Deletion is not cascading:
 Service deletion rejects while it has live VSes; referenced VS/ModuleConfig
 objects cannot be deleted. A ModuleConfig's own outgoing VS links do not block
 its deletion: those links disappear,not the VSes. Accepted deletion removes the
-object immediately; physical release can await old readers and is observable.
+object from accepted configuration. Physical release can await old readers.
+If authority confirms the name is absent, a fresh O17 lookup returns `NotFound`. O17 does not
+report reclamation of the deleted ModuleConfig.
 
 VS,real and ModuleConfig optional operator metadata participates in configuration
 equality but not selection. Resize,traffic and CP recovery preserve it;
@@ -263,8 +265,10 @@ VS/real/checker/revision provenance. Weight schema,domains,absence,validity,
 freshness and checker reduction remain observation-contract approval gates. Never substitute scheduling weight
 or invent missing defaults. Initial/transferred hysteresis across restart,
 recreation or membership change also needs owner agreement: the formula does not choose an
-initial state inside the band. This never waives all-VIP withdrawal after restart.
+initial state inside the band. This never waives withdrawal of all managed VIPs after restart.
 
+An empty contributing set is not itself readiness evidence. The owner must
+resolve loss of the last contributor before implementing this transition.
 Quorum alone is insufficient. Every contributing VS also needs confirmed current
 publication and at least one published real eligible for new traffic. Do not
 compare available l3b capacity against Q again. For example,Q10 with ten healthy
@@ -317,7 +321,7 @@ precede deltas and every observation uses current identities. In all four paths
 operator computes Q/H for current membership and combines l3b/ACL gates. Management
 changes arrive through adapter desired snapshots. These are normal paths,not a
 crash-protocol implementation. Any Monalive/operator/announcer crash/hang/restart
-interrupts permission and requires independent all-VIP withdrawal before recovery.
+interrupts permission and requires independent withdrawal of all managed VIPs before recovery.
 Unconfirmed outcomes stop dependent steps; independent expiry continues. Backend
 invocation alone is not successful route application.
 

@@ -1279,7 +1279,7 @@ Failure-injection acceptance(**NOT RUN**):
 | Stimulus | Required outcome | Timing and recovery evidence |
 | --- | --- | --- |
 | Monalive crash/hang | Old health cannot renew; withdraw every managed VIP | Configured health/stream freshness and total bound; new trusted evidence before recovery |
-| Operator crash/hang or RPC serving stale Ready | Announcer stops all managed confirmations; withdraw every VIP | Ready timeout/staleness and total bound; current l3b/health/ACL result |
+| Operator crash/hang or RPC serving stale Ready | Announcer stops all managed confirmations; withdraw every managed VIP | Ready timeout/staleness and total bound; current l3b/health/ACL result |
 | Announcer crash/hang with BIRD alive | BIRD independently removes all managed VIPs and exports withdrawal | Configured scan/check and measured cleanup bound,not BGP hold time |
 | Fast restart of any of the three before expiry | Withdraw all managed VIPs before reannounce; old process cannot restore them | Incarnation,fencing,removal confirmation; TTL alone is no proof |
 | Lost protocol requests/confirmations | Unconfirmed routes expire; datagram is not application ACK | Include BIRD cadence/application; unproved outcome blocks recovery |
@@ -1288,7 +1288,9 @@ Failure-injection acceptance(**NOT RUN**):
 | BIRD/BGP-peer loss with GR/LLGR | Peer removes within agreed budget without unaccounted stale retention | Check hold separately; disable GR/LLGR for VIPs or include retention in bound; no stale restoration |
 
 Capture stimulus and route removal at BIRD and peer,configuration revisions,
-effective timings,all managed VIPs and fresh recovery gates. Announcer state
+effective timings,all managed VIPs and fresh recovery gates. For failures and
+fast restarts of the three managed components, include an unrelated BIRD route
+and verify the l3b withdrawal leaves it untouched. Announcer state
 alone proves neither BIRD nor peer application. The online barrier is confirmed
 removal from the managed BIRD table and export to every dependent peer,ordered
 before reannounce. BGP has no per-withdraw application ACK; peer capture is
@@ -1362,9 +1364,11 @@ authorize production execution, or select passing limits after seeing results.
    the historical autotest suite is the regression base with
    the per-fixture dispositions of the D07 reconciliation. The SLO orientation, in the owner's words, is
    "be better than the historical deployment" (better-than); numeric memory, throughput,
-   loss, latency, convergence and soak limits and percentiles are fixed in the
-   versioned qualification manifest before any run and are refined from early
-   exploratory runs. WLC targets stay as specified: 20 ms cadence, 10–20 ms
+   loss, latency, convergence and soak limits and percentiles are informed by
+   exploratory baseline runs, which are not qualification evidence. Freeze
+   these thresholds in the approved versioned manifest before the first
+   qualification run. Do not revise them in response to qualification results.
+   WLC targets stay as specified: 20 ms cadence, 10–20 ms
    start interval, full recalculation at most 20 ms aiming toward 10 ms.
 3. Observation budgets(D04) are configurable,never hardcoded. Attempt timeout is
    a checker setting(default500ms,operational target100ms). Observation maximum
