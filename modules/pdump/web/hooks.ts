@@ -285,7 +285,7 @@ export const usePdumpCapture = (paused: boolean) => {
             {
                 onMessage: (record: PdumpRecord) => {
                     if (abortController.signal.aborted) return;
-                    pendingLoss.current += record.lost_before ?? 0;
+                    pendingLoss.current += Number(record.lost_before ?? 0);
                     if (pausedRef.current) return;
                     const packetData = record.data
                         ? base64ToUint8Array(record.data)

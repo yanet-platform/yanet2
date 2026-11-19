@@ -104,15 +104,18 @@ describe('useRings', () => {
 describe('capture ring loss', () => {
     afterEach(() => vi.restoreAllMocks());
 
-    it('keeps legacy packets and publishes the accumulated loss alongside received packets', async () => {
+    it.each([
+        [3, 4],
+        ['3', '4'],
+    ])('keeps legacy packets and adds loss counts %j and %j', async (first, second) => {
         const stream = vi.spyOn(pdumpApi, 'readDump').mockImplementation(() => {});
         const { result, unmount } = renderHook(() => usePdumpCapture(false));
         act(() => result.current.startCapture('demo'));
         const { onMessage } = stream.mock.calls[0]![1];
         act(() => {
             onMessage({ data: 'AQI=' });
-            onMessage({ data: 'AwQ=', lost_before: 3 });
-            onMessage({ data: 'BQY=', lost_before: 4 });
+            onMessage({ data: 'AwQ=', lost_before: first });
+            onMessage({ data: 'BQY=', lost_before: second });
         });
         await waitFor(() => expect(result.current.lossByConfig.demo).toBe(7));
         expect(result.current.packetsByConfig.demo?.map(p => Array.from(p.parsed.raw))).toEqual([[1, 2], [3, 4], [5, 6]]);
