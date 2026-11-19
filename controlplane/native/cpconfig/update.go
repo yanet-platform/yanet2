@@ -54,16 +54,10 @@ func UpdateModules(instance *zone.Instance, modules []*layout.CpModule, options 
 		shm.UnlockByte(&cp.AgentLock.Locked)
 	}()
 
-	entities := make([]entityRef, len(modules))
-	for idx, module := range modules {
-		entities[idx] = entityRef{
-			Kind:  "module",
-			Owner: module.Entity.Agent.Get(),
-			Type:  shm.String(module.Type[:]),
-			Name:  shm.String(module.Name[:]),
-		}
-	}
-	owners, err := holdEntities(cp, entities)
+	owners, err := holdEntities(cp, "module", len(modules), func(idx int) entityRef {
+		module := modules[idx]
+		return entityRef{Owner: module.Entity.Agent.Get(), Type: shm.String(module.Type[:]), Name: shm.String(module.Name[:])}
+	})
 	if err != nil {
 		return err
 	}
@@ -125,26 +119,33 @@ func attachWorkerContexts(gen, old *layout.CpConfigGen, dp *layout.DpConfig) err
 	return nil
 }
 
-// entityRef is a module or an object an update publishes: what it is,
-// its owning agent and its identity.
+// entityRef is a module or an object an update publishes: its owning
+// agent and its identity.
 type entityRef struct {
-	Kind  string
 	Owner *layout.Agent
 	Type  string
 	Name  string
 }
 
-// holdEntities checks that every entity's agent is still current and
-// holds it against reclamation until the upserts count it; it refuses an
-// entity that appears twice.
-func holdEntities(cp *layout.CpConfig, entities []entityRef) ([]*layout.Agent, error) {
+// holdEntities checks that every one of count entities of a kind has a
+// current agent and holds it against reclamation until the upserts count
+// it; it refuses an entity that appears twice.
+//
+// entityOf reads an entity's owner and identity, and runs under the
+// agent lock only: a sweep frees a superseded agent's memory, the
+// entities in it included, under that lock alone.
+func holdEntities(cp *layout.CpConfig, kind string, count int, entityOf func(idx int) entityRef) ([]*layout.Agent, error) {
 	shm.LockByte(&cp.AgentLock.Locked)
 	defer shm.UnlockByte(&cp.AgentLock.Locked)
+	entities := make([]entityRef, count)
+	for idx := range entities {
+		entities[idx] = entityOf(idx)
+	}
 	owners := make([]*layout.Agent, 0, len(entities))
 	for _, entity := range entities {
 		if entity.Owner != nil && !agent.IsCurrent(cp, entity.Owner) {
 			releaseOwners(owners)
-			return nil, fmt.Errorf("%s %s:%s is owned by a superseded agent", entity.Kind, entity.Type, entity.Name)
+			return nil, fmt.Errorf("%s %s:%s is owned by a superseded agent", kind, entity.Type, entity.Name)
 		}
 		if entity.Owner != nil {
 			atomic.AddUint64(&entity.Owner.LoadedEntityCount, 1)
@@ -155,7 +156,7 @@ func holdEntities(cp *layout.CpConfig, entities []entityRef) ([]*layout.Agent, e
 		for _, previous := range entities[:idx] {
 			if entity.Type == previous.Type && entity.Name == previous.Name {
 				releaseOwners(owners)
-				return nil, fmt.Errorf("%s %s:%s appears more than once in one update", entity.Kind, entity.Type, entity.Name)
+				return nil, fmt.Errorf("%s %s:%s appears more than once in one update", kind, entity.Type, entity.Name)
 			}
 		}
 	}

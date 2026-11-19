@@ -159,16 +159,10 @@ func UpdateObjects(instance *zone.Instance, objects []*layout.CpObject, options 
 		shm.UnlockByte(&cp.AgentLock.Locked)
 	}()
 
-	entities := make([]entityRef, len(objects))
-	for idx, object := range objects {
-		entities[idx] = entityRef{
-			Kind:  "object",
-			Owner: object.Entity.Agent.Get(),
-			Type:  shm.String(object.Type[:]),
-			Name:  shm.String(object.Name[:]),
-		}
-	}
-	owners, err := holdEntities(cp, entities)
+	owners, err := holdEntities(cp, "object", len(objects), func(idx int) entityRef {
+		object := objects[idx]
+		return entityRef{Owner: object.Entity.Agent.Get(), Type: shm.String(object.Type[:]), Name: shm.String(object.Name[:])}
+	})
 	if err != nil {
 		return err
 	}

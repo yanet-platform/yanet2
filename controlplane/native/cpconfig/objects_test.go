@@ -20,16 +20,38 @@ import (
 // object builder lays one out.
 const objectSize = unsafe.Sizeof(layout.CpObject{}) + 256
 
-// cPublishObject creates a ring object with a counter through C and
-// publishes it through the fixture's agent.
-func cPublishObject(t *testing.T, memory *publishedFixture, name string) {
+// cNewObject creates a ring object through C with a counter and a link
+// counter.
+func cNewObject(t *testing.T, memory *publishedFixture, name string) unsafe.Pointer {
 	t.Helper()
-	agent := unsafe.Pointer(memory.owner.Agent)
-	object, err := coracle.NewObject(agent, "ring", name, objectSize)
+	object, err := coracle.NewObject(unsafe.Pointer(memory.owner.Agent), "ring", name, objectSize)
 	require.NoError(t, err)
 	_, err = coracle.RegisterCounter(unsafe.Pointer(&(*layout.CpObject)(object).CounterRegistry), "drops", 2)
 	require.NoError(t, err)
-	require.NoError(t, coracle.UpdateObjects(agent, []unsafe.Pointer{object}))
+	_, err = coracle.RegisterCounter(unsafe.Pointer(&(*layout.CpObject)(object).LinkCounterRegistry), "hits", 2)
+	require.NoError(t, err)
+	return object
+}
+
+// goNewObject creates a ring object natively with a counter and a link
+// counter.
+func goNewObject(t *testing.T, memory *publishedFixture, name string) *layout.CpObject {
+	t.Helper()
+	object, err := cpconfig.NewObject(memory.owner, "ring", name, objectSize)
+	require.NoError(t, err)
+	_, err = cpconfig.RegisterCounter(&object.CounterRegistry, "drops", 2)
+	require.NoError(t, err)
+	_, err = cpconfig.RegisterCounter(&object.LinkCounterRegistry, "hits", 2)
+	require.NoError(t, err)
+	return object
+}
+
+// cPublishObject creates a ring object with its counters through C and
+// publishes it through the fixture's agent.
+func cPublishObject(t *testing.T, memory *publishedFixture, name string) {
+	t.Helper()
+	object := cNewObject(t, memory, name)
+	require.NoError(t, coracle.UpdateObjects(unsafe.Pointer(memory.owner.Agent), []unsafe.Pointer{object}))
 }
 
 // Test_UpdateObjects_MatchesC verifies that creating an object with a
@@ -55,10 +77,7 @@ func Test_UpdateObjects_MatchesC(t *testing.T) {
 					cPublishObject(t, memory, "state")
 				},
 				func() {
-					object, err := cpconfig.NewObject(memory.owner, "ring", "state", objectSize)
-					require.NoError(t, err)
-					_, err = cpconfig.RegisterCounter(&object.CounterRegistry, "drops", 2)
-					require.NoError(t, err)
+					object := goNewObject(t, memory, "state")
 					require.NoError(t, cpconfig.UpdateObjects(instance, []*layout.CpObject{object},
 						cpconfig.WithDelivery(nativetest.Deliver),
 					))
@@ -108,4 +127,65 @@ func Test_UpdateModules_RefusesLinkToMissingObject(t *testing.T) {
 	require.NoError(t, err)
 	require.Error(t, cpconfig.UpdateModules(instance, []*layout.CpModule{module}, cpconfig.WithDelivery(nativetest.Deliver)))
 	require.Same(t, published, instance.Cp.CpConfigGen.Get())
+}
+
+// Test_UpdateObjects_SeveralLinkedMatchesC verifies that replacing a
+// linked object and adding another in one update from Go leaves the
+// storage as C does: both objects, the replaced one's counters and link
+// counters continued, and the linking module's link contexts spawned
+// from the new link counters.
+func Test_UpdateObjects_SeveralLinkedMatchesC(t *testing.T) {
+	memory := newPublishedFixture(t)
+	cPublishObject(t, memory, "state")
+	config, err := cblackhole.NewModuleConfig(memory.cAgent, "a")
+	require.NoError(t, err)
+	require.NoError(t, coracle.LinkObject(config.AsFFIModule().AsRawPtr(), "ring", "state"))
+	require.NoError(t, memory.cAgent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}))
+	instance := memory.Instance()
+	memory.CompareWithC(t,
+		func() {
+			objects := []unsafe.Pointer{cNewObject(t, memory, "state"), cNewObject(t, memory, "other")}
+			require.NoError(t, coracle.UpdateObjects(unsafe.Pointer(memory.owner.Agent), objects))
+		},
+		func() {
+			objects := []*layout.CpObject{goNewObject(t, memory, "state"), goNewObject(t, memory, "other")}
+			require.NoError(t, cpconfig.UpdateObjects(instance, objects, cpconfig.WithDelivery(nativetest.Deliver)))
+		},
+	)
+}
+
+// Test_NewObject_RefusesUnknownType verifies that an object of a type
+// the dataplane has not loaded is refused, as cp_object_init refuses it.
+func Test_NewObject_RefusesUnknownType(t *testing.T) {
+	memory := newPublishedFixture(t)
+	_, err := cpconfig.NewObject(memory.owner, "missing", "state", objectSize)
+	require.Error(t, err)
+}
+
+// Test_UpdateObjects_RefusesRepeatedObject verifies that an update naming
+// one object twice is refused and the published generation stays.
+func Test_UpdateObjects_RefusesRepeatedObject(t *testing.T) {
+	memory := newPublishedFixture(t)
+	instance := memory.Instance()
+	published := instance.Cp.CpConfigGen.Get()
+	objects := []*layout.CpObject{goNewObject(t, memory, "state"), goNewObject(t, memory, "state")}
+	require.Error(t, cpconfig.UpdateObjects(instance, objects, cpconfig.WithDelivery(nativetest.Deliver)))
+	require.Same(t, published, instance.Cp.CpConfigGen.Get())
+}
+
+// Test_LinkObject_ReturnsTheExistingLink verifies that linking a module to
+// an object it links already returns that link and appends none.
+func Test_LinkObject_ReturnsTheExistingLink(t *testing.T) {
+	memory := newPublishedFixture(t)
+	module, err := cpconfig.NewBlackhole(memory.owner, "a")
+	require.NoError(t, err)
+	first, err := cpconfig.LinkObject(module, "ring", "state")
+	require.NoError(t, err)
+	second, err := cpconfig.LinkObject(module, "ring", "other")
+	require.NoError(t, err)
+	again, err := cpconfig.LinkObject(module, "ring", "state")
+	require.NoError(t, err)
+	require.Equal(t, first, again)
+	require.NotEqual(t, first, second)
+	require.Equal(t, uint64(2), module.ObjectCount)
 }
