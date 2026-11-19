@@ -6,6 +6,7 @@
 
 #include "common/memory_address.h"
 #include "lib/controlplane/config/zone.h"
+#include "lib/dataplane/config/zone.h"
 #include "lib/dataplane/module/packet_front.h"
 #include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/packet/decap.h"
@@ -80,6 +81,46 @@ yanet_sys_dp_module_worker_idx(struct module_ectx *module_ectx) {
 		}
 	}
 	return YANET_SYS_DP_WORKER_IDX_NONE;
+}
+
+struct yanet_sys_dp_port_view
+yanet_sys_dp_physical_port(
+	struct module_ectx *module_ectx,
+	const struct dp_worker *worker,
+	uint16_t device
+) {
+	const struct config_gen_ectx *gen = module_ectx->abs_config_gen_ectx;
+	if (gen == NULL || device == UINT16_MAX ||
+	    device >= gen->device_count || gen->abs_egress_backing == NULL) {
+		return (struct yanet_sys_dp_port_view){.slot = UINT16_MAX};
+	}
+	uint16_t backing = gen->abs_egress_backing[device];
+	if (backing == UINT16_MAX) {
+		return (struct yanet_sys_dp_port_view){.slot = UINT16_MAX};
+	}
+	struct cp_config_gen *cp_gen = ADDR_OF(&gen->cp_config_gen);
+	if (cp_gen == NULL) {
+		return (struct yanet_sys_dp_port_view){.slot = UINT16_MAX};
+	}
+	struct dp_config *config = ADDR_OF(&cp_gen->dp_config);
+	if (config == NULL || backing >= config->dp_topology.device_count) {
+		return (struct yanet_sys_dp_port_view){.slot = UINT16_MAX};
+	}
+	const struct dp_port *ports = ADDR_OF(&config->dp_topology.devices);
+	const struct dp_port *port = &ports[backing];
+	struct yanet_sys_dp_port_view view = {
+		.assignments = ADDR_OF(&worker->assignments),
+		.rss_queue_count = port->rss_queue_count,
+		.assignment_count = worker->assignment_count,
+		.rss_key_len = port->rss_key_len,
+		.rss_reta_size = port->rss_reta_size,
+		.slot = backing,
+	};
+	if (port->rss_valid) {
+		view.rss_key = ADDR_OF(&port->rss_key);
+		view.rss_reta = ADDR_OF(&port->rss_reta);
+	}
+	return view;
 }
 
 void
