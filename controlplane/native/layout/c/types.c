@@ -18,6 +18,7 @@
 #include "lib/controlplane/config/zone.h"
 #include "lib/dataplane/config/zone.h"
 #include "lib/dataplane/pipeline/econtext.h"
+#include "modules/acl/dataplane/config.h"
 #include "modules/decap/dataplane/config.h"
 
 int

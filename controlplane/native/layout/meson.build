@@ -40,6 +40,7 @@ if native_layout_archs.has_key(host_machine.cpu_family()) and import('fs').is_sa
     'dp_worker.disposed_count',
     'dp_worker.rx_mempool',
     'dp_worker.rx_bursts',
+    'acl_module_config.abs_targets',
   ]
   native_layout_relatives = ['module_ectx.abs_runtime_counter_storages']
   native_layout_roots = [
@@ -50,6 +51,7 @@ if native_layout_archs.has_key(host_machine.cpu_family()) and import('fs').is_sa
     'cp_module',
     'dp_worker',
     'decap_module_config',
+    'acl_module_config',
     'classify_attr_line',
     'classify_attr_port',
     'classify_attr_net4',
