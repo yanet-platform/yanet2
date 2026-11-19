@@ -270,8 +270,11 @@ go-test-prepare:
 	@test -f build/yanet_cgo_cppflags || { echo "ERROR: build/yanet_cgo_cppflags not found: go tests need this checkout's own build/, not a link to another one (remove it and run 'meson setup build')"; exit 1; }
 
 # Generates the native control plane's views of the shared-memory structures,
-# which the Go packages need to compile; a configured build/ is enough.
+# which the Go packages need to compile; a configured build/ is enough. The
+# build files are regenerated first: meson names no target a build/ configured
+# before it existed knows of.
 native-layout:
+	ninja -C build build.ninja
 	meson compile -C build native-layout
 
 cli: cli-build
