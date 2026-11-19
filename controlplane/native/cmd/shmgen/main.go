@@ -1,18 +1,20 @@
 // Command shmgen generates Go views of the C structures YANET keeps in
 // shared memory, from the DWARF of a built binary.
 //
-// The layout is read from what the compiler emitted for the binary that
-// runs: each field of a view sits at the offset the C compiler chose, gaps
-// become explicit padding, and every definition the binary carries of one
+// The layout is read from what the compiler emitted for the binary: each
+// field of a view sits at the offset the C compiler chose, gaps become
+// explicit padding, and every definition the binary carries of one
 // structure must agree. A generated test pins each size and offset, so a
 // view the Go compiler lays out differently fails before it touches
-// shared memory.
+// shared memory. The build runs it on a binary compiled from the
+// structures' headers as the dataplane compiles them (the meson target
+// native-layout).
 //
 // Usage:
 //
-//	shmgen -binary build/dataplane/yanet-dataplane -package layout \
-//		-import <package path> -out layout.go -test layout_test.go \
-//		cp_config dp_config ...
+//	shmgen -binary build/controlplane/native/layout/native-layout-types \
+//		-package layout -import <package path> -out layout.go \
+//		-test layout_test.go cp_config dp_config ...
 package main
 
 import (
@@ -125,7 +127,7 @@ func run(options options, roots []string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(output, source, 0o644); err != nil {
+	if err := writeFile(output, source); err != nil {
 		return err
 	}
 	if testOutput == "" {
@@ -138,7 +140,32 @@ func run(options options, roots []string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(testOutput, test, 0o644)
+	return writeFile(testOutput, test)
+}
+
+// writeFile replaces a file with data unless it holds data already, in one
+// rename, so a Go build reading the file meanwhile sees it whole.
+func writeFile(path string, data []byte) error {
+	if current, err := os.ReadFile(path); err == nil && bytes.Equal(current, data) {
+		return nil
+	}
+	temporary, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(temporary.Name())
+	if _, err := temporary.Write(data); err != nil {
+		temporary.Close()
+		return err
+	}
+	if err := temporary.Chmod(0o644); err != nil {
+		temporary.Close()
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temporary.Name(), path)
 }
 
 // check is one size or offset the generated test pins.

@@ -1,11 +1,17 @@
 # The Go views of the C structures the native control plane keeps in shared
-# memory, for the architecture built: shmgen generates them into the source
-# tree, as the protobuf packages are, from the debug information of a
-# translation unit of the headers that define them.
+# memory, for the architecture built.
+#
+# shmgen generates them into the source tree, as the protobuf packages are,
+# from the debug information of a translation unit of the headers that
+# define them. The build directories of one checkout share the generated
+# files, so only build/ in the top-level source tree writes them, as the cgo
+# flags are written; other build directories and architectures write none.
 
 native_layout_archs = {'x86_64': 'amd64', 'aarch64': 'arm64'}
+native_layout_gen = []
 
-if native_layout_archs.has_key(host_machine.cpu_family())
+if native_layout_archs.has_key(host_machine.cpu_family()) and import('fs').is_samepath(
+    meson.global_build_root(), meson.global_source_root() / 'build')
   native_layout_arch = native_layout_archs[host_machine.cpu_family()]
 
   native_layout_types = executable(
@@ -53,6 +59,8 @@ if native_layout_archs.has_key(host_machine.cpu_family())
   ]
   native_layout_dir = meson.current_source_dir()
 
+  # Always stale: shmgen's own sources and the generated files are outside
+  # the build graph, and shmgen leaves a file that holds its output alone.
   native_layout_gen = custom_target(
     'native-layout',
     input: native_layout_types,
@@ -72,6 +80,7 @@ if native_layout_archs.has_key(host_machine.cpu_family())
       '-relative', ','.join(native_layout_relatives),
     ] + native_layout_roots,
     env: yanet_go_env,
+    build_always_stale: true,
     build_by_default: true,
   )
   go_proto_targets += native_layout_gen
