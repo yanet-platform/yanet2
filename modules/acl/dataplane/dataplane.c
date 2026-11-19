@@ -139,10 +139,12 @@ acl_handle_packets(
 
 	uint32_t core4_classes[ACL_HANDLE_MAX_BATCH];
 	uint32_t frag4_classes[ACL_HANDLE_MAX_BATCH];
+	uint32_t plain4_classes[ACL_HANDLE_MAX_BATCH];
 	uint32_t core4_path_classes[ACL_HANDLE_MAX_BATCH];
 
 	uint32_t core6_classes[ACL_HANDLE_MAX_BATCH];
 	uint32_t frag6_classes[ACL_HANDLE_MAX_BATCH];
+	uint32_t plain6_classes[ACL_HANDLE_MAX_BATCH];
 	uint32_t core6_path_classes[ACL_HANDLE_MAX_BATCH];
 
 	struct packet *packet;
@@ -252,10 +254,10 @@ acl_handle_packets(
 		);
 
 		// The family filters share their core classification: the core
-		// classes are computed once per family batch, the fragment and
-		// ports suffixes are evaluated on their own and combined with
-		// the core classes through the root joints of the final
-		// filters.
+		// classes are computed once per family batch, the plain
+		// protocol and fragment suffixes are evaluated on their own
+		// and combined with the core classes through the joints of the
+		// final filters.
 		acl_classify_core4(
 			&acl_config->classifier_core4,
 			module_ectx->module_device_id,
@@ -271,10 +273,29 @@ acl_handle_packets(
 			ip4_idx
 		);
 
+		// The plain filter joins the plain protocol classes onto the
+		// core classes first and the fragment classes close the root:
+		// the mid classes chain in place through the plain classes,
+		// and the path packets below keep reading the core classes.
+		acl_classify_plain(
+			&acl_config->classifier_plain4,
+			(const struct packet **)ip4_packets,
+			plain4_classes,
+			ip4_idx
+		);
+
+		classify_joint_lookup(
+			&acl_config->filter_ip4.plain_proto_joint,
+			core4_classes,
+			plain4_classes,
+			plain4_classes,
+			ip4_idx
+		);
+
 		classify_combine(
 			&acl_config->filter_ip4.root_joint,
 			&acl_config->filter_ip4.rule_map,
-			core4_classes,
+			plain4_classes,
 			frag4_classes,
 			ip4_result,
 			ip4_idx
@@ -335,10 +356,29 @@ acl_handle_packets(
 			ip6_idx
 		);
 
+		// The plain filter joins the plain protocol classes onto the
+		// core classes first and the fragment classes close the root:
+		// the mid classes chain in place through the plain classes,
+		// and the path packets below keep reading the core classes.
+		acl_classify_plain(
+			&acl_config->classifier_plain6,
+			(const struct packet **)ip6_packets,
+			plain6_classes,
+			ip6_idx
+		);
+
+		classify_joint_lookup(
+			&acl_config->filter_ip6.plain_proto_joint,
+			core6_classes,
+			plain6_classes,
+			plain6_classes,
+			ip6_idx
+		);
+
 		classify_combine(
 			&acl_config->filter_ip6.root_joint,
 			&acl_config->filter_ip6.rule_map,
-			core6_classes,
+			plain6_classes,
 			frag6_classes,
 			ip6_result,
 			ip6_idx

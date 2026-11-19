@@ -113,6 +113,21 @@ func cBuildLineRanges(
 	dst.count = C.uint32_t(len(cIntervals))
 }
 
+// toLineRanges widens the authored 16 bit encoded plain ranges into
+// the derived line interval view.
+func toLineRanges(ranges filter.ProtoRanges) []LineRange {
+	if len(ranges) == 0 {
+		return nil
+	}
+	intervals := make([]LineRange, len(ranges))
+	for idx, r := range ranges {
+		intervals[idx] = LineRange{
+			From: uint32(r.From), To: uint32(r.To),
+		}
+	}
+	return intervals
+}
+
 // cBuildActions writes packet actions into the C rule representation.
 func cBuildActions(dst *C.struct_acl_rule, actions []ACLAction, pinner *runtime.Pinner) {
 	if len(actions) == 0 {
@@ -147,6 +162,9 @@ func (m *ACLRule) cBuild(pinner *runtime.Pinner) C.struct_acl_rule {
 	cBuildLineRanges(&cRule.ipproto_ranges, split.IpProto, pinner)
 	cBuildLineRanges(&cRule.tcp_flags_ranges, split.TCPFlags, pinner)
 	cBuildLineRanges(&cRule.icmp_type_ranges, split.ICMPTypes, pinner)
+	cBuildLineRanges(
+		&cRule.plain_ipproto_ranges, toLineRanges(split.Plain), pinner,
+	)
 
 	flags := RulePathMembership(
 		m.ProtoRanges, m.SrcPortRanges, m.DstPortRanges, m.Fragment,

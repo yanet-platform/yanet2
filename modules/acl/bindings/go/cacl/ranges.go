@@ -33,9 +33,19 @@ type ProtoSplit struct {
 	// ICMPv6 covering ranges: the two protocols share the type byte
 	// semantics, so one leaf discriminates both.
 	ICMPTypes []LineRange
+	// Plain holds the plain path protocol ranges of the rule, kept
+	// in the authored 16 bit encoding: every range contributes the
+	// span of the protocols it leaves the transport byte whole for.
+	// The packets without a transport byte - the other protocols and
+	// the fragments - resolve at the zero subtype, so only these
+	// ranges match them: one alternative restricting a transport byte
+	// keeps its protocols out of every span, so it never matches a
+	// packet without one.
+	Plain filter.ProtoRanges
 	// WholeL4 reports that every authored range leaves the low byte
-	// whole: such a rule matches any transport specific byte, the
-	// fragments without one included.
+	// whole: such a rule is fully owned by the plain path - it matches
+	// any transport specific byte, the fragments without one included,
+	// so the protocol paths carry no copy of it.
 	WholeL4 bool
 }
 
@@ -86,10 +96,44 @@ func intersects(ranges filter.ProtoRanges, proto uint8) bool {
 	return false
 }
 
+// plainRange returns the plain path interval of one authored range,
+// kept in the authored 16 bit encoding: the span of the protocols the
+// range leaves the transport byte whole for. An edge protocol stays
+// only when the range leaves its byte whole at that edge - the byte
+// of a covered interior protocol is never constrained - and a range
+// constraining the byte of every protocol it covers keeps no plain
+// span at all.
+func plainRange(protoRange filter.ProtoRange) (filter.ProtoRange, bool) {
+	from := uint32(protoRange.From >> 8)
+	to := uint32(protoRange.To >> 8)
+	if protoRange.From&0xff != 0 {
+		from++
+	}
+	if protoRange.To&0xff != 0xff {
+		if to == 0 {
+			return filter.ProtoRange{}, false
+		}
+		to--
+	}
+	if from > to {
+		return filter.ProtoRange{}, false
+	}
+	return filter.ProtoRange{
+		From: uint16(from << 8),
+		To:   uint16(to<<8 | 0xff),
+	}, true
+}
+
 // SplitProtoRanges splits the authored protocol ranges of one rule
 // into the derived line intervals.
 func SplitProtoRanges(ranges filter.ProtoRanges) ProtoSplit {
 	split := ProtoSplit{WholeL4: true}
+	if len(ranges) == 0 {
+		// An empty authored set leaves every protocol unconstrained
+		// - the same notion of any the line compilers apply - so the
+		// whole encoded domain is one plain span.
+		split.Plain = filter.ProtoRanges{{From: 0, To: 0xffff}}
+	}
 	for _, r := range ranges {
 		split.IpProto = append(split.IpProto, LineRange{
 			From: uint32(r.From >> 8),
@@ -104,6 +148,9 @@ func SplitProtoRanges(ranges filter.ProtoRanges) ProtoSplit {
 		}
 		if interval, ok := subspan(r, ipProtoICMPv6); ok {
 			split.ICMPTypes = append(split.ICMPTypes, interval)
+		}
+		if plain, ok := plainRange(r); ok {
+			split.Plain = append(split.Plain, plain)
 		}
 
 		if r.From&0xff != 0 || r.To&0xff != 0xff {
@@ -124,8 +171,8 @@ func hasFullPorts(ranges filter.PortRanges) bool {
 // the rule's packets resolve through.
 type PathFlags struct {
 	// Plain takes the rules matching the packets without a transport
-	// header: the whole transport byte rules and the fragment
-	// constrained ones.
+	// header: the whole transport byte alternatives of the rule and
+	// the fragment constrained ones.
 	Plain bool
 	// TCP takes the rules that can match an offset zero TCP packet.
 	TCP bool
@@ -141,17 +188,21 @@ type PathFlags struct {
 // and fragment constraint.
 //
 // The plain path takes the rules matching the packets without a
-// transport header: the rules whose every range leaves the transport
-// byte whole match any byte, absent included, and the fragment
-// constrained rules resolve through the fragment suffix. The protocol
-// paths take every remaining rule that can match a packet of their
-// protocol: the tcp and the icmp paths discriminate through their
-// byte leaves, any covering span resolves; the udp path has no leaf,
-// a UDP packet resolves at the zero subtype, so only a rule whose UDP
-// sub-span covers the zero subtype can match one. The icmp path takes
-// only whole port rules: an ICMP packet carries no ports, a port
-// constrained ICMP coverage never matched a packet in the former port
-// filter either.
+// transport header: such a packet resolves at the zero subtype, so
+// only a range leaving the byte whole of its protocols matches it,
+// and the plain ranges of the split carry exactly those - an
+// alternative restricting a transport byte keeps the rule out of the
+// plain path for its own protocols alone, the whole byte
+// alternatives of the same rule stay. The fragment constrained rules
+// resolve through the fragment suffix beside that. The protocol
+// paths take every rule that can match a packet of their protocol
+// and is not fully owned by the plain path: the tcp and the icmp
+// paths discriminate through their byte leaves, any covering span
+// resolves; the udp path has no leaf, a UDP packet resolves at the
+// zero subtype, so only a rule whose UDP sub-span covers the zero
+// subtype can match one. The icmp path takes only whole port rules:
+// an ICMP packet carries no ports, a port constrained ICMP coverage
+// never matched a packet in the former port filter either.
 func RulePathMembership(
 	protos filter.ProtoRanges,
 	srcPorts, dstPorts filter.PortRanges,
@@ -163,7 +214,7 @@ func RulePathMembership(
 	plainOwned := split.WholeL4 && fullPorts
 
 	return PathFlags{
-		Plain: split.WholeL4 && (fragOnly || fullPorts),
+		Plain: len(split.Plain) > 0 && (fragOnly || fullPorts),
 		TCP:   !fragOnly && intersects(protos, ipProtoTCP) && !plainOwned,
 		UDP: !fragOnly && intersects(protos, ipProtoUDP) &&
 			coversZero(protos, ipProtoUDP) && !plainOwned,
