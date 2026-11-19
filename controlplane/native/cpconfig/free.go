@@ -6,14 +6,17 @@ import (
 	"sync/atomic"
 	"unsafe"
 
+	"github.com/yanet-platform/yanet2/controlplane/native/agent"
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
+	"github.com/yanet-platform/yanet2/controlplane/native/shm"
 	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
 	"github.com/yanet-platform/yanet2/controlplane/native/zone"
 )
 
 // ReleaseGeneration drops the reference a pin of the instance's
-// configuration took, as cp_config_gen_release does, and frees the
-// generation when a publication retired it meanwhile.
+// configuration took, as cp_config_gen_release does: it frees the
+// generation when a publication retired it meanwhile, and then reclaims
+// the superseded agents the free left unreferenced.
 func ReleaseGeneration(cp *layout.CpConfig, pinned *zone.Generation) {
 	gen := pinned.Gen
 	if gen == nil {
@@ -21,17 +24,26 @@ func ReleaseGeneration(cp *layout.CpConfig, pinned *zone.Generation) {
 	}
 	pinned.Gen = nil
 	shmalloc.Lock(&cp.BlockAllocator)
-	defer shmalloc.Unlock(&cp.BlockAllocator)
-	retire(cp, gen)
+	freed := retire(cp, gen)
+	shmalloc.Unlock(&cp.BlockAllocator)
+	if !freed {
+		return
+	}
+	// The sweep frees through the allocator's own lock.
+	shm.LockByte(&cp.AgentLock.Locked)
+	defer shm.UnlockByte(&cp.AgentLock.Locked)
+	agent.SweepLocked(cp)
 }
 
-// retire drops the publication's reference to a replaced generation and
-// frees it when no reader pins it any more. The caller holds the
-// instance's allocator lock.
-func retire(cp *layout.CpConfig, old *layout.CpConfigGen) {
-	if atomic.AddUint64(&old.Refcnt, ^uint64(0)) == 0 {
-		freeGeneration(cp, old)
+// retire drops a reference to a generation, the publication's to a
+// replaced one or a reader's pin, frees it when it was the last and
+// reports whether it did. The caller holds the instance's allocator lock.
+func retire(cp *layout.CpConfig, old *layout.CpConfigGen) bool {
+	if atomic.AddUint64(&old.Refcnt, ^uint64(0)) != 0 {
+		return false
 	}
+	freeGeneration(cp, old)
+	return true
 }
 
 // freeGeneration releases a generation nothing references: its workers'

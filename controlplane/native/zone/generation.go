@@ -32,10 +32,10 @@ func (m *Instance) Pin() *Generation {
 // Release drops the reference Pin took.
 //
 // The last reference is not dropped: dropping it obliges the dropper to
-// free the generation, which this package cannot, so a generation
-// replaced while pinned stays allocated. A long-lived reader, whose pins
-// race publications, releases through cpconfig.ReleaseGeneration, which
-// frees it.
+// free the generation, which this package cannot, so a generation a
+// publication retires while pinned stays allocated. Any pin can race a
+// publication; a reader that can reach the control plane releases
+// through cpconfig.ReleaseGeneration, which frees such a generation.
 func (m *Generation) Release() {
 	if m.Gen == nil {
 		return
