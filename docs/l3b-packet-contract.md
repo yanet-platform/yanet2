@@ -7,7 +7,26 @@ anchors and all independent [section 18 conformance obligations](l3b-contract.md
 Its [normative-language convention](l3b-contract.md#normative-language), numeric
 domains, identity, session authority and publisher rules apply here unchanged.
 This specifies target behavior, not implementation or executed evidence.
-Every conformance vector is **NOT RUN**; ordinary TCP/UDP checksum policy is **UNSET**.
+Every conformance vector is **NOT RUN**. Ordinary forwarding validates the IPv4
+header checksum, not the complete TCP/UDP checksum; the selected policy is below.
+
+Ordinary service-policy evaluation uses the matched VS's one parent Service
+and its protected shared ACL root, as defined in
+[Service, Membership And Shared Policy](l3b-contract.md#service-membership-and-shared-policy).
+A policy update is one whole-Service replacement, not one update per VS.
+Already validated old-policy readers may finish; later validated acquisitions
+use the new revision or fail closed, including through an old VS descriptor.
+This adds no ordinary ACL check to Echo, ICMP delivery or ownership queries.
+The external distributor's projected-service budget remains its own identity;
+it is not automatically the new l3b Service incarnation or a group-wide session.
+
+Required vectors (**NOT RUN**): send valid ordinary packets to three member
+VSes on two VIPs/two ports, change their Service ACL once and verify the root
+acquisition boundary on every member without VS replacements. Include a live
+session pin, a retained old VS descriptor, a paused old-policy reader and
+changed native counter tags. No pin bypass, mixed-rule evaluation, stale-policy
+reacquisition or counter misattribution; native destination predicates may
+legitimately give different decisions under the one ACL. Preserve S5 precedence.
 
 ## Contents
 
@@ -38,18 +57,45 @@ it does not add drop reasons. Management RPC precedence is unchanged.
 | S2 Family admission | IPv4: real-fragment floor, then options in wire order, then upper-protocol dispatch (including unsupported AH/ESP). In one option, bounds/length/pointer validation precedes remaining-route semantics. IPv6: walk the chain in wire order; a ninth supported extension is rejected without reading its body. Within each supported header, bounds/length precede HBH-position and applicable Fragment, Routing or TLV semantics; TLVs follow wire order. Encountered AH/ESP/No Next Header or unsupported upper protocol rejects using the validated protocol tag, without inspecting an unsupported body. Then dispatch the admitted upper protocol. |
 | S3 ICMP integrity | Bounds-check the required ICMP header/message first; for IPv4 validate the enclosing IPv4 header checksum, then the complete ICMP message checksum. ICMPv6 validates its complete message/pseudo-header checksum. Integrity precedes type, Echo roles and quote parsing. |
 | S4 Branch admission | Reject unsupported ICMP types. Echo: addressed-VIP reply-source role, then request-source/reply-destination role, then acquire required coherent eligibility authority before deciding whether the VIP is linked and active/inactive; acquisition failure is not no-match, an unclaimed VIP uses no-matching-VS, and an all-empty linked set uses Echo-inactive. Only then prepare and hand off the reply, counting any construction failure without a partial reply. No ordinary TCP/UDP VS or service-policy admission, session resolution, real selection or MSS. Error: bounded quote parsing, including structural headers and required fields in wire order, before association/query. Quoted action bits and remaining routes retain their nonexecuting rules. |
-| S5 Ordinary forwarding | Bounds-check required TCP/UDP fields before dependent lookup. Acquire required descriptor/configuration authority before using it to establish VS match or absence: inability to evaluate a match is not no-match. Then service-policy availability/evaluation, session resolution, eligible-real selection, MSS parsing/preparation, encapsulation representable length then headroom/buffer, required atomic session commit, handoff. Preserve existing operation-specific dependencies, bounded revalidation/repreparation and no-rollback rules. |
+| S5 Ordinary forwarding | Bounds-check required TCP/UDP fields and UDP declared length, then validate applicable IPv4 header checksum before dependent lookup. Do not validate the complete ordinary TCP/UDP checksum. Acquire descriptor/configuration authority before establishing VS match/absence: inability to evaluate is not no-match. Then service-policy availability/evaluation, session-branch choice and eligible-real selection, encapsulation representable length then headroom/buffer, required atomic session commit, handoff. Initial SYN bypasses lookup but requires a pin write; UDP OPS accesses no sessions. MSS belongs to a separate preceding step. Preserve operation-specific dependencies, bounded revalidation/repreparation and no-rollback rules. |
 | S6 External association and delivery | Preserve trusted ingress binding; complete required quote validation before association/query. If association authority cannot be established, classify unprovable rather than fabricate multiple/stale/absent. With established authority, distinguish multiple candidates, a stale-only association, or no association. Query only a valid unique association; indeterminate drops before delivery/fanout. Owned uses local l3b delivery: acquire required authority, resolve the session and validate its live pin, prepare encapsulation with representable length before headroom/buffer, then any required atomic permitted refresh/copy-forward commit and handoff. Preserve operation-specific deadline, suppression and bounded revalidation/repreparation rules; no creation, ordinary service-policy/MSS, reselection, rebind, requery or refanout. Fanout readiness is not a delivery gate. Not-owned checks unknown peer configuration, missing needed source, peers-above-burst, then credit/reservation. |
 | S7 Funded peer attempts | Independently for each funded peer: allocation, complete-copy, representable length, then headroom. Stop that failed attempt only; attempt all remaining funded peers without retries/refunds. These failures are not original terminal drops. |
 
-**UNSET ordinary TCP/UDP checksum admission stage:** this amendment does not
-select checksum validation/drop behavior or its final exact position in this
-sequence, including offload assumptions or zero-checksum UDP/IPv6 handling.
-The decision is required before any target-contract implementation or conformance
-work whose result depends on ordinary TCP/UDP checksum behavior, and in any case
-before full packet semantic acceptance. This explicitly incomplete packet-policy
-area does not block the scoped representation/mutation inventory of #2718; it is
-not a promise that malformed-checksum outcomes already agree across implementations.
+**Selected ordinary integrity and UDP-length policy:**
+
+- At S5 validate the complete IPv4 header, including admitted options. Invalid
+  header checksum counted-drops before lookup, policy, session or selector effects.
+  A hardware result substitutes only with trusted evidence that it covers this
+  exact admitted header; otherwise validate it in software. There is no IPv6
+  header checksum. S1/S2 and the separate S3 ICMP checks retain their precedence.
+- l3b does not validate complete ordinary TCP/UDP checksums or reject solely for
+  their invalid value. Endpoint validation remains the destination's obligation.
+  A generic outer or transport RX checksum flag does not add an l3b inner-L4 drop
+  policy. Structural checks, safe segmented reads and correct checksum adjustment
+  for supported packet modifications remain required; no full-payload checksum
+  repair is introduced. A corrupt packet can therefore create/refresh a session,
+  consume selection or affect WLC counts before the endpoint rejects it. This
+  state-pollution exposure is an explicitly accepted MVP limitation, not harmless
+  behavior or a guarantee that it always repairs itself.
+- A zero UDP checksum alone is not a drop reason for either IPv4 or IPv6 and is
+  preserved. This is transit behavior, not permission for an ordinary IPv6 UDP
+  endpoint to violate its checksum requirements, nor certification of all special
+  zero-checksum tunnel deployments.
+- For this non-jumbogram MVP require `8 <= UDP length <= validated IP transport
+  extent`, after traversed IP headers. A smaller UDP length than that extent is
+  accepted: forward the complete admitted IP packet, without trimming its trailing
+  bytes to UDP length. Ethernet padding lies outside the validated IP extent.
+  Missing header, length below 8 or length exceeding that extent counted-drops
+  under S5 transport-structure failure before the IPv4 checksum check.
+
+Conformance vectors (NOT RUN): invalid IPv4 header checksum plus unknown VS gives
+the module-only IPv4-header-checksum reason; invalid transport length plus bad
+IPv4 checksum gives transport-structure failure. With valid structure/header,
+bad TCP/nonzero UDP checksum alone does not reject or bypass ordinary policy and
+session processing. Test zero UDP checksums in both families; UDP lengths 7, 8,
+equal to and greater than IP transport extent; shorter UDP length preserves the
+complete IP bytes. Include admitted IPv4 options, segmented headers, forged or
+unavailable hardware evidence and MSS checksum adjustment without full repair.
 
 On the first terminal fault, stop later dependent processing and count only that
 primary terminal reason at this owner, with the entry byte snapshot. Earlier
@@ -66,11 +112,14 @@ their separate S7 attempts, not a global stop after the first failed peer.
   Echo and supported ICMP-error paths rather than rejecting all IPv4 ICMP.
 - Bounded validation and real-fragment rejection precede dispatch. Ordinary
   TCP/UDP traffic alone follows VS lookup, bound service-policy admission,
-  session resolution and eligible-real selection, MSS processing and
+  session-branch choice and eligible-real selection, then
   encapsulation, then, only if session mutation is needed, the required atomic
   session insert/refresh/copy-forward or authorized rebind commit before handoff.
-  OPS front live eligible hits and misses do not require a write; back migration
-  and invalid-pin rebind do. Packet-preparation failure creates no session and
+  Initial TCP SYN (`SYN && !ACK && !RST`), including a repeat, selects without
+  lookup but requires a new pin write. SYN+ACK/SYN+RST do not bypass lookup.
+  Ordinary UDP OPS neither reads nor changes sessions, including back migration.
+  Other TCP/UDP uses stateful lookup with its required authorized refresh,
+  insertion, migration or rebind. Packet-preparation failure creates no session and
   extends no deadline. A failed required commit counted-drops the prepared packet
   without stateless fallback or partial authority/suppression changes. After a
   successful commit, later transmission loss does not roll the session back.
@@ -127,7 +176,11 @@ their separate S7 attempts, not a global stop after the first failed peer.
   admission applies first; live AH never reaches Echo. No partial reply is emitted.
   This does not implement source-route reversal, special Record Route/Timestamp
   updates or full RFC endpoint conformance; preserving opaque options is not a
-  claim of safe delivery in every reverse-path context. Retained IPv4 IDs carry
+  claim of safe delivery in every reverse-path context. In particular,
+  [RFC 1122 section 3.2.2.6](https://www.rfc-editor.org/rfc/rfc1122.html#section-3.2.2.6)
+  specifies source-route reversal MUST and Record Route/Timestamp update SHOULD;
+  those endpoint obligations are not implemented by opaque preservation.
+  Retained IPv4 IDs carry
   known unmitigated reuse/reassembly risk, including Echo replies: a copied Echo
   ID is a conditional reuse risk under RFC 6864 section 4.3, not an unconditional
   violation. An Echo Request carrying an LSRR/SSRR option with a remaining
@@ -357,13 +410,13 @@ allocation, automatic DF1 or mitigation is selected.
 The following vectors are required and **NOT RUN**:
 
 - An empty active topology or detached-only references report `NOT_APPLICABLE`,
-  never vacuous `ALL_ADOPTED`. An idle lagging or joining unacknowledged participant
+  never vacuous `ADOPTED`. An idle lagging or joining unacknowledged participant
   yields `PENDING`; a nonempty coherently observed fully acknowledged cohort yields
-  `ALL_ADOPTED`. Withdrawing a lagging participant cannot exclude it before fencing;
+  `ADOPTED`. Withdrawing a lagging participant cannot exclude it before fencing;
   unknown topology/fencing yields `UNAVAILABLE`. After proven withdrawal/fencing,
   evaluate only remaining participants, or `NOT_APPLICABLE` if none remain.
 - Cohort change preserves config token and counter-page validity. Adoption evidence
-  from a different cohort/context cannot establish `ALL_ADOPTED`; adoption does not
+  from a different cohort/context cannot establish `ADOPTED`; adoption does not
   establish reader drainage or force latest linked-VS descriptor acquisition.
 - Eligible IPv4 and IPv6 peers with only an IPv4 source consume/count-drop the
   original before reservation, with zero clones and zero token spend. Unknown peer
@@ -376,42 +429,39 @@ The following vectors are required and **NOT RUN**:
 
 ### MSS And Ordinary Encapsulation
 
-- The MSS policy is F24's typed boolean, default false, with no public numeric
-  MSS knob. Actual TCP selects this processing even in a mixed VS, never actual
-  UDP. Without the authentication bypass below, clamp the first valid MSS above
-  1220 to 1220 and preserve a smaller value including 0.
-  Option parsing stops at EOL, skips NOP, checks the other lengths, and the
-  MSS option has length 4. On enabled eligible TCP SYN&&!RST (including SYN-ACK),
-  walk all options through EOL/end before mutation, remembering only the first
-  valid MSS. A malformed option tail even after that MSS, or failure to obtain
-  packet-buffer space for an
-  otherwise required MSS modification, is a counted drop with no partial
-  modification. Insufficient logical TCP option space for the four-byte
-  insertion is not such a failure: a valid header remains unchanged by the MSS
-  step. A disabled policy or noneligible flags add no MSS-specific validation or
-  rejection, including for malformed authentication options. Mutations correct
-  lengths and necessary checksums. The constants 1220 and 536 are not path-MTU guarantees.
-  A structurally valid TCP MD5 Signature (kind 19, length 18) or TCP-AO
-  (kind 29, length at least 4 and within option bounds) anywhere before EOL
-  bypasses MSS insertion and clamping: leave the entire inner segment unchanged
-  in this step. Invalid MD5 length, AO length below 4 or a truncated option is
-  malformed under the enabled eligible parser, not a bypass. EOL terminates
-  parsing; padding after it is not authentication. No keys, authentication
-  verification or new knob is introduced. Although MD5 clamping can be safe,
-  the uniform bypass is deliberately simpler: insertion breaks MD5/AO, and AO
-  may cover other options depending on hidden MKT state. Bypass skips only MSS,
-  never normal ACL, session processing or encapsulation; live AH still drops.
-  With no authentication bypass and no MSS, a valid TCP header of at most 56 bytes
-  grows by four bytes: insert MSS 536 at TCP offset 20, before the old options.
-  Do not reuse EOL/padding space. Preserve all original option and payload bytes
-  with their packet-relative offsets increased by four; correct TCP data offset,
-  lengths and applicable checksums. A full 60-byte header stays unchanged by
-  insertion even if padded. Retain enabled TCP SYN without RST eligibility,
-  including SYN-ACK; only the first valid MSS is processed, with later duplicate
-  MSS values unchanged, not rejected merely for duplication or all clamped.
-  Buffer-failure atomicity and the late session-commit boundary still apply.
-  Malformed-option drops precede session commit and cause no partial packet
-  mutation; this does not promise that a preceding WRR selection never advances.
+- `set_mss <conf>` is a separately configured pipeline step before l3b and
+  encapsulation, not a VS field or hidden l3b action. The operator explicitly
+  selects traffic reaching it; configuration is independent of the VS token.
+  Without this step l3b never changes MSS. Its purpose is a workaround for broken
+  PMTUD, not a path-MTU guarantee.
+  It applies to TCP over IPv6 with SYN and without RST, including SYN+ACK.
+  IPv4, UDP, other flags and an unattached step add no MSS-specific checks or
+  drops. This differs from session-lookup bypass. Before reading TCP, validate
+  IPv6 declared length, available bytes, bounded extensions and TCP location.
+  Untrusted metadata is not a substitute. Use this contract's safe IPv6 S1/S2
+  parsing, extension bound and real-fragment rejection; never modify only a first
+  fragment. These prerequisites run before set_mss access, not in later l3b.
+  No MSS-specific IPv4/UDP parser is added.
+  The limit is uint16 in 0..65535, default1220 for absent/null. Explicit0 means0,
+  not default. Negative, fractional, wrongly typed or >=65536 values reject the
+  whole configuration before traffic, without narrowing or replacing last
+  accepted state. Reduce only the first valid existing MSS above the limit;
+  retain lesser/equal values including0. Never insert a missing MSS, even with
+  free space. Preserve packet length, TCP data offset, option offsets and payload.
+  Update TCP checksum when changing the value.
+  Before modification validate TCP bounds and every option through EOL/end.
+  EOL ends parsing, NOP is skipped, other lengths are checked and MSS length is4.
+  Later valid duplicates remain unchanged and are not rejected merely as duplicates.
+  Malformed tails, even after the first MSS, and inability to obtain a writable
+  buffer counted-drop in set_mss without partial modification. The packet never
+  reaches l3b or changes its sessions/WRR cursor. No insertion-space check is needed.
+  Valid TCP MD5 Signature(kind19,length18) or TCP-AO(kind29,length>=4 within bounds)
+  before EOL leaves the segment unchanged at this step. Invalid MD5/AO lengths or
+  truncated options are malformed, not bypass; validate the whole tail even with
+  valid authentication. Padding after EOL is not authentication. The conservative
+  MD5/AO bypass adds no keys/signature verification and bypasses neither later ACL,
+  l3b nor encapsulation. Separate MSS processing does not weaken l3b fragment,AH
+  or other admission rules.
 - DSCP is not an l3b policy in the new API. l3b transfers the inner traffic
   class into the outer header and preserves ECN; the configured `dscp` module
   after l3b performs any marking, with its own configuration and readback, no
@@ -431,8 +481,8 @@ The following vectors are required and **NOT RUN**:
   default, and an unknown or explicitly unspecified value is rejected. GRE is
   v0 with a four-byte header and no optional key, checksum or sequence, and
   the inner EtherType follows the packet family; the outer family follows the
-  real and the outer source follows the source policy. The MSS step precedes
-  encapsulation, a length or headroom error is a counted drop rather than a
+  real and the outer source follows the source policy. If configured, separate
+  set_mss has already run before l3b. A length or headroom error is a counted drop rather than a
   mode switch, and no separate encapsulation hop is required. NAT is outside
   the current mode set and is rejected rather than mapped to GRE.
 - Packet parsing floor: every real IPv4 packet with MF or a nonzero fragment
@@ -459,7 +509,8 @@ The following vectors are required and **NOT RUN**:
   Destination Options and Fragment headers. A ninth supported extension
   counted-drops before transport access or state effects. Encountered live AH
   counted-drops as unsupported before transport-dependent processing, ACL,
-  session/selector effects, Echo or fanout, independent of `mss_fix`; this is not
+  session/selector effects, Echo or fanout; separate set_mss does not bypass this
+  admission. This is not
   an authentication-failure claim. IPv4 protocol51 also follows unsupported drop.
   Quotes separately retain structural AH parsing using encoded length and a
   12-byte minimum within the existing eight-header and required-field bounds.
@@ -492,7 +543,14 @@ The following vectors are required and **NOT RUN**:
   supported option; all others are unknown for this admission policy. Unknown
   action bits `00` skip the structurally valid option; `01`, `10` and `11`
   counted-drop without generating Parameter Problem. This is a bounded admission
-  policy, NOT full RFC option/error-signalling compliance, including for `10/11`.
+  policy, NOT a general RFC compliance claim. For transit Hop-by-Hop processing,
+  [RFC 9673 section 5.2](https://www.rfc-editor.org/rfc/rfc9673.html#section-5.2)
+  updates RFC 8200: routers SHOULD skip unsupported/unconfigured options;
+  configured discard for `01/10/11` and Parameter Problem for `10/11` are MAY.
+  Thus silent HBH discard is not automatically an error-signalling violation.
+  The fixed product policy still does not supply section 5.2.2's recommended
+  operator configuration. This router qualification does not extend to
+  Destination Options or imply full locally terminated Echo compliance.
   Quotes are separate: structurally validate available traversed headers/TLVs and
   mandatory fields under the existing bounds, HBH-position, fragment and port
   rules, but do NOT execute quoted option action bits or require the missing
@@ -521,6 +579,11 @@ downstream fragmentation, their fragments can be misassembled, causing corruptio
 or drops. Under RFC 6864 section 4.3, IPv6-to-IPv4 ID 1 with DF 0 repeated for
 the same source, destination and protocol within the maximum datagram lifetime
 violates non-atomic ID uniqueness, an accepted known nonconformance.
+The same uniqueness requirement applies conditionally to copied IPv4 IDs when
+different inner flows collapse into one outer source/destination/protocol tuple
+and repeat an ID with DF0 within that lifetime. DF0 is non-atomic even if no
+fragmentation actually occurs; uniqueness nonconformance and observed reassembly
+damage are separate facts (RFC 6864 sections 4 and 5.3.1).
 The inner-fragment admission floor does not prevent downstream outer
 fragmentation. Copied DF 1 prevents fragmentation only at compliant nodes; it
 does not guarantee ICMP feedback. Investigation of DF 1 plus MTU/PMTU,
@@ -538,4 +601,8 @@ requires unless the encapsulator knows that no egress uses a legacy
 decapsulator. Deployment therefore requires compatible decapsulation at every
 real, including dropping an inner Not-ECT packet that arrives with outer CE
 (section 4.2). This deployment requirement is unproved here and is not an l3b
-runtime check.
+runtime check. [RFC 9601 sections 3–4 and 6.1.2](https://www.rfc-editor.org/rfc/rfc9601.html#section-4)
+update RFC 6040 and GRE: safe configuration clears outer ECN where possible for
+unknown/non-ECN egresses, without changing inner ECN. The selected normal-only
+deployment must exclude those egresses with actual evidence, not assume support;
+this document adds no compatibility-mode knob or exemption from that requirement.
