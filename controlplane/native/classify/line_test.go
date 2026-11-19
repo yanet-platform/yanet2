@@ -5,6 +5,7 @@ package classify_test
 import (
 	"bytes"
 	"fmt"
+	"iter"
 	"math/rand/v2"
 	"runtime"
 	"syscall"
@@ -231,9 +232,12 @@ func measureFootprintOf(t *testing.T, size int, compile func(context *layout.Mem
 		coracle.Unpoison(mapping)
 		require.NoError(t, syscall.Munmap(mapping))
 	}()
+	// The measure fills the arena whole: huge pages fault it in faster.
+	require.NoError(t, syscall.Madvise(mapping, syscall.MADV_HUGEPAGE))
 	arena := mapping[1<<20:]
-	for idx := range arena {
-		arena[idx] = 0xCD
+	copy(arena, footprintPattern)
+	for filled := len(footprintPattern); filled < len(arena); filled *= 2 {
+		copy(arena[filled:], arena[:filled])
 	}
 	allocator := (*layout.BlockAllocator)(unsafe.Pointer(&mapping[0]))
 	context := (*layout.MemoryContext)(unsafe.Pointer(&mapping[4096]))
@@ -243,13 +247,10 @@ func measureFootprintOf(t *testing.T, size int, compile func(context *layout.Mem
 	// Only the lines the allocator already wrote its free links into
 	// differ from the pattern before the compile; they are kept to
 	// compare against, every other line is compared to the pattern.
-	pattern := bytes.Repeat([]byte{0xCD}, 64)
 	linked := map[int][]byte{}
 	readArena(arena, func() {
-		for line := 0; line < len(arena); line += 64 {
-			if !bytes.Equal(arena[line:line+64], pattern) {
-				linked[line] = bytes.Clone(arena[line : line+64])
-			}
+		for line := range unlikePattern(arena) {
+			linked[line] = bytes.Clone(arena[line : line+64])
 		}
 	})
 
@@ -262,17 +263,40 @@ func measureFootprintOf(t *testing.T, size int, compile func(context *layout.Mem
 
 	touched := uint64(0)
 	readArena(arena, func() {
-		for line := 0; line < len(arena); line += 64 {
-			before, ok := linked[line]
-			if !ok {
-				before = pattern
+		for line := range unlikePattern(arena) {
+			if before, ok := linked[line]; !ok || !bytes.Equal(arena[line:line+64], before) {
+				touched += 64
 			}
-			if !bytes.Equal(arena[line:line+64], before) {
+		}
+		// A linked line the compile wrote the pattern over changed too.
+		for line := range linked {
+			if bytes.Equal(arena[line:line+64], footprintPattern[:64]) {
 				touched += 64
 			}
 		}
 	})
 	return footprint{Shared: touched, Heap: heapAfter.TotalAlloc - heapBefore.TotalAlloc + cHeap}
+}
+
+// footprintPattern is a page of what a footprint arena holds before the
+// compile.
+var footprintPattern = bytes.Repeat([]byte{0xCD}, 4096)
+
+// unlikePattern yields the offset of every line of the arena that is not
+// the pattern, skipping the pages that are whole.
+func unlikePattern(arena []byte) iter.Seq[int] {
+	return func(yield func(int) bool) {
+		for page := 0; page < len(arena); page += len(footprintPattern) {
+			if bytes.Equal(arena[page:page+len(footprintPattern)], footprintPattern) {
+				continue
+			}
+			for line := page; line < page+len(footprintPattern); line += 64 {
+				if !bytes.Equal(arena[line:line+64], footprintPattern[:64]) && !yield(line) {
+					return
+				}
+			}
+		}
+	}
 }
 
 // readArena runs read with all of the arena addressable, restoring what

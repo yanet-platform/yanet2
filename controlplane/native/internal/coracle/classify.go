@@ -243,13 +243,20 @@ type Stretch struct {
 // equal, however their pages are laid out.
 func Stretches(tree *layout.Lpm, keySize int) []Stretch {
 	var stretches []Stretch
+	// The last stretch takes its end only once the next one starts.
+	end := make([]byte, keySize)
 	lpm.Walk(tree, keySize, func(from, to []byte, value uint32) {
-		if count := len(stretches); count > 0 && stretches[count-1].Value == value {
-			stretches[count-1].To = string(to)
-			return
+		if count := len(stretches); count == 0 || stretches[count-1].Value != value {
+			if count > 0 {
+				stretches[count-1].To = string(end)
+			}
+			stretches = append(stretches, Stretch{From: string(from), Value: value})
 		}
-		stretches = append(stretches, Stretch{From: string(from), To: string(to), Value: value})
+		copy(end, to)
 	})
+	if count := len(stretches); count > 0 {
+		stretches[count-1].To = string(end)
+	}
 	return stretches
 }
 
