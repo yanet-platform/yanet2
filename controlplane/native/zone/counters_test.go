@@ -21,11 +21,11 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/native/zone"
 )
 
-// Test_Instance_CountersMatchCgoReader verifies that the native counter
+// Test_Generation_CountersMatchCgoReader verifies that the native counter
 // reader reports, for every tag predicate shape, the groups, counters and
 // per-worker values the cgo reader reports, after packets ran on one
 // worker only, with an object whose counter storages hold no counters.
-func Test_Instance_CountersMatchCgoReader(t *testing.T) {
+func Test_Generation_CountersMatchCgoReader(t *testing.T) {
 	harness, agent := newPublishedHarness(t)
 	object, err := coracle.NewObject(agent.AsRawPtr(), "ring", "state", unsafe.Sizeof(layout.CpObject{}))
 	require.NoError(t, err)
@@ -94,9 +94,9 @@ func Test_Instance_CountersMatchCgoReader(t *testing.T) {
 	}
 }
 
-// Test_Instance_CountersRefusesRepeatedKey verifies that predicates
+// Test_Generation_CountersRefusesRepeatedKey verifies that predicates
 // naming one key twice are refused, as the cgo reader refuses them.
-func Test_Instance_CountersRefusesRepeatedKey(t *testing.T) {
+func Test_Generation_CountersRefusesRepeatedKey(t *testing.T) {
 	harness, _ := newPublishedHarness(t)
 	native := nativeStorage(t, harness).Instances[0]
 	pinned := native.Pin()
@@ -105,9 +105,9 @@ func Test_Instance_CountersRefusesRepeatedKey(t *testing.T) {
 	require.Error(t, err)
 }
 
-// Test_Instance_CountersRefusesTooManyTags verifies that more predicates
+// Test_Generation_CountersRefusesTooManyTags verifies that more predicates
 // than a storage holds tags are refused, as the cgo reader refuses them.
-func Test_Instance_CountersRefusesTooManyTags(t *testing.T) {
+func Test_Generation_CountersRefusesTooManyTags(t *testing.T) {
 	harness, _ := newPublishedHarness(t)
 	native := nativeStorage(t, harness).Instances[0]
 	pinned := native.Pin()
