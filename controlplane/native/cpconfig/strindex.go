@@ -70,6 +70,16 @@ func strIndexInit(index *layout.StrIndex, context *layout.MemoryContext) {
 	index.Size = 0
 }
 
+// strIndexFini frees an index's values, as str_index_fini does.
+func strIndexFini(index *layout.StrIndex) {
+	values := index.Values.Get()
+	if values == nil {
+		return
+	}
+	shmalloc.ContextFree(index.MemoryContext.Get(), unsafe.Pointer(values), 4*uintptr(index.Capacity))
+	index.Values.Set(nil)
+}
+
 // strIndexLookup returns the value whose key read equals key, or
 // strIndexInvalid.
 func strIndexLookup(index *layout.StrIndex, key string, keySize int, read func(value uint32) []byte) uint32 {

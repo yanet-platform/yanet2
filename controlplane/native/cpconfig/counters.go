@@ -42,6 +42,22 @@ func counterRegistryInit(registry *layout.CounterRegistry, context *layout.Memor
 	strIndexInit(&registry.StrIndex, context)
 }
 
+// counterRegistryFini frees a counter registry's arrays and zeroes it, as
+// counter_registry_fini does.
+func counterRegistryFini(registry *layout.CounterRegistry) {
+	context := registry.MemoryContext.Get()
+	if names := registry.Names.Get(); names != nil {
+		shmalloc.ContextFree(context, unsafe.Pointer(names), unsafe.Sizeof(layout.Counter{})*uintptr(registry.Capacity))
+	}
+	for pool := range counterPoolSize {
+		if slots := registry.FreeSlots[pool].Get(); slots != nil {
+			shmalloc.ContextFree(context, unsafe.Pointer(slots), 8*uintptr(registry.FreeCapacities[pool]))
+		}
+	}
+	strIndexFini(&registry.StrIndex)
+	*registry = layout.CounterRegistry{}
+}
+
 func counterNames(registry *layout.CounterRegistry) []layout.Counter {
 	names := registry.Names.Get()
 	if names == nil {

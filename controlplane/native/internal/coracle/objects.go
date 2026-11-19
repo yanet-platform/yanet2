@@ -33,6 +33,22 @@ coracle_object_new(
 	return object;
 }
 
+// Frees an object of size bytes once no live generation holds it, as an
+// object's typed free does; -1 while one does.
+static int
+coracle_object_free(struct cp_object *object, size_t size) {
+	yanet_error *err = NULL;
+	if (cp_object_try_destroy(object, &err)) {
+		yanet_error_free(err);
+		return -1;
+	}
+	struct agent *owner = ADDR_OF(&object->entity.agent);
+	cp_object_fini(object);
+	memory_bfree(&owner->memory_context, object, size);
+	agent_destroy_released(owner);
+	return 0;
+}
+
 static int
 coracle_objects_update(
 	struct agent *agent, struct cp_object **objects, uint64_t count
@@ -88,6 +104,17 @@ func NewObject(agent unsafe.Pointer, objectType, name string, size uintptr) (uns
 		return nil, fmt.Errorf("create object %s:%s", objectType, name)
 	}
 	return unsafe.Pointer(object), nil
+}
+
+// FreeObject frees an object of size bytes through
+// cp_object_try_destroy, cp_object_fini and agent_destroy_released, as
+// an object's typed free does; it fails while a live generation holds
+// the object.
+func FreeObject(object unsafe.Pointer, size uintptr) error {
+	if C.coracle_object_free((*C.struct_cp_object)(object), C.size_t(size)) != 0 {
+		return fmt.Errorf("free object: still referenced")
+	}
+	return nil
 }
 
 // UpdateObjects runs cp_config_update_objects for the objects through
