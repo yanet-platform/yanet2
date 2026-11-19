@@ -103,8 +103,10 @@ func requirePortsMatchC(t *testing.T, rules []classify.PortRule) {
 // gives them, and commits the same attribute.
 func Test_CompilePorts_MatchesC(t *testing.T) {
 	for seed := range uint64(200) {
-		random := rand.New(rand.NewPCG(seed, 7))
-		requirePortsMatchC(t, randomPortRulesOf(seed, random.IntN(64)))
+		t.Run(fmt.Sprintf("seed %d", seed), func(t *testing.T) {
+			random := rand.New(rand.NewPCG(seed, 7))
+			requirePortsMatchC(t, randomPortRulesOf(seed, random.IntN(64)))
+		})
 	}
 }
 
@@ -144,7 +146,7 @@ func Benchmark_CompilePorts(b *testing.B) {
 	for _, count := range portSizes {
 		rules := randomPortRulesOf(1, count)
 		b.Run(fmt.Sprintf("c/%d rules", count), func(b *testing.B) {
-			context := newContext(b)
+			context := newContextOf(b, arenaSize)
 			cRules := coracle.NewCPortRules(cPortRules(rules))
 			defer cRules.Free()
 			b.ResetTimer()
@@ -152,7 +154,7 @@ func Benchmark_CompilePorts(b *testing.B) {
 			require.NoError(b, err)
 		})
 		b.Run(fmt.Sprintf("native/%d rules", count), func(b *testing.B) {
-			context := newContext(b)
+			context := newContextOf(b, arenaSize)
 			for b.Loop() {
 				ports := classify.CompilePorts(rules)
 				attr := newAttr[layout.ClassifyAttrPort](b, context)

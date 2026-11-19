@@ -143,8 +143,10 @@ func requireNet6MatchesC(t *testing.T, rules []classify.Net6Rule) {
 // commits halves and a table that answer every lookup as the C ones do.
 func Test_CompileNet6_MatchesC(t *testing.T) {
 	for seed := range uint64(300) {
-		random := rand.New(rand.NewPCG(seed, 17))
-		requireNet6MatchesC(t, randomNet6RulesOf(seed, random.IntN(160)))
+		t.Run(fmt.Sprintf("seed %d", seed), func(t *testing.T) {
+			random := rand.New(rand.NewPCG(seed, 17))
+			requireNet6MatchesC(t, randomNet6RulesOf(seed, random.IntN(160)))
+		})
 	}
 }
 
@@ -208,7 +210,7 @@ func Benchmark_CompileNet6(b *testing.B) {
 	for _, count := range net6Sizes {
 		rules := randomNet6RulesOf(1, count)
 		b.Run(fmt.Sprintf("c/%d rules", count), func(b *testing.B) {
-			context := newContext(b)
+			context := newContextOf(b, arenaSize)
 			cRules := coracle.NewCNet6Rules(cNet6Rules(rules))
 			defer cRules.Free()
 			b.ResetTimer()
@@ -216,7 +218,7 @@ func Benchmark_CompileNet6(b *testing.B) {
 			require.NoError(b, err)
 		})
 		b.Run(fmt.Sprintf("native/%d rules", count), func(b *testing.B) {
-			context := newContext(b)
+			context := newContextOf(b, arenaSize)
 			for b.Loop() {
 				attr := newAttr[layout.ClassifyAttrNet6](b, context)
 				_, err := classify.CompileNet6(rules, attr, context, "ratelimit:src6")

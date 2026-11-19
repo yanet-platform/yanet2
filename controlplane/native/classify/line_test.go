@@ -20,19 +20,31 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
 )
 
-// arenaSize is the size of a test arena, reserved, not touched: a join
-// of production-shaped networks fills most of it.
+// arenaSize is the size of the arena of a production-shaped test or a
+// benchmark, reserved, not touched: a join of production-shaped networks
+// fills most of it.
 const arenaSize = 4 << 30
 
 // footprintArenaSize is the size of the arena a footprint is measured
 // over, which the measure fills and reads whole.
 const footprintArenaSize = 1 << 30
 
+// contextSize is the size of the arena of a test of random rules. An
+// AddressSanitizer build poisons the whole arena, keeping an eighth of
+// it resident as shadow.
+const contextSize = 256 << 20
+
 // newContext returns a memory context over a fresh anonymous mapping,
 // with an allocator C and Go both draw from.
 func newContext(t testing.TB) *layout.MemoryContext {
 	t.Helper()
-	mapping, err := syscall.Mmap(-1, 0, arenaSize, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_PRIVATE|syscall.MAP_ANONYMOUS)
+	return newContextOf(t, contextSize)
+}
+
+// newContextOf returns a memory context over an arena of size bytes.
+func newContextOf(t testing.TB, size int) *layout.MemoryContext {
+	t.Helper()
+	mapping, err := syscall.Mmap(-1, 0, size, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_PRIVATE|syscall.MAP_ANONYMOUS)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		coracle.Unpoison(mapping)
@@ -41,7 +53,7 @@ func newContext(t testing.TB) *layout.MemoryContext {
 	allocator := (*layout.BlockAllocator)(unsafe.Pointer(&mapping[0]))
 	context := (*layout.MemoryContext)(unsafe.Pointer(&mapping[4096]))
 	shmalloc.Init(allocator)
-	shmalloc.PutArena(allocator, unsafe.Pointer(&mapping[1<<20]), arenaSize-(1<<20))
+	shmalloc.PutArena(allocator, unsafe.Pointer(&mapping[1<<20]), uintptr(size-(1<<20)))
 	shmalloc.ContextInit(context, "classify", allocator)
 	return context
 }
@@ -136,7 +148,9 @@ func requireLineMatchesC(t *testing.T, rules []classify.LineRule) {
 // gives them, and commits the same attribute.
 func Test_CompileLine_MatchesC(t *testing.T) {
 	for seed := range uint64(300) {
-		requireLineMatchesC(t, randomLineRules(seed))
+		t.Run(fmt.Sprintf("seed %d", seed), func(t *testing.T) {
+			requireLineMatchesC(t, randomLineRules(seed))
+		})
 	}
 }
 
@@ -173,7 +187,7 @@ func Benchmark_CompileLine(b *testing.B) {
 	for _, count := range lineSizes {
 		rules := randomLineRulesOf(1, count)
 		b.Run(fmt.Sprintf("c/%d rules", count), func(b *testing.B) {
-			context := newContext(b)
+			context := newContextOf(b, arenaSize)
 			cRules := coracle.NewCLineRules(cLineRules(rules))
 			defer cRules.Free()
 			b.ResetTimer()
@@ -181,7 +195,7 @@ func Benchmark_CompileLine(b *testing.B) {
 			require.NoError(b, err)
 		})
 		b.Run(fmt.Sprintf("native/%d rules", count), func(b *testing.B) {
-			context := newContext(b)
+			context := newContextOf(b, arenaSize)
 			for b.Loop() {
 				line := classify.CompileLine(rules, classify.LineDomain)
 				attr := newAttr[layout.ClassifyAttrLine](b, context)
@@ -210,6 +224,9 @@ func measureFootprint(t *testing.T, compile func(context *layout.MemoryContext))
 // measureFootprintOf measures a compile over an arena of size bytes.
 func measureFootprintOf(t *testing.T, size int, compile func(context *layout.MemoryContext)) footprint {
 	t.Helper()
+	if shmalloc.RedZone != 0 {
+		t.Skip("the red zones of an AddressSanitizer build are not the footprint to measure")
+	}
 	mapping, err := syscall.Mmap(-1, 0, size, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_PRIVATE|syscall.MAP_ANONYMOUS)
 	require.NoError(t, err)
 	defer func() {

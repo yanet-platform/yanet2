@@ -78,12 +78,14 @@ func randomMembers(random *rand.Rand, count int) []bool {
 // SDK gives it, rows interned alike, over joints of random stages.
 func Test_JoinRules_MatchesC(t *testing.T) {
 	for seed := range uint64(300) {
-		random := rand.New(rand.NewPCG(seed, 19))
-		ruleCount := random.IntN(48)
-		src := randomStage(random, ruleCount, 1+random.IntN(24))
-		dst := randomStage(random, ruleCount, 1+random.IntN(24))
-		transport := randomStage(random, ruleCount, 1+random.IntN(24))
-		requireRuleTableMatchesC(t, joint(t, &src, &dst), &transport, randomMembers(random, ruleCount))
+		t.Run(fmt.Sprintf("seed %d", seed), func(t *testing.T) {
+			random := rand.New(rand.NewPCG(seed, 19))
+			ruleCount := random.IntN(48)
+			src := randomStage(random, ruleCount, 1+random.IntN(24))
+			dst := randomStage(random, ruleCount, 1+random.IntN(24))
+			transport := randomStage(random, ruleCount, 1+random.IntN(24))
+			requireRuleTableMatchesC(t, joint(t, &src, &dst), &transport, randomMembers(random, ruleCount))
+		})
 	}
 }
 
@@ -143,7 +145,7 @@ func Benchmark_JoinRules(b *testing.B) {
 		transport := joint(b, &proto.Stage, &port.Stage).Stage()
 		members := randomMembers(rand.New(rand.NewPCG(1, 2)), count)
 		b.Run(fmt.Sprintf("c/%d rules", count), func(b *testing.B) {
-			context := newContext(b)
+			context := newContextOf(b, arenaSize)
 			cLeft, err := coracle.NewCStage(unsafe.Pointer(context), cStage(nets.Stage()))
 			require.NoError(b, err)
 			defer cLeft.Free()
@@ -155,7 +157,7 @@ func Benchmark_JoinRules(b *testing.B) {
 			require.NoError(b, err)
 		})
 		b.Run(fmt.Sprintf("native/%d rules", count), func(b *testing.B) {
-			context := newContext(b)
+			context := newContextOf(b, arenaSize)
 			table := newAttr[layout.RuleTable](b, context)
 			for b.Loop() {
 				require.NoError(b, classify.JoinRules(nets, transport, members, table, context, "ratelimit:rules"))

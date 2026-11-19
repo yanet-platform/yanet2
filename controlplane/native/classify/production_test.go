@@ -220,7 +220,7 @@ func productionAttributes(ruleset productionRuleset) []productionAttribute {
 				classify.FreeNet6(attr)
 			},
 			stage: func(t testing.TB) *classify.Stage {
-				context := newContext(t)
+				context := newContextOf(t, arenaSize)
 				attr := newAttr[layout.ClassifyAttrNet6](t, context)
 				stage, err := classify.CompileNet6(rules, attr, context, "ratelimit:"+name)
 				require.NoError(t, err)
@@ -404,7 +404,7 @@ func Benchmark_ProductionShaped(b *testing.B) {
 		attributes := productionAttributes(ruleset)
 		for _, attribute := range attributes {
 			b.Run(ruleset.Name+"/"+attribute.name+"/c", func(b *testing.B) {
-				context := newContext(b)
+				context := newContextOf(b, arenaSize)
 				cRules := attribute.c()
 				defer cRules.Free()
 				b.ResetTimer()
@@ -412,7 +412,7 @@ func Benchmark_ProductionShaped(b *testing.B) {
 				require.NoError(b, err)
 			})
 			b.Run(ruleset.Name+"/"+attribute.name+"/native", func(b *testing.B) {
-				context := newContext(b)
+				context := newContextOf(b, arenaSize)
 				for b.Loop() {
 					attribute.native(b, context)
 				}
@@ -421,7 +421,7 @@ func Benchmark_ProductionShaped(b *testing.B) {
 		joins := productionJoins(b, attributes)
 		for _, rules := range productionRuleTables(b, ruleset, joins) {
 			b.Run(ruleset.Name+"/"+rules.name+"/c", func(b *testing.B) {
-				context := newContext(b)
+				context := newContextOf(b, arenaSize)
 				cLeft, err := coracle.NewCStage(unsafe.Pointer(context), cStage(rules.left.Stage()))
 				require.NoError(b, err)
 				defer cLeft.Free()
@@ -433,7 +433,7 @@ func Benchmark_ProductionShaped(b *testing.B) {
 				require.NoError(b, err)
 			})
 			b.Run(ruleset.Name+"/"+rules.name+"/native", func(b *testing.B) {
-				context := newContext(b)
+				context := newContextOf(b, arenaSize)
 				table := newAttr[layout.RuleTable](b, context)
 				for b.Loop() {
 					require.NoError(b, classify.JoinRules(rules.left, rules.right, rules.members, table, context, "ratelimit:"+rules.name))
@@ -443,7 +443,7 @@ func Benchmark_ProductionShaped(b *testing.B) {
 		}
 		for _, join := range joins {
 			b.Run(ruleset.Name+"/"+join.name+"/c", func(b *testing.B) {
-				context := newContext(b)
+				context := newContextOf(b, arenaSize)
 				cLeft, err := coracle.NewCStage(unsafe.Pointer(context), cStage(join.left))
 				require.NoError(b, err)
 				defer cLeft.Free()
@@ -455,7 +455,7 @@ func Benchmark_ProductionShaped(b *testing.B) {
 				require.NoError(b, err)
 			})
 			b.Run(ruleset.Name+"/"+join.name+"/native", func(b *testing.B) {
-				context := newContext(b)
+				context := newContextOf(b, arenaSize)
 				table := newAttr[layout.ValueTable](b, context)
 				for b.Loop() {
 					_, err := classify.Join(join.left, join.right, table, context, "ratelimit:"+join.name)

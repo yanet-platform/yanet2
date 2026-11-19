@@ -111,8 +111,10 @@ func requireNet4MatchesC(t *testing.T, rules []classify.Net4Rule) {
 // commits a tree that answers every lookup as the C one does.
 func Test_CompileNet4_MatchesC(t *testing.T) {
 	for seed := range uint64(200) {
-		random := rand.New(rand.NewPCG(seed, 11))
-		requireNet4MatchesC(t, randomNet4RulesOf(seed, random.IntN(64)))
+		t.Run(fmt.Sprintf("seed %d", seed), func(t *testing.T) {
+			random := rand.New(rand.NewPCG(seed, 11))
+			requireNet4MatchesC(t, randomNet4RulesOf(seed, random.IntN(64)))
+		})
 	}
 }
 
@@ -161,7 +163,7 @@ func Benchmark_CompileNet4(b *testing.B) {
 	for _, count := range net4Sizes {
 		rules := randomNet4RulesOf(1, count)
 		b.Run(fmt.Sprintf("c/%d rules", count), func(b *testing.B) {
-			context := newContext(b)
+			context := newContextOf(b, arenaSize)
 			cRules := coracle.NewCNet4Rules(cNet4Rules(rules))
 			defer cRules.Free()
 			b.ResetTimer()
@@ -169,7 +171,7 @@ func Benchmark_CompileNet4(b *testing.B) {
 			require.NoError(b, err)
 		})
 		b.Run(fmt.Sprintf("native/%d rules", count), func(b *testing.B) {
-			context := newContext(b)
+			context := newContextOf(b, arenaSize)
 			for b.Loop() {
 				nets, err := classify.CompileNet4(rules)
 				require.NoError(b, err)

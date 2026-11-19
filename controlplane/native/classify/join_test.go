@@ -99,11 +99,13 @@ func requireJoinMatchesC(t *testing.T, left, right classify.Stage) {
 // groups small, large, empty and whole.
 func Test_Join_MatchesC(t *testing.T) {
 	for seed := range uint64(300) {
-		random := rand.New(rand.NewPCG(seed, 13))
-		ruleCount := random.IntN(40)
-		left := randomStage(random, ruleCount, 1+random.IntN(30))
-		right := randomStage(random, ruleCount, 1+random.IntN(30))
-		requireJoinMatchesC(t, left, right)
+		t.Run(fmt.Sprintf("seed %d", seed), func(t *testing.T) {
+			random := rand.New(rand.NewPCG(seed, 13))
+			ruleCount := random.IntN(40)
+			left := randomStage(random, ruleCount, 1+random.IntN(30))
+			right := randomStage(random, ruleCount, 1+random.IntN(30))
+			requireJoinMatchesC(t, left, right)
+		})
 	}
 }
 
@@ -190,7 +192,7 @@ func Benchmark_Join(b *testing.B) {
 	for _, count := range joinSizes {
 		left, right := netStages(b, count)
 		b.Run(fmt.Sprintf("c/%d rules", count), func(b *testing.B) {
-			context := newContext(b)
+			context := newContextOf(b, arenaSize)
 			cLeft, err := coracle.NewCStage(unsafe.Pointer(context), cStage(&left))
 			require.NoError(b, err)
 			defer cLeft.Free()
@@ -202,7 +204,7 @@ func Benchmark_Join(b *testing.B) {
 			require.NoError(b, err)
 		})
 		b.Run(fmt.Sprintf("native/%d rules", count), func(b *testing.B) {
-			context := newContext(b)
+			context := newContextOf(b, arenaSize)
 			table := newAttr[layout.ValueTable](b, context)
 			for b.Loop() {
 				_, err := classify.Join(&left, &right, table, context, "ratelimit:nets")
