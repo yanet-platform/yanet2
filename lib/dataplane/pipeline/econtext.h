@@ -469,6 +469,17 @@ struct device_ectx {
 	// placement, so handlers resolve the pipeline they execute in
 	// without per-packet state.
 	uint16_t device_id;
+	// Offset pointer to the owning generation context, filled by the
+	// control plane when the device context is created.
+	struct config_gen_ectx *config_gen_ectx;
+	// The same generation, as an absolute address for the packet hot
+	// path.
+	//
+	// The publishing process copies it from the relative field above
+	// before the context is released to workers; it is zero until
+	// then. Device handlers reach the generation's executing entry —
+	// and the entry they may arm — through it.
+	struct config_gen_ectx *abs_config_gen_ectx;
 };
 
 // Per-worker execution context for a cp_object.

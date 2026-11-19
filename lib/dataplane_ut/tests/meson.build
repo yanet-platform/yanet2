@@ -55,6 +55,8 @@ if not dataplane_only
       lib_logging_dep,
       lib_dev_plain_dp_dep,
       lib_dev_plain_api_dep,
+      lib_dev_trafgen_dp_dep,
+      lib_dev_trafgen_api_dep,
       lib_agent_cp_dep,
       lib_errors_dep,
       lib_packet_dp_dep,

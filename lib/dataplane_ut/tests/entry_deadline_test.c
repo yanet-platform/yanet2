@@ -11,6 +11,7 @@
 #include "common/strutils.h"
 #include "common/test_assert.h"
 #include "devices/plain/api/controlplane.h"
+#include "devices/trafgen/api/controlplane.h"
 #include "lib/controlplane/agent/agent.h"
 #include "lib/controlplane/config/cp_module.h"
 #include "lib/dataplane/config/zone.h"
@@ -24,6 +25,7 @@
 #include <rte_ip.h>
 #include <rte_mbuf.h>
 
+#include <stdio.h>
 #include <string.h>
 
 // What the probe module's handler observed during its last invocation.
@@ -455,11 +457,324 @@ entry_deadline_test(void) {
 	return TEST_SUCCESS;
 }
 
+// Verifies the trafgen generator re-arms its input entry on every run,
+// so it keeps sourcing traffic once the worker's force-poll is gone.
+static int
+trafgen_rearm_test(void) {
+	const char *devs_to_load[] = {"trafgen"};
+	struct dataplane_ut_config cfg = {
+		.cp_memory = 1u << 25,
+		.dp_memory = 1u << 20,
+		.worker_count = 1,
+		.devices_to_load = devs_to_load,
+		.devices_to_load_count = 1,
+	};
+	struct dataplane_ut *ut = dataplane_ut_new(&cfg);
+	TEST_ASSERT_NOT_NULL(ut, "dataplane_ut_new returned NULL");
+
+	struct yanet_shm *shm = dataplane_ut_shm(ut);
+	yanet_error *err = NULL;
+	struct agent *agent =
+		agent_attach(shm, 0, "trafgen-rearm", 8u << 20, &err);
+	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
+
+	struct cp_pipeline_config *input_pipeline =
+		cp_pipeline_config_create("input", 0);
+	TEST_ASSERT_NOT_NULL(
+		input_pipeline, "input pipeline allocation failed"
+	);
+	struct cp_pipeline_config *output_pipeline =
+		cp_pipeline_config_create("output", 0);
+	TEST_ASSERT_NOT_NULL(
+		output_pipeline, "output pipeline allocation failed"
+	);
+	struct cp_pipeline_config *pipelines[] = {
+		input_pipeline, output_pipeline
+	};
+	TEST_ASSERT_SUCCESS(
+		agent_update_pipelines(agent, 2, pipelines, &err),
+		"pipeline update failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	cp_pipeline_config_free(input_pipeline);
+	cp_pipeline_config_free(output_pipeline);
+
+	struct cp_device_trafgen_config *device_config =
+		cp_device_trafgen_config_new("gen0", 1, 1, &err);
+	TEST_ASSERT_NOT_NULL(
+		device_config, "cp_device_trafgen_config_new failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		cp_device_trafgen_config_set_input_pipeline(
+			device_config, 0, "input", 1
+		),
+		"input device pipeline setup failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		cp_device_trafgen_config_set_output_pipeline(
+			device_config, 0, "output", 1
+		),
+		"output device pipeline setup failed"
+	);
+	struct cp_device *device =
+		cp_device_trafgen_new(agent, device_config, &err);
+	cp_device_trafgen_config_free(device_config);
+	TEST_ASSERT_NOT_NULL(device, "cp_device_trafgen_new failed");
+
+	// One parseable frame, replayed at 1000 pps by a single worker: a
+	// packet's worth of bucket credit is exactly one millisecond.
+	uint8_t
+		frame[sizeof(struct rte_ether_hdr) +
+		      sizeof(struct rte_ipv4_hdr)];
+	memset(frame, 0, sizeof(frame));
+	struct rte_ether_hdr *ether = (struct rte_ether_hdr *)frame;
+	ether->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
+	struct rte_ipv4_hdr *ipv4 = (struct rte_ipv4_hdr *)(ether + 1);
+	ipv4->version_ihl = RTE_IPV4_VHL_DEF;
+	ipv4->total_length = rte_cpu_to_be_16(sizeof(struct rte_ipv4_hdr));
+	ipv4->dst_addr = rte_cpu_to_be_32(UINT32_C(0xc0000201));
+	uint32_t lengths[1] = {sizeof(frame)};
+	TEST_ASSERT_SUCCESS(
+		cp_device_trafgen_set_frames(
+			device, frame, sizeof(frame), lengths, 1, &err
+		),
+		"frame upload failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	TEST_ASSERT_SUCCESS(
+		cp_device_trafgen_set_rate(device, 1000), "rate setup failed"
+	);
+
+	struct cp_device *devices[] = {device};
+	TEST_ASSERT_SUCCESS(
+		agent_update_devices(agent, 1, devices, &err),
+		"device update failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+
+	const uint64_t now = 1000 * 1000 * 1000;
+	dataplane_ut_set_time_ns(ut, now);
+	TEST_ASSERT_SUCCESS(
+		dataplane_ut_begin_round(ut, 0), "begin_round failed"
+	);
+	struct config_gen_ectx *context = NULL;
+	TEST_ASSERT_SUCCESS(
+		deadline_test_context(ut, &context), "context lookup failed"
+	);
+	struct device_ectx *device_ectx =
+		config_gen_ectx_get_device(context, 0);
+	struct device_entry_ectx *input_entry =
+		device_ectx->abs_input_pipelines;
+
+	// The first run anchors the pacer clock and emits nothing, but must
+	// still arm the entry for one packet interval of bucket time.
+	struct packet_list round_input;
+	packet_list_init(&round_input);
+	struct dataplane_ut_round_result result;
+	dataplane_ut_run(ut, 0, NULL, &round_input, &result);
+	dataplane_ut_round_result_free(&result);
+	const uint64_t interval_ns = 1000 * 1000;
+	TEST_ASSERT_EQUAL(
+		(long)input_entry->deadline_ns,
+		(long)(now + interval_ns),
+		"the generator must re-arm its entry for one packet interval"
+	);
+
+	// The re-arm drives the sweep: before the deadline nothing moves,
+	// at the deadline the entry is dispatched.
+	dataplane_ut_set_time_ns(ut, now + interval_ns / 2);
+	TEST_ASSERT_SUCCESS(dataplane_ut_arm_due(ut, 0), "arm_due failed");
+	TEST_ASSERT_EQUAL(
+		(long)input_entry->schedule_list,
+		(long)device_entry_schedule_home,
+		"the generator's arm must not fire before its deadline"
+	);
+	dataplane_ut_set_time_ns(ut, now + interval_ns);
+	TEST_ASSERT_SUCCESS(dataplane_ut_arm_due(ut, 0), "arm_due failed");
+	TEST_ASSERT_EQUAL(
+		(long)input_entry->schedule_list,
+		(long)device_entry_schedule_ready,
+		"the generator's arm must dispatch its entry at the deadline"
+	);
+
+	// The dispatched run emits from the accumulated credit and re-arms
+	// again relative to its own now. Two full intervals passed since
+	// the pacer anchored, so the bucket releases two packets.
+	dataplane_ut_set_time_ns(ut, now + 2 * interval_ns);
+	dataplane_ut_run(ut, 0, NULL, &round_input, &result);
+	TEST_ASSERT_EQUAL(
+		(long)(packet_list_count(&result.output) +
+		       packet_list_count(&result.drop)),
+		2L,
+		"the dispatched run must emit the accumulated packets"
+	);
+	dataplane_ut_round_result_free(&result);
+	TEST_ASSERT_EQUAL(
+		(long)input_entry->deadline_ns,
+		(long)(now + 3 * interval_ns),
+		"the emitting run must re-arm relative to its own time"
+	);
+
+	agent_detach(agent);
+	dataplane_ut_free(ut);
+	return TEST_SUCCESS;
+}
+
+// Verifies that a non-divisor packet rate rounds the wakeup up, so the
+// credit for each packet is payable at the wake that fires for it.
+static int
+trafgen_remainder_test(void) {
+	const char *devs_to_load[] = {"trafgen"};
+	struct dataplane_ut_config cfg = {
+		.cp_memory = 1u << 25,
+		.dp_memory = 1u << 20,
+		.worker_count = 1,
+		.devices_to_load = devs_to_load,
+		.devices_to_load_count = 1,
+	};
+	struct dataplane_ut *ut = dataplane_ut_new(&cfg);
+	TEST_ASSERT_NOT_NULL(ut, "dataplane_ut_new returned NULL");
+
+	struct yanet_shm *shm = dataplane_ut_shm(ut);
+	yanet_error *err = NULL;
+	struct agent *agent =
+		agent_attach(shm, 0, "trafgen-remainder", 8u << 20, &err);
+	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
+
+	struct cp_pipeline_config *input_pipeline =
+		cp_pipeline_config_create("input", 0);
+	TEST_ASSERT_NOT_NULL(
+		input_pipeline, "input pipeline allocation failed"
+	);
+	struct cp_pipeline_config *output_pipeline =
+		cp_pipeline_config_create("output", 0);
+	TEST_ASSERT_NOT_NULL(
+		output_pipeline, "output pipeline allocation failed"
+	);
+	struct cp_pipeline_config *pipelines[] = {
+		input_pipeline, output_pipeline
+	};
+	TEST_ASSERT_SUCCESS(
+		agent_update_pipelines(agent, 2, pipelines, &err),
+		"pipeline update failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	cp_pipeline_config_free(input_pipeline);
+	cp_pipeline_config_free(output_pipeline);
+
+	struct cp_device_trafgen_config *device_config =
+		cp_device_trafgen_config_new("gen0", 1, 1, &err);
+	TEST_ASSERT_NOT_NULL(
+		device_config, "cp_device_trafgen_config_new failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		cp_device_trafgen_config_set_input_pipeline(
+			device_config, 0, "input", 1
+		),
+		"input device pipeline setup failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		cp_device_trafgen_config_set_output_pipeline(
+			device_config, 0, "output", 1
+		),
+		"output device pipeline setup failed"
+	);
+	struct cp_device *device =
+		cp_device_trafgen_new(agent, device_config, &err);
+	cp_device_trafgen_config_free(device_config);
+	TEST_ASSERT_NOT_NULL(device, "cp_device_trafgen_new failed");
+
+	uint8_t
+		frame[sizeof(struct rte_ether_hdr) +
+		      sizeof(struct rte_ipv4_hdr)];
+	memset(frame, 0, sizeof(frame));
+	struct rte_ether_hdr *ether = (struct rte_ether_hdr *)frame;
+	ether->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
+	struct rte_ipv4_hdr *ipv4 = (struct rte_ipv4_hdr *)(ether + 1);
+	ipv4->version_ihl = RTE_IPV4_VHL_DEF;
+	ipv4->total_length = rte_cpu_to_be_16(sizeof(struct rte_ipv4_hdr));
+	ipv4->dst_addr = rte_cpu_to_be_32(UINT32_C(0xc0000201));
+	uint32_t lengths[1] = {sizeof(frame)};
+	TEST_ASSERT_SUCCESS(
+		cp_device_trafgen_set_frames(
+			device, frame, sizeof(frame), lengths, 1, &err
+		),
+		"frame upload failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	// Three packets per second: one packet costs exactly one billion
+	// credit, so a full interval of 333333333 ns accrues 999999999 —
+	// one short of a packet.
+	TEST_ASSERT_SUCCESS(
+		cp_device_trafgen_set_rate(device, 3), "rate setup failed"
+	);
+
+	struct cp_device *devices[] = {device};
+	TEST_ASSERT_SUCCESS(
+		agent_update_devices(agent, 1, devices, &err),
+		"device update failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+
+	const uint64_t now = 1000 * 1000 * 1000;
+	dataplane_ut_set_time_ns(ut, now);
+	TEST_ASSERT_SUCCESS(
+		dataplane_ut_begin_round(ut, 0), "begin_round failed"
+	);
+	struct config_gen_ectx *context = NULL;
+	TEST_ASSERT_SUCCESS(
+		deadline_test_context(ut, &context), "context lookup failed"
+	);
+	struct device_entry_ectx *input_entry =
+		config_gen_ectx_get_device(context, 0)->abs_input_pipelines;
+
+	// The anchor run arms one rounded-up packet interval: 333333334 ns,
+	// not the truncated 333333333 that wakes a billionth short.
+	struct packet_list round_input;
+	packet_list_init(&round_input);
+	struct dataplane_ut_round_result result;
+	dataplane_ut_run(ut, 0, NULL, &round_input, &result);
+	dataplane_ut_round_result_free(&result);
+	const uint64_t interval_ns = 333333334;
+	TEST_ASSERT_EQUAL(
+		(long)input_entry->deadline_ns,
+		(long)(now + interval_ns),
+		"the anchor arm must round the packet interval up"
+	);
+
+	// At the armed moment the accumulated credit is exactly one packet:
+	// the run emits it and arms the next wake from the leftover two
+	// credit, again rounded up.
+	dataplane_ut_set_time_ns(ut, now + interval_ns);
+	dataplane_ut_run(ut, 0, NULL, &round_input, &result);
+	TEST_ASSERT_EQUAL(
+		(long)(packet_list_count(&result.output) +
+		       packet_list_count(&result.drop)),
+		1L,
+		"the wake at the rounded-up arm must afford one packet"
+	);
+	dataplane_ut_round_result_free(&result);
+	TEST_ASSERT_EQUAL(
+		(long)input_entry->deadline_ns,
+		(long)(now + 2 * interval_ns - 1),
+		"the emitting run must arm the next packet from the leftover "
+		"credit"
+	);
+
+	agent_detach(agent);
+	dataplane_ut_free(ut);
+	return TEST_SUCCESS;
+}
+
 int
 main(void) {
 	log_enable_name("error");
 	TEST_ASSERT_SUCCESS(
 		entry_deadline_test(), "entry_deadline_test failed"
+	);
+	TEST_ASSERT_SUCCESS(trafgen_rearm_test(), "trafgen_rearm_test failed");
+	TEST_ASSERT_SUCCESS(
+		trafgen_remainder_test(), "trafgen_remainder_test failed"
 	);
 	return TEST_SUCCESS;
 }

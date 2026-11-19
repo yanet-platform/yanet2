@@ -56,6 +56,10 @@ _Static_assert(
 	"struct device_entry_ectx size changed, bump YANET_MODULE_ABI_VERSION"
 );
 _Static_assert(
+	sizeof(struct device_ectx) == 80,
+	"struct device_ectx size changed, bump YANET_MODULE_ABI_VERSION"
+);
+_Static_assert(
 	sizeof(struct config_gen_ectx) == 304,
 	"struct config_gen_ectx size changed, bump YANET_MODULE_ABI_VERSION"
 );

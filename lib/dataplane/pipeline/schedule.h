@@ -128,6 +128,17 @@ device_entry_ectx_arm(
 	}
 }
 
+// The device entry whose handler invocation is currently executing.
+//
+// The device-handler counterpart of module_ectx_current_entry: valid
+// only inside the device's own handler invocation, NULL between them.
+static inline struct device_entry_ectx *
+device_ectx_current_entry(struct device_ectx *device_ectx) {
+	struct config_gen_ectx *config_gen_ectx =
+		device_ectx->abs_config_gen_ectx;
+	return config_gen_ectx == NULL ? NULL : config_gen_ectx->current_entry;
+}
+
 // The device entry whose pipeline the module currently executes in.
 //
 // Valid only inside the module's own handler invocation; NULL between
