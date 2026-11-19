@@ -663,8 +663,8 @@ delete and create, not an in-place parent change; sessions do not migrate.
 Member schedulers, real pools, health and sessions remain independent.
 
 F40/F41 and O18–O23 in the representation contract define identity, policy CAS,
-whole-policy replacement, readback, deletion and observation. O02–O05/O11/O14/O16
-now explicitly address VirtualService. The Service policy token versions policy,
+whole-policy replacement, readback, deletion and observation. O02–O05/O09–O12/O14/O16
+operate on VSes, not Service groups. The Service policy token versions policy,
 not the separately paginated membership inventory. A policy change switches
 one shared root, not several per-VS roots; post-switch acquisition through an
 old VS descriptor cannot freeze the old ACL. Already validated old-policy readers

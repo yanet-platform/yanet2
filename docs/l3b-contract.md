@@ -231,9 +231,9 @@ One public l3b API exposes twenty-three operations; there is no second
 session-table service. The names are contract inventory, not a protobuf
 package, tag or C ABI freeze.
 
-O02–O05, O11, O12, O14 and O16 operate on VSes, not Service groups. O05 lists
-VSes. O12 `ListSessions` addresses one owning VS as specified by F32 and is
-the exception to the `VirtualService` naming pattern. O18–O23 address the
+O02–O05, O09–O12, O14 and O16 operate on VSes, not Service groups. O05 lists
+VSes. O09/O10 mutate reals under one owning VS and its expected token.
+O12 `ListSessions` addresses one owning VS as specified by F32. O18–O23 address the
 group. Final schemas MUST use distinct types and endpoints, not infer object
 kind from a name. No old-endpoint bypass
 or permit-kind reinterpretation is allowed under C05.

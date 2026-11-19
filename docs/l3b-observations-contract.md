@@ -365,8 +365,9 @@ eligibility **is already a requirement**, not a pending owner decision.
 | --- | --- |
 | Order and recovery | Delta/heartbeat before initialization, duplicate without refresh, conflicting sequence, gap, reconnect with and without proven history. |
 | Fencing | A -> B -> A, restarts, marker/sequence reset/wrap, delayed/in-flight messages, obsolete validators and real/address reuse. |
-| Checker settings | Omitted/null/zero/min/max timeout; absent/invalid effective timeout; revisions; retries 0/255, failure 256 at 255, threshold changes and hysteresis. |
+| Checker settings | Omitted/null/zero/min/max timeout; absent/invalid effective timeout; revisions; retries 0/255 and rejection of 256 as a configured value, failure 256 at retries=255, threshold changes and hysteresis. |
 | Freshness | Stale initial view; heartbeat/replay/reconnect/ack delay cannot extend evidence; newer same-value probe can; future timestamps, clock jumps and expiry. |
+| Clock arithmetic | Allowed and rejected age/uncertainty, restart and incompatible clock domains. Widen uint32 durations before checked uint64 deadline addition without wrap or saturation. Same-domain elapsed time retains uint64 range. |
 | Worker expiry | Equality with the earliest required checker/stream deadline rejects eligibility for both new selection and pin use. Repeat with failed disable publication, an old enabled descriptor, idle/resumed worker and unverifiable clock mapping. A later successful probe cannot extend the deadline in an immutable older descriptor. |
 | Authority | Health cannot override admin disable/drain; weight0 excludes new choice but does not invalidate an enabled/healthy stateful pin outside bypass. One healthy checker cannot override another's unknown; empty required-checker set remains ineligible even if admin-enabled. |
 | Q/H and weights | After observation-contract owner agreement: prior up/down inside band,W=0,Q−H,Q+H,restart/recreation/membership changes,dynamic weight with unchanged scheduling weight. Check current provenance/validity without invented missing defaults. The withdrawal barrier for all managed VIPs remains. |

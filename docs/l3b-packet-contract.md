@@ -604,6 +604,11 @@ fragmentation. Copied DF 1 prevents fragmentation only at compliant nodes; it
 does not guarantee ICMP feedback. Investigation of DF 1 plus MTU/PMTU,
 oversized-packet and ICMP-feedback policy is deferred pending an explicit
 decision; this note selects no such policy or new traffic restriction.
+The deferred investigation must compare DF 1 with the retained matrix for both
+inner families under IPIP and GRE, and include the distributor's IPv4 clones.
+Cover effective MTU, oversized packets, ICMP feedback owner/path/rate, missing
+Packet Too Big feedback and blackholes. Obtain reproduction and PMTU-vector
+evidence before choosing a change. This is not a new activation gate.
 
 The real-fragment admission floor, inner traffic-class/ECN inheritance,
 external DSCP marking and length/headroom counted-drop rules remain unchanged.
