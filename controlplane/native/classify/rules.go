@@ -3,6 +3,7 @@
 package classify
 
 import (
+	"bytes"
 	"fmt"
 	"slices"
 	"unsafe"
@@ -80,12 +81,25 @@ func (m *ruleRows) Intern(row []uint32, hash uint32) (uint32, error) {
 		mask := uint32(len(m.Table) - 1)
 		for slot := hash & mask; m.Table[slot] != 0; slot = (slot + 1) & mask {
 			number := m.Table[slot] - 1
-			if m.Hashes[number] == hash && slices.Equal(m.Stored[number], row) {
+			if m.Hashes[number] == hash && equalValues(m.Stored[number], row) {
 				return number, nil
 			}
 		}
 	}
 	return m.Store(row, hash)
+}
+
+// equalValues reports whether two lists of values are equal, compared as
+// bytes: the runtime compares bytes in vector words where a loop over the
+// values compares one at a time, and interning a large rule table spends
+// most of its time on such comparisons.
+func equalValues(left, right []uint32) bool {
+	return len(left) == len(right) && bytes.Equal(valueBytes(left), valueBytes(right))
+}
+
+// valueBytes returns the bytes of a list of values.
+func valueBytes(values []uint32) []byte {
+	return unsafe.Slice((*byte)(unsafe.Pointer(unsafe.SliceData(values))), len(values)*int(unsafe.Sizeof(uint32(0))))
 }
 
 // place puts a row number at the first free slot of its probe path.

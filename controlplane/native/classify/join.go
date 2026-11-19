@@ -639,7 +639,7 @@ func (m *classSet) Intern(hash uint32, key []uint32) (uint32, error) {
 	if len(m.Slots) > 0 {
 		for pos := hash & mask; m.Slots[pos].ID != none; pos = (pos + 1) & mask {
 			slot := m.Slots[pos]
-			if slot.Hash == hash && slices.Equal(m.Key(slot.ID), key) {
+			if slot.Hash == hash && equalValues(m.Key(slot.ID), key) {
 				return slot.ID, nil
 			}
 		}
