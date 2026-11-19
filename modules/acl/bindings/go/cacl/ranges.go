@@ -128,6 +128,12 @@ func plainRange(r filter.ProtoRange) (filter.ProtoRange, bool) {
 // into the derived line intervals.
 func SplitProtoRanges(ranges filter.ProtoRanges) ProtoSplit {
 	split := ProtoSplit{WholeL4: true}
+	if len(ranges) == 0 {
+		// An empty authored set leaves every protocol unconstrained
+		// - the same notion of any the line compilers apply - so the
+		// whole encoded domain is one plain span.
+		split.Plain = filter.ProtoRanges{{From: 0, To: 0xffff}}
+	}
 	for _, r := range ranges {
 		split.IpProto = append(split.IpProto, LineRange{
 			From: uint32(r.From >> 8),

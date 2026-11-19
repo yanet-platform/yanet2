@@ -84,6 +84,24 @@ func TestRulePathMembership(t *testing.T) {
 			want:     cacl.PathFlags{Plain: true},
 		},
 		{
+			// The empty authored set is the wildcard the line
+			// compilers apply: every protocol unconstrained, the
+			// whole encoded domain one plain span.
+			name:     "no_proto_ranges_full_ports_is_plain",
+			protos:   filter.ProtoRanges{},
+			srcPorts: wholePorts,
+			want:     cacl.PathFlags{Plain: true},
+		},
+		{
+			// A port restriction keeps the wildcard rule off the
+			// plain path and no protocol path covers it either: the
+			// packets without ports never match it.
+			name:     "no_proto_ranges_partial_ports_matches_nothing",
+			protos:   filter.ProtoRanges{},
+			srcPorts: filter.PortRanges{{From: 100, To: 200}},
+			want:     cacl.PathFlags{},
+		},
+		{
 			name:     "whole_byte_partial_ports_is_tcp",
 			protos:   filter.ProtoRanges{filter.NewProtoRange(6, filter.AnySubtype())},
 			srcPorts: filter.PortRanges{{From: 100, To: 200}},

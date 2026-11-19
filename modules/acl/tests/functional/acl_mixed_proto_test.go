@@ -179,3 +179,71 @@ func TestACL_GREOnlyDenied(t *testing.T) {
 	assert.Empty(t, result.Output, "a whole byte GRE rule must deny the GRE packet")
 	require.Len(t, result.Drop, 1)
 }
+
+// TestACL_NoProtoRangesDeniesEveryProtocol verifies the wildcard rule
+// shape: a rule with no authored protocol ranges constrains no
+// protocol - the notion of any the classifiers apply to an empty
+// range set - so it denies packets of every protocol through the
+// plain path, the fragments and the flagless protocols included.
+func TestACL_NoProtoRangesDeniesEveryProtocol(t *testing.T) {
+	allProtos := filter.ProtoRanges{{From: 0, To: 65535}}
+	unspec4 := []xnetip.Contiguous[xnetip.Network4]{filter.UnspecifiedIPv4}
+	rules := []cacl.ACLRule{
+		deny4Rule(unspec4, unspec4, filter.ProtoRanges{}),
+		allow4Rule(unspec4, unspec4, allProtos),
+	}
+
+	eth := layers.Ethernet{
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+
+	h, agent, backend := setupACLHarness(t, []string{"port0"})
+	applyACLRules(t, backend, "test", rules)
+	wireACLPipeline(t, agent, "port0", "test")
+
+	t.Run("gre_denied", func(t *testing.T) {
+		gre := rawIPv4Frame(false, false, 0, layers.IPProtocolGRE, grePayload)
+		result, err := h.HandleSegmentedPackets([][]byte{gre})
+		require.NoError(t, err)
+		assert.Empty(t, result.Output)
+		require.Len(t, result.Drop, 1)
+	})
+
+	t.Run("tcp_denied", func(t *testing.T) {
+		ip4 := layers.IPv4{
+			Version:  4,
+			TTL:      64,
+			Protocol: layers.IPProtocolTCP,
+			SrcIP:    net.ParseIP("192.0.2.1"),
+			DstIP:    net.ParseIP("10.0.0.1"),
+		}
+		tcp := layers.TCP{SrcPort: 12345, DstPort: 80, SYN: true}
+		tcp.SetNetworkLayerForChecksum(&ip4)
+		pkt := xpacket.LayersToPacket(t, &eth, &ip4, &tcp)
+
+		result, err := h.HandlePackets(pkt)
+		require.NoError(t, err)
+		assert.Empty(t, result.Output)
+		require.Len(t, result.Drop, 1)
+	})
+
+	t.Run("udp_denied", func(t *testing.T) {
+		ip4 := layers.IPv4{
+			Version:  4,
+			TTL:      64,
+			Protocol: layers.IPProtocolUDP,
+			SrcIP:    net.ParseIP("192.0.2.1"),
+			DstIP:    net.ParseIP("10.0.0.1"),
+		}
+		udp := layers.UDP{SrcPort: 12345, DstPort: 300}
+		udp.SetNetworkLayerForChecksum(&ip4)
+		pkt := xpacket.LayersToPacket(t, &eth, &ip4, &udp)
+
+		result, err := h.HandlePackets(pkt)
+		require.NoError(t, err)
+		assert.Empty(t, result.Output)
+		require.Len(t, result.Drop, 1)
+	})
+}
