@@ -12,7 +12,7 @@ against C byte for byte.
 | `cmd/shmgen` | Generates Go views of C structures from DWARF, with a layout test | no |
 | `layout` | The generated views (`go generate`), per architecture | no |
 | `shm` | Relative pointers, process-local words, byte and pid locks, C strings | no |
-| `zone` | Maps the storage, finds instances, pins generations, reads topology, modules, agents | no |
+| `zone` | Maps the storage, finds instances, pins generations, reads topology, modules, agents, counters, dataplane time | no |
 | `shmalloc` | Block allocator and memory contexts of `common/memory*.h` | `-asan` builds only |
 | `agent` | `agent_attach`, agent registry, sweep of superseded agents | no |
 | `cpconfig` | Module configurations and objects and their frees, generation copy, upsert and delete, workers' execution contexts, counter storages, publication, teardown of retired generations | no |
