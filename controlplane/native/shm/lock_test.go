@@ -3,11 +3,10 @@
 package shm_test
 
 import (
-	"bufio"
 	"os"
 	"runtime"
+	"runtime/pprof"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 	"unsafe"
@@ -29,34 +28,21 @@ const waiters = 1000
 // foreignPid stands for a writer in another process holding the lock.
 const foreignPid = 1 << 30
 
-// threadCount returns the number of OS threads of this process.
-func threadCount(t *testing.T) int {
-	t.Helper()
-	status, err := os.Open("/proc/self/status")
-	require.NoError(t, err)
-	defer status.Close()
-	scanner := bufio.NewScanner(status)
-	for scanner.Scan() {
-		if value, ok := strings.CutPrefix(scanner.Text(), "Threads:"); ok {
-			count, err := strconv.Atoi(strings.TrimSpace(value))
-			require.NoError(t, err)
-			return count
-		}
-	}
-	t.Fatal("no thread count in /proc/self/status")
-	return 0
+// threadsCreated returns how many OS threads the Go runtime has created.
+func threadsCreated() int {
+	return pprof.Lookup("threadcreate").Count()
 }
 
-// peakThreads samples the thread count for the duration and returns the
-// largest value seen.
-func peakThreads(t *testing.T, duration time.Duration) int {
-	t.Helper()
-	peak := 0
-	for deadline := time.Now().Add(duration); time.Now().Before(deadline); {
-		peak = max(peak, threadCount(t))
+// awaitThreads waits until more than target threads were created after
+// since, or the timeout passes, and returns how many were. The runtime
+// hands the processor of a goroutine blocked in a cgo call to a new
+// thread only as often as its monitor gets the CPU, so on a loaded host
+// the threads come slower than on an idle one.
+func awaitThreads(since, target int, timeout time.Duration) int {
+	for deadline := time.Now().Add(timeout); threadsCreated()-since <= target && time.Now().Before(deadline); {
 		time.Sleep(10 * time.Millisecond)
 	}
-	return peak
+	return threadsCreated() - since
 }
 
 // rawSharedMemory mirrors the C handle struct yanet_shm.
@@ -97,7 +83,7 @@ func Test_LockPid_WaitersHoldNoThreads(t *testing.T) {
 	require.NoError(t, err)
 	lockWord := &storage.Instances[0].Cp.ConfigLock
 	pid := int32(os.Getpid())
-	baseline := threadCount(t)
+	baseline := threadsCreated()
 
 	holder := shm.LockPid(lockWord, foreignPid)
 	var native errgroup.Group
@@ -108,7 +94,8 @@ func Test_LockPid_WaitersHoldNoThreads(t *testing.T) {
 			return nil
 		})
 	}
-	nativePeak := peakThreads(t, 500*time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
+	nativeCreated := threadsCreated() - baseline
 	holder.Unlock()
 	require.NoError(t, native.Wait())
 	nativeDuration := time.Since(started)
@@ -116,20 +103,21 @@ func Test_LockPid_WaitersHoldNoThreads(t *testing.T) {
 	holder = shm.LockPid(lockWord, foreignPid)
 	var cgo errgroup.Group
 	started = time.Now()
+	baseline = threadsCreated()
 	for idx := range configs {
 		cgo.Go(configs[idx].Free)
 	}
-	cgoPeak := peakThreads(t, 500*time.Millisecond)
+	cgoCreated := awaitThreads(baseline, waiters/2, 30*time.Second)
 	holder.Unlock()
 	require.NoError(t, cgo.Wait())
 	cgoDuration := time.Since(started)
 
-	t.Logf("%d waiters, GOMAXPROCS %d, %d threads before", waiters, runtime.GOMAXPROCS(0), baseline)
-	t.Logf("native: peak %d threads (+%d), done %v after start", nativePeak, nativePeak-baseline, nativeDuration)
-	t.Logf("cgo:    peak %d threads (+%d), done %v after start", cgoPeak, cgoPeak-baseline, cgoDuration)
+	t.Logf("%d waiters, GOMAXPROCS %d", waiters, runtime.GOMAXPROCS(0))
+	t.Logf("native: %d threads created, done %v after start", nativeCreated, nativeDuration)
+	t.Logf("cgo:    %d threads created, done %v after start", cgoCreated, cgoDuration)
 
-	require.Less(t, nativePeak-baseline, runtime.GOMAXPROCS(0)+16,
+	require.Less(t, nativeCreated, runtime.GOMAXPROCS(0)+16,
 		"native waiters must not take an OS thread each")
-	require.Greater(t, cgoPeak-baseline, waiters/2,
+	require.Greater(t, cgoCreated, waiters/2,
 		"cgo waiters are expected to hold an OS thread each")
 }
