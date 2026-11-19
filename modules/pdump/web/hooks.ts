@@ -166,6 +166,19 @@ export const usePdumpCapture = (paused: boolean) => {
         packets: [],
     });
     const intervalRef = useRef<number | null>(null);
+    const [lossByConfig, setLossByConfig] = useState<Record<string, number>>({});
+    const pendingLoss = useRef(0);
+
+    const flushLoss = useCallback(() => {
+        const count = pendingLoss.current;
+        if (count === 0) return;
+        pendingLoss.current = 0;
+        const name = bufferRef.current.configName;
+        setLossByConfig(prev => ({
+            ...prev,
+            [name]: Math.min(Number.MAX_SAFE_INTEGER, (prev[name] ?? 0) + count),
+        }));
+    }, []);
 
     const arrivalsCounterRef = useRef<Record<string, number>>({});
     const prevCountersRef = useRef<Record<string, number>>({});
@@ -197,6 +210,7 @@ export const usePdumpCapture = (paused: boolean) => {
     }, []);
 
     const startCapture = useCallback((configName: string) => {
+        flushLoss();
         if (abortControllerRef.current) {
             abortControllerRef.current.abort();
         }
@@ -213,6 +227,7 @@ export const usePdumpCapture = (paused: boolean) => {
         abortControllerRef.current = abortController;
 
         bufferRef.current = { configName, packets: [] };
+        setLossByConfig(prev => ({ ...prev, [configName]: 0 }));
 
         setState((prev) => ({
             ...prev,
@@ -221,6 +236,7 @@ export const usePdumpCapture = (paused: boolean) => {
         }));
 
         const tick = () => {
+            flushLoss();
             flushBuffer();
             if (intervalRef.current !== null) {
                 intervalRef.current = window.setTimeout(tick, FLUSH_INTERVAL_MS);
@@ -268,6 +284,8 @@ export const usePdumpCapture = (paused: boolean) => {
             configName,
             {
                 onMessage: (record: PdumpRecord) => {
+                    if (abortController.signal.aborted) return;
+                    pendingLoss.current += record.lost_before ?? 0;
                     if (pausedRef.current) return;
                     const packetData = record.data
                         ? base64ToUint8Array(record.data)
@@ -317,6 +335,8 @@ export const usePdumpCapture = (paused: boolean) => {
                     counter[cfg] = (counter[cfg] ?? 0) + 1;
                 },
                 onError: (error: Error) => {
+                    if (abortController.signal.aborted) return;
+                    flushLoss();
                     setState((prev) => ({
                         ...prev,
                         liveConfig: null,
@@ -324,6 +344,8 @@ export const usePdumpCapture = (paused: boolean) => {
                     }));
                 },
                 onEnd: () => {
+                    if (abortController.signal.aborted) return;
+                    flushLoss();
                     setState((prev) => ({
                         ...prev,
                         liveConfig: null,
@@ -332,9 +354,10 @@ export const usePdumpCapture = (paused: boolean) => {
             },
             abortController.signal
         );
-    }, [flushBuffer]);
+    }, [flushBuffer, flushLoss]);
 
     const stopCapture = useCallback(() => {
+        flushLoss();
         if (intervalRef.current !== null) {
             // Null first so any in-flight tick callback skips rescheduling.
             const handle = intervalRef.current;
@@ -356,11 +379,14 @@ export const usePdumpCapture = (paused: boolean) => {
             ...prev,
             liveConfig: null,
         }));
-    }, []);
+    }, [flushLoss]);
 
     const clearPackets = useCallback((configName: string) => {
-        packetIdRef.current = 0;
-        bufferRef.current = { configName, packets: [] };
+        const buffer = bufferRef.current;
+        if (!buffer.configName || buffer.configName === configName) {
+            packetIdRef.current = 0;
+            buffer.packets = [];
+        }
         arrivalsCounterRef.current = { ...arrivalsCounterRef.current, [configName]: 0 };
         prevCountersRef.current = { ...prevCountersRef.current, [configName]: 0 };
         setState((prev) => ({
@@ -387,6 +413,7 @@ export const usePdumpCapture = (paused: boolean) => {
     return {
         liveConfig: state.liveConfig,
         packetsByConfig: state.packetsByConfig,
+        lossByConfig,
         ppsByConfig,
         error: state.error,
         isCapturing: state.liveConfig !== null,

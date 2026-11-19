@@ -366,6 +366,7 @@
         font-variant-numeric: tabular-nums;
 
         &--muted { color: var(--yn-text-3); }
+        &--loss { color: var(--yn-warn); }
     }
 }
 

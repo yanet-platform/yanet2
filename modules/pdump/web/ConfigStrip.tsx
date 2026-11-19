@@ -9,6 +9,7 @@ interface ConfigStripProps {
     isCapturing: boolean;
     isCaptureActive: boolean;
     packetCount: number;
+    lostRecords: number;
     ppsHistory: number[];
     onStartCapture: () => void;
     onStopCapture: () => void;
@@ -25,6 +26,7 @@ const ConfigStrip: React.FC<ConfigStripProps> = ({
     isCapturing,
     isCaptureActive,
     packetCount,
+    lostRecords,
     ppsHistory,
     onStartCapture,
     onStopCapture,
@@ -81,6 +83,14 @@ const ConfigStrip: React.FC<ConfigStripProps> = ({
                     <span className="pdump-stat__label">Packets</span>
                     <span className="pdump-stat__value">{packetCount.toLocaleString()}</span>
                 </div>
+                {lostRecords > 0 && (
+                    <div className="pdump-stat" title="Capture records lost from worker rings since this capture started">
+                        <span className="pdump-stat__label">Ring loss</span>
+                        <span className="pdump-stat__value pdump-stat__value--loss">
+                            {lostRecords >= Number.MAX_SAFE_INTEGER && '≥'}{lostRecords.toLocaleString()}
+                        </span>
+                    </div>
+                )}
                 <div className="pdump-stat">
                     <span className="pdump-stat__label">pps</span>
                     <span className="pdump-stat__value">

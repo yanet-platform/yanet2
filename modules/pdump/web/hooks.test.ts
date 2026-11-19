@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
 
 const { createRing, deleteRing, listRings } = vi.hoisted(() => ({
@@ -11,7 +11,8 @@ vi.mock('@yanet/core/api/ring', () => ({
     ring: { createRing, deleteRing, listRings },
 }));
 
-import { useRings } from './hooks';
+import { pdumpApi } from '@yanet/core/api/pdump';
+import { usePdumpCapture, useRings } from './hooks';
 
 describe('useRings', () => {
     beforeEach(() => {
@@ -97,5 +98,66 @@ describe('useRings', () => {
 
         expect(deleted).toBe(false);
         expect(listRings).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('capture ring loss', () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    it('keeps legacy packets and publishes the accumulated loss alongside received packets', async () => {
+        const stream = vi.spyOn(pdumpApi, 'readDump').mockImplementation(() => {});
+        const { result, unmount } = renderHook(() => usePdumpCapture(false));
+        act(() => result.current.startCapture('demo'));
+        const { onMessage } = stream.mock.calls[0]![1];
+        act(() => {
+            onMessage({ data: 'AQI=' });
+            onMessage({ data: 'AwQ=', lost_before: 3 });
+            onMessage({ data: 'BQY=', lost_before: 4 });
+        });
+        await waitFor(() => expect(result.current.lossByConfig.demo).toBe(7));
+        expect(result.current.packetsByConfig.demo?.map(p => Array.from(p.parsed.raw))).toEqual([[1, 2], [3, 4], [5, 6]]);
+        unmount();
+    });
+
+    it('counts losses while paused, isolates streams and keeps the final count until restart', () => {
+        const stream = vi.spyOn(pdumpApi, 'readDump').mockImplementation(() => {});
+        const { result, unmount } = renderHook(() => usePdumpCapture(true));
+        act(() => result.current.startCapture('a'));
+        const first = stream.mock.calls[0]![1];
+        act(() => {
+            first.onMessage({ lost_before: 7 });
+            result.current.startCapture('b');
+        });
+        const second = stream.mock.calls[1]![1];
+        act(() => {
+            first.onMessage({ lost_before: 20 });
+            first.onEnd?.();
+            second.onMessage({ lost_before: 2 });
+            result.current.clearPackets('a');
+            second.onMessage({ lost_before: 3 });
+        });
+        expect(result.current.liveConfig).toBe('b');
+        act(() => result.current.stopCapture());
+        expect(result.current.lossByConfig).toEqual({ a: 7, b: 5 });
+        act(() => result.current.startCapture('a'));
+        expect(result.current.lossByConfig).toEqual({ a: 0, b: 5 });
+        unmount();
+    });
+
+    it('restarts packet numbering after clearing a stopped capture', async () => {
+        const stream = vi.spyOn(pdumpApi, 'readDump').mockImplementation(() => {});
+        const { result, unmount } = renderHook(() => usePdumpCapture(false));
+        act(() => result.current.startCapture('demo'));
+        act(() => stream.mock.calls[0]![1].onMessage({ data: 'AQI=' }));
+        await waitFor(() => expect(result.current.packetsByConfig.demo).toHaveLength(1));
+        act(() => {
+            result.current.stopCapture();
+            result.current.clearPackets('demo');
+            result.current.startCapture('demo');
+        });
+        act(() => stream.mock.calls[1]![1].onMessage({ data: 'AwQ=' }));
+        await waitFor(() => expect(result.current.packetsByConfig.demo).toHaveLength(1));
+        expect(result.current.packetsByConfig.demo?.[0]?.id).toBe(0);
+        unmount();
     });
 });
