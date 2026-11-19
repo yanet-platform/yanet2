@@ -13,6 +13,12 @@
 // entry processing has no packet transmission allowed, so its whole
 // output is dropped and the only chance for a packet to survive is
 // being routed into a device entry by a module.
+//
+// The invocation consumes the entry's deadline — any invocation,
+// including a packet-driven one before the deadline — and the entry
+// becomes the generation's current entry for the duration of the run,
+// so the handlers it dispatches can arm exactly the entry that
+// invoked them.
 static inline void
 worker_run_entry(
 	struct dp_worker *dp_worker,
@@ -22,6 +28,11 @@ worker_run_entry(
 ) {
 	struct device_ectx *device_ectx = device_entry_ectx->abs_device_ectx;
 	struct packet_front *schedule = &device_entry_ectx->schedule;
+
+	device_entry_ectx->deadline_ns = DEVICE_ENTRY_DEADLINE_NEVER;
+	struct device_entry_ectx *previous_entry =
+		config_gen_ectx->current_entry;
+	config_gen_ectx->current_entry = device_entry_ectx;
 
 	struct packet_front active = *schedule;
 	packet_front_init(schedule);
@@ -35,6 +46,8 @@ worker_run_entry(
 			config_gen_ectx, device_entry_ectx, &active
 		);
 	}
+
+	config_gen_ectx->current_entry = previous_entry;
 
 	packet_front_merge(packet_front, &active);
 }
