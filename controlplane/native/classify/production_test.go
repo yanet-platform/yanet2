@@ -16,6 +16,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/native/classify"
 	"github.com/yanet-platform/yanet2/controlplane/native/internal/coracle"
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
+	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
 )
 
 // productionRulesets names the ACL rulesets, JSON files separated by
@@ -52,9 +53,13 @@ type productionRuleset struct {
 }
 
 // loadProductionRulesets reads the rulesets productionRulesets names, or
-// skips the test without them.
+// skips the test without them or in an AddressSanitizer build, whose
+// arenas they do not fit.
 func loadProductionRulesets(t testing.TB) []productionRuleset {
 	t.Helper()
+	if shmalloc.RedZone != 0 {
+		t.Skip("production-shaped rulesets do not fit the arenas of an AddressSanitizer build")
+	}
 	paths := os.Getenv(productionRulesets)
 	if paths == "" {
 		t.Skipf("set %s to measure on production-shaped rulesets", productionRulesets)

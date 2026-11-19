@@ -21,8 +21,9 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
 )
 
-// arenaSize is the size of a test arena, reserved, not touched: a join
-// of production-shaped networks fills most of it.
+// arenaSize is the size of a test arena, reserved and touched only as
+// far as a compile writes or a footprint measure fills it: a join of
+// production-shaped networks fills most of it.
 const arenaSize = 4 << 30
 
 // asanArenaSize is the size of a test arena in an AddressSanitizer
@@ -232,8 +233,9 @@ func measureFootprintOf(t *testing.T, size int, compile func(context *layout.Mem
 		coracle.Unpoison(mapping)
 		require.NoError(t, syscall.Munmap(mapping))
 	}()
-	// The measure fills the arena whole: huge pages fault it in faster.
-	require.NoError(t, syscall.Madvise(mapping, syscall.MADV_HUGEPAGE))
+	// The measure fills the arena whole: huge pages fault it in faster,
+	// and a kernel without them only fills it slower.
+	_ = syscall.Madvise(mapping, syscall.MADV_HUGEPAGE)
 	arena := mapping[1<<20:]
 	copy(arena, footprintPattern)
 	for filled := len(footprintPattern); filled < len(arena); filled *= 2 {
