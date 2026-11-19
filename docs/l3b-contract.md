@@ -220,10 +220,9 @@ consume this logical cap again, but remain physically accounted until reclaimed.
 Other admission limits still apply; passing this object-size bound does not
 guarantee that resources exist for publication.
 
-F26 and O14 also obey section7: every actual growth is at least ×2 and each VS
-requires a finite configurable ceiling. The ceiling field/default/change rules,
-autogrow trigger and memory policy remain engineering decisions, not absence of
-the ceiling requirement.
+F26 and O14 also obey section7: every actual growth is at least ×2, automatic
+growth uses ×2, and each VS has a finite configurable ceiling. The wire field,
+policy default, trigger threshold and memory budget still need approval.
 
 ## 3. Operation Inventory (O01-O23)
 
@@ -276,9 +275,10 @@ Another writer may already have made the token stale; conditional mutations stil
 validate it. Full configuration and actual session capacity use existing readback,
 not a mandatory full snapshot in every mutation response.
 
-The successful O19 and O20 responses remain open for S1 API schema approval.
-O19's accepted policy-token semantics and O20's deletion semantics do not
-select the response payloads. Do not infer them from O03/O07 or O04/O15.
+O19 returns the Service incarnation and policy token of its accepted result.
+A request with the current token and an equal F22 binding returns the same pair. The response
+does not acknowledge worker adoption. O20 returns empty success for accepted
+deletion, not a reclamation acknowledgement. S1 still approves the wire schema.
 
 All existing-object mutations use the complete [section 5 error order](#5-management-surface-permits-and-error-order).
 Create, prepare and read continuations retain their separate rules there.
@@ -772,6 +772,7 @@ and real views apply only after their identity is safely established.
 | Reverse-delivery acquisition/read failure; required deadline, refresh, copy-forward, suppression, revalidation/repreparation or encapsulation length/buffer failure | S6 | Existing shared failure reasons on the delivery branch, distinct per cause; l3b module and safely established VS/real, no partial session/suppression effect or successful output. |
 | Missing/expired session at reverse delivery after owned query; invalid reverse-delivery pin | S6 | l3b delivery owner with known VS, real only when established; no requery/reselect/refanout. |
 | Absent, multiple, stale or unprovable ingress/service association | S6 | External distributor diagnostics, distinct association reasons; no fabricated l3b child attribution. |
+| Quoted-source mismatch; received clone without an owner | S6 | Distinct external distributor reasons outside O16/O17. Count the mismatch before association/query and the clone miss after the ownership query. Neither reserves clone credit or sends clones. |
 | Indeterminate ownership; fanout not-ready (including unknown peers, missing family source or peers exceeding burst); insufficient budget | S6 | External distributor, distinct failures before clone reservation/output as applicable. |
 | Funded clone allocation/complete-copy failure; funded clone encapsulation length/headroom failure | S7 | External distributor per failed attempt, distinct clone failures; remaining funded peers continue, with no refund. |
 
@@ -960,10 +961,12 @@ from the network key and is not reconstructed by current real lookup.
   increases actual capacity at least ×2; power-of-two rounding of a larger target
   already ensures this minimum. Every VS needs a finite configurable capacity
   ceiling within F26's domain: neither initial nor grown capacity may exceed it.
-  The generic API bound is not a per-VS ceiling. Exact field/default/change
-  semantics remain representation decisions; no setting is invented here.
-  Metric, thresholds, step selection(at least ×2), memory policy and resource-
-  pressure behavior remain undecided. Automation does not promise no overflow
+  The generic API bound is not a per-VS ceiling. Automatic growth requests
+  exactly twice the current capacity. Skip it if doubling exceeds the ceiling
+  or if peak-memory admission cannot cover both old and new tables. Do not
+  clamp to a smaller increase. The wire representation, configured default,
+  trigger threshold and exact memory accounting still need agreement.
+  Automation does not promise no overflow
   or waive counted drops on required session-write failure. Shrink is desirable
   later, not mandatory for MVP; the current shrink prohibition remains.
 - Accepted growth advances the VS token; traffic and automatic back retirement
@@ -2402,6 +2405,11 @@ cases below and the packet companion's embedded cases.
   allocation/admission and definite pre-accept failure preserve R1 and its token;
   lost reply/takeover reconciles the same accepted R2, not rollback/republication.
   Equal R2 with current token is a no-op; stale token is Aborted.
+- Gateway reply vectors (**NOT RUN**): O19 returns the accepted pair. An equal
+  F22 binding with the current token returns that same pair. A revision-only
+  change returns a new token, and a stale expected token returns `Aborted`.
+  O20 returns empty success while a retained reader still delays reclamation.
+  Neither response reports worker adoption.
 - Race O02 with O19 and O20, then crash at enrollment/acceptance boundaries.
   No accepted orphan, absent member-index entry or member requiring later policy
   installation is allowed. O20 rejects for even an unlinked/disabled live member.
@@ -2671,6 +2679,7 @@ all earlier checks passing. No assertion chooses overflow behavior (#3121).
 | Malformed applicable MSS option/tail; required MSS buffer failure | Separate set_mss drops without partial modification, before l3b or its session/cursor effects. |
 | Encapsulation length; encapsulation headroom/buffer failure | No fallback or output increment; B is entry to l3b, after separate set_mss if configured. |
 | Reverse delivery missing/expired session after owned query; invalid reverse pin | Delivery-owner drop without requery/reselect/refan; no invented real. |
+| External quoted-source mismatch; received clone without an owner | Distinct reasons owned by the error distributor, not O16/O17. Count the mismatch before association/query and the clone miss after one query. Neither reserves clone credit or sends clones. |
 | External absent; multiple; stale; unprovable association | Distinct external reasons before query/state/clones/tokens, never O16/O17. |
 | External indeterminate ownership; unknown peers; missing needed source; peers above burst; insufficient credit | Distinct external primary reasons, no clone output/reservation on these admission failures. |
 | Funded clone allocation; complete-copy; encapsulation length; headroom failure | Per-failed-attempt external counters, not additional original terminal drops; continue other funded peers without refund. |
@@ -2716,7 +2725,7 @@ Armed later failures are not permission to execute checks after the terminal fau
 | MF09 Acquisition before absence | Required descriptor acquisition fails while a lookup without authoritative context would appear absent -> acquisition-failure, not no-matching-VS or session miss; no cursor advance. Repeat for required Echo eligibility-authority acquisition before deciding VIP membership, with no reply. |
 | MF10 Ordinary dependencies | Policy DENY plus armed session-read failure -> policy-denial only, no session read. A preceding set_mss drop never reaches l3b, with no encapsulation,session or WRR advance. S5 itself has no MSS check. |
 | MF11 Encapsulation ties | Unrepresentable encapsulated length plus insufficient headroom -> length only, no headroom acquisition or commit. Repeat on reverse delivery after a valid owned query and live pin; no required refresh/copy-forward commit, requery or refanout. |
-| MF12 External admission | Stale association plus armed ownership/readiness faults -> stale-association only, no query/tokens. Not-owned with unknown peers plus missing source/burst/credit faults -> unknown-peers only; known peers with the latter three -> missing-source only, no reservation. |
+| MF12 External admission | Stale association plus armed ownership/readiness faults -> stale-association only, no query/tokens. A not-owned original with unknown peers plus missing source/burst/credit faults -> unknown-peers only; known peers with the latter three -> missing-source only, no reservation. A not-owned received clone counts only the clone miss, without checking fanout readiness or reserving credit. |
 | MF13 Independent clones | Funded A allocation failure plus latent encapsulation fault -> allocation only. After successful allocation, complete-copy failure plus unrepresentable length -> copy only. After successful copy, unrepresentable length plus insufficient headroom -> length only. In each case B is valid and still attempted; no later A operation/reason, extra original terminal-drop reason or refund. |
 
 The following additional bounded vectors are **NOT RUN**:
@@ -2869,7 +2878,8 @@ Packet disposition vectors (all **NOT RUN**):
   unique VS then external service association before reverse-key port omission.
   No/multiple/stale/unprovable association consumes/count-drops before query/state/
   clones/tokens. Coherent older binding is usable; owned delivery to sameVS bypasses
-  fanout readiness, not-owned uses only bound-service readiness/peers/budget.
+  fanout readiness. A not-owned original uses only bound-service readiness,
+  peers and budget. A not-owned received clone drops without reservation or fanout.
   No postquery retargeting, recreated-name inheritance or new-VS bucket refill;
   indeterminate still drops without retry/fanout.
 - For both Echo and supported errors in both families, bad ICMP checksums
@@ -3135,7 +3145,10 @@ Required discriminating vectors include:
   readback/lists. Separate CLI/operator/Gateway restart with a live owner does not
   invalidate tokens.
 - Bounded autogrow (**NOT RUN**): default initial65536 and valid nondefault;
-  manual/automatic O14 grow at least ×2 with CAS and no third table. After ceiling
+  manual O14 growth of at least ×2. Observe exactly ×2 from autogrow even when
+  ×4 would fit. Reject growth if the budget fits the new table alone but not
+  both tables together. Preserve the table and its sessions on refusal. Check
+  CAS and no third table. After ceiling
   representation agreement test initial/grown capacity below,at,above ceiling,
   arithmetic overflow and resource refusal: no ceiling bypass,partial acceptance,
   shrink or lost old sessions. At ceiling no overflow-free guarantee is made;

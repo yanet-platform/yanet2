@@ -741,16 +741,19 @@ and udp/other rules remain as defined in the representation contract. Tests are
 Automatic grow-only resizing is MVP scope: l3b operator observes VS tables and
 initiates O14 through Gateway/CP with CAS/admission,no shrink,no growth while a
 physical back exists. Each actual growth is at least ×2; initial default65536 is
-configurable and each VS needs a finite configurable ceiling. Trigger metric,
-thresholds,step selection,memory policy and ceiling representation/default/change
-rules remain open. This is not implicit dataplane growth or overflow-free service;
+configurable and each VS needs a finite configurable ceiling. Automatic growth
+requests exactly ×2 and admits the peak with both tables present. The trigger,
+thresholds, exact memory accounting and ceiling wire schema still need approval.
+This is not implicit dataplane growth or overflow-free service;
 required-write failure remains a counted drop.
 
-Assume `services.yaml` membership and VS configuration agree: VS classification
-selects parent Service without another VIP-membership ACL filter,while retaining
-independent destination predicates. Detecting mismatch and updating classification
-remain OPEN; historical VIP exclusion equivalence is not guaranteed. Full
-historical BGP-agent-failure behavior is not established here.
+When a valid full `services.yaml` snapshot confirms VIP exclusion, block traffic
+processing for that VIP and withdraw its route. The block covers ordinary traffic,
+Echo replies and ICMP error delivery and fanout. Preserve other VIPs of the same
+Service. A failed read or validation does not establish exclusion. Detection,
+propagation and classification ordering still need design and proof. Independent
+ACL destination predicates remain. Full historical BGP-agent-failure behavior is
+not established here.
 
 Before implementation agree snapshot formats,scope,versions,stale-generation and
 delete/return fencing,and recovery between CP apply and result publication.

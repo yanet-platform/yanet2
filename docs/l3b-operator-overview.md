@@ -139,14 +139,15 @@ flowchart TB
     E --> R["Real server"]
 ```
 
-**Assumption:** `services.yaml` section membership agrees with VS and parent
-Service configuration. Classification chooses Service without another internal
-VIP-membership filter; independent destination predicates remain. Mismatch,
-including removing VIP membership while retaining a VS,remains OPEN: detection,
-inter-operator change delivery and classification ordering are not selected.
-Automatic reconciliation or historical VIP-exclusion equivalence is not assured.
+When a valid full `services.yaml` snapshot confirms that it excludes a VIP,
+block traffic processing for that VIP and withdraw its route, even if its VS
+still exists. This includes ordinary forwarding, Echo replies and delivery or
+peer fanout of ICMP errors for that VIP. Do not block other VIPs of the same Service. Read or validation
+failure is not evidence of removal. This does not select a second filter within
+Service ACL. Detection, change delivery and classification ordering still need
+design and proof. Independent ACL destination predicates remain unchanged.
 
-l3b itself answers configured VIP Echo if a linked VS has at least one configured
+l3b itself answers Echo for a configured, non-excluded VIP if a linked VS has at least one configured
 real,even disabled/unhealthy/zero-weight. All-empty or unclaimed VIP gets no reply.
 Echo is not health. Echo and supported ICMP errors bypass ordinary Service ACL;
 errors use an existing-session delivery path without new real selection. External
@@ -175,8 +176,9 @@ Each VS has a session table,initially65536 configurable slots,rounded up to a
 power of two. l3b operator initiates MVP autogrow through CP O14; dataplane never
 changes capacity implicitly. Every actual growth is at least ×2,with VS token,
 memory admission,no physical back and a finite configurable per-VS ceiling.
-Ceiling field/default/change rules,trigger metric,thresholds,step selection and
-resource-pressure policy remain open. Shrink is desirable later,not required for
+Autogrow requests exactly ×2. Skip it if the result exceeds the ceiling or
+peak-memory admission cannot cover both tables. Ceiling field/default/change
+rules, trigger metric, thresholds and exact memory accounting remain open. Shrink is desirable later,not required for
 MVP and currently forbidden. Required-write failure still drops; autogrow does
 not promise no overflow. An existing ACL-map growth loop is a pattern,not l3b
 implementation evidence. Historical10000-VS/100000-real estimates are superseded
@@ -263,12 +265,13 @@ One failed real does not necessarily withdraw the prefix. Administrative disable
 or scheduling weight0 in l3b alone does not change W. Preserve current
 VS/real/checker/revision provenance. Weight schema,domains,absence,validity,
 freshness and checker reduction remain observation-contract approval gates. Never substitute scheduling weight
-or invent missing defaults. Initial/transferred hysteresis across restart,
-recreation or membership change also needs owner agreement: the formula does not choose an
-initial state inside the band. This never waives withdrawal of all managed VIPs after restart.
+or invent missing defaults. On first startup and after restart, initialize quorum to down and require
+fresh evidence at the up threshold. The formula does not carry over an old up
+state. Hysteresis transfer on recreation or membership changes without restart
+still needs agreement. Restart still requires withdrawal of all managed VIPs.
 
-An empty contributing set is not itself readiness evidence. The owner must
-resolve loss of the last contributor before implementing this transition.
+An empty contributing set is not ready. Withdraw the VIP route when its last
+contributing VS disappears.
 Quorum alone is insufficient. Every contributing VS also needs confirmed current
 publication and at least one published real eligible for new traffic. Do not
 compare available l3b capacity against Q again. For example,Q10 with ten healthy

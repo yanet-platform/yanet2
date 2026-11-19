@@ -40,6 +40,11 @@ legitimately give different decisions under the one ACL. Preserve S5 precedence.
 
 ## 12. Packet Surfaces
 
+In the [operator integration](l3b-operator-overview.md), confirmed VIP exclusion
+blocks ordinary forwarding, Echo replies and ICMP error delivery or peer fanout
+for that VIP, even if its VS remains. Bypassing ordinary Service ACL does not
+bypass exclusion. The point of enforcement and update ordering remain to be designed.
+
 ### Packet Drop Precedence
 
 The sequence below orders the selected packet checks for multi-fault attribution,
@@ -58,7 +63,7 @@ it does not add drop reasons. Management RPC precedence is unchanged.
 | S3 ICMP integrity | Bounds-check the required ICMP header/message first; for IPv4 validate the enclosing IPv4 header checksum, then the complete ICMP message checksum. ICMPv6 validates its complete message/pseudo-header checksum. Integrity precedes type, Echo roles and quote parsing. |
 | S4 Branch admission | Reject unsupported ICMP types. Echo: addressed-VIP reply-source role, then request-source/reply-destination role, then acquire required coherent eligibility authority before deciding whether the VIP is linked and active/inactive; acquisition failure is not no-match, an unclaimed VIP uses no-matching-VS, and an all-empty linked set uses Echo-inactive. Only then prepare and hand off the reply, counting any construction failure without a partial reply. No ordinary TCP/UDP VS or service-policy admission, session resolution, real selection or MSS. Error: bounded quote parsing, including structural headers and required fields in wire order, before association/query. Quoted action bits and remaining routes retain their nonexecuting rules. |
 | S5 Ordinary forwarding | Bounds-check required TCP/UDP fields and UDP declared length, then validate applicable IPv4 header checksum before dependent lookup. Do not validate the complete ordinary TCP/UDP checksum. Acquire descriptor/configuration authority before establishing VS match/absence: inability to evaluate is not no-match. Then service-policy availability/evaluation, session-branch choice and eligible-real selection, encapsulation representable length then headroom/buffer, required atomic session commit, handoff. Initial SYN bypasses lookup but requires a pin write; UDP OPS accesses no sessions. MSS belongs to a separate preceding step. Preserve operation-specific dependencies, bounded revalidation/repreparation and no-rollback rules. |
-| S6 External association and delivery | Preserve trusted ingress binding; complete required quote validation before association/query. If association authority cannot be established, classify unprovable rather than fabricate multiple/stale/absent. With established authority, distinguish multiple candidates, a stale-only association, or no association. Query only a valid unique association; indeterminate drops before delivery/fanout. Owned uses local l3b delivery: acquire required authority, resolve the session and validate its live pin, prepare encapsulation with representable length before headroom/buffer, then any required atomic permitted refresh/copy-forward commit and handoff. Preserve operation-specific deadline, suppression and bounded revalidation/repreparation rules; no creation, ordinary service-policy/MSS, reselection, rebind, requery or refanout. Fanout readiness is not a delivery gate. Not-owned checks unknown peer configuration, missing needed source, peers-above-burst, then credit/reservation. |
+| S6 External association and delivery | Preserve trusted ingress binding. Complete quote validation and compare the quoted source with the IP destination carrying the ICMP error before association/query. For clones use the post-decapsulation header. Count and drop a mismatch. If association authority cannot be established, classify unprovable rather than fabricate multiple/stale/absent. With established authority, distinguish multiple candidates, a stale-only association, or no association. Query only a valid unique association; indeterminate counted-drops before delivery/fanout. Owned uses local l3b delivery: acquire required authority, resolve the session and validate its live pin, prepare encapsulation with representable length before headroom/buffer, then any required atomic permitted refresh/copy-forward commit and handoff. Preserve operation-specific deadline, suppression and bounded revalidation/repreparation rules; no creation, ordinary service-policy/MSS, reselection, rebind, requery or refanout. Fanout readiness is not a delivery gate. Not-owned counts and drops a received clone without reservation. Only a not-owned original checks unknown peer configuration, missing needed source, peers-above-burst, then credit/reservation. |
 | S7 Funded peer attempts | Independently for each funded peer: allocation, complete-copy, representable length, then headroom. Stop that failed attempt only; attempt all remaining funded peers without retries/refunds. These failures are not original terminal drops. |
 
 **Selected ordinary integrity and UDP-length policy:**
@@ -144,8 +149,9 @@ their separate S7 attempts, not a global stop after the first failed peer.
   integration boundary, not supported egress.
 - After both address-role checks pass, Echo eligibility aggregates only VSes linked in the invoked ModuleConfig's
   protected coherent configuration, not necessarily the latest published one.
-  At least one configured real among those VSes at the addressed family/VIP
-  makes it active, regardless of administrative enablement, weight or health.
+  A confirmed-excluded VIP does not answer, even if the linked VSes remain.
+  For a non-excluded VIP, at least one configured real among those VSes at the
+  addressed family/VIP makes it active, regardless of enablement, weight or health.
   Echo signals configured VIP availability, not backend health: a nonempty set
   remains sufficient even when every real is disabled, zero-weight or unhealthy.
   An admitted IPv4/v6 Echo Request then produces one reply without session
@@ -250,6 +256,10 @@ their separate S7 attempts, not a global stop after the first failed peer.
   normalization. Before any ownership query, its trusted
   ingress binder selects the actual instance and allowed scope; packet fields
   cannot self-select either. Fully validate the quote, including required ports.
+  Compare the quoted source with the destination of the IP packet carrying the
+  ICMP error, for both IPv4 and IPv6. For a received peer clone, use that IP
+  header after decapsulation, never the tunnel destination. On mismatch, count
+  one drop before association, ownership query or clone-budget reservation.
   For VIP-to-client quotes, use quoted source VIP, quoted source service port and
   quoted TCP/UDP protocol to select a unique immutable VS incarnation, then its
   unique external projected-service-incarnation association. Section 10's global
@@ -281,8 +291,9 @@ their separate S7 attempts, not a global stop after the first failed peer.
   error counted-drops without another ownership query, refresh attempt or peer
   fanout, and without reselection, rebind or revival.
   Fanout readiness is NOT a gate for this owned local delivery. A `not-owned`
-  result uses only the bound external service's readiness, peers and all-or-none
-  budget below; indeterminate handling is unchanged.
+  result for an original uses only the bound external service's readiness,
+  peers and all-or-none budget below. Count and drop a received clone with that result
+  without reserving credit or sending clones. Indeterminate handling is unchanged.
 - The error-distribution module owns peer fanout and final error disposition;
   l3b performs no peer fanout. `indeterminate` consumes and counted-drops the
   original without retry or fanout; received clones never refan. Each projected
@@ -393,6 +404,13 @@ attempts. Recipient admission, decapsulation, clone provenance and the ownership
 query contract require integration proof before activation; source ACLs do not
 constitute cryptographic authentication. Received clones never refan, and external
 trusted-provenance enforcement remains unproved, not implied by this rule.
+
+Compatibility checks with YANET1 (NOT RUN): exercise both ICMP families with
+distinct tunnel and ICMP destinations. A matching quote and otherwise valid
+clone with a valid unique association must produce exactly one ownership query.
+A quote matching only the tunnel destination must produce one counted drop,
+no query and no credit reservation. On a valid clone's ownership miss, count one
+drop without reserving credit or sending another clone.
 
 IPv4 clone ID1/DF0 is separately accepted with known, nonmitigated reassembly risk
 for both inner families: downstream fragmentation with equal outer source,
