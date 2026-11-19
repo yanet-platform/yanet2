@@ -10,7 +10,7 @@ import (
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/controlplane/native/agent"
-	"github.com/yanet-platform/yanet2/controlplane/native/internal/nativetest"
+	"github.com/yanet-platform/yanet2/controlplane/native/nativetest"
 )
 
 // newFixture returns a one-worker dataplane harness with blackhole.

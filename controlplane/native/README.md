@@ -20,7 +20,7 @@ against C byte for byte.
 | `decap` | Decap module configurations | no |
 | `cmd/yanet-native` | Static inspector of a running dataplane | no |
 | `internal/coracle` | Runs the C implementations as the tests' oracle | tests only |
-| `internal/nativetest` | In-process dataplane fixture, the C-then-Go comparison, the test assigner | tests only |
+| `nativetest` | In-process dataplane fixture, the C-then-Go comparison, the test assigner | tests only |
 
 Tests: `make test-only GO_TEST_PACKAGES="./controlplane/native/..."`. The production
 packages build with `CGO_ENABLED=0`. Layouts are generated per architecture, from an amd64

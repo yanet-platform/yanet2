@@ -15,8 +15,8 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/native/cpconfig"
-	"github.com/yanet-platform/yanet2/controlplane/native/internal/nativetest"
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
+	"github.com/yanet-platform/yanet2/controlplane/native/nativetest"
 	"github.com/yanet-platform/yanet2/modules/blackhole/bindings/go/cblackhole"
 )
 
