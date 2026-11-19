@@ -1,3 +1,9 @@
+yanet2 (0.6.0) unstable; urgency=medium
+
+  * Release 0.6.0.
+
+ -- Andrey Kiselev <kiselevandrew@yandex.ru>  Thu, 19 Nov 2026 17:29:48 +0300
+
 yanet2 (0.5.0) unstable; urgency=medium
 
   * Release 0.5.0.
