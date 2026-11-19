@@ -32,7 +32,7 @@ const (
 	fwstateMapV4 = "fwstate_map_v4"
 	fwstateMapV6 = "fwstate_map_v6"
 
-	// plainDomain is the domain of the plain path\'s protocol leaf: the
+	// plainDomain is the domain of the plain path's protocol leaf: the
 	// authored 16 bit encoding, the IP protocol number in the high byte.
 	plainDomain = 0x10000
 )
