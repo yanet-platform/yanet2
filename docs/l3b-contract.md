@@ -405,7 +405,8 @@ retain authored-order target failures and all-or-nothing application.
   validation, then owning-object lookup, then the expected token, then target
   resolution and state-dependent preconditions, then normalized equality, then
   resource admission and acceptance. A compiler error is not automatically an
-  out-of-memory condition. For either create kind, an otherwise valid request
+  out-of-memory condition. For Service, VirtualService and ModuleConfig alike,
+  an otherwise valid create request
   whose target exists returns `AlreadyExists` before checking whether its
   bounded permit is unknown, expired, consumed or invalidated. When the target is absent,
   such a permit returns `Aborted`. Thus a competing create loses with
@@ -572,8 +573,11 @@ metadata-only changes do not.
   and total length, and the CLI returns the complete document or an error. A
   client may impose a stricter local memory limit, but it reports a local
   failure rather than a truncated configuration.
-- Before accepting any state-changing operation, prepare and account the exact
-  encoded snapshot, including all accepted fields. If its total
+- Before accepting a mutation that produces a new accepted configuration export,
+  prepare and account the exact encoded snapshot, including all accepted fields.
+  O04, O15 and O20 do not allocate a replacement export for the deleted object.
+  O01 permit issuance does not produce an export. Other admission checks and
+  protected retirement of existing exports still apply. If a new export's total
   exceeds `config_max_export_bytes`, reject with `ResourceExhausted`, preserving
   accepted state and CAS; never truncate. Exactly the cap passes only this bound,
   not other admission checks. Passing `module_max_bindings` alone guarantees
@@ -2488,6 +2492,9 @@ cases below and the packet companion's embedded cases.
   or other admission may still reject. Repeat through accepted-state-changing
   manual/capacity operations as applicable; preserve validation, stale-token and
   validated no-op precedence, plus complete readback of every accepted export.
+  With other admission checks passing, verify that an otherwise valid O04, O15
+  or O20 is not rejected for lack of space for a replacement export. An existing
+  export stays protected until its readers finish.
 - On an otherwise permitted stateful operation, RST without SYN uses `tcp_time_wait`,
   not immediate deletion. A live authoritative eligible pin remains counted by
   WLC until expiry, then stops; use one positive time_wait timeout and its exact expiry
@@ -2686,9 +2693,9 @@ identity, and `UNAVAILABLE` on an unprovable transition. Check that forwarding
 continues and unrelated groups are unchanged. Read `2^64−1`, then trigger
 rollover with a known increment. Check that the new period includes that
 increment exactly once and excludes old contributions. Repeat for an aggregate
-whose individual cells still fit. When only the byte increment triggers
-rollover, both the packet and byte contributions of that event belong to the
-new period. Also check a subsequent increment.
+whose individual cells still fit. Run both cases: only the packet increment
+triggers rollover, or only the byte increment does. Both contributions of
+the triggering event belong to the new period. Also check a subsequent increment.
 Do not compute a delta across identities or issue a new identity on failure.
 
 | Injected fault | Counter boundary and exclusions |

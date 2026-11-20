@@ -1434,11 +1434,13 @@ authorize production execution, or select passing limits after seeing results.
 | S7 | D08 exploratory BOOTTIME cost experiments before qualification | Measurements and owner clock decision,not qualification pass | S5 |
 
 The order is `S5 → S7 → S6`. S7 requires an approved protocol and separate
-run authorization; it produces no numerical qualification verdict. After S7,
-approve the versioned clock and threshold manifest, then authorize S6 separately.
+run authorization; it produces no numerical qualification verdict.
 If S7 selects a different clock, update the affected S5 implementation and
-repeat its proofs, including suspend, before S6. A run exceeding an applicable
-limit does not pass S6. Approval, run authorization and verdict are distinct.
+repeat its proofs, including suspend. Repeat affected S4 measurements, including
+direct clock-read and full packet-path cost, for the selected implementation.
+Approve the clock and versioned threshold manifest with the applicable evidence,
+then authorize S6 separately. A run exceeding an applicable limit does not
+pass S6. Approval, run authorization and verdict are distinct.
 
 ### Recorded open engineering forks
 
