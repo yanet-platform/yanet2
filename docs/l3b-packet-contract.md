@@ -517,12 +517,15 @@ The following vectors are required and **NOT RUN**:
   pointer is not greater than its length, counted-drops before dispatch with a
   dedicated source-route reason: no transport-dependent processing, VS lookup,
   ACL evaluation, session/selector effects, Echo reply or encapsulation. A
-  malformed option length or pointer in the currently visited option, including a pointer below the RFC 791
-  minimum of 4 or an option length outside the IPv4 option area, counted-drops
-  under a distinct malformed-option reason, never the remaining-route reason
-  for that option. A terminal fault in an earlier option stops the scan.
-  An exhausted option (pointer greater than length, which RFC 791 defines as an
-  exhausted route) is unchanged, as are Record Route and Timestamp handling.
+  malformed option counted-drops under a distinct malformed-option reason,
+  never the remaining-route reason for that option. Before classifying the
+  route, require length of at least 3 within the IPv4 option area and
+  `(length - 3)` divisible by 4. Require pointer at least 4. When the pointer
+  is within the option, require it to start a complete four-byte address at
+  offset 4, 8, 12, and so on, using the one-based RFC 791 pointer.
+  A terminal fault in an earlier option stops the scan. With valid length and
+  a pointer greater than length, the option is exhausted and stays unchanged.
+  Record Route and Timestamp handling stays unchanged.
   l3b executes no route and rewrites no destination. Quoted IPv4 headers are
   validated structurally only: a quoted remaining route is not by itself
   grounds for rejection. RFC 7126 sections 4.3.5 and 4.4.5 recommend dropping
@@ -605,13 +608,19 @@ that check.
 
 | Inner -> outer | Outer TTL / Hop Limit | IPv4 ID and fragmentation field | IPv6 flow label |
 | --- | --- | --- | --- |
-| IPv4 -> IPv4 | Copy inner TTL | Copy inner ID and fragmentation field | N/A |
+| IPv4 -> IPv4 | Copy inner TTL | Copy inner ID and fragmentation field with the reserved flag cleared | N/A |
 | IPv6 -> IPv4 | Copy inner Hop Limit | ID 1, fragmentation field zero | N/A |
 | IPv4 -> IPv6 | Copy inner TTL | N/A | Zero |
 | IPv6 -> IPv6 | Copy inner Hop Limit | N/A | Copy inner flow label |
 
-**Known risk accepted for the current contract, not mitigated:** copied IPv4
-ID/fragmentation fields and IPv6-to-IPv4 ID 1/DF 0 remain unchanged. If outer
+On newly generated outer IPv4 headers, clear the reserved flag before computing
+the checksum. Do not reject an input solely for that flag or modify the inner
+header. This changes the previous whole-field copy, not the ID, DF, TTL or
+fragment checks. Peer clones already use a zero fragmentation field.
+See [RFC 1812 §4.2.2.3](https://www.rfc-editor.org/rfc/rfc1812.html#section-4.2.2.3).
+
+**Known risk accepted for the current contract, not mitigated:** IPv4 ID and DF
+handling and IPv6-to-IPv4 ID 1/DF 0 remain unchanged. If outer
 packets with the same source, destination and protocol reuse an ID and undergo
 downstream fragmentation, their fragments can be misassembled, causing corruption
 or drops. Under RFC 6864 section 4.3, IPv6-to-IPv4 ID 1 with DF 0 repeated for

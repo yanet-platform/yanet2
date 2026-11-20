@@ -2894,13 +2894,19 @@ Packet disposition vectors (all **NOT RUN**):
   reason before dispatch, with no VS lookup, ACL, session, selector or cursor
   effect, Echo reply, reply count or encapsulation. Pointer 12 is exhausted:
   processing continues under the other checks, the option bytes stay unchanged
-  and no source-route reason increments. Pointer 3, and a length extending
-  past the IPv4 option area, count the malformed-option reason, never the
-  remaining-route reason. Record Route and Timestamp options are non-drop
+  and no source-route reason increments. Test pointer 3, misaligned live
+  pointer 5 at length 11, length 4 with pointer 5, and a length extending past
+  the option area. Each counts only malformed-option, even when the pointer
+  exceeds a malformed length. Record Route and Timestamp options are non-drop
   controls. An ICMP error quoting an IPv4 header with a remaining LSRR/SSRR
   route is not rejected for that route and proceeds to structural extraction
   subject to other checks; a quoted malformed option keeps its structural
   quote reason.
+- Outer IPv4 reserved-flag vectors (**NOT RUN**): for IPv4-to-IPv4 IPIP and
+  GRE, use otherwise valid non-fragmented inputs with the reserved flag set.
+  Repeat with DF clear and set. Verify no flag-only drop, unchanged inner
+  bytes, preserved outer ID, DF and TTL, clear outer reserved flag and a valid
+  generated IPv4 header checksum. Peer-clone headers remain unchanged.
 - Trusted ingress scope cannot be self-selected by packet fields. Missing ports
   reject even for portless VS; quoted sourceVIP/source service port/protocol select
   unique VS then external service association before reverse-key port omission.
