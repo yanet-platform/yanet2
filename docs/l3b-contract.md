@@ -2693,8 +2693,8 @@ identity, and `UNAVAILABLE` on an unprovable transition. Check that forwarding
 continues and unrelated groups are unchanged. Read `2^64−1`, then trigger
 rollover with a known increment. Check that the new period includes that
 increment exactly once and excludes old contributions. Repeat for an aggregate
-whose individual cells still fit. Run both cases: only the packet increment
-triggers rollover, or only the byte increment does. Both contributions of
+whose individual cells still fit. At each boundary (cell and aggregate), test
+packet-only overflow and byte-only overflow separately. Both contributions of
 the triggering event belong to the new period. Also check a subsequent increment.
 Do not compute a delta across identities or issue a new identity on failure.
 
