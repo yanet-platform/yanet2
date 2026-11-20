@@ -132,6 +132,7 @@ fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
         .header(shim_dir.join("bindings.h").display().to_string())
         .clang_arg(format!("--target={arch}-unknown-linux-gnu"))
         .clang_args(flags.header_args())
+        .clang_args(flags.sanitizer_args())
         .clang_arg(format!("-I{}", shim_dir.display()))
         // bindgen omits a hidden-visibility function; the attribute is for
         // the C compiler that builds the shim, not for the Rust binding.

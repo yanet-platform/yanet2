@@ -169,12 +169,13 @@ impl CFlags {
         &self.warnings
     }
 
-    /// The sanitizer options of the dataplane's C sources, for the shim of a
-    /// Rust build that is sanitized itself.
+    /// The sanitizer options of the dataplane's C sources.
     ///
-    /// The block allocator lays out red zones when its C is instrumented, so
-    /// the shim's inline copy of it must be instrumented too; an
-    /// uninstrumented Rust binary has no sanitizer runtime to link it with.
+    /// Bindgen always reads the headers with them, so constants selected by
+    /// compiler sanitizer detection match the C build. The shim takes them
+    /// only into a sanitized Rust build: the block allocator lays out red
+    /// zones when its C is instrumented, but an uninstrumented Rust binary
+    /// has no sanitizer runtime to link it with.
     pub fn sanitizer_args(&self) -> &[String] {
         &self.sanitizers
     }
@@ -245,7 +246,7 @@ fn reduce(directory: &Path, tokens: impl Iterator<Item = String>) -> (Vec<String
         let Some((option, joined)) = option else {
             if ABI_OPTIONS.iter().any(|&option| token.starts_with(option)) {
                 args.push(token);
-            } else if token.starts_with("-fsanitize=") {
+            } else if token.starts_with("-fsanitize=") || token.starts_with("-fno-sanitize=") {
                 sanitizers.push(token);
             } else if token.starts_with("-W") && !TOOL_OPTIONS.iter().any(|tool| token.starts_with(tool)) {
                 warnings.push(token);

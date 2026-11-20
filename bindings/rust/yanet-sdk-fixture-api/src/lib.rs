@@ -25,6 +25,7 @@ use yanet_sdk_api::{Agent, Error, ErrorKind};
 use yanet_sdk_fixture::{
     ConfigParts, RouteFibParts, RouteListParts, RouteParts, StashConfigParts, StateConfigParts, TallyConfigParts,
 };
+use yanet_sys::bindings::{ASAN_RED_ZONE, MEMORY_BLOCK_ALLOCATOR_MAX_SIZE};
 
 /// Bytes of a name in a record, the terminating NUL included.
 pub const FIB_NAME_LEN: usize = 64;
@@ -151,6 +152,16 @@ impl Fixture {
                 weights,
             })
         })
+    }
+
+    /// Writes the allocator red-zone size and maximum request size that the
+    /// bindings read from C, in that order, and returns their count.
+    pub fn allocator_constants(_agent: &Agent, values: &mut [u64]) -> Result<u64, Error> {
+        let constants = [ASAN_RED_ZONE as u64, MEMORY_BLOCK_ALLOCATOR_MAX_SIZE as u64];
+        for (value, constant) in values.iter_mut().zip(constants) {
+            *value = constant;
+        }
+        Ok(constants.len() as u64)
     }
 }
 

@@ -56,6 +56,18 @@ func Test_NewFibDevice_LongestName_IsAccepted(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// Test_AllocatorConstants_RustMatchesC verifies that bindgen and the C
+// compiler evaluate allocator constants under the same sanitizer configuration.
+func Test_AllocatorConstants_RustMatchesC(t *testing.T) {
+	bed := newBed(t)
+
+	redZone, maximumSize, err := cfixture.AllocatorConstants(bed.agent)
+
+	require.NoError(t, err)
+	require.Equal(t, cfixture.CASANRedZone, redZone)
+	require.Equal(t, cfixture.CMemoryBlockAllocatorMaxSize, maximumSize)
+}
+
 // Test_NewConfig_NameWithNUL_IsInvalidArgument verifies that a configuration
 // name that holds a NUL is refused instead of being cut short at it.
 func Test_NewConfig_NameWithNUL_IsInvalidArgument(t *testing.T) {

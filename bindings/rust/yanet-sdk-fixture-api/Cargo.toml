@@ -19,6 +19,7 @@ doctest = false
 yanet-sdk = { path = "../yanet-sdk" }
 yanet-sdk-api = { path = "../yanet-sdk-api" }
 yanet-sdk-fixture = { path = "../yanet-sdk-fixture" }
+yanet-sys = { path = "../yanet-sys" }
 
 [build-dependencies]
 yanet-sdk-build = { path = "../yanet-sdk-build" }

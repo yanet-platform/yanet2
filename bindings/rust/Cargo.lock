@@ -838,6 +838,7 @@ dependencies = [
  "yanet-sdk-api",
  "yanet-sdk-build",
  "yanet-sdk-fixture",
+ "yanet-sys",
 ]
 
 [[package]]

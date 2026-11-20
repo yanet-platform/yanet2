@@ -11,6 +11,7 @@ package cfixture
 #include <rte_build_config.h>
 
 #include "api/agent.h"
+#include "common/memory_block.h"
 #include "lib/dataplane/packet/packet.h"
 #include "lib/errors/errors.h"
 #include "yanet_sdk_fixture_api.h"
@@ -26,6 +27,12 @@ yanet_cp_yanet_sdk_fixture_api__fixture_build(
 int
 yanet_cp_yanet_sdk_fixture_api__fixture_free(
 	struct cp_module *module, yanet_error **err
+);
+
+int
+yanet_cp_yanet_sdk_fixture_api__fixture_allocator_constants(
+	struct agent *agent, uint64_t *values, size_t values_len, uint64_t *out,
+	yanet_error **err
 );
 
 struct cp_module *
@@ -150,6 +157,33 @@ const PluginDir = C.YANET_SDK_FIXTURE_PLUGIN_DIR
 // prepended to its frame: the headroom of its buffer less the packet
 // descriptor, which shares the buffer in front of the frame.
 const PrependRoom = int(C.RTE_PKTMBUF_HEADROOM - C.sizeof_struct_packet)
+
+const (
+	// CASANRedZone is the allocator red-zone size that the C compiler sees.
+	CASANRedZone = uint64(C.ASAN_RED_ZONE)
+	// CMemoryBlockAllocatorMaxSize is the largest allocator request that the
+	// C compiler accepts.
+	CMemoryBlockAllocatorMaxSize = uint64(C.MEMORY_BLOCK_ALLOCATOR_MAX_SIZE)
+)
+
+// AllocatorConstants returns the allocator red-zone size and maximum request
+// size that Rust bindgen read from C.
+func AllocatorConstants(agent *ffi.Agent) (uint64, uint64, error) {
+	var values [2]C.uint64_t
+	var count C.uint64_t
+	var cErr *C.yanet_error
+	rc := C.yanet_cp_yanet_sdk_fixture_api__fixture_allocator_constants(
+		(*C.struct_agent)(agent.AsRawPtr()),
+		&values[0],
+		C.size_t(len(values)),
+		&count,
+		&cErr,
+	)
+	if rc != 0 {
+		return 0, 0, fmt.Errorf("failed to read allocator constants: %w", cerrors.FromC(unsafe.Pointer(cErr)))
+	}
+	return uint64(values[0]), uint64(values[1]), nil
+}
 
 // FibNameLen is the size of a name in a FIB record, the terminating NUL
 // included.
