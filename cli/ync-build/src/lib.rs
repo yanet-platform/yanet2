@@ -15,6 +15,7 @@ mod generator;
 /// repository root as seen from the crate.
 pub struct Build {
     root: PathBuf,
+    extra_includes: Vec<PathBuf>,
     protos: Vec<PathBuf>,
     builder: Builder,
     runtime: &'static str,
@@ -27,17 +28,36 @@ pub struct Build {
 /// holding only its name, so CLIs keep importing the service-name constant
 /// from there.
 pub fn client(root: impl AsRef<Path>, protos: &[&str]) -> Build {
-    let builder = tonic_prost_build::configure()
-        .emit_rerun_if_changed(false)
-        .extern_path(".common.commonpb.v1", "::commonpb::pb")
-        .extern_path(".common.filterpb.v1", "::filterpb::pb");
-
     Build {
         root: root.as_ref().to_path_buf(),
+        extra_includes: Vec::new(),
         protos: protos.iter().map(PathBuf::from).collect(),
-        builder,
+        builder: shared_configure(),
         runtime: "::ync::rpc",
     }
+}
+
+/// Starts a client build with extra proto include directories, for a
+/// module living outside the checkout.
+///
+/// The module's own protos resolve through the extra directories while
+/// their imports keep resolving against the checkout the CLI builds
+/// against.
+pub fn client_includes(root: impl AsRef<Path>, extra_includes: &[impl AsRef<Path>], protos: &[&str]) -> Build {
+    Build {
+        root: root.as_ref().to_path_buf(),
+        extra_includes: extra_includes.iter().map(|p| p.as_ref().to_path_buf()).collect(),
+        protos: protos.iter().map(PathBuf::from).collect(),
+        builder: shared_configure(),
+        runtime: "::ync::rpc",
+    }
+}
+
+fn shared_configure() -> Builder {
+    tonic_prost_build::configure()
+        .emit_rerun_if_changed(false)
+        .extern_path(".common.commonpb.v1", "::commonpb::pb")
+        .extern_path(".common.filterpb.v1", "::filterpb::pb")
 }
 
 impl Build {
@@ -68,13 +88,16 @@ impl Build {
             println!("cargo:rerun-if-changed={}", proto.display());
         }
 
+        let mut includes = vec![self.root.clone()];
+        includes.extend(self.extra_includes.iter().cloned());
+
         let mut config = Config::new();
         config.service_generator(Box::new(ClientGenerator::new(self.runtime)));
 
         self.builder
             .build_client(false)
             .build_server(false)
-            .compile_with_config(config, &protos, &[self.root])?;
+            .compile_with_config(config, &protos, &includes)?;
 
         Ok(())
     }

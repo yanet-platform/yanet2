@@ -1,0 +1,21 @@
+[package]
+name = "yanet-servicepb"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+prost.workspace = true
+serde = { workspace = true, features = ["derive"] }
+tonic.workspace = true
+commonpb.workspace = true
+filterpb.workspace = true
+readinesspb.workspace = true
+ync-rpc.workspace = true
+
+[build-dependencies]
+ync-build.workspace = true

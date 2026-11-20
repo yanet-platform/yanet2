@@ -39,6 +39,7 @@ make fuzz [MODULE=<name>]
 - `lint/` — repo linters (`style`, `commit`, `protobuf`); `docs/`, `deploy/`, `debian/`, `subprojects/dpdk/`.
 
 - `lab/` — local QEMU lab library; `cmd/yanet-lab/` — developer-only lab CLI (not packaged); `tests/functional/framework/` — QEMU harness shared by functional tests and the lab (imports `testing`).
+- `sdk/` — build-side surface for out-of-tree modules: pkg-config metadata + ABI-version archive generated into `build/sdk/`; `sdk/example/` is a complete reference module built as if external (`make sdk-example`, docs/module-sdk.md).
 
 ### Module layout (canonical — decap, dscp, forward, route as reference)
 

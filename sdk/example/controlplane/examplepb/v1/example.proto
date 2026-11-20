@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+package sdk.example.controlplane.examplepb.v1;
+
+option go_package = "github.com/yanet-platform/yanet2/sdk/example/controlplane/examplepb/v1;examplepb";
+
+// ExampleService is the controlplane service of the reference out-of-tree
+// module.
+service ExampleService {
+  // ListConfigs returns all example module configurations of all
+  // dataplane instances.
+  rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
+
+  // ShowConfig returns the current configuration for the example module.
+  rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
+
+  // UpdateConfig creates or replaces the named example config and publishes
+  // it to the dataplane.
+  rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
+
+  // DeleteConfig removes the named example config when it is no longer
+  // referenced by any pipeline.
+  rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse);
+}
+
+message ListConfigsRequest {}
+
+// ListConfigsResponse contains existing configurations.
+message ListConfigsResponse { repeated string configs = 1; }
+
+// ShowConfigRequest retrieves the runtime configuration for the example
+// module.
+message ShowConfigRequest { string name = 1; }
+
+// ShowConfigResponse contains the configuration details of the example
+// module.
+message ShowConfigResponse { string name = 1; }
+
+// UpdateConfigRequest names the config to create or replace.
+//
+// The example config carries no payload, since the module unconditionally
+// drops every packet routed to it.
+message UpdateConfigRequest { string name = 1; }
+
+// UpdateConfigResponse is the response to an UpdateConfig call.
+message UpdateConfigResponse {}
+
+// DeleteConfigRequest names the config to delete.
+message DeleteConfigRequest { string name = 1; }
+
+// DeleteConfigResponse is the response to a DeleteConfig call.
+message DeleteConfigResponse {}
