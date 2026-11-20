@@ -160,8 +160,9 @@ Only a new complete, valid snapshot that includes the VIP can trigger
 reinstatement. While the block remains, confirm current local publication,
 fresh health and quorum, an eligible real for each contributing VS, and `ADOPTED` for the
 required ACL, including idle relevant workers. Do not rely on traffic through
-the VIP or on an advertised route. CP then publishes removal of the block
-for that same current intent generation.
+the VIP or on an advertised route. Publish removal of the block only while
+the same intent generation and all prerequisite evidence are still current
+at the publication decision. Otherwise keep the block.
 Workers may process direct traffic after applying that admission. Confirm
 adoption and recheck current readiness before setting Ready and announcing.
 The restart and failure recovery barrier for BIRD removal and export still applies.

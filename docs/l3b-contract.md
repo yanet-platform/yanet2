@@ -718,9 +718,9 @@ Expose exact `uint64` totals for the current accumulation period, including
 aggregates. Before overflow, automatically start a zero-based period for the
 affected group with a fresh accumulation identity. Do not restart the VS or
 change configuration, sessions, forwarding or unrelated groups. Report only
-the new period's value after the transition. If a contribution triggers a
-proven rollover, account for it exactly once in the new period, including in
-aggregates. Clients must not compute deltas
+the new period's value after the transition. If an event triggers a proven
+rollover, account for all its contributions to the affected group exactly once
+in the new period, including in aggregates. Clients must not compute deltas
 across identities. `2^64−1` is representable. If a value is already out of
 range or the transition cannot be proven, return `UNAVAILABLE` for that group
 without a numeric substitute until a valid period starts. Overflow alone does
@@ -2686,7 +2686,9 @@ identity, and `UNAVAILABLE` on an unprovable transition. Check that forwarding
 continues and unrelated groups are unchanged. Read `2^64−1`, then trigger
 rollover with a known increment. Check that the new period includes that
 increment exactly once and excludes old contributions. Repeat for an aggregate
-whose individual cells still fit. Also check a subsequent increment.
+whose individual cells still fit. When only the byte increment triggers
+rollover, both the packet and byte contributions of that event belong to the
+new period. Also check a subsequent increment.
 Do not compute a delta across identities or issue a new identity on failure.
 
 | Injected fault | Counter boundary and exclusions |
@@ -3187,6 +3189,10 @@ Required discriminating vectors include:
   arithmetic overflow and resource refusal: no ceiling bypass,partial acceptance,
   shrink or lost old sessions. At ceiling no overflow-free guarantee is made;
   required writes still fail closed.
+- O03 ceiling precedence (**NOT RUN**): submit an otherwise valid in-domain
+  ceiling below current capacity. Expect `FailedPrecondition` with a current
+  token and `Aborted` with a stale token. Neither request changes the accepted
+  configuration, token, capacity or sessions.
 - Permit millisecond boundaries (**NOT RUN**): valid_for_ms=300000 at issuance;
   create at t+299999 may accept, at t+300000 or later rejects with `Aborted`
   for an absent target. A present otherwise-valid target retains `AlreadyExists`.
