@@ -118,6 +118,7 @@ CLI_RELEASE_BINARIES := $(addprefix $(RELEASE_DIR)/,$(CLI_BINARIES))
 	build \
 	dataplane \
 	go-test-prepare \
+	native-layout \
 	install \
 	clean \
 	go-cache-clean \
@@ -184,7 +185,7 @@ lint-go:
 	go test ./lint/style/cmd/stylelint/
 	go run ./lint/style/cmd/stylelint/
 	@if command -v golangci-lint >/dev/null 2>&1; then \
-		$(MAKE) proto-go; \
+		$(MAKE) proto-go native-layout; \
 		golangci-lint run ./...; \
 	else \
 		echo "WARN: 'golangci-lint' not found, skipping modernize lint (install: https://golangci-lint.run/welcome/install/)"; \
@@ -267,6 +268,15 @@ dataplane: build
 go-test-prepare:
 	meson compile -C build go-test-prepare
 	@test -f build/yanet_cgo_cppflags || { echo "ERROR: build/yanet_cgo_cppflags not found: go tests need this checkout's own build/, not a link to another one (remove it and run 'meson setup build')"; exit 1; }
+
+# Generates the native control plane's views of the shared-memory structures,
+# which the Go packages need to compile.
+#
+# A configured build/ is enough. The build files are regenerated first: a
+# build/ configured before this target existed does not know it.
+native-layout:
+	ninja -C build build.ninja
+	meson compile -C build native-layout
 
 cli: cli-build
 
