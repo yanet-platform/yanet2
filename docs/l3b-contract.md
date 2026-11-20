@@ -149,7 +149,7 @@ representation and the protobuf/C consequences.
 | F08 | OPS and removed `pure_l3` | OPS is the only public VS flag, a separate boolean omitted as false; other typed booleans remain. TCP-only true is `InvalidArgument`; false/absent is valid. UDP-only and mixed true is retained and acts only on actual UDP. Session/transition rules and validation precedence are in [section 10](#10-scheduler-ops-weights-and-identities). The redundant `pure_l3` switch is rejected; portless mode derives from F02 port absence. |
 | F09 | WLC power | Requested uint32 domain 0..100: absent/0 stores 0 and uses effective 10; 1..100 stores and uses the supplied value. Values >100 are `InvalidArgument`, not clamped or retained. Requested 0 differs from requested 10 in equality/readback. No public `max_weight`; the fixed selector-parameter ceiling 100 is not an input-weight limit. |
 | F10 | WLC inputs, samples and confirmation | Complete all-worker sampling, generation-scoped fallback and guarded confirmation under [section 8](#wlc-inputs-and-observations). Requested cadence 20 ms, not a deadline or adoption SLO; derived results/observations are read-only. |
-| F11 | WLC geometry and resource admission | Logical lookup length 1600*N over all configured unique real bindings including disabled and zero-weight members; an explicit empty selector at N=0. The aggregate binding charge is at most 2097151 per actual dataplane-instance registry across all three schedulers and agent owners, including unlinked VSes; physical admission is separate; all arithmetic is checked before narrowing or allocation. The 10000-VS and 100000-real values are unqualified planning inputs, not API caps. |
+| F11 | WLC geometry and resource admission | Logical lookup length 1600*N over all configured unique real bindings including disabled and zero-weight members; an explicit empty selector at N=0. The aggregate binding charge is at most 2097151 per actual dataplane-instance registry across all three schedulers and agent owners, including unlinked VSes; physical admission is separate; all arithmetic is checked before narrowing or allocation. The historical 10000-VS/100000-real envelope is not the current target or an API cap. See the [MVP scale gate](l3b-mvp-spec.md#stages-to-an-mvp). |
 | F12 | Internal WRR cursor (not writable VS format) | Unsigned 64-bit. For a coherent nonempty expanded sequence of length L, `next = (cursor + 1) mod 2^64` and `slot = next mod L`; only a successful coherent selection commits `cursor = next`, and a later failure does not roll it back. Per worker and VS incarnation, shared across links, preserved across ordinary replacement and a control-plane restart. Wrap is ordinary arithmetic and may break strict cyclic order when L does not divide 2^64. Internal runtime state: no public cursor setter and no 32-bit narrowing. |
 | F13 | `session_timeouts.tcp` and `tcp_established` | `tcp` is the common fallback for three TCP classes, not a separate class. `tcp_established` selects established for TCP without SYN, FIN or RST. Optional uint32 milliseconds, 0..4294967295; absent/null inherits, explicit0 is retained. For each class: per-VS class → per-VS tcp → global class → global tcp →60000ms; section7 defines resolution. |
 | F14 | `session_timeouts.tcp_syn` | Class syn: any TCP SYN regardless of ACK/FIN/RST, only for an otherwise permitted write. Optional uint32 milliseconds, inheritance per F13, not tcp_established; explicit0 retained. The class alone does not authorize lookup bypass or rescheduling. |
@@ -221,8 +221,12 @@ Other admission limits still apply; passing this object-size bound does not
 guarantee that resources exist for publication.
 
 F26 and O14 also obey section7: every actual growth is at least ×2, automatic
-growth uses ×2, and each VS has a finite configurable ceiling. The wire field,
-policy default, trigger threshold and memory budget still need approval.
+growth uses ×2, and each VS has a finite configurable ceiling. O02 uses an
+explicit `max_session_slots`, taking the configured deployment ceiling only
+if the field is absent. If neither
+exists, reject O02, not control-plane startup. O03 requires `max_session_slots`
+and never keeps it by omission. The exact wire schema and resource settings
+are engineering work.
 
 ## 3. Operation Inventory (O01-O23)
 
@@ -240,8 +244,8 @@ or permit-kind reinterpretation is allowed under C05.
 | ID | Operation | Selected semantics |
 | --- | --- | --- |
 | O01 | `PrepareCreate` | Explicit absence preparation, not a `Get` side effect; a distinct bounded grant, no name or resource reservation, no payload binding. An existing target is `AlreadyExists` without a new grant; fixed expiry and invalidation of all permits from the preceding absence interval apply. An unrepresentable server-side expiry returns `Unavailable` with no grant under section 5's order. A lost response may retain a record; no deduplication and no invisible extension. |
-| O02 | `CreateVirtualService` | Full VS configuration with required F40 parent reference, optional F39 VS/real strings and a VIRTUAL_SERVICE create permit. Validate the parent and enroll authoritative membership in the same recoverable acceptance as the VS, ordered against parent deletion. New reals are administratively disabled. Return the VS incarnation/token; no upsert, implicit parent creation or F22 payload. Other create error/uncertain-outcome rules remain unchanged. |
-| O03 | `UpdateVirtualService` | Full VS replacement with required unchanged F40 parent and expected VS token. Absent is `NotFound`; stale token is `Aborted` even for equal input. Preserve survivor weights, administrative state, incarnations, pins, session deadlines and capacity; apply F39 defaults/equality. Equal normalized input is a no-op; changes advance only the VS token once. Network identity and parent are immutable. No F22 payload or per-VS policy update. |
+| O02 | `CreateVirtualService` | Full VS configuration with required F40 parent reference, optional F39 VS/real strings and a VIRTUAL_SERVICE create permit. Validate the parent and enroll authoritative membership in the same recoverable acceptance as the VS, ordered against parent deletion. New reals are administratively disabled. Return the VS incarnation/token; no upsert, implicit parent creation or F22 payload. Other create error/uncertain-outcome rules remain unchanged. O02 takes explicit `max_session_slots` or resolves it from the deployment profile. |
+| O03 | `UpdateVirtualService` | Full VS replacement with required unchanged F40 parent and expected VS token. Absent is `NotFound`; stale token is `Aborted` even for equal input. Preserve survivor weights, administrative state, incarnations, pins, session deadlines and capacity; apply F39 defaults/equality. Equal normalized input is a no-op; changes advance only the VS token once. Network identity and parent are immutable. No F22 payload or per-VS policy update. `max_session_slots` is mandatory. Changing it does not resize or change sessions. |
 | O04 | `DeleteVirtualService` | The current VS token; absent is `NotFound`; accepted incoming links are `FailedPrecondition` with no cascade. Accepted deletion atomically removes live parent membership and owns session cleanup; old configurations and readers delay reclamation. No operator state-delete command or resurrection through delayed create/link; same-name recreation gets fresh incarnation and sessions. |
 | O05 | `ListVirtualServices` | Bounded authoritative lexical VS inventory with section 6 membership coherence, continuation and recovery rules. Optional F40 Service filter: both name/incarnation required together; an absent parent is `NotFound`, wrong incarnation or stale member-set cursor is `Aborted`. Filtered pages expose exact member names/incarnations and bind the filter, parent incarnation and member-set revision. No usable partial page on failure or permit/token issuance side effect. |
 | O06 | `CreateModuleConfig` | A distinct create with the complete explicit members or empty binding collection, optional F39 ModuleConfig string and a create token, no upsert; every link is validated by target incarnation and any invalid link rejects the whole operation. No internal common-policy field. |
@@ -710,10 +714,16 @@ identical cells and accumulated state with proven issuance metadata may retain
 the prior identity under the iff rule above; otherwise require a fresh safely
 issued identity before reporting that group as available.
 
-Counter numeric domains and observable arithmetic at overflow remain a separate
-preimplementation obligation; no physical width, wrap or saturation behavior is
-selected here. Accumulation identity alone does not settle that obligation;
-[#3121](https://github.com/yanet-platform/yanet2/issues/3121) owns that deferred work.
+Expose exact `uint64` totals for the current accumulation period, including
+aggregates. Before overflow, automatically start a zero-based period for the
+affected group with a fresh accumulation identity. Do not restart the VS or
+change configuration, sessions, forwarding or unrelated groups. Report only
+the new period's value after the transition. Clients must not compute deltas
+across identities. `2^64−1` is representable. If a value is already out of
+range or the transition cannot be proven, return `UNAVAILABLE` for that group
+without a numeric substitute until a valid period starts. Overflow alone does
+not issue an identity. [#3121](https://github.com/yanet-platform/yanet2/issues/3121)
+tracks the mechanism and conformance, not a new product decision.
 
 ### Semantic Counter Catalogue
 
@@ -964,8 +974,15 @@ from the network key and is not reconstructed by current real lookup.
   The generic API bound is not a per-VS ceiling. Automatic growth requests
   exactly twice the current capacity. Skip it if doubling exceeds the ceiling
   or if peak-memory admission cannot cover both old and new tables. Do not
-  clamp to a smaller increase. The wire representation, configured default,
-  trigger threshold and exact memory accounting still need agreement.
+  clamp to a smaller increase. CP admits the peak for both tables including
+  required metadata such as suppression. Setting the ceiling does not reserve
+  memory. Resolve the ceiling once on O02, persist it and return it on VS
+  readback. Policy changes do not rewrite existing ceilings. Validate the
+  configured ceiling against the rounded default initial size. Compare the
+  rounded O02/O14 capacity to the ceiling without rounding the ceiling up.
+  O03 cannot lower it below current capacity and does not resize or change
+  sessions. The VS token orders O03 and O14. Bounds, encoding, the growth
+  trigger and exact memory accounting belong to technical design.
   Automation does not promise no overflow
   or waive counted drops on required session-write failure. Shrink is desirable
   later, not mandatory for MVP; the current shrink prohibition remains.
@@ -2283,7 +2300,7 @@ qualification.
 | F23 ModuleConfig bindings | COL; each member has R name and R VS incarnation bytes 1..256; duplicates reject; order retained; empty unlinks only. No VIP, protocol or range fields on a link. | One atomic all-target validation; name and incarnation are separate, not token parsing. |
 | F24 removed mss_fix/fix_mss | X, including false,0 and null; numeric MSS in VS is also X. | No embedded MSS processing or alias in l3b. Separate set_mss applies its configurable uint16 limit(default1220) only to TCP/IPv6 SYN without RST and never inserts a missing MSS. |
 | F25 DSCP | All old packed or per-VS DSCP inputs are X even null or 0; the separate `dscp` module owns marking. | No field in the new descriptor or C config; no shared token. |
-| F26 initial_session_slots; new_slots; actual_slots | Create only: D(current `l3b.policy.session_default_slots`, initially 65536); explicit 0 also means that default; the default or a positive value in 1..1073741824 rounds to the next power of two with minimum 16. Resize: R positive in the same domain; zero rejects. Actual slots RO. An initial size inside a replacement is X. | A creation envelope separate from the descriptor; the raw resize value is compared before rounding: shrink `FailedPrecondition`, equal no-op, back-blocked growth `FailedPrecondition`. |
+| F26 initial_session_slots; new_slots; actual_slots | Create only: D(current `l3b.policy.session_default_slots`, initially 65536); explicit 0 also means that default; the default or a positive value in 1..1073741824 rounds to the next power of two with minimum 16. Resize: R positive in the same domain; zero rejects. Actual slots RO. An initial size inside a replacement is X. `max_session_slots`: explicit or deployment-profile ceiling on O02, mandatory on O03, accepted value on readback. See section 7. | A creation envelope separate from the descriptor; the raw resize value is compared before rounding: shrink `FailedPrecondition`, equal no-op, back-blocked growth `FailedPrecondition`. |
 | F27 encapsulation mode | D(IPIP) optional enum; explicit unspecified, unknown or NAT rejects; GRE is supported with the fixed minimal header; key, checksum and sequence inputs are excluded. | Presence is distinct from enum zero; checked C mode mapping. |
 | F28 expected token, real target vector/incarnation, returned identities | Expected token R bytes 1..256. O09/O10 vector R nonempty, no null members; each full F03 key, incarnation R bytes 1..256 and operation value R. Duplicate normalized full keys reject even with different incarnations. Returned object incarnation and token are RO bytes 1..256; link-target incarnations use the same width. | Copied length plus bytes. Structural vector errors precede token checks. Owner absence `NotFound`; stale token `Aborted` before target lookup; then first target error in authored order: missing real `NotFound`, wrong incarnation `Aborted`. Final candidate validated and published atomically; no new vector cap. |
 | F29 prepare kind and name; create token; valid_for_ms | Kind R SERVICE, VIRTUAL_SERVICE or MODULE_CONFIG; name per F01; create token R bytes1..256 bound to exact kind/name/instance/owner context; valid_for_ms RO uint32 milliseconds reports the issuance-fixed configurable duration(default300000). The16384 permit count covers all kinds/issuers. | Missing/empty/oversized token is InvalidArgument; well-shaped unknown/expired/consumed/context-mismatched permit is Aborted for an absent target. Valid existing target is AlreadyExists; recovery or unrepresentable expiry is Unavailable without a grant. Kind is never inferred or migrated implicitly; policy changes do not extend issued permits. |
@@ -2297,7 +2314,7 @@ qualification.
 | F40 parent Service | R message with R F01 name and R incarnation bytes 1..256, base64 in text; no null/empty/multiple parent, no inference from policy tuple. Required unchanged on O03. | Copy and retain the exact identity-bound Service handle; checked lengths before C. Missing/invalid is InvalidArgument; live parent change is FailedPrecondition after VS CAS. |
 | F41 Service and filtered membership | Service uses F01 name, F28 incarnation/token and F22 policy. O05 filter is OPT; if present, both F40 identity fields R. O05 rows include VS name/incarnation, not mutable config. O23 observations RO under the existing F37 identity/enum/provenance domains. | Purpose/kind/parent/member-revision-bound bounded pages. Service export excludes membership; VS export excludes F22. Exact schema and status cursor codec remain preimplementation work. |
 | F37 GetModuleConfigStatus | RO accepted incarnation/token, target publication, authoritative worker cohort and typed adoption state under section 6. | No input default/setter, no exclusion of idle workers; codecs/layout remain downstream. |
-| F38 Counter observations | RO semantic identity, accumulation identity, values and provenance in O16 VS/full-key-and-incarnation real groups and O17 module totals/reasons/Echo groups, typed available/unavailable/not-applicable. Full section 6 catalogue includes unimplemented paths; external counters stay external. | Current binding only, shared cells once; no fabricated zero or unknown child attribution, historical aggregation or continuity promise; exact codecs/layout and #3121 numeric/overflow decisions remain downstream. |
+| F38 Counter observations | RO semantic identity, accumulation identity, values and provenance in O16 VS/full-key-and-incarnation real groups and O17 module totals/reasons/Echo groups, typed available/unavailable/not-applicable. Full section 6 catalogue includes unimplemented paths; external counters stay external. | Current binding only, shared cells once; no fabricated zero or unknown child attribution, historical aggregation or continuity promise; codecs, layout and implementation of section 6 accumulation-period rollover are technical work under #3121. |
 | F39 VS, real and ModuleConfig metadata | D(empty) protobuf string; ProtoJSON/YAML string, 0..256 decoded UTF-8 bytes, valid UTF-8, no NUL. Missing, textual null and empty normalize to empty on create/full replacement. Reject numeric/bool/object/list coercion; YAML `"10"` is text, 10 rejects. Preserve whitespace, case and Unicode without trim/normalization; no interpretation, uniqueness or inheritance. | Check decoded UTF-8 byte length before C; owned length-delimited data, no truncation or selected physical layout. All strings enter normalized equality after survivor preservation; real strings use owning VS CAS, ModuleConfig its own CAS. Coherent accepted readback, normal admission/publication and existing budgets apply. Partial/runtime/resize/recovery preserve strings; recreation uses newly supplied/default strings. Final wire names/tags/ABI remain downstream. |
 
 ### Byte-Page Framing, Cursor Errors And Read-Only Identities
@@ -2659,7 +2676,12 @@ Counter delta vectors are **NOT RUN**. Start from known non-overflowing values a
 one invocation with entry buffer length B. Each terminal fault below increments
 input by(1,B), drop by(1,B), exactly its primary reason by1 and output by0 at the
 detecting owner. Exercise every semicolon-separated alternative separately, with
-all earlier checks passing. No assertion chooses overflow behavior (#3121).
+all earlier checks passing. Separate #3121 vectors (**NOT RUN**) cover the
+maximum value, cell and aggregate overflow, automatic new period with a fresh
+identity, and `UNAVAILABLE` on an unprovable transition. Check that forwarding
+continues and unrelated groups are unchanged. Add a known nonzero increment
+after verified rollover and read exactly that value under the new identity.
+Do not compute a delta across identities or issue a new identity on failure.
 
 | Injected fault | Counter boundary and exclusions |
 | --- | --- |
@@ -3367,8 +3389,8 @@ All obligations above are specification obligations, **NOT RUN**.
    protocol and distinguish exploratory baseline measurements from qualification.
    The workload, target matrix, numeric qualification thresholds and statistical
    method require accountable-owner approval before qualification execution;
-   they must not be fitted to its results. The 10000 VS / 100000 real values remain
-  unqualified planning scale. Existing run permission and accountable owners are
+   they must not be fitted to its results. The target of 100000 VS averaging 1000
+  reals requires separate registry, ABI and pool evidence. Existing run permission and accountable owners are
   retained; this sequence neither authorizes execution nor qualifies performance.
   NAT rejection is fixed by F27 and
   section 12, not an open mode-selection decision.

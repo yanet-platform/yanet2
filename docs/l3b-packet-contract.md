@@ -43,7 +43,11 @@ legitimately give different decisions under the one ACL. Preserve S5 precedence.
 In the [operator integration](l3b-operator-overview.md), confirmed VIP exclusion
 blocks ordinary forwarding, Echo replies and ICMP error delivery or peer fanout
 for that VIP, even if its VS remains. Bypassing ordinary Service ACL does not
-bypass exclusion. The point of enforcement and update ordering remain to be designed.
+bypass exclusion. CP publishes one VIP admission decision, including for
+`unrdup`. Planned withdrawal follows block publication. Emergency withdrawal
+does not wait for CP. Once the approved reader-lag bound expires, a pending
+delivery or clone emission must not use an older allow. This does not recall
+packets already emitted. Enforcement points and timing need design.
 
 ### Packet Drop Precedence
 
@@ -284,7 +288,8 @@ their separate S7 attempts, not a global stop after the first failed peer.
   to now plus `other`, unless OPS suppresses refresh for actual quoted UDP;
   mixed-VS TCP still refreshes. It creates no session,
   selects no new real, rebinds no affinity and revives no expired record.
-  Queries never mutate sessions. Query/delivery API placement, execution
+  Query and handoff stay inside the dataplane, not over RPC. Queries never
+  mutate sessions. API shape, execution
   context, packet ownership and protected generation lifetime require
   downstream integration proof, not access to shared tables by the caller.
   If the session is absent or expired at delivery after an `owned` query, the

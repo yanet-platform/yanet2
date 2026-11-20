@@ -59,7 +59,7 @@ flowchart LR
 | Management system | External desired Service/VS/real configuration |
 | l3b adapter | Sole writer of complete,durable,versioned local desired snapshots for both operators |
 | ACL Adapter | Separately assembles and atomically publishes firewall rules; does not manage CP Service objects |
-| ACL operator | Consumes desired Service/policyRef and rule publication; validates/translates rules; owns Service/ACL create,update,delete and rule revisions; result snapshot is a working candidate |
+| ACL operator | Consumes desired Service/policyRef and rule publication; validates/translates rules; owns Service/ACL create,update,delete and rule revisions; publishes a separate durable result snapshot |
 | Monalive | Checks reals,keeps failure history,sends results/freshness; operator controls check membership. No authoritative Q/H decision or direct Gateway/shared-memory access |
 | l3b operator | Owns VS/reals/ModuleConfig,health integration,autogrow,Q/H,hysteresis,contributing ports/VS and final readiness. Matches ACL intent/result and confirms CP publication; does not mutate Service/ACL |
 | Gateway | API entry and platform authorization,not health owner |
@@ -86,9 +86,9 @@ and tracks revisions. CP,not adapter,assigns Service incarnation on creation.
 Both operators reread snapshots on start and reconcile accepted CP state.
 GetService/ListServices are not desired inventory. Atomic snapshot publication
 does not imply simultaneous application. A read failure is not empty inventory
-or deletion; startup without publication waits for the source.
+or deletion. At startup, absent usable retained state or an eligible source, wait.
 
-**Working candidate:** ACL operator atomically publishes a durable result with
+ACL operator atomically publishes a durable result with
 processed intent revision,Service/policyRef,rule revision,Service incarnation/
 policy token,and required-policy versus protective-deny outcome. l3b operator
 matches current intent and confirms that exact policy via CP. A result file is
@@ -96,8 +96,18 @@ not active-state proof. For removal,l3b operator unlinks/deletes VSes first and
 ACL operator deletes the empty Service. CP's live-member guard does not solve
 stale reconcile versus new intent returning a Service.
 
-Snapshot formats,scope,versions,stale-generation fencing and recovery between
-CP apply and result publication remain open. No age-only snapshot TTL is chosen.
+Use the deployment’s designated primary source. Allow a configured fallback
+only at boot, with no usable retained state and no prior primary acceptance.
+Accept only provably complete inventory for the managed scope. An authoritative
+empty snapshot can remove objects. Missing, partial or unverified inputs retain
+the last valid configuration. Repeated matching reads do not prove coherence
+without a source guarantee. A boot fallback does not resume after the primary
+source has been accepted, including after restart. Do not merge sources.
+
+Use the same intent generation for acceptance and result publication. A late
+result must not become current or open Ready after intent changes. Recover by
+reconciling current intent and accepted CP state. Snapshot encoding, fencing
+and recovery details remain technical work. No age-only snapshot TTL is chosen.
 This split replaces a single-process preparation/reload arrangement with two
 independent consumers; it is target integration,not delivered code.
 
@@ -143,9 +153,11 @@ When a valid full `services.yaml` snapshot confirms that it excludes a VIP,
 block traffic processing for that VIP and withdraw its route, even if its VS
 still exists. This includes ordinary forwarding, Echo replies and delivery or
 peer fanout of ICMP errors for that VIP. Do not block other VIPs of the same Service. Read or validation
-failure is not evidence of removal. This does not select a second filter within
-Service ACL. Detection, change delivery and classification ordering still need
-design and proof. Independent ACL destination predicates remain unchanged.
+failure does not change prior decisions. CP publishes the VIP block for all
+these paths. Publish a planned block before withdrawal. Emergency withdrawal
+does not wait for CP. Approve and verify a reader-lag bound before activation.
+Reinstatement requires a new complete snapshot and current readiness. The gate
+is not a second filter inside Service ACL. Native destination matching remains.
 
 l3b itself answers Echo for a configured, non-excluded VIP if a linked VS has at least one configured
 real,even disabled/unhealthy/zero-weight. All-empty or unclaimed VIP gets no reply.
@@ -177,8 +189,9 @@ power of two. l3b operator initiates MVP autogrow through CP O14; dataplane neve
 changes capacity implicitly. Every actual growth is at least ×2,with VS token,
 memory admission,no physical back and a finite configurable per-VS ceiling.
 Autogrow requests exactly ×2. Skip it if the result exceeds the ceiling or
-peak-memory admission cannot cover both tables. Ceiling field/default/change
-rules, trigger metric, thresholds and exact memory accounting remain open. Shrink is desirable later,not required for
+peak-memory admission cannot cover both tables. CP makes final admission.
+O02 uses an explicit ceiling or deployment default. O03 requires it. Trigger
+metric, thresholds and exact memory accounting remain technical work. Shrink is desirable later,not required for
 MVP and currently forbidden. Required-write failure still drops; autogrow does
 not promise no overflow. An existing ACL-map growth loop is a pattern,not l3b
 implementation evidence. Historical10000-VS/100000-real estimates are superseded
@@ -263,12 +276,14 @@ All contributing VSes of a VIP prefix(/32 or/128) must pass. Excluding a VS need
 an empty final announce group; omission alone may retain a legacy-derived group.
 One failed real does not necessarily withdraw the prefix. Administrative disable
 or scheduling weight0 in l3b alone does not change W. Preserve current
-VS/real/checker/revision provenance. Weight schema,domains,absence,validity,
-freshness and checker reduction remain observation-contract approval gates. Never substitute scheduling weight
-or invent missing defaults. On first startup and after restart, initialize quorum to down and require
-fresh evidence at the up threshold. The formula does not carry over an old up
-state. Hysteresis transfer on recreation or membership changes without restart
-still needs agreement. Restart still requires withdrawal of all managed VIPs.
+VS/real/checker/revision provenance. A real has a separate static quorum weight
+or one designated checker supplies its dynamic weight. A missing weight does
+not refresh the last value. Do not substitute scheduling weight or assume a
+default. See the [observation contract](l3b-observations-contract.md).
+Initialize quorum down on startup, restart, recreation of a contributing VS or
+a change in configured contributing membership. Fresh evidence must reach the
+up threshold. Metadata changes and ordinary health or W changes do not reset
+hysteresis. Restart still requires withdrawal of all managed VIPs.
 
 An empty contributing set is not ready. Withdraw the VIP route when its last
 contributing VS disappears.
@@ -280,7 +295,8 @@ that last eligible real withdraws despite quorum. This does not promise capacity
 
 First and repeated announcements require the **required ACL**,matched to current
 intent,policyRef,Service incarnation and current relevant cohort including idle
-workers. VS creation/linking requires confirmation for changed membership. A
+workers, in current `ADOPTED` state. VS creation/linking requires confirmation
+for changed membership. A
 successful install RPC,old Ready or empty-Service NOT_APPLICABLE is insufficient;
 ADOPTED protective deny is not required-policy readiness.
 Rule delivery/validation failure alone retains independently confirmed agreed

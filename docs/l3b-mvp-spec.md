@@ -44,7 +44,7 @@ traffic-share, progress or churn guarantees.
 | M06 | Ordinary packets,sources,IPIP/GRE,Echo/ICMP,safe buffers,lengths,metadata and explicit RFC deviations. Separate set_mss before l3b clamps an existing TCP/IPv6 MSS(default1220),never inserts. Preparation failure writes no session. | #2742/#2748/#2749/#2750–#2755/#2760/#2761 |
 | M07 | Read-only ownership query, unique ingress/service association and bounded unrdup fanout. Given indeterminate ownership, no clone or token spend occurs. | #2756–#2759; shared #2011 |
 | M08 | Accepted readback versus live status,all-worker adoption,counter identity/arithmetic and cleanup visibility. An idle lagging relevant worker prevents ADOPTED. | #2731–#2734/#2746/#3121 |
-| M09 | Actual-hop authorization,health fencing/freshness,operator lifecycle and announcement/withdrawal. Both operators consume l3b adapter desired snapshots; ACL result snapshot is a candidate. First/repeated announcement requires confirmed required ACL for current Service/cohort. Delayed A→B→A input cannot certify later A. | #2735/#2775/#2776 |
+| M09 | Actual-hop authorization,health fencing/freshness,operator lifecycle and announcement/withdrawal. Both operators consume l3b adapter desired snapshots; ACL operator publishes a separate result. First/repeated announcement requires confirmed required ACL for current Service/cohort. Delayed A→B→A input cannot certify later A. | #2735/#2775/#2776 |
 | M10 | Installed CLI and versioned incompatible migration, not merely a workspace build. Given a packaged installation, the l3b command is discoverable and rejects unsupported legacy input. | #2719/#2720/#2771–#2773 |
 | M11 | Reusable Lab reports, protected scenario, reset/cleanup and authorized stand/load automation. Given failed preparation, cleanup releases only resources owned by that run and produces a failure artifact. | #2716/#2766–#2769/#2717 |
 | M12 | Full compatibility/source-assertion mapping, predeclared qualification and accountable launch verdict. Given missing evidence or an unapproved metric, launch remains unqualified. | #2770–#2774/#2717 |
@@ -275,6 +275,11 @@ not just the VS root. Existing `lib/controlplane/config/zone.c` supplies configu
 locking/generation infrastructure, not this whole proof by itself.
 
 ### Concrete authority and recovery construction (D01/D05)
+
+Accept each related change once, by switching its owning protected, immutable
+CP root. Failure before that switch preserves the previous state. Unprovable
+recovery fails closed for affected writes and must not substitute an empty
+registry for authoritative state. Sessions belong to the VS incarnation.
 
 This construction specifies required new seams, not implemented primitives.
 At the pinned baseline, `lib/controlplane/config/zone.c:273–316` publishes a
@@ -634,6 +639,13 @@ and reuse front, and race resize/retirement with back-hit copy. All are **NOT RU
 
 ### API, ABI, ACL and installed clients
 
+Keep module `l3b`, CLI `yanet-cli-l3b` and one new incompatible Gateway service.
+Coordinate CLI, CP and dataplane migration. Use a separate protobuf package
+and service version. Do not reuse tags or promise rolling ABI compatibility. Convert old input explicitly without a
+second writer or hidden aliases. Attach state only after identity and ABI version
+checks. If migration requires draining and recreation, document session loss.
+The exact schema and migration matrix remain technical work.
+
 The implementation inventory includes `modules/l3b/controlplane/l3bpb/v1/l3b.proto`,
 `service.go`, `backend.go`, `modules/l3b/api/`, `objects/l3b/api/`, bindings and CLI.
 Final versioned package/tags and shared layout require an explicit reviewed schema
@@ -704,7 +716,7 @@ O21/O22 are accepted state,not desired inventory. Source read failure is not an
 empty set or deletion; cold start without publication waits. No mandatory mutual
 operator RPC is introduced.
 
-**Working candidate:** ACL operator atomically publishes a durable local result
+ACL operator atomically publishes a durable local result
 snapshot containing processed intent revision,Service/policyRef,rule revision,
 Service incarnation/policy token,and required-policy versus protective-deny
 outcome. l3b operator matches current intent and independently confirms that ACL
@@ -743,24 +755,30 @@ initiates O14 through Gateway/CP with CAS/admission,no shrink,no growth while a
 physical back exists. Each actual growth is at least ×2; initial default65536 is
 configurable and each VS needs a finite configurable ceiling. Automatic growth
 requests exactly ×2 and admits the peak with both tables present. The trigger,
-thresholds, exact memory accounting and ceiling wire schema still need approval.
+thresholds, exact memory accounting and ceiling wire schema remain technical
+work. O02 requires an explicit ceiling or deployment default. O03 requires the field.
 This is not implicit dataplane growth or overflow-free service;
 required-write failure remains a counted drop.
 
 When a valid full `services.yaml` snapshot confirms VIP exclusion, block traffic
 processing for that VIP and withdraw its route. The block covers ordinary traffic,
 Echo replies and ICMP error delivery and fanout. Preserve other VIPs of the same
-Service. A failed read or validation does not establish exclusion. Detection,
-propagation and classification ordering still need design and proof. Independent
-ACL destination predicates remain. Full historical BGP-agent-failure behavior is
+Service. A failed read or validation does not change the last decision. CP
+publishes VIP admission covering every path, including external ICMP distribution.
+Do not use ordinary Service ACL as that gate. Publish a planned block before
+withdrawing the route. Emergency withdrawal does not wait for CP. Before activation, approve the maximum reader lag, record it in the verification
+manifest together with its start event, and verify the cutoff on each affected path. Detection and propagation still need design.
+Independent ACL destination predicates remain. Full historical BGP-agent-failure behavior is
 not established here.
 
-Before implementation agree snapshot formats,scope,versions,stale-generation and
-delete/return fencing,and recovery between CP apply and result publication.
-Inventory reread/current token alone is not a race proof. No age-only snapshot
+Bind intent acceptance and result publication to the same generation. In
+A → B → A, the two A intents have distinct generations, including across restart. Delayed
+results cannot supersede current intent or grant readiness. Verify recovery
+between CP apply and result publication. Rereading inventory or checking only
+the current object token is not enough. Snapshot formats, scope, generation
+encoding and the recovery mechanism remain technical work. No age-only snapshot
 TTL is selected. See the [overview and four scenarios](l3b-operator-overview.md).
-These are target integration requirements and a result-exchange candidate,not
-evidence of delivered Service API,snapshot delivery or autogrow.
+These are target requirements, not evidence of delivered integration.
 
 ### WLC and counter arithmetic
 
@@ -788,10 +806,9 @@ production sampler or C ordering/lifetime proof. Specify construction/update/tie
 and continuation with actual selected selector code before activation; equal output
 needs active-selector provenance, not empty-patch success.
 
-Counter #3121 must select value widths, per-cell increment behavior, aggregation
-overflow/reset handling, accumulation identity and unavailable reporting. Never
-silently wrap a management aggregate or sum a shared cell twice. The complete
-semantic catalogue in the main contract is not yet a physical arithmetic design.
+Observations expose exact `uint64` totals for one accumulation period, including
+aggregates. [#3121](https://github.com/yanet-platform/yanet2/issues/3121) defines
+the rollover mechanism and conformance evidence. Never sum a shared cell twice.
 
 ### Deterministic selector and sampling construction (D02 proposal)
 
@@ -983,9 +1000,10 @@ with carry, then publishes even; reader accepts only matching even sequence read
 All concurrently accessed words are atomics, not a C data race disguised as seqlock.
 Sequence and wrap exhaustion mark the storage unavailable before reuse/wrap; never
 silently reset or saturate into a plausible value. A stopped odd writer requires
-non-resumption/recovery or unavailable, not guessed zero. Expose exact values as
-nonnegative integers without uint64 truncation; aggregate/deduplicate by immutable
-semantic/storage/producer-executor incarnation using big.Int, not per link or array position.
+non-resumption/recovery or unavailable, not guessed zero. Compute exact internal
+values without truncation; aggregate/deduplicate by immutable semantic/storage/
+producer-executor incarnation, not per link or array position. Public readback
+uses the main contract’s `uint64` period rollover and group `UNAVAILABLE` rules.
 Gauge/session counts are sampled authority, not event-counter differences. Reset
 creates a new storage incarnation only under existing reset/accumulation rules;
 same-incarnation takeover preserves values. Tests must force low-word carry, torn
@@ -1002,7 +1020,7 @@ sequence around payload reads, then AVAILABLE again, within a finite positive
 attempt budget; exhausted reads return only that observation group unavailable.
 An interrupted odd update is not reconstructed from guessed increments: after
 non-resumption leave the storage unavailable unless a separate exact intent proves
-completion. This cannot stop packet/configuration progress. Carry vector:
+completion. This cannot stop packet/configuration progress. Internal carry vector:
 (wrap=7,low=2^64-2)+3 → (8,1), aggregate exact value 8*2^64+1; sequence2^64-2
 cannot accept another update. Two producer shards with values 5 and7 aggregate12,
 whereas two links to the same shard with value5 still contribute5.
@@ -1318,7 +1336,9 @@ must be approved and versioned before its run: hardware/NUMA/NIC/software matrix
 VS/real distributions, offered traffic/protocol/payload mix, sessions/churn/updates,
 warmup, repetitions/duration, invalid samples, uncertainty, metric units/boundaries,
 aggregation/percentiles and numerical memory/throughput/loss/latency/convergence/
-soak limits. The planning envelope 10000 VS/100000 reals is not qualified capacity.
+soak limits. The historical 10000-VS/100000-real envelope is not the current
+target. Qualifying 100000 VS with 1000 reals on average requires separate registry,
+ABI and pool capacity evidence; it does not raise the current cap of 2097151.
 Do not select passing limits after seeing qualification results.
 
 Every claimed target has an accountable owner, run permission and retained evidence.
@@ -1405,13 +1425,18 @@ authorize production execution, or select passing limits after seeing results.
 | S2 | D01 typed-handle publisher,pools and recovery | Design signoff,implementation and independently executed applicable cross-process/crash/reader proof from the authority/recovery construction,not merely a plan,before dependent enabled-real traffic | S1 |
 | S3 | D02 pinned-source selector port, sampler and counters | Implementation plus an independently built reference run reproducing the multi-real head/lookup vectors | S1 |
 | S4 | D03 S5 endpoint-check verification and packet-path cost | Measured report on the qualification environment | Implementation, bench access |
-| S5 | D04/D05 observation protocol and publish-before-removal | Approved protocol, principals and grants, then implementation | S2, owner answers |
+| S5 | D04/D05 observation protocol and publish-before-removal | Approved protocol, principals and grants, then implementation | S2 |
 | S6 | Qualification against the approved manifest | Executed versioned-manifest runs under approved applicable clock policy | S2–S5 and S7 clock decision |
 | S7 | D08 exploratory BOOTTIME cost experiments before qualification | Measurements and owner clock decision,not qualification pass | S5 |
+
+The order is `S5 → S7 → S6`. S7 requires an approved protocol and separate
+run authorization; it produces no numerical qualification verdict. After S7,
+approve the versioned clock and threshold manifest, then authorize S6 separately.
+Document approval is not run authorization.
 
 ### Recorded open engineering forks
 
 - Registry width and pool geometry for the raised cap (shared-struct/ABI work).
 - Formal SLO numbers, informed by exploratory baseline runs and fixed before qualification.
-- Named accountable approvers and authorization scope for the S1/S5 approvals
-  and run permission: an open owner input; nobody is appointed yet.
+- The MVP owner approves S1/S5, run authorization and release. Implementation
+  coordination and independent verification remain separate from acceptance.

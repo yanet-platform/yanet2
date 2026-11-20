@@ -93,7 +93,8 @@ Even a restart shorter than TTL requires withdrawal before reannouncement.
 Distinguish process incarnations, fence the old sender and prove
 withdraw→reannounce ordering. BIRD's periodic timer alone does not prove it.
 Fresh health/serving readiness and required ACL confirmation are mandatory after
-restart; do not carry old Ready over. Unknown withdrawal outcome blocks
+restart. Revalidate those gates after confirmed BIRD removal and export; do not
+carry old Ready over. Unknown withdrawal outcome blocks
 reannouncement. The fencing/confirmation protocol remains engineering work, not
 a new message schema selected here.
 
@@ -132,7 +133,7 @@ expand object scope or displace another assigned source.
 | Changed marker, unproven history or restart | Initialize unknown/unhealthy with streak zero; do not fabricate success. |
 | Old revision, marker or real incarnation | A delayed message cannot enable a current real or attach to an address reused by a new real. |
 | Outcome outside retention | Report unknown outcome and require resynchronization; do not claim non-application or permit replay by evicting a result. |
-| Quorum-weight inputs W | Monalive supplies the operator with required real-state weights, including dynamic checker contributions, bound to current VS/real/checker and revision. This is neither an authoritative quorum flag nor scheduling-weight mutation. Exact schema,numeric domains,absence,validity/freshness and checker reduction require observation-contract owner agreement before integration. No wire format or default is invented. Without sufficient trusted inputs readiness is unproved. Scheduling-weight substitution is forbidden. |
+| Quorum-weight inputs W | Each real has a separate static quorum weight or exactly one designated checker supplies its dynamic weight. Other checkers still participate in health AND, not weight reduction. Weight is nonnegative and bound to the current VS and real. Dynamic weight also requires provenance from the designated checker and its current revision. Omission is not zero and does not extend validity. A previous weight is usable only until its original expiry with proven continuity. Never substitute scheduling weight. Untrusted or incomplete inputs cannot establish readiness. Do not accept a partial or overflowing sum as full W. Encoding and numeric bounds are technical work. |
 
 Before implementing [#2776](https://github.com/yanet-platform/yanet2/issues/2776),
 the receiver must have an **approved validator-visible stale-exclusion proof**.
@@ -332,6 +333,12 @@ F39 is **not** an epoch, checker revision, anti-ABA identity, freshness evidence
 authorization, publisher generation or adoption proof. Replacing the former
 numeric-version proposal does not remove system fencing and incarnation.
 
+## Accepted quorum and publication rules
+
+Start down on startup, restart, contributing VS recreation or configured contributing membership change. Metadata, ordinary W changes and individual probes do not reset hysteresis. Require fresh evidence at the up threshold. Loss of the last contributing VS withdraws the VIP. |
+
+Equal-result confirmation requires actual publication provenance and a current target. Coalescing must preserve history, freshness and required intermediate disable publication.
+
 ## Approval register (open)
 
 The [health-expiry enforcement proof](l3b-mvp-spec.md#actual-hop-trust-and-routing)
@@ -349,10 +356,10 @@ register's accountable approval or the cross-process publisher proof.
 | Observation-contract owner / #2775 | Approve the receiver-visible stale-exclusion proof and bounded failure/recovery vectors, before #2776. |
 | Contract and deployment owners / #2775 | Approve age evidence, uncertainty and clock-jump/restart rules, independent freshness/liveness/deadline bounds. |
 | Resource owner / #2775 | Approve recovery-window capacity, exhaustion/eviction and stale exclusion after eviction. |
-| Publisher/mutation owners / #2725/#2762/#2775 | Approve generation/readiness representation, equal-result confirmation and permitted supersession/coalescing while proving the selected mandatory intermediate-disable publication. |
+| Publication / #2725/#2762/#2775 | Specify the current target and prove publication, including intermediate disable. |
 | Trust-policy owner / #2735/#2775 | Approve actual principals, assignments, trusted identity delivery and grants. |
 | Health-integration owner / #2775 | Verify selected empty-checker ineligibility and validate timing/lease ownership while preserving AND and fail-closed semantics for required checkers. |
-| Operator Q/H owner / #2775 | First startup and restart initialize quorum to down and require fresh evidence at the up threshold. Loss of the last contributing VS withdraws the VIP. Agree hysteresis transfer on recreation or membership changes without restart, plus weight-input schema, domains and validity. No missing-weight default is inferred. |
+| Operator Q/H / #2775 | Weight encoding and numeric bounds; proof of freshness and quorum reset. |
 
 These are unresolved; this draft picks no deployment numbers, named production
 roles, codec, epoch width, new grace period, pending-disable flag, per-delta
@@ -370,7 +377,7 @@ eligibility **is already a requirement**, not a pending owner decision.
 | Clock arithmetic | Allowed and rejected age/uncertainty, restart and incompatible clock domains. Widen uint32 durations before checked uint64 deadline addition without wrap or saturation. Same-domain elapsed time retains uint64 range. |
 | Worker expiry | Equality with the earliest required checker/stream deadline rejects eligibility for both new selection and pin use. Repeat with failed disable publication, an old enabled descriptor, idle/resumed worker and unverifiable clock mapping. A later successful probe cannot extend the deadline in an immutable older descriptor. |
 | Authority | Health cannot override admin disable/drain; weight0 excludes new choice but does not invalidate an enabled/healthy stateful pin outside bypass. One healthy checker cannot override another's unknown; empty required-checker set remains ineligible even if admin-enabled. |
-| Q/H and weights | Test first startup and restart separately. Start the restart case with quorum up and the VIP advertised. Verify withdrawal and no reannouncement with fresh in-band W. Fresh W at the up threshold raises quorum, but reannouncement also requires the other readiness checks. Test prior up/down inside the band,W=0,Q−H,Q+H, and loss of the last contributor. After owner agreement, test recreation/membership changes and dynamic weights with unchanged scheduling weights. Check provenance without inventing missing defaults. |
+| Q/H and weights | Test first startup and restart separately. Start the restart case with quorum up and the VIP advertised. Verify withdrawal and no reannouncement with fresh in-band W. Fresh W at the up threshold raises quorum, but reannouncement also requires the other readiness checks. Test prior up/down inside the band,W=0,Q−H,Q+H, and loss of the last contributor. Verify reset to down on recreation or configured membership change, not on metadata change. Verify dynamic weight expiry on omission with unchanged scheduling weight. Check provenance without inventing missing defaults. |
 | Intermediate disable | Accept disable then recovery before publication; recovery-enable publication cannot overtake or absorb the successful disabled-state publication. Repeat with failed publication, lost acknowledgement, takeover and outcome-cache eviction; no implicit all-worker adoption wait. |
 | Disable versus recreation | Accept disable for i1, fail publication, then attempt O03 real removal (including explicit empty and a changed port/key) or O04 VS deletion: FailedPrecondition, whole request unchanged, no queued deletion. Repeat transfer-by-recreation. After proven successful disabled-state publication, retry under valid CAS may remove; recreate as fresh i2/VS, never alias another port/incarnation. No all-worker adoption wait. |
 | Removal ordering and recovery | Race accepted disable with final structural acceptance in both orders; delayed prevalidated observations cannot attach to removed/recreated identities. Inject lost publication reply, takeover, outcome-cache eviction and uncertain settlement state: pending remains FailedPrecondition, uncertain authority/provenance Unavailable, proven settlement permits normal removal checks. An old disable publication predating the transition is not coverage. Test stale CAS before pending-precondition failure and a valid no-op/survivor-preserving replacement while pending; unrelated reals never partially remove. Bound retained resources before admission, not by erasing an accepted obligation. |
