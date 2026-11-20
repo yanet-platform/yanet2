@@ -156,8 +156,16 @@ peer fanout of ICMP errors for that VIP. Do not block other VIPs of the same Ser
 failure does not change prior decisions. CP publishes the VIP block for all
 these paths. Publish a planned block before withdrawal. Emergency withdrawal
 does not wait for CP. Approve and verify a reader-lag bound before activation.
-Reinstatement requires a new complete snapshot and current readiness. The gate
-is not a second filter inside Service ACL. Native destination matching remains.
+Only a new complete, valid snapshot that includes the VIP can trigger
+reinstatement. While the block remains, confirm current local publication,
+fresh health and quorum, an eligible real for each contributing VS, and `ADOPTED` for the
+required ACL, including idle relevant workers. Do not rely on traffic through
+the VIP or on an advertised route. CP then publishes removal of the block
+for that same current intent generation.
+Workers may process direct traffic after applying that admission. Confirm
+adoption and recheck current readiness before setting Ready and announcing.
+The restart and failure recovery barrier for BIRD removal and export still applies.
+The gate is not a second filter inside Service ACL. Native destination matching remains.
 
 l3b itself answers Echo for a configured, non-excluded VIP if a linked VS has at least one configured
 real,even disabled/unhealthy/zero-weight. All-empty or unclaimed VIP gets no reply.

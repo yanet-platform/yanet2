@@ -718,7 +718,9 @@ Expose exact `uint64` totals for the current accumulation period, including
 aggregates. Before overflow, automatically start a zero-based period for the
 affected group with a fresh accumulation identity. Do not restart the VS or
 change configuration, sessions, forwarding or unrelated groups. Report only
-the new period's value after the transition. Clients must not compute deltas
+the new period's value after the transition. If a contribution triggers a
+proven rollover, account for it exactly once in the new period, including in
+aggregates. Clients must not compute deltas
 across identities. `2^64−1` is representable. If a value is already out of
 range or the transition cannot be proven, return `UNAVAILABLE` for that group
 without a numeric substitute until a valid period starts. Overflow alone does
@@ -980,8 +982,10 @@ from the network key and is not reconstructed by current real lookup.
   readback. Policy changes do not rewrite existing ceilings. Validate the
   configured ceiling against the rounded default initial size. Compare the
   rounded O02/O14 capacity to the ceiling without rounding the ceiling up.
-  O03 cannot lower it below current capacity and does not resize or change
-  sessions. The VS token orders O03 and O14. Bounds, encoding, the growth
+  In O03 validate request shape and domain, then resolve the VS and check its
+  token. With a current token, a ceiling below current capacity returns
+  `FailedPrecondition` and changes nothing. O03 never resizes or changes sessions.
+  The VS token orders O03 and O14. Bounds, encoding, the growth
   trigger and exact memory accounting belong to technical design.
   Automation does not promise no overflow
   or waive counted drops on required session-write failure. Shrink is desirable
@@ -2679,8 +2683,10 @@ detecting owner. Exercise every semicolon-separated alternative separately, with
 all earlier checks passing. Separate #3121 vectors (**NOT RUN**) cover the
 maximum value, cell and aggregate overflow, automatic new period with a fresh
 identity, and `UNAVAILABLE` on an unprovable transition. Check that forwarding
-continues and unrelated groups are unchanged. Add a known nonzero increment
-after verified rollover and read exactly that value under the new identity.
+continues and unrelated groups are unchanged. Read `2^64−1`, then trigger
+rollover with a known increment. Check that the new period includes that
+increment exactly once and excludes old contributions. Repeat for an aggregate
+whose individual cells still fit. Also check a subsequent increment.
 Do not compute a delta across identities or issue a new identity on failure.
 
 | Injected fault | Counter boundary and exclusions |

@@ -133,7 +133,7 @@ expand object scope or displace another assigned source.
 | Changed marker, unproven history or restart | Initialize unknown/unhealthy with streak zero; do not fabricate success. |
 | Old revision, marker or real incarnation | A delayed message cannot enable a current real or attach to an address reused by a new real. |
 | Outcome outside retention | Report unknown outcome and require resynchronization; do not claim non-application or permit replay by evicting a result. |
-| Quorum-weight inputs W | Each real has a separate static quorum weight or exactly one designated checker supplies its dynamic weight. Other checkers still participate in health AND, not weight reduction. Weight is nonnegative and bound to the current VS and real. Dynamic weight also requires provenance from the designated checker and its current revision. Omission is not zero and does not extend validity. A previous weight is usable only until its original expiry with proven continuity. Never substitute scheduling weight. Untrusted or incomplete inputs cannot establish readiness. Do not accept a partial or overflowing sum as full W. Encoding and numeric bounds are technical work. |
+| Quorum-weight inputs W | Each real has a separate static quorum weight or exactly one designated checker supplies its dynamic weight. Reject a configuration that declares both sources for one real. Ignore weight from undesignated checkers; they still participate in health AND. No runtime fallback between sources. Weight is nonnegative and bound to the current VS and real. Dynamic weight also requires provenance from the designated checker and its current revision. Omission is not zero and does not extend validity. A previous weight is usable only until its original expiry with proven continuity. Never substitute scheduling weight. Untrusted or incomplete inputs cannot establish readiness. Do not accept a partial or overflowing sum as full W. Encoding and numeric bounds are technical work. |
 
 Before implementing [#2776](https://github.com/yanet-platform/yanet2/issues/2776),
 the receiver must have an **approved validator-visible stale-exclusion proof**.
@@ -335,7 +335,7 @@ numeric-version proposal does not remove system fencing and incarnation.
 
 ## Accepted quorum and publication rules
 
-Start down on startup, restart, contributing VS recreation or configured contributing membership change. Metadata, ordinary W changes and individual probes do not reset hysteresis. Require fresh evidence at the up threshold. Loss of the last contributing VS withdraws the VIP. |
+Start down on startup, restart, contributing VS recreation or configured contributing membership change. Changes limited to non-contributing VSes, metadata, ordinary W changes and individual probes do not reset hysteresis. Require fresh evidence at the up threshold. Loss of the last contributing VS withdraws the VIP. |
 
 Equal-result confirmation requires actual publication provenance and a current target. Coalescing must preserve history, freshness and required intermediate disable publication.
 

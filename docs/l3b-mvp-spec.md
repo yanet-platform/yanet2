@@ -771,6 +771,10 @@ manifest together with its start event, and verify the cutoff on each affected p
 Independent ACL destination predicates remain. Full historical BGP-agent-failure behavior is
 not established here.
 
+Follow the [operator overview](l3b-operator-overview.md) for reinstatement:
+confirm local prerequisites before unblocking and confirm worker admission
+before Ready and announcement.
+
 Bind intent acceptance and result publication to the same generation. In
 A → B → A, the two A intents have distinct generations, including across restart. Delayed
 results cannot supersede current intent or grant readiness. Verify recovery
@@ -1357,7 +1361,7 @@ cannot produce the verdict.
 | D03 | Ordinary checksum/UDP-length semantics selected; verify S5 IPv4-header checking, structural bounds, preservation, counter attribution and measured cost. | #2742 and packet owner |
 | D04 | Activation/stream/history acceptance, builtin authenticated-context assignment enforcement and bounded retention/challenge construction supplied. Protocol approval, deployment principals/grants and implementation proof remain outstanding; remote proxy metadata is not certified principal delivery. | #2735/#2775 |
 | D05 | Empty checker set ineligible and disable-before-recovery/removal selected; serialized history/publication/structural decisions, exact coverage receipts, retention and crash recovery specified. Implement and qualify without terminal-discharge shortcuts or all-worker adoption barriers; failed publication can block removal indefinitely. | Health/publisher owners |
-| D06 | Numerical observation/stream/route/recovery budgets, resource limits, workload/SLO/target matrix, approvers and run permission. | Deployment and qualification owners |
+| D06 | Numerical observation, stream, route and recovery budgets. Resource limits, workload, target profile and SLOs. | Deployment and qualification contributors prepare the manifest. The MVP owner approves it and separately authorizes each run. Verification remains independent. |
 | D07 | Pinned scheduler/session sources, stated RFC boundaries and all17H/14N fixture-tree assertions reconciled with retained/deviating/external dispositions and source discrepancies. Bilingual parity and candidate-specific independent review are separate receipts; source inspection/fixture counts do not qualify target execution or every unrelated RFC/NAT subsystem. | Contract and compatibility reviewers |
 | D08 | Hard worker expiry selected; conservative age/deadline provenance, conditional direct-BOOTTIME and pin/selection/failed-publication/restart/preemption validation specified. Clock choice remains unapproved; runtime experiments and numerical budgets are NOT RUN/unset, never inferred from the proposal. | Health, packet and publisher owners |
 
@@ -1426,13 +1430,15 @@ authorize production execution, or select passing limits after seeing results.
 | S3 | D02 pinned-source selector port, sampler and counters | Implementation plus an independently built reference run reproducing the multi-real head/lookup vectors | S1 |
 | S4 | D03 S5 endpoint-check verification and packet-path cost | Measured report on the qualification environment | Implementation, bench access |
 | S5 | D04/D05 observation protocol and publish-before-removal | Approved protocol, principals and grants, then implementation | S2 |
-| S6 | Qualification against the approved manifest | Executed versioned-manifest runs under approved applicable clock policy | S2–S5 and S7 clock decision |
+| S6 | Qualification against the approved manifest | Pass every applicable approved limit and criterion on the pinned candidate under the approved clock policy | S2–S5 and S7 clock decision |
 | S7 | D08 exploratory BOOTTIME cost experiments before qualification | Measurements and owner clock decision,not qualification pass | S5 |
 
 The order is `S5 → S7 → S6`. S7 requires an approved protocol and separate
 run authorization; it produces no numerical qualification verdict. After S7,
 approve the versioned clock and threshold manifest, then authorize S6 separately.
-Document approval is not run authorization.
+If S7 selects a different clock, update the affected S5 implementation and
+repeat its proofs, including suspend, before S6. A run exceeding an applicable
+limit does not pass S6. Approval, run authorization and verdict are distinct.
 
 ### Recorded open engineering forks
 
