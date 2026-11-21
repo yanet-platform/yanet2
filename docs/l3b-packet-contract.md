@@ -176,11 +176,15 @@ their separate S7 attempts, not a global stop after the first failed peer.
   byte-for-byte, including an empty payload.
   Transform the admitted request with unchanged header geometry, rather than
   constructing bare IP headers. Preserve IPv4 options, IPv6 extensions, TOS/Traffic
-  Class, IPv4 ID/DF and other IP fields, and IPv6 flow label. Only the endpoints,
-  TTL/Hop Limit, ICMP type/code and necessary checksums change as specified above;
-  header lengths remain unchanged. Recompute or correctly update the IPv4 header
-  checksum including options and the separate ICMP message checksum; for ICMPv6,
-  account for the complete message and pseudo-header.
+  Class, IPv4 ID/DF and IPv6 flow label. In addition to the endpoint, TTL/Hop Limit,
+  ICMP type/code and checksum changes above, clear the reserved flag in the
+  generated IPv4 Echo Reply before computing or updating its IPv4 header checksum.
+  [RFC 1812 section 4.2.2.3](https://www.rfc-editor.org/rfc/rfc1812.html#section-4.2.2.3)
+  requires the flag to be zero in originated datagrams and forbids dropping an
+  incoming packet solely because it is set. The Echo Request admission rules do
+  not change. Other IP fields and header lengths remain unchanged. The IPv4
+  header checksum covers options. Update the separate ICMP message checksum;
+  for ICMPv6, account for the complete message and pseudo-header.
   Correct code changes from incoming 1 or 255 as well as type changes; a type-only
   checksum delta is insufficient. Existing fragment, TLV, Routing and checksum
   admission applies first; live AH never reaches Echo. No partial reply is emitted.

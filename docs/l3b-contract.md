@@ -3010,6 +3010,13 @@ Packet disposition vectors (all **NOT RUN**):
   retain code/content. At the same codes, truncated lengths, invalid quotes,
   non-initial quoted fragments, genuinely fragmented incoming packets and failed
   ownership/delivery checks retain their rejection paths; unsupported types drop.
+- IPv4 Echo Reply reserved-flag vectors (**NOT RUN**): send two otherwise valid
+  Echo Requests to an active VIP, one with the reserved flag `0` and one with
+  `1`. Both requests have DF set, a nonzero IPv4 ID and valid IPv4 and ICMP
+  checksums. Neither drops because of the flag. At l3b handoff before routing,
+  each produces exactly one reply:
+  `0→0` and `1→0`, respectively, with valid IPv4 header and ICMP checksums,
+  unchanged DF and IPv4 ID, and TTL `65`. The other Echo checks still apply.
 - Original consumption occurs once per distributor invocation for success, valid
   zero peers and every failure outcome. Success/zero peers add no consumption
   drop count, zero peers spend no tokens, and existing failure accounting remains.

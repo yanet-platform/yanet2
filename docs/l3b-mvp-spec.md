@@ -126,6 +126,20 @@ for why the outer route decrement is not proof of inner-hop RFC conformance.
 Fixtures with zero TC/flow label or IPv4 ID1 do not distinguish general header rules.
 Exact source selection sequences are not proof of current target placement or shares.
 
+<a id="echo-reserved-flag-comparison"></a>
+
+For an IPv4 Echo Request already admitted to the reply handler, YANET1's
+[`balancer_icmp_reply_handle`](https://github.com/yanet-platform/yanet/blob/af3531a88a8c5b0ab140353686ab23d13cd9e200/dataplane/worker.cpp#L4416-L4441)
+leaves the reserved flag unchanged before `balancer_flow`. The
+[checksum helper](https://github.com/yanet-platform/yanet/blob/af3531a88a8c5b0ab140353686ab23d13cd9e200/dataplane/checksum.h#L88-L92)
+only writes the header checksum. This is source evidence for `0→0` and `1→1`
+before routing, not an on-wire result. The
+[previous l3b contract](https://github.com/yanet-platform/yanet2/blob/75ce110e6945359a0ca7762c9c8a324e1cca3fc4/docs/l3b-packet-contract.md#L175-L183)
+also preserved the flag. The [selected l3b contract](l3b-packet-contract.md#packet-path-rules)
+requires `0→0` and `1→0` at handoff under RFC 1812 §4.2.2.3 (R04 below).
+This is an intentional difference for input `1`, not a fix for an observed
+failure. Both reserved-flag vectors in the contract are **NOT RUN**.
+
 Important assertion-level qualifications:
 
 - 048 has 21 CLI blocks and 27 allocator scalar assertions at nine checkpoints.
@@ -183,7 +197,7 @@ certificate. An unknown/update status must not be converted into a passing claim
 | R01 IPv6 options | RFC 8200 sections 4.1/4.2 and its update RFC 9673 sections 5.1/5.2/5.2.2 distinguish HBH router skip SHOULD/configured-discard MAY and operator-configuration SHOULD from Destination Options. | Keep bounded fixed admission; correct the packet companion's obsolete blanket error-signalling qualification. No new knob or option execution. |
 | R02 ECN | RFC 6040 sections 4.1–4.3; RFC 9601 sections 3–4/6.1.2 explicitly includes GRE and requires safe configuration for unknown/non-ECN egresses. | Keep normal-mode inheritance only with evidenced compatible real decapsulation. The normal-only implementation does not acquire a compatibility exception merely by citing legacy behavior. |
 | R03 IPv4 ID | RFC 6864 sections 4/4.1/4.3/5.3.1: non-atomic sources including tunnel ingresses MUST NOT repeat IDs for the same tuple within one MDL. DF0 is non-atomic without requiring observed fragmentation. | Preserve accepted ID/DF policy and research scope, but describe conditional nonconformance of colliding copied IDs as well as constant ID1; no automatic DF1, allocator or new launch gate. |
-| R04 Echo | RFC 1122 section 3.2.2.6 source-route reversal MUST and RR/Timestamp update SHOULD; RFC 4443 section 4.2 IPv6 multicast Echo SHOULD/unicast reply-source MUST. | Explicit endpoint limitations remain; opaque preservation is not execution of these obligations. |
+| R04 Echo | RFC 1122 section 3.2.2.6 source-route reversal MUST and RR/Timestamp update SHOULD; RFC 4443 section 4.2 IPv6 multicast Echo SHOULD/unicast reply-source MUST; [RFC 1812 section 4.2.2.3](https://www.rfc-editor.org/rfc/rfc1812.html#section-4.2.2.3) forbids setting the reserved IPv4 flag in originated datagrams or dropping an input solely because the flag is set. | Clear the reserved flag in generated IPv4 Echo Replies before computing or updating the IPv4 header checksum. Do not drop requests because of this flag alone. Other endpoint limitations remain; opaque preservation does not fulfill those obligations. |
 | R05 Transport checksums | RFC 9293 section 3.1 TCP endpoint checksum requirement; RFC 1122 section 4.1.3.4 UDP endpoint rules; RFC 8200 section 8.1 and RFC 6936 section 5 (requirements 8–10) include qualified zero-checksum tunnel/middlebox considerations. | Inner transport is not automatically terminated by IPIP/GRE ingress. The selected policy leaves full transport verification to the endpoint; IPv4 header validation is a separate router obligation under RFC 1812 sections 4.2.2.5/5.2.2. |
 
 RFC 8200 verified erratum 5945 corrects fragmentation text; reported, held and
