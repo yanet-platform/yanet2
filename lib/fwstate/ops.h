@@ -254,6 +254,7 @@ fwmap_update_value_nat64state(
 	// carries, whatever their bytes.
 	d->ip4 = old.ip4;
 	d->port = old.port;
+	d->cli_port = old.cli_port;
 	memcpy(d->src6, old.src6, sizeof(d->src6));
 	memcpy(d->prefix, old.prefix, sizeof(d->prefix));
 	// Establishment latches: an ACK seen by any refresh keeps the
@@ -279,6 +280,7 @@ fwmap_promote_value_nat64state(
 	d->created_at = old_v->created_at;
 	d->ip4 = old_v->ip4;
 	d->port = old_v->port;
+	d->cli_port = old_v->cli_port;
 	memcpy(d->src6, old_v->src6, sizeof(d->src6));
 	memcpy(d->prefix, old_v->prefix, sizeof(d->prefix));
 	d->tcp_established = new_v->tcp_established || old_v->tcp_established;

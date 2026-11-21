@@ -43,6 +43,7 @@ members = [
     "modules/l3b/cli",
     "modules/mirror/cli",
     "modules/nat64/cli",
+    "modules/nat64s/cli",
     "modules/pdump/cli",
     "modules/route-mpls/cli",
     "modules/route/cli",
@@ -148,6 +149,7 @@ yanet-cli-l3b = { opt-level = "s", codegen-units = 1 }
 yanet-cli-metrics = { opt-level = "s", codegen-units = 1 }
 yanet-cli-mirror = { opt-level = "s", codegen-units = 1 }
 yanet-cli-nat64 = { opt-level = "s", codegen-units = 1 }
+yanet-cli-nat64s = { opt-level = "s", codegen-units = 1 }
 yanet-cli-operator-neighbour = { opt-level = "s", codegen-units = 1 }
 yanet-cli-operator-pipeline = { opt-level = "s", codegen-units = 1 }
 yanet-cli-operator-route = { opt-level = "s", codegen-units = 1 }

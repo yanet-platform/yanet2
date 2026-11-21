@@ -1,0 +1,270 @@
+package nat64s
+
+import (
+	"context"
+	"fmt"
+	"math"
+	"slices"
+
+	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/controlplane/crud"
+	nat64spb "github.com/yanet-platform/yanet2/modules/nat64s/controlplane/nat64spb/v1"
+)
+
+// ServiceOption configures the NAT64sService constructor.
+type ServiceOption func(*serviceOptions)
+
+type serviceOptions struct {
+	Log *zap.Logger
+}
+
+func newServiceOptions() *serviceOptions {
+	return &serviceOptions{
+		Log: zap.NewNop(),
+	}
+}
+
+// WithServiceLog sets the logger for the NAT64sService.
+func WithServiceLog(log *zap.Logger) ServiceOption {
+	return func(o *serviceOptions) {
+		o.Log = log
+	}
+}
+
+// NAT64sService implements the stateful NAT64 gRPC service.
+type NAT64sService struct {
+	nat64spb.UnimplementedNAT64SServiceServer
+
+	core *crud.Core[*NAT64sConfig]
+	log  *zap.Logger
+}
+
+// NAT64sConfig is the decoded, whole configuration of one named config.
+type NAT64sConfig struct {
+	// Prefixes are the 12-byte NAT64 prefixes for v4->v6
+	// destinations.
+	Prefixes [][]byte
+	// Pool is the public IPv4 pool in network byte order.
+	Pool []uint32
+	// Timeout is the single session timeout in seconds.
+	Timeout   SessionTimeout
+	MTU       MTUConfig
+	PortRange PortRange
+	// MapName names the linked nat64state_map object.
+	MapName string
+}
+
+// SessionTimeout carries the two session timeouts in seconds: one for
+// every session, and a longer one for an established TCP session.
+type SessionTimeout struct {
+	Timeout        uint16
+	TCPEstablished uint16
+}
+
+// MTUConfig carries the MTU limits of the translation.
+type MTUConfig struct {
+	IPv4MTU uint32
+	IPv6MTU uint32
+}
+
+// PortRange bounds the translated source-port window [Lo, Hi).
+type PortRange struct {
+	Lo uint16
+	Hi uint16
+}
+
+const nat64sPrefixBits = 96
+
+// NewNAT64sService creates a NAT64sService over the backend.
+func NewNAT64sService(backend Backend, options ...ServiceOption) *NAT64sService {
+	opts := newServiceOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
+	return &NAT64sService{
+		core: crud.NewCore(backend),
+		log:  opts.Log,
+	}
+}
+
+func (m *NAT64sService) ListConfigs(
+	ctx context.Context,
+	req *nat64spb.ListConfigsRequest,
+) (*nat64spb.ListConfigsResponse, error) {
+	return &nat64spb.ListConfigsResponse{Configs: m.core.List()}, nil
+}
+
+func (m *NAT64sService) ShowConfig(
+	ctx context.Context,
+	req *nat64spb.ShowConfigRequest,
+) (*nat64spb.ShowConfigResponse, error) {
+	cfg, ok := m.core.Get(req.GetName())
+	if !ok {
+		return nil, status.Errorf(codes.NotFound, "config %q not found", req.GetName())
+	}
+	return &nat64spb.ShowConfigResponse{Config: encodeConfig(cfg)}, nil
+}
+
+// UpdateConfig replaces the whole named config with the one the request
+// carries, publishing nothing when that config is invalid.
+func (m *NAT64sService) UpdateConfig(
+	ctx context.Context,
+	req *nat64spb.UpdateConfigRequest,
+) (*nat64spb.UpdateConfigResponse, error) {
+	config, err := decodeConfig(req.GetConfig())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+
+	name := req.GetName()
+	if err := m.core.Replace(name, config); err != nil {
+		return nil, crud.PublishError(name, err)
+	}
+
+	return &nat64spb.UpdateConfigResponse{}, nil
+}
+
+// DeleteConfig removes the named config when it is no longer referenced
+// by any pipeline.
+func (m *NAT64sService) DeleteConfig(
+	ctx context.Context,
+	req *nat64spb.DeleteConfigRequest,
+) (*nat64spb.DeleteConfigResponse, error) {
+	if err := m.core.Delete(req.GetName()); err != nil {
+		return nil, crud.DeleteError(req.GetName(), err)
+	}
+	return &nat64spb.DeleteConfigResponse{}, nil
+}
+
+// decodeConfig converts a whole wire config into its stored form,
+// rejecting anything the dataplane could not translate with.
+func decodeConfig(wire *nat64spb.Config) (*NAT64sConfig, error) {
+	if wire == nil {
+		return nil, fmt.Errorf("config is required")
+	}
+
+	config := &NAT64sConfig{}
+
+	seenPrefixes := make(map[[12]byte]struct{}, len(wire.GetPrefixes()))
+	for idx, wirePrefix := range wire.GetPrefixes() {
+		prefix, err := wirePrefix.ToPrefix()
+		if err != nil {
+			return nil, fmt.Errorf("prefixes[%d]: invalid prefix: %w", idx, err)
+		}
+		if prefix.Bits() != nat64sPrefixBits {
+			return nil, fmt.Errorf(
+				"prefixes[%d]: prefix must be a /%d, got /%d",
+				idx, nat64sPrefixBits, prefix.Bits(),
+			)
+		}
+		address := prefix.Masked().Addr().As16()
+		key := [12]byte(address[:nat64sPrefixBits/8])
+		if _, ok := seenPrefixes[key]; ok {
+			return nil, fmt.Errorf("prefixes[%d]: prefix is listed twice", idx)
+		}
+		seenPrefixes[key] = struct{}{}
+		config.Prefixes = append(config.Prefixes, slices.Clone(address[:nat64sPrefixBits/8]))
+	}
+
+	seen := make(map[uint32]struct{}, len(wire.GetPool()))
+	for idx, wireAddr := range wire.GetPool() {
+		if wireAddr == nil {
+			return nil, fmt.Errorf("pool[%d]: address is required", idx)
+		}
+		addr := wireAddr.GetAddr()
+		if _, ok := seen[addr]; ok {
+			return nil, fmt.Errorf("pool[%d]: address is listed twice", idx)
+		}
+		seen[addr] = struct{}{}
+		config.Pool = append(config.Pool, addr)
+	}
+
+	config.Timeout.Timeout = uint16(clampTimeout(wire.GetTimeout()))
+	config.Timeout.TCPEstablished = uint16(
+		clampTimeout(wire.GetTcpEstablishedTimeout()),
+	)
+
+	if wireMTU := wire.GetMtu(); wireMTU != nil {
+		if wireMTU.GetIpv4Mtu() > math.MaxUint16 || wireMTU.GetIpv6Mtu() > math.MaxUint16 {
+			return nil, fmt.Errorf(
+				"mtu limits must fit 16 bits, got ipv4=%d ipv6=%d",
+				wireMTU.GetIpv4Mtu(), wireMTU.GetIpv6Mtu(),
+			)
+		}
+		config.MTU = MTUConfig{
+			IPv4MTU: wireMTU.GetIpv4Mtu(),
+			IPv6MTU: wireMTU.GetIpv6Mtu(),
+		}
+	}
+
+	if wireRange := wire.GetPortRange(); wireRange != nil {
+		if wireRange.GetLo() > math.MaxUint16 || wireRange.GetHi() > math.MaxUint16 {
+			return nil, fmt.Errorf(
+				"port range bounds must fit 16 bits, got [%d, %d)",
+				wireRange.GetLo(), wireRange.GetHi(),
+			)
+		}
+		lo, hi := uint16(wireRange.GetLo()), uint16(wireRange.GetHi())
+		if hi <= lo {
+			return nil, fmt.Errorf(
+				"port range must be non-empty, got [%d, %d)", lo, hi,
+			)
+		}
+		config.PortRange = PortRange{Lo: lo, Hi: hi}
+	}
+
+	config.MapName = wire.GetMap()
+
+	if config.MapName == "" {
+		return nil, fmt.Errorf(
+			"a stateful config must link its nat64state_map session tables",
+		)
+	}
+
+	return config, nil
+}
+
+func encodeConfig(config *NAT64sConfig) *nat64spb.Config {
+	wire := &nat64spb.Config{
+		Pool:                  make([]*commonpb.IPv4Address, 0, len(config.Pool)),
+		Timeout:               uint32(config.Timeout.Timeout),
+		TcpEstablishedTimeout: uint32(config.Timeout.TCPEstablished),
+		Mtu: &nat64spb.MTUConfig{
+			Ipv4Mtu: config.MTU.IPv4MTU,
+			Ipv6Mtu: config.MTU.IPv6MTU,
+		},
+		PortRange: &nat64spb.PortRange{Lo: uint32(config.PortRange.Lo), Hi: uint32(config.PortRange.Hi)},
+		Map:       config.MapName,
+	}
+
+	for _, prefix := range config.Prefixes {
+		var address [16]byte
+		copy(address[:], prefix)
+		wire.Prefixes = append(wire.Prefixes, &commonpb.IPv6Prefix{
+			Addr:      commonpb.NewIPv6Address(address),
+			PrefixLen: nat64sPrefixBits,
+		})
+	}
+	for _, addr := range config.Pool {
+		wire.Pool = append(wire.Pool, &commonpb.IPv4Address{Addr: addr})
+	}
+
+	return wire
+}
+
+// clampTimeout bounds one timeout in seconds: zero keeps zero (the C side
+// applies its default), the rest saturate at the C maximum.
+func clampTimeout(value uint32) uint32 {
+	// The C knob is uint16_t; the cap is the largest representable
+	// value.
+	const max = 65535
+	if value > max {
+		return max
+	}
+	return value
+}

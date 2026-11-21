@@ -15,6 +15,7 @@ import (
 	l3b "github.com/yanet-platform/yanet2/modules/l3b/controlplane"
 	mirror "github.com/yanet-platform/yanet2/modules/mirror/controlplane"
 	nat64 "github.com/yanet-platform/yanet2/modules/nat64/controlplane"
+	nat64s "github.com/yanet-platform/yanet2/modules/nat64s/controlplane"
 	pdump "github.com/yanet-platform/yanet2/modules/pdump/controlplane"
 	route_mpls "github.com/yanet-platform/yanet2/modules/route-mpls/controlplane"
 	route "github.com/yanet-platform/yanet2/modules/route/controlplane"
@@ -37,6 +38,9 @@ type ModulesConfig struct {
 	Mirror xcfg.Optional[mirror.Config] `yaml:"mirror"`
 	// NAT64 is the configuration for the NAT64 module.
 	NAT64 xcfg.Optional[nat64.Config] `yaml:"nat64"`
+
+	// NAT64s is the configuration for the stateful NAT64 module.
+	NAT64s xcfg.Optional[nat64s.Config] `yaml:"nat64s"`
 	// Pdump is the configuration for the packet dump module.
 	Pdump xcfg.Optional[pdump.Config] `yaml:"pdump"`
 	// ACL is the configuration for the acl module.
