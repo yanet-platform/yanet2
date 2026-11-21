@@ -2702,9 +2702,10 @@ packet-only overflow and byte-only overflow separately. Also cover simultaneous
 packet/byte overflow at each level and simultaneous cell/aggregate overflow
 for one event. Justify each initial state against the counter invariants before
 using it. A seeded model state does not prove reachability through normal traffic.
-For every case, verify one transition to a fresh period, all event contributions
-exactly once in that period and none in the old period. Check a subsequent increment.
-Do not compute a delta across identities or issue a new identity on failure.
+For each proven rollover, verify one transition to a fresh period, all event
+contributions exactly once in that period and none in the old period. Check a
+subsequent increment. Do not compute a delta across identities. For an unproven
+transition, verify `UNAVAILABLE` without a numeric value or a new identity.
 
 | Injected fault | Counter boundary and exclusions |
 | --- | --- |

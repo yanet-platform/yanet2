@@ -355,16 +355,16 @@ interrupts permission and requires independent withdrawal of all managed VIPs be
 Unconfirmed outcomes stop dependent steps; independent expiry continues. Backend
 invocation alone is not successful route application.
 
+O02 and O03 return the VS incarnation and token, not individual real incarnations.
+After acceptance, read the coherent O11/F30 snapshot and confirm the VS and real
+incarnations are still current before binding checks. If current identities
+cannot be confirmed, reconcile before binding. Pre-binding results cannot
+establish eligibility or refresh health.
+
 ### New Service and VS
 
 Separate operations,not one transaction. Confirm each dependency; announce last
 only if the whole contributing prefix is ready.
-O02 and O03 return the VS identity and token, not individual real incarnations.
-After acceptance, use a coherent O11/F30 readback to bind the checker assignment
-to the accepted VS and real incarnations. A superseded or unconfirmed readback
-cannot authorize that binding. Reconcile before accepting health for new reals.
-Provisional probes are not authoritative. Results from before binding cannot
-establish eligibility or refresh health.
 
 ```mermaid
 sequenceDiagram
@@ -393,24 +393,29 @@ sequenceDiagram
     C-->>O: Current binding confirmed
     O->>C: Create VS with parent incarnation, reals disabled
     C-->>O: Accepted VS incarnation and token
-    O->>C: Read accepted VS through O11
-    C-->>O: Coherent real keys and incarnations
     O->>C: Link VS in ModuleConfig
-    C-->>O: Binding confirmed
-    O->>H: Real membership and checks
-    H->>O: Required probe results
-    O->>C: Initial health for current incarnations
-    C-->>O: Accepted, publication not yet proved
-    O->>C: Administratively enable reals
-    O->>C: Confirm publications, required ACL and cohort
-    C-->>O: Publications, ACL and serving readiness confirmed
-    N->>O: Poll Ready
-    alt Whole contributing prefix ready and permission fresh
-        O-->>N: Ready
-        N->>N: Apply BIRD announcement after own hysteresis
-    else Readiness unconfirmed
-        O-->>N: Not ready
-        Note over N: No new announcement
+    C-->>O: Link confirmed
+    O->>C: Read accepted VS through O11
+    C-->>O: Coherent snapshot with VS and real identities
+    O->>O: Confirm current VS and real incarnations
+    alt Incarnations confirmed current
+        O->>H: Bind and start checks for current real incarnations
+        H->>O: Required probe results
+        O->>C: Initial health for current incarnations
+        C-->>O: Accepted, publication not yet proved
+        O->>C: Administratively enable reals
+        O->>C: Confirm publications, required ACL and cohort
+        C-->>O: Publications, ACL and serving readiness confirmed
+        N->>O: Poll Ready
+        alt Whole contributing prefix ready and permission fresh
+            O-->>N: Ready
+            N->>N: Apply BIRD announcement after own hysteresis
+        else Readiness unconfirmed
+            O-->>N: Not ready
+            Note over N: No new announcement
+        end
+    else Incarnations unconfirmed or superseded
+        Note over O,H: Reconcile without binding checks or accepting new health
     end
 ```
 
@@ -442,11 +447,16 @@ sequenceDiagram
         Note over C: Survivors retain state, new reals disabled, old incarnations fenced
         C->>W: Publish new membership
         C-->>O: Required publication confirmed
-        O->>C: Read accepted VS through O11
-        C-->>O: Coherent real keys and incarnations
-        O->>H: Start checks bound to new real incarnations
-        O->>H: Stop removed checks
         Note over W: No simultaneous all-worker switch
+        O->>H: Stop removed checks
+        O->>C: Read accepted VS through O11
+        C-->>O: Coherent snapshot with VS and real identities
+        O->>O: Confirm current VS and real incarnations
+        alt Incarnations confirmed current
+            O->>H: Start checks bound to new real incarnations
+        else Incarnations unconfirmed or superseded
+            Note over O,H: Reconcile without binding checks or accepting new health
+        end
     end
     opt Replacement settled and separate weight change requested
         M->>O: Weight change
@@ -490,21 +500,26 @@ sequenceDiagram
         end
         O->>H: Stop A/B checks
         O->>C: Read accepted VS through O11
-        C-->>O: Coherent real keys and incarnations
-        O->>H: Start checks bound to C/D incarnations
-        H->>O: Required C/D probe results
-        O->>C: Current C/D health, initial view before deltas
-        C-->>O: Observations accepted
-        O->>C: Administratively enable C/D
-        O->>C: Confirm current Service/cohort required ACL
-        C-->>O: Publications, ACL and serving readiness confirmed
-        N->>O: Poll Ready
-        alt Whole prefix ready and permission fresh
-            O-->>N: Ready
-            N->>N: Apply BIRD announcement after hysteresis
-        else Unconfirmed
-            O-->>N: Not ready
-            Note over N: No reannouncement
+        C-->>O: Coherent snapshot with VS and real identities
+        O->>O: Confirm current VS and real incarnations
+        alt Incarnations confirmed current
+            O->>H: Start checks bound to C/D incarnations
+            H->>O: Required C/D probe results
+            O->>C: Current C/D health, initial view before deltas
+            C-->>O: Observations accepted
+            O->>C: Administratively enable C/D
+            O->>C: Confirm current Service/cohort required ACL
+            C-->>O: Publications, ACL and serving readiness confirmed
+            N->>O: Poll Ready
+            alt Whole prefix ready and permission fresh
+                O-->>N: Ready
+                N->>N: Apply BIRD announcement after hysteresis
+            else Unconfirmed
+                O-->>N: Not ready
+                Note over N: No reannouncement
+            end
+        else Incarnations unconfirmed or superseded
+            Note over O,H: Reconcile without binding checks or accepting new health
         end
         Note over W,N: Full replacement can interrupt service
     end
