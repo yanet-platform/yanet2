@@ -293,6 +293,8 @@ Initialize quorum down on startup, restart, recreation of a contributing VS or
 a change in configured contributing membership. Fresh evidence must reach the
 up threshold. Metadata changes and ordinary health or W changes do not reset
 hysteresis. Restart still requires withdrawal of all managed VIPs.
+A VS change does not reset quorum if the VS is outside the contributing set
+before and after the change and that set stays unchanged.
 
 An empty contributing set is not ready. Withdraw the VIP route when its last
 contributing VS disappears.
@@ -357,6 +359,12 @@ invocation alone is not successful route application.
 
 Separate operations,not one transaction. Confirm each dependency; announce last
 only if the whole contributing prefix is ready.
+O02 and O03 return the VS identity and token, not individual real incarnations.
+After acceptance, use a coherent O11/F30 readback to bind the checker assignment
+to the accepted VS and real incarnations. A superseded or unconfirmed readback
+cannot authorize that binding. Reconcile before accepting health for new reals.
+Provisional probes are not authoritative. Results from before binding cannot
+establish eligibility or refresh health.
 
 ```mermaid
 sequenceDiagram
@@ -384,7 +392,9 @@ sequenceDiagram
     O->>C: Verify accepted Service and policy
     C-->>O: Current binding confirmed
     O->>C: Create VS with parent incarnation, reals disabled
-    C-->>O: VS created, current incarnations known
+    C-->>O: Accepted VS incarnation and token
+    O->>C: Read accepted VS through O11
+    C-->>O: Coherent real keys and incarnations
     O->>C: Link VS in ModuleConfig
     C-->>O: Binding confirmed
     O->>H: Real membership and checks
@@ -407,8 +417,8 @@ sequenceDiagram
 ### Real membership and weight changes
 
 Full replacement preserves survivor weights,admin state and sessions; it does
-not renew health. Start new checks; stop removed checks only after confirmed
-membership publication. Early new results do not enable old/unknown incarnations.
+not renew health. Start authoritative checks for new reals after O11 readback
+and identity binding. Stop removed checks only after confirmed membership publication.
 Weight change is separate. New reals follow the first scenario's enable/health
 path; lost prefix readiness uses the withdrawal path below.
 
@@ -421,11 +431,9 @@ sequenceDiagram
     participant C as l3b CP via Gateway
     participant W as Dataplane
     M->>O: New real membership via adapter desired snapshot
-    O->>H: Start checks for new reals
     O->>C: Replace full list
     alt Rejected before acceptance
         C-->>O: Rejected, old membership retained
-        O->>H: Stop only unaccepted new checks
         Note over O,H: Old checks continue
     else Outcome or publication unconfirmed
         C-->>O: Uncertain or incomplete
@@ -434,6 +442,9 @@ sequenceDiagram
         Note over C: Survivors retain state, new reals disabled, old incarnations fenced
         C->>W: Publish new membership
         C-->>O: Required publication confirmed
+        O->>C: Read accepted VS through O11
+        C-->>O: Coherent real keys and incarnations
+        O->>H: Start checks bound to new real incarnations
         O->>H: Stop removed checks
         Note over W: No simultaneous all-worker switch
     end
@@ -460,12 +471,10 @@ sequenceDiagram
     participant W as Dataplane
     participant N as yanet-announcer
     M->>O: Replace A/B with C/D via adapter desired snapshot
-    O->>H: Start C/D checks
     O->>C: Full real-list replacement
     C->>C: Check no unpublished required disable for A/B
     alt Rejected before acceptance
         C-->>O: Whole request rejected, A/B remain
-        O->>H: Stop only unaccepted C/D checks
         Note over O,H: A/B checks continue
     else Outcome or publication unconfirmed
         C-->>O: Uncertain or incomplete
@@ -480,6 +489,9 @@ sequenceDiagram
             N->>N: Apply BIRD withdrawal
         end
         O->>H: Stop A/B checks
+        O->>C: Read accepted VS through O11
+        C-->>O: Coherent real keys and incarnations
+        O->>H: Start checks bound to C/D incarnations
         H->>O: Required C/D probe results
         O->>C: Current C/D health, initial view before deltas
         C-->>O: Observations accepted

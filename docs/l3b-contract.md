@@ -2495,6 +2495,10 @@ cases below and the packet companion's embedded cases.
   With other admission checks passing, verify that an otherwise valid O04, O15
   or O20 is not rejected for lack of space for a replacement export. An existing
   export stays protected until its readers finish.
+- O01 under export-memory pressure (**NOT RUN**): retain protected snapshots
+  that exhaust replacement-export capacity. With an absent target, permit
+  registry space and all other O01 checks passing, verify that O01 issues a
+  permit without allocating an export or altering any accepted snapshot or token.
 - On an otherwise permitted stateful operation, RST without SYN uses `tcp_time_wait`,
   not immediate deletion. A live authoritative eligible pin remains counted by
   WLC until expiry, then stops; use one positive time_wait timeout and its exact expiry
@@ -2694,8 +2698,12 @@ continues and unrelated groups are unchanged. Read `2^64−1`, then trigger
 rollover with a known increment. Check that the new period includes that
 increment exactly once and excludes old contributions. Repeat for an aggregate
 whose individual cells still fit. At each boundary (cell and aggregate), test
-packet-only overflow and byte-only overflow separately. Both contributions of
-the triggering event belong to the new period. Also check a subsequent increment.
+packet-only overflow and byte-only overflow separately. Also cover simultaneous
+packet/byte overflow at each level and simultaneous cell/aggregate overflow
+for one event. Justify each initial state against the counter invariants before
+using it. A seeded model state does not prove reachability through normal traffic.
+For every case, verify one transition to a fresh period, all event contributions
+exactly once in that period and none in the old period. Check a subsequent increment.
 Do not compute a delta across identities or issue a new identity on failure.
 
 | Injected fault | Counter boundary and exclusions |

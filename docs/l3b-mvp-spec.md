@@ -1445,13 +1445,18 @@ authorize production execution, or select passing limits after seeing results.
 | S4 | D03 S5 endpoint-check verification and packet-path cost | Measured report on the qualification environment | Implementation, bench access |
 | S5 | D04/D05 observation protocol and publish-before-removal | Approved protocol, principals and grants, then implementation | S2 |
 | S6 | Qualification against the approved manifest | Pass every applicable approved limit and criterion on the pinned candidate under the approved clock policy | S2–S5 and S7 clock decision |
-| S7 | D08 exploratory BOOTTIME cost experiments before qualification | Measurements and owner clock decision,not qualification pass | S5 |
+| S7 | D08 exploratory clock-cost experiments, starting with BOOTTIME | Measurements for the selected implementation and owner clock approval, not a qualification pass | S5 |
 
 The order is `S5 → S7 → S6`. S7 requires an approved protocol and separate
 run authorization; it produces no numerical qualification verdict.
-If S7 selects a different clock, update the affected S5 implementation and
-repeat its proofs, including suspend. Repeat affected S4 measurements, including
-direct clock-read and full packet-path cost, for the selected implementation.
+If S7 identifies a different clock, update the affected S5 implementation and
+repeat its proofs, including suspend. Repeat the D08 direct-read and full
+packet-path cost experiments in S7 for that implementation under separate
+exploratory run authorization. Repeat the affected D03 endpoint-check and
+packet-path measurements in S4 in the qualification environment. One report
+may satisfy both stages only if it records coverage of both sets of conditions,
+including the D06 matrix, publication failure, and idle or lagging workers
+for D08. Reusing evidence does not give S7 a qualification verdict.
 Approve the clock and versioned threshold manifest with the applicable evidence,
 then authorize S6 separately. A run exceeding an applicable limit does not
 pass S6. Approval, run authorization and verdict are distinct.
