@@ -146,7 +146,7 @@ impl<'a, W: ?Sized> Freed<'a, W> {
 }
 
 impl<'a, W: ?Sized> Freed<'a, W, Context> {
-    /// Issues a return capability at the existing raw `Build::free` boundary.
+    /// Issues a return capability for an allocation in a live context.
     ///
     /// # Safety
     ///

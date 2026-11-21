@@ -38,14 +38,14 @@ use yanet_shm::{
     shm::{MAX_ALIGN, ShmLayout},
 };
 
-pub use self::tree::{BURST, Decode, Join, Node, Rules, link};
+pub use self::tree::{BURST, Decode, Join, Node, Rules};
 pub use crate::bindings::{
     classify_line_range as LineRange, filter_port_range as PortRange, net4 as Net4, net6 as Net6,
 };
 use crate::{
     bindings,
     common::lpm::Lpm,
-    cp::{Build, FfiRecord, Init, MemoryContext, Owner, Place, Refusal},
+    cp::{Build, FfiRecord, Free, Init, Owner, Place, Refusal, Taken},
 };
 
 mod tree;
@@ -566,19 +566,22 @@ macro_rules! classifiers {
         // which are opaque. Dropping is a no-op.
         unsafe impl ShmLayout for $name {}
 
-        // SAFETY: the C object is the whole value; the compile, the join or
-        // the decode that wrote it allocated only in the memory context, in
-        // blocks and child contexts its C free returns and unlinks.
-        unsafe impl Build for $name {
+        impl Build for $name {
             type Parts<'b, W: Owner> = Infallible;
 
             fn write<'s, 'b, W: Owner>(parts: Infallible, _: Place<'s, 'b, Self, W>) -> Result<Init<'s, Self>, Refusal> {
                 match parts {}
             }
+        }
 
-            unsafe fn free<W: Owner>(addr: usize, memory: &MemoryContext<'_, W>) {
-                // SAFETY: the object was written whole (caller contract).
-                unsafe { bindings::$free(memory.root().ptr(addr)) };
+        // SAFETY: compiling, joining or decoding initializes the entire C
+        // object. Its finalizer returns each of its allocations and unlinks
+        // its child contexts without releasing the object's own storage.
+        unsafe impl Free for $name {
+            fn free<W: Owner>(taken: Taken<'_, Self, W>) {
+                // SAFETY: the token owns the initialized C object at its
+                // final address in the still-live context.
+                unsafe { bindings::$free(taken.memory().root().ptr(taken.addr())) };
             }
         }
     )*};

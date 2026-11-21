@@ -10,15 +10,26 @@
 use core::{
     ffi::{CStr, c_int},
     fmt,
-    marker::PhantomData,
-    mem::size_of,
 };
 
-use super::{Build, BuildError, Kind, MemoryContext, Owned, Owner, Refusal, Scope, refused};
+use super::{Build, BuildError, Kind, Owned, Owner, Refusal, Scope, placement::BlockSlot, refused};
 use crate::{
     bindings,
-    classify::{Attribute, Decode, Join, Node, Rules, link},
+    classify::{Attribute, Decode, Join, Node, Rules},
 };
+
+impl<T, W: Owner> BlockSlot<'_, T, W> {
+    fn zero(&mut self) -> *mut T {
+        let raw = self.root_ptr();
+        // SAFETY: the reservation is exclusive and aligned for one whole value.
+        unsafe { raw.write_bytes(0, 1) };
+        raw
+    }
+
+    fn context(&self) -> *mut bindings::memory_context {
+        self.raw().with_addr(self.memory().live.context().get()).cast()
+    }
+}
 
 /// The classes of a stage of a composition over a ruleset of build `'b`: the
 /// registry of its class space and the group of each rule.
@@ -27,41 +38,36 @@ use crate::{
 /// build and ruleset; it is scratch of the build in its memory, which it
 /// returns when dropped.
 struct Stage<'b, W: Owner> {
-    addr: usize,
+    slot: BlockSlot<'b, bindings::classifier, W>,
     rules: u32,
-    memory: &'b MemoryContext<'b, W>,
-    _brand: PhantomData<fn(&'b ()) -> &'b ()>,
 }
 
 impl<W: Owner> fmt::Debug for Stage<'_, W> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         f.debug_struct("Stage")
-            .field("addr", &self.addr)
+            .field("addr", &self.raw().addr())
             .field("rules", &self.rules)
             .finish()
     }
 }
 
-impl<W: Owner> Stage<'_, W> {
-    fn raw(&self) -> *const bindings::classifier {
-        self.memory.root().ptr(self.addr)
+impl<'b, W: Owner> Stage<'b, W> {
+    fn zero(mut slot: BlockSlot<'b, bindings::classifier, W>, rules: u32) -> Self {
+        slot.zero();
+        Self { slot, rules }
+    }
+
+    fn raw(&self) -> *mut bindings::classifier {
+        self.slot.raw()
     }
 }
 
 impl<W: Owner> Drop for Stage<'_, W> {
     fn drop(&mut self) {
-        let root = self.memory.root();
-        // SAFETY: the stage was filled whole over its rule count in the
-        // build's context, which is live, and its block, allocated with the
-        // size of one stage, is referenced by nothing else.
-        unsafe {
-            bindings::yanet_sys_classify_stage_free(
-                root.ptr(self.addr),
-                root.ptr(self.memory.live.context().get()),
-                self.rules,
-            );
-            self.memory.free(self.addr, size_of::<bindings::classifier>());
-        }
+        // SAFETY: a zeroed stage is finalizable even after partial output.
+        // The slot and its allocations still belong to this live context.
+        unsafe { bindings::yanet_sys_classify_stage_free(self.raw(), self.slot.context(), self.rules) };
+        // The reservation returns its storage only after finalization.
     }
 }
 
@@ -122,7 +128,6 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
             return Err(refused::<W, E>(Refusal::NoCMemory));
         }
         same_ruleset(&[left.stage.rules as usize, right.stage.rules as usize]).map_err(refused::<W, E>)?;
-        let memory = self.memory;
         let (Branch { value: left, stage: left_stage }, Branch { value: right, stage: right_stage }) = (left, right);
         self.staged(left_stage.rules, |context, stage, join: *mut Join<L, R>| {
             // SAFETY: both stages were filled over the rule count, and the
@@ -139,13 +144,9 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
                 )
             };
             if status == 0 {
-                let (left_edge, right_edge) = Join::<L, R>::EDGES;
-                // SAFETY: the node's joint is written whole and its edges are
-                // not; the classifiers are of this build.
-                unsafe {
-                    link(memory, join.addr() + left_edge, left);
-                    link(memory, join.addr() + right_edge, right);
-                }
+                // SAFETY: the prefix was joined from these inputs' stages
+                // and the exclusive node is in their build.
+                unsafe { Join::write_inputs(join, left, right) };
             }
             status
         })
@@ -173,7 +174,6 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
             return Err(refused::<W, E>(Refusal::NoCMemory));
         }
         same_ruleset(&[left.stage.rules as usize, right.stage.rules as usize, rules.len()]).map_err(refused::<W, E>)?;
-        let memory = self.memory;
         let (Branch { value: left, stage: left_stage }, Branch { value: right, stage: right_stage }) = (left, right);
         self.written(|context, table: *mut Rules<L, R>| {
             // SAFETY: both stages were filled over the rule count of the
@@ -191,12 +191,9 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
                 )
             };
             if status == 0 {
-                let (left_edge, right_edge) = Rules::<L, R>::EDGES;
-                // SAFETY: as for a joint.
-                unsafe {
-                    link(memory, table.addr() + left_edge, left);
-                    link(memory, table.addr() + right_edge, right);
-                }
+                // SAFETY: the prefix was joined from these inputs' stages
+                // and the exclusive node is in their build.
+                unsafe { Rules::write_inputs(table, left, right) };
             }
             status
         })
@@ -223,7 +220,6 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
             return Err(refused::<W, E>(Refusal::NoCMemory));
         }
         same_ruleset(&[input.stage.rules as usize, rules.len()]).map_err(refused::<W, E>)?;
-        let memory = self.memory;
         let Branch { value: input, stage } = input;
         self.written(|context, map: *mut Decode<N>| {
             // SAFETY: the stage was filled over the rule count of the
@@ -240,8 +236,9 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
                 )
             };
             if status == 0 {
-                // SAFETY: as for a joint.
-                unsafe { link(memory, map.addr() + Decode::<N>::EDGE, input) };
+                // SAFETY: the prefix was decoded from this input's stage
+                // and the exclusive node is in its build.
+                unsafe { Decode::write_inputs(map, input) };
             }
             status
         })
@@ -279,26 +276,16 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
         self,
         write: impl FnOnce(*mut bindings::memory_context, *mut T) -> c_int,
     ) -> Result<Owned<'b, T, W>, E> {
-        let memory = self.memory;
-        let addr = self.alloc(size_of::<T>())?;
-        let root = memory.root();
-        // SAFETY: the block is ours, of the size of one `T`.
-        unsafe { root.ptr::<u8>(addr).write_bytes(0, size_of::<T>()) };
-        if write(root.ptr(memory.live.context().get()), root.ptr(addr)) != 0 {
-            // SAFETY: the block is ours, and the failed routine left nothing
-            // in it.
-            unsafe { memory.free(addr, size_of::<T>()) };
+        let mut slot = BlockSlot::reserve(self)?;
+        let value = slot.zero();
+        if write(slot.context(), value) != 0 {
+            drop(slot);
             // Memory is C's only failure for the routines of this module.
             return Err(refused::<W, E>(Refusal::OutOfMemory));
         }
-        // The block of one `T` was allocated from the context and written
-        // whole.
-        Ok(Owned {
-            addr,
-            memory,
-            _brand: PhantomData,
-            _value: PhantomData,
-        })
+        // SAFETY: success wrote the whole value, including any input edges,
+        // at the final address of the reservation.
+        Ok(unsafe { slot.assume_init() })
     }
 
     /// As [`Scope::written`], for a routine that also fills a stage over the
@@ -312,34 +299,9 @@ impl<'b, W: Owner, E: From<BuildError<W::Error>>, K: Kind> Scope<'b, '_, W, E, K
         rules: u32,
         write: impl FnOnce(*mut bindings::memory_context, *mut bindings::classifier, *mut T) -> c_int,
     ) -> Result<Branch<'b, T, W>, E> {
-        let memory = self.memory;
-        let addr = self.alloc(size_of::<bindings::classifier>())?;
-        let root = memory.root();
-        let stage = root.ptr::<bindings::classifier>(addr);
-        // SAFETY: the block is ours, of the size of one stage.
-        unsafe { stage.write_bytes(0, 1) };
-        match self.written(|context, value| write(context, stage, value)) {
-            Ok(value) => Ok(Branch {
-                value,
-                stage: Stage {
-                    addr,
-                    rules,
-                    memory,
-                    _brand: PhantomData,
-                },
-            }),
-            Err(err) => {
-                // SAFETY: the stage was zeroed and then, if the routine ran,
-                // left by it in a state its C finalizer releases, as it does
-                // a zeroed one, in the build's context, which is live; its
-                // block is ours.
-                unsafe {
-                    bindings::yanet_sys_classify_stage_free(stage, root.ptr(memory.live.context().get()), rules);
-                    memory.free(addr, size_of::<bindings::classifier>());
-                }
-                Err(err)
-            }
-        }
+        let stage = Stage::zero(BlockSlot::reserve(self)?, rules);
+        let value = self.written(|context, value| write(context, stage.raw(), value))?;
+        Ok(Branch { value, stage })
     }
 }
 

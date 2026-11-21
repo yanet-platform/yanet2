@@ -23,7 +23,7 @@ use yanet_sdk_testing::cp::{Call, Interruptible, LiveHeaders, TestCx, TestError,
 use yanet_sys::{
     bindings::{COUNTER_TAG_VALUE_LEN, CP_MODULE_NAME_LEN, CP_OBJECT_NAME_LEN},
     common::LINE_BLOCK_ALIGN,
-    cp::{BuildError, Builder, Built, Init, MemoryContext, Owner, Place, Scope},
+    cp::{BuildError, Builder, Built, Free, Init, Owner, Place, Scope, Taken},
     dp::ModuleConfig,
 };
 
@@ -91,13 +91,16 @@ mod derived {
     #[repr(C)]
     pub(super) struct Enclosing<const __place: usize> {
         pub(super) prior: [ShmSlice<u8>; __place],
+        pub(super) middle: ShmSlice<u16>,
         pub(super) current: Interruptible<ShmSlice<u32>>,
+        pub(super) after_first: ShmSlice<u8>,
+        pub(super) after_second: ShmSlice<u16>,
     }
 }
 
 #[allow(clippy::std_instead_of_core)]
 #[test]
-fn test_slice_interrupted_after_initialization_releases_nested_field_before_derived_guards() {
+fn test_slice_interrupted_after_initialization_releases_nested_field_before_earlier_fields() {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
     use derived::{Enclosing, EnclosingParts};
@@ -114,7 +117,10 @@ fn test_slice_interrupted_after_initialization_releases_nested_field_before_deri
                     };
                     Ok(EnclosingParts {
                         prior: [b.slice(17, |_| Ok(0))?],
+                        middle: b.slice(3, |_| Ok(0))?,
                         current: (b.slice(2, |_| Ok(0))?, interrupt),
+                        after_first: b.slice(13, |_| Ok(0))?,
+                        after_second: b.slice(11, |_| Ok(0))?,
                     })
                 })
             }));
@@ -128,7 +134,7 @@ fn test_slice_interrupted_after_initialization_releases_nested_field_before_deri
                 ));
             }
             assert_eq!(
-                [8, 17, 2 * size_of::<Enclosing<1>>()],
+                [8, 6, 17, 22, 13, 2 * size_of::<Enclosing<1>>()],
                 owner.take_child_returns().as_slice()
             );
             Ok(0)
@@ -152,21 +158,21 @@ struct FlakyParts {
 // SAFETY: a word accepts every bit pattern and has no padding.
 unsafe impl ShmLayout for Flaky {}
 
-// SAFETY: the word is the whole value, written or refused as a whole. It
-// stands in, under Miri, for an embedded C object whose initialisation runs
-// out of memory.
-unsafe impl Build for Flaky {
+// SAFETY: the initialized word owns no blocks or registrations.
+unsafe impl Free for Flaky {
+    fn free<W: Owner>(_: Taken<'_, Self, W>) {}
+}
+
+impl Build for Flaky {
     type Parts<'b, W: Owner> = FlakyParts;
 
     fn write<'s, 'b, W: Owner>(parts: FlakyParts, place: Place<'s, 'b, Self, W>) -> Result<Init<'s, Self>, Refusal> {
         if parts.fails {
             return Err(Refusal::OutOfMemory);
         }
-        // SAFETY: the word has no address-relative fields or release work.
+        // SAFETY: the word does not depend on its address or its build.
         Ok(unsafe { place.put(Self(parts.word)) })
     }
-
-    unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
 }
 
 /// A device, a counter, a block of ports and a word whose write may be
@@ -467,7 +473,7 @@ fn test_build_leaves_indexes_of_no_records_empty_and_unallocated() {
 
 #[test]
 fn test_build_writes_nested_slices_and_a_box() {
-    let owner = owner();
+    let owner = owner().with_child_return_log();
 
     let built = build_policy(&owner, &[(1, &[80, 443]), (2, &[]), (3, &[53])]).expect("built");
 
@@ -495,6 +501,11 @@ fn test_build_writes_nested_slices_and_a_box() {
         );
     });
     owner.release(built);
+    // Return the rules and their ports before the default box.
+    assert_eq!(
+        [8, 16, 3 * size_of::<Rule>(), size_of::<Rule>()],
+        owner.take_child_returns().as_slice()
+    );
     owner.assert_released();
 }
 

@@ -104,12 +104,13 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
     let predicates: Vec<_> = where_clause.iter().flat_map(|w| w.predicates.iter()).collect();
     let ty = quote!(#name #ty_generics);
+    let addr = format_ident!("__addr");
 
     let mut bounds = Vec::new();
     let mut parts_fields = Vec::new();
     let mut writes = Vec::new();
-    let mut guards = Vec::new();
-    let mut frees = Vec::new();
+    let mut commits = Vec::new();
+    let mut releases = Vec::new();
     let mut debug_bounds = Vec::new();
     let mut idents = Vec::new();
     let mut field_idents = Vec::new();
@@ -119,27 +120,19 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         let field_ty = &field.ty;
         let vis = &field.vis;
         let binding = format_ident!("__f{}", idx);
-        let guard = format_ident!("__g{}", idx);
         bounds.push(quote_spanned! {field_ty.span()=>
             __field_is_build::<#field_ty>();
         });
         parts_fields.push(quote_spanned!(field_ty.span()=> #vis #ident: <#field_ty as #p::Build>::Parts<'b, __W>));
         debug_bounds
             .push(quote_spanned!(field_ty.span()=> <#field_ty as #p::Build>::Parts<'b, __W>: #core::fmt::Debug));
+        let offset = quote!(#core::mem::offset_of!(Self, #ident));
         writes.push(quote_spanned! {field_ty.span()=>
-            __addr.write_field::<#field_ty>(#core::mem::offset_of!(#ty, #ident), #binding)?;
-            let #guard = #p::Partial::<#field_ty, __W>::new(
-                __addr.memory(),
-                __addr.addr() + #core::mem::offset_of!(#ty, #ident),
-                1,
-            );
+            let #binding = #addr.write_field::<#field_ty>(#offset, #binding)?;
         });
-        guards.push(guard);
-        frees.push(quote_spanned! {field_ty.span()=>
-            <#field_ty as #p::Build>::free::<__W>(
-                __addr + #core::mem::offset_of!(#ty, #ident),
-                __memory,
-            );
+        commits.push(quote!(#core::mem::forget(#binding);));
+        releases.push(quote_spanned! {field_ty.span()=>
+            #addr.free_field::<#field_ty>(#offset);
         });
         idents.push(quote!(#ident: #binding));
         field_idents.push(ident);
@@ -163,7 +156,7 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     // A non-generic type is checked once here. A generic one cannot name its
     // parameters in a constant, so every alignment it asks for is checked here,
     // a `Drop` impl clashes with the blanket impl below, and the value's
-    // layout is checked again where each instance is written or freed.
+    // layout is checked again in each instance's field recipe.
     let checks = if generic {
         quote! {
             #(#core::assert!(#aligns <= #p::MAX_ALIGN, #align_msg);)*
@@ -181,10 +174,8 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     };
     let instance_checks = generic.then(|| {
         quote! {
-            const {
-                #core::assert!(!#core::mem::needs_drop::<Self>(), #drop_msg);
-                #core::assert!(#core::mem::align_of::<Self>() <= #p::MAX_ALIGN, #align_msg);
-            }
+            #core::assert!(!#core::mem::needs_drop::<Self>(), #drop_msg);
+            #core::assert!(#core::mem::align_of::<Self>() <= #p::MAX_ALIGN, #align_msg);
         }
     });
 
@@ -229,40 +220,39 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
             }
         }
 
-        // SAFETY: every field is written at its own offset from the parts of
-        // its own type, each exactly once, and nothing else is written; a
-        // refused field returns the fields before it, last first, and the
-        // parts after it are dropped; the blocks owned are exactly those of
-        // the fields, each freed once.
-        unsafe impl #impl_generics #p::Build for #ty #where_clause {
+        // SAFETY: both paths name each actual field once, from the same
+        // type and offset. Locals roll back completed fields before unused
+        // parts. A successful write transfers all fields to the record.
+        unsafe impl #impl_generics #p::Record for #ty #where_clause {
+            type RecordParts<'b, __W: #p::Owner> = #parts_name<'b, __W, #(#args),*>;
+
+            fn write_fields<'slot, 'b, __W: #p::Owner>(
+                __parts: Self::RecordParts<'b, __W>,
+                #addr: #p::RecordPlace<'slot, 'b, Self, __W>,
+            ) -> #core::result::Result<#p::Init<'slot, Self>, #p::Refusal>
+            where
+                Self: #p::Build,
+            {
+                const { #instance_checks }
+                let #parts_name { #(#idents),* } = __parts;
+                #(#writes)*
+                #(#commits)*
+                #core::result::Result::Ok(#addr.finish())
+            }
+
+            fn free_fields<__W: #p::Owner>(mut #addr: #p::RecordTaken<'_, Self, __W>) {
+                #(#releases)*
+            }
+        }
+
+        impl #impl_generics #p::Build for #ty #where_clause {
             type Parts<'b, __W: #p::Owner> = #parts_name<'b, __W, #(#args),*>;
 
             fn write<'slot, 'b, __W: #p::Owner>(
                 __parts: #parts_name<'b, __W, #(#args),*>,
-                mut __addr: #p::Place<'slot, 'b, Self, __W>,
+                __addr: #p::Place<'slot, 'b, Self, __W>,
             ) -> #core::result::Result<#p::Init<'slot, Self>, #p::Refusal> {
-                #instance_checks
-                let #parts_name { #(#idents),* } = __parts;
-                // SAFETY: the offsets name distinct fields of this place.
-                // Each completed field stays guarded until the whole value
-                // takes over, without moving any address-relative edge.
-                unsafe {
-                    #(#writes)*
-                    #(#core::mem::forget(#guards);)*
-                    #core::result::Result::Ok(__addr.assume_init())
-                }
-            }
-
-            unsafe fn free<__W: #p::Owner>(
-                __addr: usize,
-                __memory: &#p::MemoryContext<'_, __W>,
-            ) {
-                #instance_checks
-                // SAFETY: each field lies in the value at the address, which
-                // was written whole (caller contract).
-                unsafe {
-                    #(#frees)*
-                }
+                __addr.write_record(__parts)
             }
         }
     })

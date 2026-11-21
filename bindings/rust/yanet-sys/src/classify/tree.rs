@@ -17,10 +17,7 @@ use core::{
 use yanet_shm::{rel::ShmBox, resolve::Resolve, shm::ShmLayout};
 
 use super::{Addr4, Joint, LineAttr, Net4Attr, Net6Attr, PortAttr, Rule, RuleMap, RuleTable, lpm_value};
-use crate::{
-    bindings,
-    cp::{Build, Init, MemoryContext, Owned, Owner, Place, Refusal},
-};
+use crate::cp::{Build, Free, Init, Owned, Owner, Place, Refusal, Taken};
 
 /// A classifier of a tree: an attribute, or a joint of two classifiers.
 ///
@@ -28,21 +25,25 @@ use crate::{
 /// class of the stage it was compiled or joined with.
 ///
 /// ```compile_fail,E0277
+/// use core::convert::Infallible;
 /// use yanet_shm::{resolve::Resolve, shm::ShmLayout};
 /// use yanet_sys::{
 ///     classify::Node,
-///     cp::{Build, Init, MemoryContext, Owner, Place, Refusal},
+///     cp::{Build, Free, Init, Owner, Place, Refusal, Taken},
 /// };
 /// #[repr(C)]
 /// struct Mine(u32);
+/// // SAFETY: a C-layout record containing only an integer.
 /// unsafe impl ShmLayout for Mine {}
-/// unsafe impl Build for Mine {
-///     type Parts<'b, W: Owner> = u32;
-///     fn write<'s, 'b, W: Owner>(value: u32, place: Place<'s, 'b, Self, W>) -> Result<Init<'s, Self>, Refusal> {
-///         // SAFETY: the integer owns nothing and has no relative edges.
-///         Ok(unsafe { place.put(Self(value)) })
+/// // SAFETY: the integer owns no resources.
+/// unsafe impl Free for Mine {
+///     fn free<W: Owner>(_: Taken<'_, Self, W>) {}
+/// }
+/// impl Build for Mine {
+///     type Parts<'b, W: Owner> = Infallible;
+///     fn write<'s, 'b, W: Owner>(parts: Infallible, _: Place<'s, 'b, Self, W>) -> Result<Init<'s, Self>, Refusal> {
+///         match parts {}
 ///     }
-///     unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
 /// }
 /// impl Node for Mine {
 ///     type Key = u32;
@@ -361,18 +362,24 @@ const _: () = {
 
 /// The shared-memory impls of the nodes that hold their inputs.
 macro_rules! holders {
-    ($($name:ident<$($param:ident),*> { $table:ident: $raw:ty, $free:ident; $($edge:ident: $ty:ident),* })*) => {$(
+    (@free $taken:ident;) => {};
+    (@free $taken:ident; $edge:ident: $ty:ident $(, $rest:ident: $rest_ty:ident)*) => {{
+        holders!(@free $taken; $($rest: $rest_ty),*);
+        // SAFETY: this is a distinct, initialized box field, outside the
+        // finalized prefix and projected only once.
+        let edge = unsafe { $taken.field::<ShmBox<$ty>>(offset_of!(Self, $edge)) };
+        ShmBox::<$ty>::free(edge);
+    }};
+
+    // The fields are listed in write order and released in reverse order.
+    ($($name:ident<$($param:ident),*> { $table:ident: $prefix:ty; $($edge:ident: $ty:ident),* })*) => {$(
         // SAFETY: a `#[repr(C)]` struct of an opaque C object, which accepts
         // every pattern, and offset words, without padding (asserted above);
         // the C object leads, so the node has its alignment, and dropping is
         // a no-op.
         unsafe impl<$($param: ShmLayout),*> ShmLayout for $name<$($param),*> {}
 
-        // SAFETY: written only by the scope's joins and decodes, which put
-        // the C object and the owned edges whole; freeing returns what the C
-        // build allocated in its context, then its inputs, the right one
-        // before the left.
-        unsafe impl<$($param: Build),*> Build for $name<$($param),*> {
+        impl<$($param: Build),*> Build for $name<$($param),*> {
             type Parts<'b, W: Owner> = Infallible;
 
             fn write<'s, 'b, W: Owner>(
@@ -381,24 +388,45 @@ macro_rules! holders {
             ) -> Result<Init<'s, Self>, Refusal> {
                 match parts {}
             }
+        }
 
-            unsafe fn free<W: Owner>(addr: usize, memory: &MemoryContext<'_, W>) {
-                // SAFETY: the node holds a value (caller contract), which only
-                // the scope's joins and decodes write, whole: the C object at
-                // its start, then the edges.
-                unsafe {
-                    bindings::$free(memory.root().ptr::<$raw>(addr + offset_of!(Self, $table)));
-                    $(<ShmBox<$ty> as Build>::free::<W>(addr + offset_of!(Self, $edge), memory);)*
-                }
+        // SAFETY: the joins and decode initialize the prefix and every
+        // owned edge. Release finalizes the prefix before returning its
+        // inputs, with the right input before the left when there are two.
+        unsafe impl<$($param: Build),*> Free for $name<$($param),*> {
+            fn free<W: Owner>(mut taken: Taken<'_, Self, W>) {
+                // SAFETY: this is the initialized C prefix, projected once.
+                let prefix = unsafe { taken.field::<$prefix>(offset_of!(Self, $table)) };
+                <$prefix>::free(prefix);
+                holders!(@free taken; $($edge: $ty),*);
+            }
+        }
+
+        impl<$($param: Node),*> $name<$($param),*> {
+            /// Installs the inputs into their final owning fields.
+            ///
+            /// # Safety
+            ///
+            /// The output is exclusive, aligned and has provenance for the
+            /// inputs' build. Its prefix was built from their corresponding
+            /// stages, and none of its edges has been installed yet.
+            pub(crate) unsafe fn write_inputs<'b, W: Owner>(out: *mut Self, $($edge: Owned<'b, $ty, W>),*) {
+                $(
+                    // SAFETY: out covers this field in the reserved node.
+                    let field = unsafe { &raw mut (*out).$edge };
+                    // SAFETY: the field is an exclusive box slot in this
+                    // build, apart from the input block.
+                    unsafe { $edge.write_box(field) };
+                )*
             }
         }
     )*};
 }
 
 holders! {
-    Join<L, R> { table: bindings::value_table, yanet_sys_classify_joint_free; right: R, left: L }
-    Rules<L, R> { table: bindings::rule_table, yanet_sys_classify_rule_table_free; right: R, left: L }
-    Decode<N> { map: bindings::vline, yanet_sys_classify_rule_map_free; input: N }
+    Join<L, R> { table: Joint; left: L, right: R }
+    Rules<L, R> { table: RuleTable; left: L, right: R }
+    Decode<N> { map: RuleMap; input: N }
 }
 
 mod sealed {
@@ -413,39 +441,6 @@ mod sealed {
     impl Sealed for super::LineAttr {}
 
     impl<L, R> Sealed for super::Join<L, R> {}
-}
-
-/// Writes an owned edge of a node whose C object a build has just written.
-///
-/// # Safety
-///
-/// The edge is an unwritten offset word of a node in a block of the memory
-/// context's build, whose C object is written whole; the part is of the same
-/// build.
-#[doc(hidden)]
-pub unsafe fn link<'b, W: Owner, T: Build>(memory: &'b MemoryContext<'b, W>, edge: usize, part: Owned<'b, T, W>) {
-    // SAFETY: the edge is an aligned, unwritten offset word of the node
-    // (caller contract); a box write only stores the offset.
-    let written = unsafe { memory.write_at::<ShmBox<T>>(edge, part) };
-    debug_assert!(written.is_ok(), "a box write does not fail");
-}
-
-impl<L, R> Join<L, R> {
-    /// Offsets of the left and the right edge.
-    #[doc(hidden)]
-    pub const EDGES: (usize, usize) = (offset_of!(Self, left), offset_of!(Self, right));
-}
-
-impl<L, R> Rules<L, R> {
-    /// Offsets of the left and the right edge.
-    #[doc(hidden)]
-    pub const EDGES: (usize, usize) = (offset_of!(Self, left), offset_of!(Self, right));
-}
-
-impl<N> Decode<N> {
-    /// Offset of the edge of the input.
-    #[doc(hidden)]
-    pub const EDGE: usize = offset_of!(Self, input);
 }
 
 #[cfg(test)]
@@ -485,7 +480,8 @@ mod tests {
     /// the rule of the joint class of the classes of both bytes of a key.
     #[test]
     fn test_decode_tree_reads_the_rule_of_the_joint_class() {
-        type Tree = Decode<Join<LineAttr, LineAttr>>;
+        type Input = Join<LineAttr, LineAttr>;
+        type Tree = Decode<Input>;
         let arena = BlockArena::new();
         let (left, right) = (
             line_attr(arena, |byte| u32::from(byte) % 3),
@@ -500,13 +496,12 @@ mod tests {
             join + offset_of!(bindings::value_table, values),
             &[&[0, 1], &[2, 3], &[4, 5]],
         );
-        let (left_edge, right_edge) = Join::<LineAttr, LineAttr>::EDGES;
-        point(arena, join + left_edge, left);
-        point(arena, join + right_edge, right);
+        point(arena, join + offset_of!(Input, left), left);
+        point(arena, join + offset_of!(Input, right), right);
         // The last joint class matches no rule.
         let tree = block(arena, size_of::<Tree>());
         lay_line(arena, tree, &[10, 11, 12, 13, 14, Rule::NONE.0]);
-        point(arena, tree + Tree::EDGE, join);
+        point(arena, tree + offset_of!(Tree, input), join);
 
         // SAFETY: laid out as C lays it out and a build links it, and frozen
         // for the test.
@@ -539,9 +534,8 @@ mod tests {
         lay_line(arena, tree + offset_of!(C, class_map), &[1, 0, 1]);
         lay_rows(arena, tree + offset_of!(C, rows), &[&[5, Rule::NONE.0], &[2, 4]]);
         put(arena, tree + offset_of!(C, class_count), 2u32);
-        let (left_edge, right_edge) = Tree::EDGES;
-        point(arena, tree + left_edge, left);
-        point(arena, tree + right_edge, right);
+        point(arena, tree + offset_of!(Tree, left), left);
+        point(arena, tree + offset_of!(Tree, right), right);
 
         // SAFETY: laid out as C lays it out and a build links it, and frozen
         // for the test.

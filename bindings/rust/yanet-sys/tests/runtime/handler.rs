@@ -10,7 +10,7 @@ use core::{
 use yanet_shm::{rel::RelPtr, shm::ShmLayout};
 use yanet_sys::{
     bindings,
-    cp::{Build, Init, MemoryContext, Owner, Place, Refusal},
+    cp::{Build, Free, Init, Owner, Place, Refusal, Taken},
     dp::{
         Batch, CommitCx, Counter, CounterRef, Cx, Device, Module, TaggedCounter, TaggedCounters, TaggedCountersRef,
         Traffic, Verdict,
@@ -36,16 +36,17 @@ struct Config {
 // which accept every bit pattern, with no padding and no drop.
 unsafe impl ShmLayout for Config {}
 
-// SAFETY: the configuration is laid out by hand and never built: its parts
-// cannot exist, so nothing is ever written, and it owns no block to free.
-unsafe impl Build for Config {
+// SAFETY: the hand-laid fixture owns no build resources.
+unsafe impl Free for Config {
+    fn free<W: Owner>(_: Taken<'_, Self, W>) {}
+}
+
+impl Build for Config {
     type Parts<'b, W: Owner> = Infallible;
 
     fn write<'s, 'b, W: Owner>(parts: Infallible, _: Place<'s, 'b, Self, W>) -> Result<Init<'s, Self>, Refusal> {
         match parts {}
     }
-
-    unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
 }
 
 /// Reads everything the runtime hands a module: the configuration, prepared

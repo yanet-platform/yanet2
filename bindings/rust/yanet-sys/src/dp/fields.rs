@@ -53,6 +53,10 @@ pub struct Counter<T = u64> {
 }
 
 impl<T> Counter<T> {
+    pub(crate) const fn from_id(id: u64) -> Self {
+        Self { id, _layout: PhantomData }
+    }
+
     /// Index in the module's counter registry.
     #[inline(always)]
     pub fn id(&self) -> u64 {
@@ -78,6 +82,10 @@ pub struct TaggedCounter<T = u64> {
 }
 
 impl<T> TaggedCounter<T> {
+    pub(crate) const fn from_ids(registry: u64, id: u64) -> Self {
+        Self { registry, id, _layout: PhantomData }
+    }
+
     /// Index of the counter's registry among the module's tagged registries.
     #[inline(always)]
     pub fn registry(&self) -> u64 {
@@ -91,8 +99,7 @@ impl<T> TaggedCounter<T> {
     }
 }
 
-// The builder writes the two indices as the two words of the value, in the
-// order of the fields.
+// The two indices must match the layout of the C words.
 const _: () = assert!(size_of::<TaggedCounter>() == 2 * size_of::<u64>());
 
 /// Per-worker counters of the module in one of its tagged registries, picked
@@ -121,6 +128,10 @@ pub struct TaggedCounters<T = u64> {
 }
 
 impl<T> TaggedCounters<T> {
+    pub(crate) const fn from_registration(registry: u64, len: u64) -> Self {
+        Self { registry, len, _layout: PhantomData }
+    }
+
     /// Index of the registry among the module's tagged registries, zero when
     /// the configuration registered no counter in it: the first counter makes
     /// the registry.
@@ -143,8 +154,7 @@ impl<T> TaggedCounters<T> {
     }
 }
 
-// The builder writes the registry index and the number of counters as the two
-// words of the value, in the order of the fields.
+// The registry index and count must match the layout of the C words.
 const _: () = assert!(size_of::<TaggedCounters>() == 2 * size_of::<u64>());
 
 /// Per-worker counter of an object, registered by the control plane in the
@@ -175,6 +185,10 @@ pub struct ObjectCounter<T = u64> {
 }
 
 impl<T> ObjectCounter<T> {
+    pub(crate) const fn from_id(id: u64) -> Self {
+        Self { id, _layout: PhantomData }
+    }
+
     /// Index in the object's counter registry.
     #[inline(always)]
     pub fn id(&self) -> u64 {
@@ -393,6 +407,10 @@ pub struct Device {
 }
 
 impl Device {
+    pub(crate) const fn from_index(index: u64) -> Self {
+        Self { index }
+    }
+
     /// Index in the module's device list.
     #[inline(always)]
     pub fn index(&self) -> u64 {
@@ -414,6 +432,10 @@ pub struct ObjectLink<O> {
 }
 
 impl<O> ObjectLink<O> {
+    pub(crate) const fn from_index(index: u64) -> Self {
+        Self { index, _object: PhantomData }
+    }
+
     /// Index in the module's object links.
     #[inline(always)]
     pub fn index(&self) -> u64 {
@@ -506,6 +528,22 @@ pub struct PerWorker<T> {
 }
 
 impl<T: Copy + ShmLayout> PerWorker<T> {
+    /// Forms the metadata for a particular final per-worker field.
+    ///
+    /// # Safety
+    ///
+    /// The value may only be used at that address. A nonzero offset from
+    /// there must name the field's exclusively owned block, allocated in
+    /// the issuing context with exactly [`Self::block_size`] bytes for
+    /// `workers` and initialized at the required alignment and stride.
+    /// Zero offset requires zero workers.
+    pub(crate) const unsafe fn from_offset(offset: isize, workers: u64) -> Self {
+        Self {
+            slots: RelPtr::from_offset(offset),
+            workers,
+        }
+    }
+
     /// Bytes from one worker's slot to the next: the value rounded up to
     /// whole 128-byte lines.
     pub const STRIDE: usize = size_of::<T>().next_multiple_of(SLOT_LINE);
@@ -863,9 +901,7 @@ unsafe impl<T: Copy + ShmLayout + Send> Sync for PerWorker<T> {}
 // are plain values aligned for `T` by the builder.
 unsafe impl<T: Copy + ShmLayout> ShmLayout for PerWorker<T> {}
 
-// The builder writes and frees the field through two raw words, the offset
-// and then the count right after it, not through the struct, so its layout
-// must stay what these assertions state.
+// The shared layout is a relative pointer followed by a worker count.
 const _: () = {
     assert!(size_of::<PerWorker<u64>>() == 16);
     assert!(core::mem::offset_of!(PerWorker<u64>, workers) == size_of::<isize>());
@@ -898,6 +934,26 @@ pub struct PerWorkerSlice<T> {
 }
 
 impl<T: Copy + ShmLayout> PerWorkerSlice<T> {
+    /// Forms the metadata for a particular final per-worker slice field.
+    ///
+    /// # Safety
+    ///
+    /// The value may only be used at that address. A nonzero offset from
+    /// there must name the field's exclusively owned table of `workers`
+    /// offsets. Each entry must name a distinct, non-null, exclusively
+    /// owned region with `len` initialized elements. The table and each
+    /// region must be aligned and allocated at their exact block sizes
+    /// in the issuing context. Zero offset requires zero length, but not
+    /// necessarily zero workers.
+    pub(crate) const unsafe fn from_offset(offset: isize, workers: u64, len: usize) -> Self {
+        Self {
+            regions: RelPtr::from_offset(offset),
+            workers,
+            len: len as u64,
+            _element: PhantomData,
+        }
+    }
+
     /// Bytes of the block of one region of the given number of values, zero
     /// when the values take no bytes, `None` when the size overflows.
     ///
@@ -1277,9 +1333,8 @@ unsafe impl<T: Copy + ShmLayout + Send> Sync for PerWorkerSlice<T> {}
 // and the regions hold plain values aligned for `T` by the builder.
 unsafe impl<T: Copy + ShmLayout> ShmLayout for PerWorkerSlice<T> {}
 
-// The builder writes and frees the field through three raw words, the table
-// offset, then the worker count and the length right after it, not through the
-// struct, so its layout must stay what these assertions state.
+// The shared layout is a relative pointer followed by a worker count and
+// length.
 const _: () = {
     assert!(size_of::<PerWorkerSlice<u64>>() == 24);
     assert!(core::mem::offset_of!(PerWorkerSlice<u64>, workers) == size_of::<isize>());
