@@ -123,7 +123,11 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         bounds.push(quote_spanned! {field_ty.span()=>
             __field_is_build::<#field_ty>();
         });
-        parts_fields.push(quote_spanned!(field_ty.span()=> #vis #ident: <#field_ty as #p::Build>::Parts<'b, __W>));
+        let field_doc = format!("Builder input for [`{name}::{ident}`].");
+        parts_fields.push(quote_spanned! {field_ty.span()=>
+            #[doc = #field_doc]
+            #vis #ident: <#field_ty as #p::Build>::Parts<'b, __W>
+        });
         debug_bounds
             .push(quote_spanned!(field_ty.span()=> <#field_ty as #p::Build>::Parts<'b, __W>: #core::fmt::Debug));
         writes.push(quote_spanned! {field_ty.span()=>
