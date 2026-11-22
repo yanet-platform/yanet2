@@ -440,11 +440,16 @@ configure_file(output: build_stamp, configuration: yanet_stamp)
 # build constraint of every file of the package.
 cgo_packages = {}
 
-# Every protoc generator in the tree; each Go binary depends on all of them.
+# Every Go code generator in the tree; each Go binary depends on all of them.
 #
-# No Go binary can then be built before a generated package it imports, and
-# the extra edges are cheap: a generator run takes a fraction of a second.
+# No Go binary can then be built before a generated package it imports. The
+# protoc generators take a fraction of a second; the native views compile one
+# C translation unit and run shmgen, and join before any directory declares a
+# Go target that may import them.
 go_proto_targets = []
+if not dataplane_only
+  subdir('controlplane/native/layout')
+endif
 subdir('common')
 subdir('lib')
 subdir('devices')
