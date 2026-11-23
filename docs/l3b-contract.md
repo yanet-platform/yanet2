@@ -2912,6 +2912,14 @@ Packet disposition vectors (all **NOT RUN**):
   fragment/TLV/SL0/checksum rejects and live-AH drop; no partial reply or reply
   counter on drop. No source-route reversal, special RR/Timestamp update or
   retained-ID mitigation is inferred from these vectors.
+- IPv4 option-walk vectors (**NOT RUN**): check NOP advancement, EOL with
+  padding, and a truncated option before EOL on live and quoted headers.
+  Verify that parsing preserves the option bytes and that a quoted remaining
+  source route does not by itself trigger the live rejection.
+- IPv6 Fragment vectors (**NOT RUN**): exercise two atomic Fragment headers,
+  an atomic followed by a non-atomic Fragment header, and the extension bound
+  on live and quoted headers. Check live fragment disposition separately
+  from quote validation and transport availability.
 - IPv4 source-route vectors (**NOT RUN**): on live IPv4 TCP, UDP and Echo
   Requests, separately for LSRR (131) and SSRR (137) with option length 11,
   pointers 4 and 8 are remaining routes: counted-drop with the source-route
@@ -3329,8 +3337,13 @@ Required discriminating vectors include:
 - Clone bucket fractional refill/cap, shared-worker contention, new-state full
   versus surviving control-plane restart/takeover, old-rate update accrual and
   carry/clamp, unchanged policy and peer churn, zero/exact/insufficient funding,
-  peers above burst, and no refund after reservation failures. Numeric/clock
-  bounds and error handling must be specified before activation.
+  and no refund after reservation failures. Check valid readiness at peer count
+  equal to burst and refusal of readiness above burst. The defensive runtime
+  check is **NOT RUN** unless the exact candidate first proves the protected
+  generation invariant that no admissible configuration can exceed burst.
+  A synthetic check of that guard is not evidence of reachability through
+  normal configuration. Numeric/clock bounds and error handling must be
+  specified before activation.
 - Selected selector algorithms/ties/vectors before implementation; creation and
   membership versus unchanged-membership Update, empty selector and failure
   preservation, no silent full rebuild. These are algorithm-conformance vectors,
