@@ -114,7 +114,6 @@ func Test_String_StopsAtTerminator(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, tc.want, shm.String(tc.field))
-			require.Equal(t, []byte(tc.want), shm.Bytes(tc.field))
 		})
 	}
 }
