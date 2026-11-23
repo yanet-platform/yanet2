@@ -4,26 +4,31 @@
 
 #include <sched.h>
 #include <stdatomic.h>
-#include <stdbool.h>
+#include <stdint.h>
 
+// A test-and-test-and-set spinlock, held while its word is one.
+//
+// The lock is a whole aligned 32-bit word rather than a byte, so a
+// process that shares the memory without this header takes it with a
+// plain word-sized compare-and-swap instead of masking a shared word.
 struct spinlock {
-	atomic_bool locked;
+	_Atomic uint32_t locked;
 };
 
 /* Initialize the spinlock to unlocked state */
 static inline void
 spinlock_init(struct spinlock *lock) {
-	atomic_init(&lock->locked, false);
+	atomic_init(&lock->locked, 0);
 }
 
 /* Acquire the lock (blocking) */
 static inline void
 spinlock_lock(struct spinlock *lock) {
-	bool expected = false;
+	uint32_t expected = 0;
 	if (atomic_compare_exchange_strong_explicit(
 		    &lock->locked,
 		    &expected,
-		    true,
+		    1,
 		    memory_order_acquire,
 		    memory_order_relaxed
 	    )) {
@@ -32,11 +37,11 @@ spinlock_lock(struct spinlock *lock) {
 
 	int spins = 0;
 	for (;;) {
-		expected = false;
+		expected = 0;
 		if (atomic_compare_exchange_weak_explicit(
 			    &lock->locked,
 			    &expected,
-			    true,
+			    1,
 			    memory_order_acquire,
 			    memory_order_relaxed
 		    )) {
@@ -57,5 +62,5 @@ spinlock_lock(struct spinlock *lock) {
 /* Release the lock */
 static inline void
 spinlock_unlock(struct spinlock *lock) {
-	atomic_store_explicit(&lock->locked, false, memory_order_release);
+	atomic_store_explicit(&lock->locked, 0, memory_order_release);
 }

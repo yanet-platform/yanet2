@@ -52,7 +52,9 @@
 // device-entry deadline scheduler.
 // 51: struct device_ectx gained the config_gen_ectx offset/absolute pair,
 // so device handlers reach the executing entry they may arm.
-#define YANET_MODULE_ABI_VERSION 52
+// 52: struct spinlock widened from a byte to a 32-bit word, which
+// widens every block allocator's lock and moves cp_config's agent lock.
+#define YANET_MODULE_ABI_VERSION 53
 
 // Symbol name a module .so exports carrying its compiled-against
 // YANET_MODULE_ABI_VERSION, as a uint32_t global.

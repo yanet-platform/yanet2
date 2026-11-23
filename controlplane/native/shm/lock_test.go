@@ -7,7 +7,6 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
-	"unsafe"
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
@@ -31,78 +30,37 @@ func requireBlocked(t *testing.T, acquired *atomic.Bool) {
 	require.False(t, acquired.Load(), "the lock was taken while held")
 }
 
-// Test_LockByte_LeavesNeighbours verifies that taking and releasing a byte
-// lock changes only its own byte of the word it shares with other locks,
-// as C's one-byte spinlocks expect.
-func Test_LockByte_LeavesNeighbours(t *testing.T) {
-	cases := []struct {
-		name   string
-		offset int
-	}{
-		{"lowest byte of the word", 0},
-		{"second byte of the word", 1},
-		{"third byte of the word", 2},
-		{"highest byte of the word", 3},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			words := [2]uint32{0x5a5a5a5a, 0x5a5a5a5a}
-			memory := unsafe.Slice((*byte)(unsafe.Pointer(&words[0])), 8)
-			memory[tc.offset] = 0
-			lock := (*bool)(unsafe.Pointer(&memory[tc.offset]))
-
-			shm.LockByte(lock)
-			locked := [8]byte(memory)
-			shm.UnlockByte(lock)
-
-			want := [8]byte{0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a}
-			want[tc.offset] = 1
-			require.Equal(t, want, locked)
-			want[tc.offset] = 0
-			require.Equal(t, want, [8]byte(memory))
-		})
-	}
+// Test_LockSpin_HoldsWordUntilUnlock verifies that a spinlock word reads
+// one while held and zero once released, as C's spinlock keeps it.
+func Test_LockSpin_HoldsWordUntilUnlock(t *testing.T) {
+	var word uint32
+	shm.LockSpin(&word)
+	require.Equal(t, uint32(1), atomic.LoadUint32(&word))
+	shm.UnlockSpin(&word)
+	require.Zero(t, atomic.LoadUint32(&word))
 }
 
-// Test_LockByte_WaitsForHolder verifies that a byte lock C holds, its byte
-// set to true, keeps a taker waiting until C clears it, while the other
-// lock of the same word stays free.
-func Test_LockByte_WaitsForHolder(t *testing.T) {
-	cases := []struct {
-		name      string
-		held      int
-		neighbour int
-	}{
-		{"first lock of the word held", 0, 1},
-		{"second lock of the word held", 1, 0},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				var word uint32
-				memory := unsafe.Slice((*byte)(unsafe.Pointer(&word)), 4)
-				held := (*bool)(unsafe.Pointer(&memory[tc.held]))
-				neighbour := (*bool)(unsafe.Pointer(&memory[tc.neighbour]))
-				atomic.StoreUint32(&word, 1<<(8*tc.held))
+// Test_LockSpin_WaitsForHolder verifies that a spinlock C holds, its word
+// set to one, keeps a taker waiting until C clears it.
+func Test_LockSpin_WaitsForHolder(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var word uint32
+		atomic.StoreUint32(&word, 1)
 
-				var taker errgroup.Group
-				var acquired atomic.Bool
-				taker.Go(func() error {
-					shm.LockByte(held)
-					acquired.Store(true)
-					return nil
-				})
-				shm.LockByte(neighbour)
-				shm.UnlockByte(neighbour)
-				requireBlocked(t, &acquired)
-
-				atomic.AndUint32(&word, ^(uint32(0xff) << (8 * tc.held)))
-				require.NoError(t, taker.Wait())
-				require.Equal(t, uint32(1)<<(8*tc.held), atomic.LoadUint32(&word))
-				shm.UnlockByte(held)
-			})
+		var taker errgroup.Group
+		var acquired atomic.Bool
+		taker.Go(func() error {
+			shm.LockSpin(&word)
+			acquired.Store(true)
+			return nil
 		})
-	}
+		requireBlocked(t, &acquired)
+
+		atomic.StoreUint32(&word, 0)
+		require.NoError(t, taker.Wait())
+		require.Equal(t, uint32(1), atomic.LoadUint32(&word))
+		shm.UnlockSpin(&word)
+	})
 }
 
 // Test_LockPid_HoldsPidUntilUnlock verifies that a process-id lock stores

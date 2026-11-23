@@ -25,12 +25,12 @@ type Generation struct {
 // held. The publication lock is held for the load and the increment only,
 // as C's own readers do.
 func (m *Instance) Pin() *Generation {
-	shm.LockByte(&m.Cp.GenLock.Locked)
+	shm.LockSpin(&m.Cp.GenLock.Locked)
 	gen := m.Cp.CpConfigGen.Load()
 	if gen != nil {
 		atomic.AddUint64(&gen.Refcnt, 1)
 	}
-	shm.UnlockByte(&m.Cp.GenLock.Locked)
+	shm.UnlockSpin(&m.Cp.GenLock.Locked)
 	return &Generation{Gen: gen}
 }
 

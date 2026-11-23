@@ -156,8 +156,8 @@ func (m *Generation) Modules() []Module {
 // Agents returns the agents registered in the instance, under the agent
 // registry lock.
 func (m *Instance) Agents() []Agent {
-	shm.LockByte(&m.Cp.AgentLock.Locked)
-	defer shm.UnlockByte(&m.Cp.AgentLock.Locked)
+	shm.LockSpin(&m.Cp.AgentLock.Locked)
+	defer shm.UnlockSpin(&m.Cp.AgentLock.Locked)
 
 	registry := m.Cp.AgentRegistry.Get()
 	if registry == nil {

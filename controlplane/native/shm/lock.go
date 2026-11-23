@@ -6,40 +6,25 @@ import (
 	"runtime"
 	"sync/atomic"
 	"time"
-	"unsafe"
 )
 
-// LockByte takes a one-byte spinlock that C declares as an atomic bool.
+// LockSpin takes a spinlock that C keeps as a 32-bit word, one while
+// held.
 //
-// Go has no byte-wide atomics, so the byte is set through an atomic OR on
-// the aligned word that holds it: a neighbouring lock in the same word
-// sees its own byte unchanged. Waiting backs off into sleeps, so a long
-// hold by another process parks the goroutine instead of an OS thread.
-func LockByte(lock *bool) {
-	word, shift := wordOf(unsafe.Pointer(lock))
+// Waiting backs off into sleeps, so a long hold by another process parks
+// the goroutine instead of an OS thread.
+func LockSpin(lock *uint32) {
 	for attempt := 0; ; attempt++ {
-		if atomic.LoadUint32(word)>>shift&0xff == 0 &&
-			atomic.OrUint32(word, 1<<shift)>>shift&0xff == 0 {
+		if atomic.LoadUint32(lock) == 0 && atomic.CompareAndSwapUint32(lock, 0, 1) {
 			return
 		}
 		backoff(attempt)
 	}
 }
 
-// UnlockByte releases a lock taken by LockByte.
-func UnlockByte(lock *bool) {
-	word, shift := wordOf(unsafe.Pointer(lock))
-	atomic.AndUint32(word, ^(uint32(0xff) << shift))
-}
-
-// wordOf returns the aligned 32-bit word holding the byte at address and
-// the byte's bit shift in it.
-//
-// The shift assumes a little-endian target, as amd64 and arm64 are: the
-// byte at the lowest address is the word's lowest byte.
-func wordOf(address unsafe.Pointer) (*uint32, uint) {
-	misalignment := uintptr(address) & 3
-	return (*uint32)(unsafe.Add(address, -int(misalignment))), uint(misalignment) * 8
+// UnlockSpin releases a lock taken by LockSpin.
+func UnlockSpin(lock *uint32) {
+	atomic.StoreUint32(lock, 0)
 }
 
 // PidLock is a lock C keeps as the process id of its holder.
