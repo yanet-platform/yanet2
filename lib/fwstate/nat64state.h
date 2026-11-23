@@ -52,20 +52,23 @@ struct nat64state_wan_key {
 /**
  * @brief The session timeouts of a stateful NAT64 instance
  *
- * Two knobs in seconds: one for every session whatever its protocol,
- * and a longer one for a TCP session once the remote has answered it —
- * the idle established connection RFC 6146 3.5.2.2 gives its two-hour
- * timer. Zero selects each knob's default.
+ * Three knobs in seconds: one for every session whatever its protocol, a
+ * longer one for a TCP session once the remote has answered it — the idle
+ * established connection RFC 6146 3.5.2.2 gives its two-hour timer — and
+ * the transitory one a TCP session moves to once both ends have closed
+ * it. Zero selects each knob's default.
  */
 struct nat64state_timeouts {
 	uint16_t timeout;
 	uint16_t tcp_established;
+	uint16_t tcp_transitory;
 };
 
 #define NAT64STATE_TIMEOUT_DEFAULT 60
 // RFC 6146 3.5.2.2: the two-hour TCP_est timer plus the four-minute
 // transitory one.
 #define NAT64STATE_TCP_ESTABLISHED_DEFAULT 7440
+#define NAT64STATE_TCP_TRANSITORY_DEFAULT 240
 // The largest timeout the uint16_t knob can represent; the config
 // boundary refuses larger values instead of silently narrowing them.
 #define NAT64STATE_TIMEOUT_MAX 65535
@@ -98,6 +101,14 @@ struct nat64state_value {
 	 * sets it when the remote's SYN answers the session (RFC 6146
 	 * 3.5.2.2), and on no other packet. */
 	bool tcp_established;
+	/** Whether each end has closed its half of the TCP session: the
+	 * client's on the lan side, the remote's on the wan side, each set
+	 * by a FIN or an RST from that end. The session ages on the
+	 * transitory timeout once both are set; until then a half-closed
+	 * session keeps the lifetime it had, since the open half may still
+	 * carry data (RFC 6146 3.5.2.2). */
+	bool lan_closed;
+	bool wan_closed;
 	/** Pool IPv4 address (network order) of the lan-side allocation */
 	uint32_t ip4;
 	/** Pool port (host order) of the lan-side allocation */
@@ -114,12 +125,14 @@ struct nat64state_value {
 /**
  * @brief The session TTL of a stateful NAT64 instance
  *
- * A TCP session the remote has answered ages on the established knob,
- * everything else on the general one; a zero knob selects its default
- * rather than an already-expired session.
+ * A TCP session both ends have closed ages on the transitory knob; one
+ * the remote has answered on the established knob; everything else on the
+ * general one. A zero knob selects its default rather than an
+ * already-expired session.
  *
  * @param proto IP protocol number of the session
  * @param tcp_established whether the remote has answered the TCP session
+ * @param both_closed whether both ends have closed the TCP session
  * @param timeouts the timeout knobs
  *
  * @return TTL in nanoseconds
@@ -133,14 +146,24 @@ static inline uint64_t
 nat64state_entry_ttl(
 	uint16_t proto,
 	bool tcp_established,
+	bool both_closed,
 	const struct nat64state_timeouts *t
 ) {
-	if (proto == IPPROTO_TCP && tcp_established) {
-		return (uint64_t)nat64state_timeout(
-			       t->tcp_established,
-			       NAT64STATE_TCP_ESTABLISHED_DEFAULT
-		       ) *
-		       1000000000ull;
+	if (proto == IPPROTO_TCP) {
+		if (both_closed) {
+			return (uint64_t)nat64state_timeout(
+				       t->tcp_transitory,
+				       NAT64STATE_TCP_TRANSITORY_DEFAULT
+			       ) *
+			       1000000000ull;
+		}
+		if (tcp_established) {
+			return (uint64_t)nat64state_timeout(
+				       t->tcp_established,
+				       NAT64STATE_TCP_ESTABLISHED_DEFAULT
+			       ) *
+			       1000000000ull;
+		}
 	}
 	return (uint64_t
 	       )nat64state_timeout(t->timeout, NAT64STATE_TIMEOUT_DEFAULT) *

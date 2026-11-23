@@ -60,6 +60,11 @@ func (m *DeleteConfigRequest) Validate() error {
 	return commonpb.ValidateModuleName("name", m.GetName())
 }
 
+// Validate checks that a sessions request names a configuration.
+func (m *ShowSessionsRequest) Validate() error {
+	return commonpb.ValidateModuleName("name", m.GetName())
+}
+
 // Validate checks the limits only the request can judge; the rest is
 // judged when the config is decoded into its stored form.
 func (m *Config) Validate() error {
@@ -74,11 +79,21 @@ func (m *Config) Validate() error {
 	if err := m.GetMtu().Validate(); err != nil {
 		return fmt.Errorf("mtu: %w", err)
 	}
-	if err := ValidateTimeout("timeout", m.GetTimeout()); err != nil {
-		return err
+	knobs := []struct {
+		Field string
+		Value uint32
+	}{
+		{"timeout", m.GetTimeout()},
+		{"tcp_established_timeout", m.GetTcpEstablishedTimeout()},
+		{"tcp_transitory_timeout", m.GetTcpTransitoryTimeout()},
+	}
+	for _, knob := range knobs {
+		if err := ValidateTimeout(knob.Field, knob.Value); err != nil {
+			return err
+		}
 	}
 
-	return ValidateTimeout("tcp_established_timeout", m.GetTcpEstablishedTimeout())
+	return nil
 }
 
 // ValidateTimeout checks that one session timeout in seconds fits what

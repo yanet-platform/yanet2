@@ -257,9 +257,12 @@ fwmap_update_value_nat64state(
 	d->cli_port = old.cli_port;
 	memcpy(d->src6, old.src6, sizeof(d->src6));
 	memcpy(d->prefix, old.prefix, sizeof(d->prefix));
-	// Establishment latches: an establishment seen by any refresh keeps
-	// the session on the established timeout.
+	// Establishment and the closing halves latch: an establishment seen
+	// by any refresh, or a FIN or RST from an end, keeps the session in
+	// that state.
 	d->tcp_established = d->tcp_established || old.tcp_established;
+	d->lan_closed = d->lan_closed || old.lan_closed;
+	d->wan_closed = d->wan_closed || old.wan_closed;
 }
 
 // Cross-layer promotion of a nat64state entry from a stale layer into a
@@ -284,4 +287,6 @@ fwmap_promote_value_nat64state(
 	memcpy(d->src6, old_v->src6, sizeof(d->src6));
 	memcpy(d->prefix, old_v->prefix, sizeof(d->prefix));
 	d->tcp_established = new_v->tcp_established || old_v->tcp_established;
+	d->lan_closed = new_v->lan_closed || old_v->lan_closed;
+	d->wan_closed = new_v->wan_closed || old_v->wan_closed;
 }

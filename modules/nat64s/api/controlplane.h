@@ -62,10 +62,10 @@ nat64s_module_config_free(struct cp_module *cp_module, yanet_error **err);
 
 /**
  * Fill a freshly created nat64s module configuration: copy the
- * prefixes, pool, the two session timeouts and MTU limits, and link the session
- * map objects. Zero timeout knobs select their defaults; the names link nothing
- * when NULL or empty. An IPv6 MTU limit above NAT64S_MTU_IPV6_MAX is held down
- * to it.
+ * prefixes, pool, the three session timeouts and MTU limits, and link the
+ * session map objects. Zero timeout knobs select their defaults; the names link
+ * nothing when NULL or empty. An IPv6 MTU limit above NAT64S_MTU_IPV6_MAX is
+ * held down to it.
  */
 int
 nat64s_module_config_update(

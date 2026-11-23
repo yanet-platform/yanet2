@@ -1823,6 +1823,248 @@ test_established_latch(struct nat64s_env *env) {
 	// Restore the suite's timeouts.
 	env->config->timeouts.timeout = 300;
 	env->config->timeouts.tcp_established = 300;
+	env->config->timeouts.tcp_transitory = 300;
+	return TEST_SUCCESS;
+}
+
+// Set the TCP flags of a packet built by one of the TCP builders.
+static void
+nat64s_test_set_tcp_flags(struct packet *packet, uint8_t flags) {
+	struct rte_tcp_hdr *tcp = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(packet),
+		struct rte_tcp_hdr *,
+		packet->transport_header.offset
+	);
+	tcp->tcp_flags = flags;
+}
+
+// The identity of one established test session: the client's own port and
+// the translated port the remote sees, which its return segments target.
+struct nat64s_test_session {
+	uint16_t client_port;
+	uint16_t allocated_port;
+};
+
+// Establish a session for the client port: a SYN out, its SYN-ACK back.
+// The translated port is read off the outbound packet.
+static int
+nat64s_establish_session(
+	struct nat64s_env *env,
+	uint64_t now,
+	uint16_t client_port,
+	struct nat64s_test_session *session
+) {
+	dataplane_ut_set_time_ns(env->ut, now);
+	struct packet *in = NULL;
+	struct packet *out = NULL;
+	bool dropped = false;
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v6_syn(env, client_port, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the SYN must not be dropped");
+	TEST_ASSERT_NOT_NULL(out, "the SYN must be translated");
+	struct rte_tcp_hdr *out_tcp = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(out),
+		struct rte_tcp_hdr *,
+		out->transport_header.offset
+	);
+	session->client_port = client_port;
+	session->allocated_port = rte_be_to_cpu_16(out_tcp->src_port);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_reply(env, session->allocated_port, &in),
+		"build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the SYN-ACK must not be dropped");
+	rte_pktmbuf_free(packet_to_mbuf(out));
+	return TEST_SUCCESS;
+}
+
+// One TCP segment of the session at the given time, client to remote or
+// back. Returns 1 when the translator forwarded it, 0 when it dropped it.
+static int
+nat64s_send_segment_at(
+	struct nat64s_env *env,
+	uint64_t now,
+	const struct nat64s_test_session *session,
+	bool from_client,
+	uint8_t flags
+) {
+	dataplane_ut_set_time_ns(env->ut, now);
+	struct packet *in = NULL;
+	struct packet *out = NULL;
+	bool dropped = false;
+	if (from_client) {
+		TEST_ASSERT_SUCCESS(
+			nat64s_make_v6_syn(env, session->client_port, &in),
+			"build failed"
+		);
+	} else {
+		TEST_ASSERT_SUCCESS(
+			nat64s_make_v4_reply(env, session->allocated_port, &in),
+			"build failed"
+		);
+	}
+	nat64s_test_set_tcp_flags(in, flags);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	if (out != NULL) {
+		rte_pktmbuf_free(packet_to_mbuf(out));
+	}
+	return dropped ? 0 : 1;
+}
+
+// A half-closed session keeps its established lifetime: RFC 6146
+// 3.5.2.2 keeps the session alive for the half that may still carry data,
+// so one end's FIN alone must not start the transitory timer. Covered in
+// both orders on separate sessions, since each side's refresh path
+// decides on its own.
+static int
+test_half_close_keeps_established(struct nat64s_env *env) {
+	env->config->timeouts.timeout = 30;
+	env->config->timeouts.tcp_established = 300;
+	env->config->timeouts.tcp_transitory = 30;
+
+	const uint64_t base = 8000000000000ull;
+	const uint64_t step = 1000000000000ull;
+	const uint64_t idle = 120ull * 1000000000ull;
+	struct nat64s_test_session session = {0};
+
+	// The client closes its half; long after, the remote's still-open
+	// half must still reach the client.
+	TEST_ASSERT_SUCCESS(
+		nat64s_establish_session(env, base, 2001, &session), "establish"
+	);
+	TEST_ASSERT(
+		nat64s_send_segment_at(
+			env,
+			base + 1 * 1000000000ull,
+			&session,
+			true,
+			RTE_TCP_FIN_FLAG | RTE_TCP_ACK_FLAG
+		) == 1,
+		"the client's FIN must be translated"
+	);
+	TEST_ASSERT(
+		nat64s_send_segment_at(
+			env, base + idle, &session, false, RTE_TCP_ACK_FLAG
+		) == 1,
+		"a session only the client closed must keep its established "
+		"timeout"
+	);
+
+	// The other order: the remote closes first, the client keeps
+	// talking.
+	TEST_ASSERT_SUCCESS(
+		nat64s_establish_session(env, base + step, 2002, &session),
+		"establish"
+	);
+	TEST_ASSERT(
+		nat64s_send_segment_at(
+			env,
+			base + step + 1 * 1000000000ull,
+			&session,
+			false,
+			RTE_TCP_FIN_FLAG | RTE_TCP_ACK_FLAG
+		) == 1,
+		"the remote's FIN must be translated"
+	);
+	TEST_ASSERT(
+		nat64s_send_segment_at(
+			env,
+			base + step + idle,
+			&session,
+			true,
+			RTE_TCP_ACK_FLAG
+		) == 1,
+		"a session only the remote closed must keep its established "
+		"timeout"
+	);
+
+	env->config->timeouts.timeout = 300;
+	env->config->timeouts.tcp_established = 300;
+	env->config->timeouts.tcp_transitory = 300;
+	return TEST_SUCCESS;
+}
+
+// Both ends closed: the session moves to the transitory timeout and
+// expires soon after, releasing its external tuple while an established
+// session with the same idle time would have lived on. Covered in both
+// orders on separate sessions.
+static int
+test_full_close_goes_transitory(struct nat64s_env *env) {
+	env->config->timeouts.timeout = 30;
+	env->config->timeouts.tcp_established = 300;
+	env->config->timeouts.tcp_transitory = 30;
+
+	const uint64_t base = 9000000000000ull;
+	const uint64_t step = 1000000000000ull;
+	const uint64_t sec = 1000000000ull;
+	struct nat64s_test_session session = {0};
+
+	for (int client_first = 1; client_first >= 0; --client_first) {
+		const uint64_t at = client_first ? base : base + step;
+		TEST_ASSERT_SUCCESS(
+			nat64s_establish_session(
+				env, at, client_first ? 2003 : 2004, &session
+			),
+			"establish"
+		);
+		const bool first_fin = client_first;
+		const bool second_fin = !client_first;
+
+		TEST_ASSERT(
+			nat64s_send_segment_at(
+				env,
+				at + 1 * sec,
+				&session,
+				first_fin,
+				RTE_TCP_FIN_FLAG | RTE_TCP_ACK_FLAG
+			) == 1,
+			"the first FIN must be translated"
+		);
+		// One FIN alone is not enough: past the transitory timeout the
+		// session must still answer.
+		TEST_ASSERT(
+			nat64s_send_segment_at(
+				env,
+				at + 60 * sec,
+				&session,
+				second_fin,
+				RTE_TCP_ACK_FLAG
+			) == 1,
+			"one FIN must not yet start the transitory timeout"
+		);
+
+		TEST_ASSERT(
+			nat64s_send_segment_at(
+				env,
+				at + 61 * sec,
+				&session,
+				second_fin,
+				RTE_TCP_FIN_FLAG | RTE_TCP_ACK_FLAG
+			) == 1,
+			"the second FIN must be translated"
+		);
+		TEST_ASSERT(
+			nat64s_send_segment_at(
+				env,
+				at + 61 * sec + 60 * sec,
+				&session,
+				second_fin,
+				RTE_TCP_ACK_FLAG
+			) == 0,
+			"a session both ends closed must expire on the "
+			"transitory "
+			"timeout"
+		);
+	}
+
+	env->config->timeouts.timeout = 300;
+	env->config->timeouts.tcp_established = 300;
+	env->config->timeouts.tcp_transitory = 300;
 	return TEST_SUCCESS;
 }
 
@@ -1869,17 +2111,6 @@ test_session_expires(struct nat64s_env *env) {
 	TEST_ASSERT_NULL(out, "an expired session must not translate");
 	TEST_ASSERT(dropped, "an expired session must drop its reply");
 	return TEST_SUCCESS;
-}
-
-// Set the TCP flags of a packet built by one of the TCP builders.
-static void
-nat64s_test_set_tcp_flags(struct packet *packet, uint8_t flags) {
-	struct rte_tcp_hdr *tcp = rte_pktmbuf_mtod_offset(
-		packet_to_mbuf(packet),
-		struct rte_tcp_hdr *,
-		packet->transport_header.offset
-	);
-	tcp->tcp_flags = flags;
 }
 
 // Move the tail of a built TCP packet's header into a second segment,
@@ -2245,7 +2476,6 @@ test_latched_lan_entry_holds_return_refresh(struct nat64s_env *env) {
 	env->config->timeouts.tcp_established = 300;
 	return TEST_SUCCESS;
 }
-
 // A session outlives the client's silence: return traffic alone keeps
 // the client's entry alive.
 //
@@ -3974,13 +4204,16 @@ test_full_table_refuses_without_wedging(struct nat64s_env *env) {
 
 // Timeouts left unset reach the dataplane unset, and each resolves to its
 // own default there: a TCP session the remote has answered lives for
-// hours, one that it has not lives for a minute.
+// hours, one that it has not lives for a minute, and one both ends have
+// closed lives for the four minutes between.
 static int
 test_default_timeouts_follow_each_knob(struct nat64s_env *env) {
 	const struct nat64s_env_settings defaults = {
 		.port_lo = 1024,
 		.port_hi = 4096,
-		.timeouts = {.timeout = 0, .tcp_established = 0},
+		.timeouts =
+			{.timeout = 0, .tcp_established = 0, .tcp_transitory = 0
+			},
 	};
 	TEST_ASSERT_SUCCESS(
 		nat64s_env_reconfigure(env, &defaults), "reconfigure failed"
@@ -4029,6 +4262,32 @@ test_default_timeouts_follow_each_knob(struct nat64s_env *env) {
 	uint16_t unestablished_port = rte_be_to_cpu_16(tcp->src_port);
 	rte_pktmbuf_free(packet_to_mbuf(out));
 
+	// Flow C is established, then both ends close it.
+	struct nat64s_test_session closing = {0};
+	TEST_ASSERT_SUCCESS(
+		nat64s_establish_session(env, base, 2015, &closing), "establish"
+	);
+	TEST_ASSERT(
+		nat64s_send_segment_at(
+			env,
+			base,
+			&closing,
+			true,
+			RTE_TCP_FIN_FLAG | RTE_TCP_ACK_FLAG
+		) == 1,
+		"the client's FIN must be translated"
+	);
+	TEST_ASSERT(
+		nat64s_send_segment_at(
+			env,
+			base,
+			&closing,
+			false,
+			RTE_TCP_FIN_FLAG | RTE_TCP_ACK_FLAG
+		) == 1,
+		"the remote's FIN must be translated"
+	);
+
 	// A minute in, the unestablished flow is gone.
 	dataplane_ut_set_time_ns(env->ut, base + 61 * sec);
 	TEST_ASSERT_SUCCESS(
@@ -4041,6 +4300,15 @@ test_default_timeouts_follow_each_knob(struct nat64s_env *env) {
 	);
 	TEST_ASSERT(dropped, "an unestablished flow's reply must be dropped");
 
+	// A minute and a half in, the closed one still answers: its default
+	// outlives the unestablished one.
+	TEST_ASSERT(
+		nat64s_send_segment_at(
+			env, base + 90 * sec, &closing, false, RTE_TCP_ACK_FLAG
+		) == 1,
+		"a closed flow must outlive the unestablished default"
+	);
+
 	// Two minutes in, the established one still answers.
 	dataplane_ut_set_time_ns(env->ut, base + 120 * sec);
 	TEST_ASSERT_SUCCESS(
@@ -4050,6 +4318,19 @@ test_default_timeouts_follow_each_knob(struct nat64s_env *env) {
 	TEST_ASSERT(
 		!dropped,
 		"an established flow must outlive the unestablished default"
+	);
+
+	// Four minutes past its last answer, the closed flow is gone: its
+	// default is the transitory one, not the established one.
+	TEST_ASSERT(
+		nat64s_send_segment_at(
+			env,
+			base + (90 + 241) * sec,
+			&closing,
+			false,
+			RTE_TCP_ACK_FLAG
+		) == 0,
+		"a closed flow must expire four minutes after its last packet"
 	);
 
 	TEST_ASSERT_SUCCESS(
@@ -4762,13 +5043,16 @@ test_counters_registered(struct nat64s_env *env) {
 // The largest timeout a knob represents reaches the session whole.
 //
 // One configured with it still answers half a second short of it, on
-// either knob.
+// every knob.
 static int
 test_largest_timeout_kept_whole(struct nat64s_env *env) {
 	const struct nat64s_env_settings largest = {
 		.port_lo = 1024,
 		.port_hi = 4096,
-		.timeouts = {.timeout = 65535, .tcp_established = 65535},
+		.timeouts =
+			{.timeout = 65535,
+			 .tcp_established = 65535,
+			 .tcp_transitory = 65535},
 	};
 	TEST_ASSERT_SUCCESS(
 		nat64s_env_reconfigure(env, &largest), "reconfigure failed"
@@ -4817,7 +5101,33 @@ test_largest_timeout_kept_whole(struct nat64s_env *env) {
 	uint16_t unestablished_port = rte_be_to_cpu_16(tcp->src_port);
 	rte_pktmbuf_free(packet_to_mbuf(out));
 
-	// Half a second short of the largest timeout, both still answer.
+	// Flow C is established, then both ends close it.
+	struct nat64s_test_session closing = {0};
+	TEST_ASSERT_SUCCESS(
+		nat64s_establish_session(env, base, 2019, &closing), "establish"
+	);
+	TEST_ASSERT(
+		nat64s_send_segment_at(
+			env,
+			base,
+			&closing,
+			true,
+			RTE_TCP_FIN_FLAG | RTE_TCP_ACK_FLAG
+		) == 1,
+		"the client's FIN must be translated"
+	);
+	TEST_ASSERT(
+		nat64s_send_segment_at(
+			env,
+			base,
+			&closing,
+			false,
+			RTE_TCP_FIN_FLAG | RTE_TCP_ACK_FLAG
+		) == 1,
+		"the remote's FIN must be translated"
+	);
+
+	// Half a second short of the largest timeout, all three still answer.
 	dataplane_ut_set_time_ns(env->ut, base + 65534 * sec + sec / 2);
 	TEST_ASSERT_SUCCESS(
 		nat64s_make_v4_reply(env, established_port, &in), "build failed"
@@ -4839,6 +5149,17 @@ test_largest_timeout_kept_whole(struct nat64s_env *env) {
 		"an unestablished session must live for the largest timeout"
 	);
 	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	TEST_ASSERT(
+		nat64s_send_segment_at(
+			env,
+			base + 65534 * sec + sec / 2,
+			&closing,
+			false,
+			RTE_TCP_ACK_FLAG
+		) == 1,
+		"a closed session must live for the largest transitory timeout"
+	);
 
 	TEST_ASSERT_SUCCESS(
 		nat64s_env_reconfigure(env, &nat64s_suite_settings),
@@ -4892,6 +5213,12 @@ main(void) {
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_reverse_syn_establishes(&env);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_half_close_keeps_established(&env);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_full_close_goes_transitory(&env);
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_session_survives_refresh_window(&env);

@@ -13,6 +13,7 @@ import (
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/crud"
+	"github.com/yanet-platform/yanet2/modules/nat64s/bindings/go/cnat64s"
 	nat64spb "github.com/yanet-platform/yanet2/modules/nat64s/controlplane/nat64spb/v1"
 	fwstatemappb "github.com/yanet-platform/yanet2/objects/fwstate/controlplane/fwstatemappb/v1"
 )
@@ -41,8 +42,11 @@ func WithServiceLog(log *zap.Logger) ServiceOption {
 type NAT64sService struct {
 	nat64spb.UnimplementedNAT64SServiceServer
 
-	core *crud.Core[*NAT64sConfig]
-	log  *zap.Logger
+	// core owns config publication; the backend stays for the reads that
+	// are not about a config's stored form, the session dump.
+	backend Backend
+	core    *crud.Core[*NAT64sConfig]
+	log     *zap.Logger
 }
 
 // NAT64sConfig is the decoded, whole configuration of one named config.
@@ -53,7 +57,7 @@ type NAT64sConfig struct {
 	// Pool is the public IPv4 pool, each address the integer whose bytes
 	// in memory are its network-order ones.
 	Pool []uint32
-	// Timeout is the single session timeout in seconds.
+	// Timeout carries the session timeouts in seconds.
 	Timeout   SessionTimeout
 	MTU       MTUConfig
 	PortRange PortRange
@@ -61,11 +65,13 @@ type NAT64sConfig struct {
 	MapName string
 }
 
-// SessionTimeout carries the two session timeouts in seconds: one for
-// every session, and a longer one for an established TCP session.
+// SessionTimeout carries the three session timeouts in seconds: one for
+// every session, a longer one for an established TCP session, and the
+// transitory one for a TCP session both ends have closed.
 type SessionTimeout struct {
 	Timeout        uint16
 	TCPEstablished uint16
+	TCPTransitory  uint16
 }
 
 // MTUConfig carries the MTU limits of the translation.
@@ -90,8 +96,9 @@ func NewNAT64sService(backend Backend, options ...ServiceOption) *NAT64sService 
 	}
 
 	return &NAT64sService{
-		core: crud.NewCore(backend),
-		log:  opts.Log,
+		backend: backend,
+		core:    crud.NewCore(backend),
+		log:     opts.Log,
 	}
 }
 
@@ -142,6 +149,94 @@ func (m *NAT64sService) DeleteConfig(
 		return nil, crud.DeleteError(req.GetName(), err)
 	}
 	return &nat64spb.DeleteConfigResponse{}, nil
+}
+
+// defaultSessionsPageSize is the page size of a session dump whose
+// request leaves it zero.
+const defaultSessionsPageSize uint32 = 1024
+
+// ShowSessions streams the live sessions of the named config's session
+// map, a page per message, until a page comes back empty.
+//
+// Every page is judged live at the dataplane instant read once before
+// the first, so a session does not flicker between pages as the dump
+// runs.
+//
+// The registry recreating the map between two pages gives it a fresh
+// first layer; the cursor then names slots of that one, and the dump can
+// repeat or miss the sessions that moved. That is the documented cost of
+// reading a table the dataplane keeps mutating.
+func (m *NAT64sService) ShowSessions(
+	req *nat64spb.ShowSessionsRequest,
+	stream nat64spb.NAT64SService_ShowSessionsServer,
+) error {
+	name := req.GetName()
+	if _, ok := m.core.Get(name); !ok {
+		return status.Errorf(codes.NotFound, "config %q not found", name)
+	}
+	now, ok := m.backend.DataplaneTime()
+	if !ok {
+		return status.Error(codes.Unavailable, "the dataplane is not running")
+	}
+
+	pageSize := req.GetPageSize()
+	if pageSize == 0 {
+		pageSize = defaultSessionsPageSize
+	}
+
+	// The cursor walks slot indices, which a full table keeps advancing;
+	// a bound that no real table reaches stops a cursor that somehow
+	// stops advancing instead of spinning on an endless dump.
+	const maxCursor = int64(1) << 62
+	for cursor := int64(0); ; {
+		if err := stream.Context().Err(); err != nil {
+			return err
+		}
+		sessions, next, err := m.backend.Sessions(name, cursor, now, pageSize)
+		if err != nil {
+			return status.Error(codes.Internal, err.Error())
+		}
+		if len(sessions) == 0 {
+			return nil
+		}
+		page := &nat64spb.SessionsPage{
+			Sessions: make([]*nat64spb.Session, 0, len(sessions)),
+			Now:      now,
+		}
+		for _, session := range sessions {
+			page.Sessions = append(page.Sessions, encodeSession(&session))
+		}
+		if err := stream.Send(page); err != nil {
+			return err
+		}
+		if next <= cursor || next > maxCursor {
+			// The walk did not advance past what it returned:
+			// ending here cannot loop, and loses nothing a retry
+			// would find.
+			return nil
+		}
+		cursor = next
+	}
+}
+
+// encodeSession converts one session as the binding read it to its wire
+// form. The address bytes are already in network order on both sides.
+func encodeSession(session *cnat64s.Session) *nat64spb.Session {
+	return &nat64spb.Session{
+		Proto:        uint32(session.Proto),
+		ClientAddr:   &commonpb.IPAddress{Addr: session.ClientAddr[:]},
+		ClientPort:   uint32(session.ClientPort),
+		RemoteAddr:   &commonpb.IPAddress{Addr: session.RemoteAddr[:]},
+		RemotePort:   uint32(session.RemotePort),
+		ExternalAddr: &commonpb.IPv4Address{Addr: binary.BigEndian.Uint32(session.ExternalAddr[:])},
+		ExternalPort: uint32(session.ExternalPort),
+		Established:  session.Established,
+		ClientClosed: session.ClientClosed,
+		RemoteClosed: session.RemoteClosed,
+		CreatedAt:    session.CreatedAt,
+		UpdatedAt:    session.UpdatedAt,
+		ExpiresAt:    session.ExpiresAt,
+	}
 }
 
 // decodeConfig converts a whole wire config into its stored form,
@@ -215,6 +310,12 @@ func decodeConfig(wire *nat64spb.Config) (*NAT64sConfig, error) {
 	}
 	config.Timeout.Timeout = uint16(wire.GetTimeout())
 	config.Timeout.TCPEstablished = uint16(wire.GetTcpEstablishedTimeout())
+	if err := nat64spb.ValidateTimeout(
+		"tcp_transitory_timeout", wire.GetTcpTransitoryTimeout(),
+	); err != nil {
+		return nil, err
+	}
+	config.Timeout.TCPTransitory = uint16(wire.GetTcpTransitoryTimeout())
 
 	// The request boundary applies the same rule; a config decoded for
 	// an in-process caller gets it here.
@@ -258,6 +359,7 @@ func encodeConfig(config *NAT64sConfig) *nat64spb.Config {
 		Pool:                  make([]*commonpb.IPv4Address, 0, len(config.Pool)),
 		Timeout:               uint32(config.Timeout.Timeout),
 		TcpEstablishedTimeout: uint32(config.Timeout.TCPEstablished),
+		TcpTransitoryTimeout:  uint32(config.Timeout.TCPTransitory),
 		Mtu: &nat64spb.MTUConfig{
 			Ipv4Mtu: config.MTU.IPv4MTU,
 			Ipv6Mtu: config.MTU.IPv6MTU,
