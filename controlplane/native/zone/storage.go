@@ -144,6 +144,11 @@ func (m *Storage) findInstances() error {
 		if dp.StorageSize == 0 {
 			return fmt.Errorf("instance %d: zero storage size", idx)
 		}
+		// Every pointer read later lands inside the instance, so the whole
+		// extent must be mapped; it also keeps the next offset in range.
+		if !m.Contains(address, uintptr(dp.StorageSize)) {
+			return fmt.Errorf("instance %d: storage of %d bytes at offset %d runs past the mapping", idx, dp.StorageSize, offset)
+		}
 		m.Instances = append(m.Instances, &Instance{Index: idx, Dp: dp, Cp: cp})
 		offset += uintptr(dp.StorageSize)
 	}

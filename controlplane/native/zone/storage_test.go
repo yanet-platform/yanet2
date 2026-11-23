@@ -133,6 +133,14 @@ func Test_Storage_RefusesMalformedInstances(t *testing.T) {
 			},
 			"zero storage size",
 		},
+		{
+			"storage size past the mapping",
+			func(data []byte, dp *layout.DpConfig) []byte {
+				dp.StorageSize = uint64(len(data)) + 8
+				return data
+			},
+			"runs past the mapping",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
