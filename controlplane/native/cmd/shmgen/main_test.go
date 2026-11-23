@@ -75,6 +75,22 @@ func Test_Shmgen_FailsOnDisagreeingUnits(t *testing.T) {
 	}
 }
 
+// Test_Shmgen_PreservesBitFieldStorage verifies that both DWARF offset
+// encodings expose all bytes occupied by the named bit-fields.
+func Test_Shmgen_PreservesBitFieldStorage(t *testing.T) {
+	for _, flag := range []string{"-gdwarf-4", "-gdwarf-5"} {
+		t.Run(flag, func(t *testing.T) {
+			options := fixtureOptions(t, buildFixtureWithFlags(t, []string{flag}, "view.c"))
+			require.NoError(t, run(options, []string{"fixture_bits", "fixture_high_bits"}))
+
+			source, err := os.ReadFile(options.Output)
+			require.NoError(t, err)
+			require.Regexp(t, `Bits1\s+\[2\]byte // bit-fields first, second, last`, string(source))
+			require.Regexp(t, `Bits3\s+\[1\]byte // bit-fields high`, string(source))
+		})
+	}
+}
+
 // Test_Shmgen_KeepsUnchangedOutput verifies that generating the same
 // views again leaves the files, their modification times included, as
 // they were.

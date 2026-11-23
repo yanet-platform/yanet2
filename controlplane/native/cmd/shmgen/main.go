@@ -27,6 +27,7 @@ import (
 	"bytes"
 	"debug/dwarf"
 	"debug/elf"
+	"encoding/binary"
 	"flag"
 	"fmt"
 	"go/format"
@@ -132,7 +133,7 @@ func run(options options, roots []string) error {
 	}
 	constraint := "//go:build linux && " + goarch
 
-	m, err := newGenerator(data, options.Locals, options.Relatives)
+	m, err := newGenerator(data, file.ByteOrder, options.Locals, options.Relatives)
 	if err != nil {
 		return err
 	}
@@ -286,7 +287,7 @@ type pending struct {
 	Type dwarf.Type
 }
 
-func newGenerator(data *dwarf.Data, locals, relatives map[string]bool) (*generator, error) {
+func newGenerator(data *dwarf.Data, order binary.ByteOrder, locals, relatives map[string]bool) (*generator, error) {
 	m := &generator{
 		data:        data,
 		locals:      locals,
@@ -302,6 +303,13 @@ func newGenerator(data *dwarf.Data, locals, relatives map[string]bool) (*generat
 		enums:       map[string][]*dwarf.EnumType{},
 		signedEnums: map[*dwarf.EnumType]bool{},
 	}
+	// debug/dwarf drops whether a zero bit offset was present. Match the
+	// original member entry to its field while that distinction is known.
+	type parent struct {
+		Offset  dwarf.Offset
+		Members int
+	}
+	var parents []parent
 	reader := data.Reader()
 	for {
 		entry, err := reader.Next()
@@ -310,6 +318,25 @@ func newGenerator(data *dwarf.Data, locals, relatives map[string]bool) (*generat
 		}
 		if entry == nil {
 			break
+		}
+		if entry.Tag == 0 {
+			if len(parents) == 0 {
+				return nil, fmt.Errorf("unexpected end of DWARF children at %#x", entry.Offset)
+			}
+			parents = parents[:len(parents)-1]
+			continue
+		}
+		if entry.Tag == dwarf.TagMember && len(parents) != 0 {
+			owner := &parents[len(parents)-1]
+			if offset, ok := entry.Val(dwarf.AttrBitOffset).(int64); ok {
+				if err := m.normalizeBitOffset(owner.Offset, owner.Members, offset, order); err != nil {
+					return nil, err
+				}
+			}
+			owner.Members++
+		}
+		if entry.Children {
+			parents = append(parents, parent{Offset: entry.Offset})
 		}
 		if entry.Tag == dwarf.TagAtomicType {
 			if err := m.addAtomic(entry); err != nil {
@@ -334,6 +361,30 @@ func newGenerator(data *dwarf.Data, locals, relatives map[string]bool) (*generat
 		m.definitions[name] = append(m.definitions[name], entry.Offset)
 	}
 	return m, nil
+}
+
+// normalizeBitOffset converts the legacy offset from the high end of a
+// storage unit to the bit position from the start of the structure.
+func (m *generator) normalizeBitOffset(owner dwarf.Offset, member int, offset int64, order binary.ByteOrder) error {
+	typ, err := m.data.Type(owner)
+	if err != nil {
+		return err
+	}
+	structure, ok := typ.(*dwarf.StructType)
+	if !ok || member >= len(structure.Field) {
+		return fmt.Errorf("invalid bit-field member %d at %#x", member, owner)
+	}
+	field := structure.Field[member]
+	if order == binary.LittleEndian {
+		size := field.ByteSize
+		if size == 0 {
+			size = field.Type.Size()
+		}
+		offset = size*8 - offset - field.BitSize
+	}
+	field.DataBitOffset = field.ByteOffset*8 + offset
+	field.ByteOffset, field.BitOffset = 0, 0
+	return nil
 }
 
 // addAtomic records the type an _Atomic qualifier applies to.
