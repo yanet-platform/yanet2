@@ -148,7 +148,7 @@ representation and the protobuf/C consequences.
 | F07 | Scheduler | Create and full replacement select WRR, HASH or WLC explicitly; absent, unspecified and unknown values reject; partial real mutations do not resubmit the scheduler. There are no RR/PURR aliases, public hash masks, index masks or scheduler flags that redefine the selected scheduler. Standalone CHASH is deferred to #2904. |
 | F08 | OPS and removed `pure_l3` | OPS is the only public VS flag, a separate boolean omitted as false; other typed booleans remain. TCP-only true is `InvalidArgument`; false/absent is valid. UDP-only and mixed true is retained and acts only on actual UDP. Session/transition rules and validation precedence are in [section 10](#10-scheduler-ops-weights-and-identities). The redundant `pure_l3` switch is rejected; portless mode derives from F02 port absence. |
 | F09 | WLC power | Requested uint32 domain 0..100: absent/0 stores 0 and uses effective 10; 1..100 stores and uses the supplied value. Values >100 are `InvalidArgument`, not clamped or retained. Requested 0 differs from requested 10 in equality/readback. No public `max_weight`; the fixed selector-parameter ceiling 100 is not an input-weight limit. |
-| F10 | WLC inputs, samples and confirmation | Complete all-worker sampling, generation-scoped fallback and guarded confirmation under [section 8](#wlc-inputs-and-observations). Requested cadence 20 ms, not a deadline or adoption SLO; derived results/observations are read-only. |
+| F10 | WLC inputs, samples and confirmation | Complete all-worker sampling, generation-scoped fallback and guarded confirmation under [section 8](#wlc-inputs-and-observations). Configurable requested cadence, default 20 ms, not a deadline or adoption SLO; derived results/observations are read-only. |
 | F11 | WLC geometry and resource admission | Logical lookup length 1600*N over all configured unique real bindings including disabled and zero-weight members; an explicit empty selector at N=0. The aggregate binding charge is at most 2097151 per actual dataplane-instance registry across all three schedulers and agent owners, including unlinked VSes; physical admission is separate; all arithmetic is checked before narrowing or allocation. The historical 10000-VS/100000-real envelope is not the current target or an API cap. See the [MVP scale gate](l3b-mvp-spec.md#stages-to-an-mvp). |
 | F12 | Internal WRR cursor (not writable VS format) | Unsigned 64-bit. For a coherent nonempty expanded sequence of length L, `next = (cursor + 1) mod 2^64` and `slot = next mod L`; only a successful coherent selection commits `cursor = next`, and a later failure does not roll it back. Per worker and VS incarnation, shared across links, preserved across ordinary replacement and a control-plane restart. Wrap is ordinary arithmetic and may break strict cyclic order when L does not divide 2^64. Internal runtime state: no public cursor setter and no 32-bit narrowing. |
 | F13 | `session_timeouts.tcp` and `tcp_established` | `tcp` is the common fallback for three TCP classes, not a separate class. `tcp_established` selects established for TCP without SYN, FIN or RST. Optional uint32 milliseconds, 0..4294967295; absent/null inherits, explicit0 is retained. For each class: per-VS class → per-VS tcp → global class → global tcp →60000ms; section7 defines resolution. |
@@ -197,8 +197,9 @@ workload-fit guarantee.
 All operational timeouts, intervals and freshness budgets are configurable at
 their owner. Numerical durations are defaults or explicit targets, not hidden
 implementation constants. This includes create-permit lifetime(default300000ms)
-and WLC's requested20ms cycle. Exact setting keys and permitted bounds for these
-two policies remain representation decisions; no new RPC is introduced. An issued
+and WLC's requested cycle, which defaults to 20 ms. The WLC setting is defined
+in section 8. The permit setting key and bounds remain representation decisions.
+No new RPC is introduced. An issued
 permit retains its issuance-fixed duration: later policy changes never extend it
 retroactively. Numerical300000/20ms vectors below use the corresponding default
 policy; also test a valid nondefault setting. Hard byte, record and integer-type
@@ -1104,7 +1105,9 @@ no new selection while valid pins remain.
 
 Inputs are the original positive weights of administratively enabled,
 health-eligible reals and one complete all-worker sample. The requested sampling,
-computation, retry and reconciliation cadence is 20 ms. Targets are a 10–20 ms
+computation, retry and reconciliation cadence is the restart-required
+`l3b.policy.wlc_recompute_interval_ms` (`uint32`, 10–20 inclusive, default 20).
+Skip an elapsed tick rather than queueing overdue work. Targets are a 10–20 ms
 start interval and full-recalculation duration <=20 ms, aiming toward 10 ms,
 not a sample-validity deadline or adoption SLO. Within one input generation,
 the first two consecutive invalid attempts retain the last applicable successfully
@@ -1118,7 +1121,7 @@ active output uses guarded confirmation below. Requested WLC power is writable
 configuration under F09; derived effective power, WLC results, active-state and
 freshness observations are read-only, never independent caller setters.
 
-- Go computes WLC on a requested 20 ms cadence from one complete all-worker active-session
+- Go computes WLC on the configured cadence from one complete all-worker active-session
   sample. For each eligible real i, let `w_i` be its original positive
   configured weight, `c_i` its sampled active-session count, `W = sum(w_i)`,
   `C = sum(c_i)` and `p` the effective power from F09. Compute:
@@ -1146,7 +1149,7 @@ freshness observations are read-only, never independent caller setters.
   2*A>=199*C, otherwise divide A by C with half-up remainder rounding. This is
   mathematical notation, not unchecked machine arithmetic; it introduces no
   numeric count width or count-domain limit.
-- The requested cadence remains 20 ms. The start-to-start interval target is
+- The configured cadence does not replace the measurement targets. The start-to-start interval target is
   10–20 ms; independently, full-recalculation duration targets <=20 ms, aiming
   toward 10 ms. Measure the full duration from the start of sample acquisition
   through the complete all-worker sample, weight calculation and selector-result
@@ -1425,13 +1428,13 @@ cross-process proof and the implementation remain downstream (#2725, #2726).
   staleness guarantee. The applicable-input rules still hold: preserving prior
   active state does not authorize committing new inputs with an inapplicable
   selector. Activation failure marks WLC not-ready without advancing freshness.
-  Retry on the 20 ms tick using a fresh complete sample prepared
+  Retry on the next configured tick using a fresh complete sample prepared
   from committed continuation, even if weights equal a previously failed
   candidate. No separate timer or queue of old pending samples is introduced.
   The first two invalid attempts may retain previously ready-but-degraded state,
   but cannot clear preceding activation-failure not-ready; the third attempts
   fallback. Only successful applicable valid activation/confirmation restores ready.
-  Sampling, computation, retry and reconciliation share this 20 ms cadence;
+  Sampling, computation, retry and reconciliation share the configured cadence;
   it is not a worker-adoption SLO or bounded staleness guarantee.
 
 Unknown activation outcomes require protected authoritative reconciliation through
@@ -2292,7 +2295,7 @@ qualification.
 | F07 scheduler | R enum WRR, HASH or WLC; no default; unspecified, unknown, RR and PURR reject; CHASH unsupported here. | Checked enum mapping; masks and flags are X; no historical aliases. |
 | F08 OPS; pure_l3 | OPS D(false); UDP-only and mixed VS true retained, acting only on actual UDP; TCP-only true is InvalidArgument, false/absent valid. pure_l3 is X, including false and 0. | Typed bool; request-local rejection after recovery and before CAS in API/CLI; portless derived solely from F02 port presence. |
 | F09 requested WLC power; effective power; max_weight | Requested D(0), uint32 domain 0..100. Absent/0 stores 0, effective 10; 1..100 stored/effective as supplied; >100 InvalidArgument. Requested 0 and 10 differ in equality/readback. Effective and applicability RO; max_weight/default_wlc_power X. | Validate before narrowing and CAS; no clamping or out-of-range retention. |
-| F10 WLC samples, results, freshness | RO; not fields of create, replace or manual requests. One complete sample and requested 20 ms sampling/computation/retry/reconciliation cadence; start interval target 10–20 ms and full-recalculation duration <=20 ms, aiming toward 10 ms under section 8, not adoption SLO or a time-only invalidity/fallback gate; no caller default or zero setter. | Observations are separate from the token-stable descriptor; no float coercion of integer counters. |
+| F10 WLC samples, results, freshness | RO; not fields of create, replace or manual requests. One complete sample per attempt on the configured cadence (default 20 ms); start interval target 10–20 ms and full-recalculation duration <=20 ms, aiming toward 10 ms under section 8, not adoption SLO or a time-only invalidity/fallback gate; no caller default or zero setter. | Observations are separate from the token-stable descriptor; no float coercion of integer counters. |
 | F11 selector geometry, N, charges | Derived and RO; 1600*N checked; N=0 is an explicit empty selector; binding charge cap 2097151; physical exhaustion is `ResourceExhausted`. | Checked multiplication and count conversion plus retained-memory accounting; no caller cell count and no 100000-real cap. |
 | F12 internal WRR cursor (excluded from writable VS format) | Internal runtime state, not a descriptor/input field; no public setter or required public observation. uint64 modulo advancement and lifetime unchanged. | uint64, not index or int32; source state independent of the configuration token; this inventory row defines no wire field. |
 | F13 timeouts.tcp / tcp_established | Optional uint32 0..4294967295 milliseconds. Absent/null inherits; explicit0 retained. Established: VS tcp_established → VS tcp → global tcp_established → global tcp →60000. | tcp is common input fallback, not a fourth class. Resolve presence before defaults and passing concrete uint32 to C; widen to uint64 before checked addition. |
@@ -2632,7 +2635,10 @@ cases below and the packet companion's embedded cases.
   `18446744073709551614`, two successful selections both read slot 0. A
   failed coherent read at any of these positions commits nothing; a later
   packet-processing failure after a successful read does not roll back.
-- At successive20 ms ticks in one WLC input generation, three invalid samples
+- Check 10 and 20 ms cadence, rejection of 9 and 21 ms settings, and an elapsed
+  tick skipped without backlog. Retry must use a fresh sample on the configured
+  cadence and must not certify worker adoption. **NOT RUN**.
+- At successive default 20 ms ticks in one WLC input generation, three invalid samples
   retain applicable state for attempts1/2 and attempt fallback at3. Inject fallback
   publication failure: no claimed activation. A later valid sample resets once;
   activation failure retries from a fresh sample on the next tick. An unknown
@@ -2777,7 +2783,7 @@ Armed later failures are not permission to execute checks after the terminal fau
 The following additional bounded vectors are **NOT RUN**:
 
 - Failed WLC activation followed by equal fresh weights still attempts activation
-  on the 20 ms cadence. Two invalid samples cannot clear not-ready; the third
+  on the configured cadence. Two invalid samples cannot clear not-ready; the third
   attempts fallback. Unknown-outcome reconciliation distinguishes committed,
   not-committed and unknown using descriptor/builder and operation/owner/input
   evidence, not equal weights; unknown blocks dependent publication, superseded

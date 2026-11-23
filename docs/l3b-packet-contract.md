@@ -330,9 +330,12 @@ their separate S7 attempts, not a global stop after the first failed peer.
   eligible peers it atomically reserves `n` tokens or none. With insufficient
   credit it counted-drops without partial fanout; with no peers it spends none.
   Failures after reservation never refund tokens: admission budgets attempts,
-  not guaranteed delivery. If peers grow beyond burst, fanout is not ready and
-  counted-drops without cloning until the configuration or group permits full
-  funding; capacity is never raised implicitly.
+  not guaranteed delivery. A candidate where peer count exceeds burst cannot
+  become ready. Membership and burst come from the same accepted generation;
+  no separate dynamic membership is introduced. If that invariant fails at
+  runtime, counted-drop without reserving credit or cloning. Treat that path
+  as a defensive check, not an expected transition of an accepted generation.
+  Capacity is never raised implicitly.
   Bounded numeric representation, clock precision/source, safe elapsed-time
   arithmetic and clock/arithmetic-error handling must be specified and verified
   before activation. The cap is not permission to overflow an intermediate:
@@ -527,6 +530,9 @@ The following vectors are required and **NOT RUN**:
   `(length - 3)` divisible by 4. Require pointer at least 4. When the pointer
   is within the option, require it to start a complete four-byte address at
   offset 4, 8, 12, and so on, using the one-based RFC 791 pointer.
+  In live and quoted IPv4 option walks, End of Option List stops the scan and
+  padding is not parsed. No Operation advances one byte. Other options require
+  bounded encoded lengths. Neither walk changes the option bytes.
   A terminal fault in an earlier option stops the scan. With valid length and
   a pointer greater than length, the option is exhausted and stays unchanged.
   Record Route and Timestamp handling stays unchanged.
@@ -556,7 +562,10 @@ The following vectors are required and **NOT RUN**:
   promised. For admitted incoming ICMPv6 with Segments Left zero, the pseudo-header
   uses the current base-header destination. No ordinary TCP/UDP checksum expansion.
   ESP, No Next Header and unsupported upper protocols counted-drop. An atomic
-  IPv6 fragment (offset zero, M clear) follows ordinary processing. Exact-port
+  IPv6 fragment (offset zero, M clear) follows ordinary processing. Each Fragment
+  header counts toward the extension bound. There is no separate repeated-Fragment
+  rejection. The live parsing floor still rejects any non-atomic Fragment header;
+  quote structure and transport availability checks remain separate. Exact-port
   VS and ACL port predicates require an available transport header; missing
   fields fail closed. These TCP/UDP port predicates do not precede Echo or
   the separate ICMP-error path; no second error parser is introduced in l3b.

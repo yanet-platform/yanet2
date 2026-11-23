@@ -1409,7 +1409,7 @@ authorize production execution, or select passing limits after seeing results.
    exploratory baseline runs, which are not qualification evidence. Freeze
    these thresholds in the approved versioned manifest before the first
    qualification run. Do not revise them in response to qualification results.
-   WLC targets stay as specified: 20 ms cadence, 10–20 ms
+   WLC targets stay as specified: configurable cadence (default 20 ms), 10–20 ms
    start interval, full recalculation at most 20 ms aiming toward 10 ms.
 3. Observation budgets(D04) are configurable,never hardcoded. Attempt timeout is
    a checker setting(default500ms,operational target100ms). Observation maximum
