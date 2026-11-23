@@ -18,7 +18,6 @@ if native_layout_archs.has_key(host_machine.cpu_family()) and import('fs').is_sa
     'native-layout-types',
     files('c/types.c'),
     include_directories: include_directories('../../..'),
-    dependencies: [libdpdk_inc_dep],
     c_args: ['-g', '-fno-eliminate-unused-debug-types'],
     build_by_default: false,
   )

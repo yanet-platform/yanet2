@@ -1,11 +1,10 @@
 // The structures the native control plane's views are generated from.
 //
-// The file is compiled as the dataplane compiles its headers, with the
-// project's arguments and DPDK's configuration, and its debug information
-// keeps every structure the headers define: shmgen reads the layouts the
-// views are generated from out of it, as it would out of the dataplane.
-
-#include <rte_mbuf.h>
+// The file is compiled with the project's arguments, and its debug
+// information keeps every structure the headers define: shmgen reads the
+// layouts the views are generated from out of it, as it would out of the
+// dataplane. The structures reach DPDK through pointers only, which the
+// views keep opaque, so DPDK's own headers take no part in the layouts.
 
 #include "lib/controlplane/agent/agent.h"
 #include "lib/controlplane/config/cp_module.h"

@@ -6,9 +6,10 @@
 // explicit padding, and every definition the binary carries of one
 // structure must agree. A generated test pins each size and offset, so a
 // view the Go compiler lays out differently fails before it touches
-// shared memory. The build runs it on a binary compiled from the
-// structures' headers as the dataplane compiles them (the meson target
-// native-layout).
+// shared memory. The build runs it on a binary the meson target
+// native-layout compiles from the structures' headers with the project's
+// arguments. The structures reach DPDK through pointers only, which the
+// views keep opaque, so DPDK's headers take no part in their layouts.
 //
 // The enumerators of the enumerations named as constants become typed
 // unsigned Go constants as wide as their enumeration, so values the headers
