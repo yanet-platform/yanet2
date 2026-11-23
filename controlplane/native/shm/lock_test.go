@@ -5,37 +5,30 @@ package shm_test
 import (
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 	"unsafe"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/yanet-platform/yanet2/controlplane/native/shm"
 )
 
 // blockedFor is how long a taker must stay blocked to count as waiting
 // for a held lock.
+//
+// The waiting tests run in a synctest bubble, so the time is fake and the
+// lock's back-off sleeps pass instantly.
 const blockedFor = 50 * time.Millisecond
 
-// takeAsync starts taking a lock on another goroutine and returns a
-// channel closed once it holds it.
-func takeAsync(take func()) <-chan struct{} {
-	acquired := make(chan struct{})
-	go func() {
-		take()
-		close(acquired)
-	}()
-	return acquired
-}
-
-// requireBlocked fails unless the taker still waits after blockedFor.
-func requireBlocked(t *testing.T, acquired <-chan struct{}) {
+// requireBlocked fails unless a taker that started before still waits
+// after blockedFor, once every goroutine of the bubble is blocked.
+func requireBlocked(t *testing.T, acquired *atomic.Bool) {
 	t.Helper()
-	select {
-	case <-acquired:
-		t.Fatal("the lock was taken while held")
-	case <-time.After(blockedFor):
-	}
+	time.Sleep(blockedFor)
+	synctest.Wait()
+	require.False(t, acquired.Load(), "the lock was taken while held")
 }
 
 // Test_LockByte_LeavesNeighbours verifies that taking and releasing a byte
@@ -85,21 +78,29 @@ func Test_LockByte_WaitsForHolder(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var word uint32
-			memory := unsafe.Slice((*byte)(unsafe.Pointer(&word)), 4)
-			held := (*bool)(unsafe.Pointer(&memory[tc.held]))
-			neighbour := (*bool)(unsafe.Pointer(&memory[tc.neighbour]))
-			atomic.StoreUint32(&word, 1<<(8*tc.held))
+			synctest.Test(t, func(t *testing.T) {
+				var word uint32
+				memory := unsafe.Slice((*byte)(unsafe.Pointer(&word)), 4)
+				held := (*bool)(unsafe.Pointer(&memory[tc.held]))
+				neighbour := (*bool)(unsafe.Pointer(&memory[tc.neighbour]))
+				atomic.StoreUint32(&word, 1<<(8*tc.held))
 
-			acquired := takeAsync(func() { shm.LockByte(held) })
-			shm.LockByte(neighbour)
-			shm.UnlockByte(neighbour)
-			requireBlocked(t, acquired)
+				var taker errgroup.Group
+				var acquired atomic.Bool
+				taker.Go(func() error {
+					shm.LockByte(held)
+					acquired.Store(true)
+					return nil
+				})
+				shm.LockByte(neighbour)
+				shm.UnlockByte(neighbour)
+				requireBlocked(t, &acquired)
 
-			atomic.AndUint32(&word, ^(uint32(0xff) << (8 * tc.held)))
-			<-acquired
-			require.Equal(t, uint32(1)<<(8*tc.held), atomic.LoadUint32(&word))
-			shm.UnlockByte(held)
+				atomic.AndUint32(&word, ^(uint32(0xff) << (8 * tc.held)))
+				require.NoError(t, taker.Wait())
+				require.Equal(t, uint32(1)<<(8*tc.held), atomic.LoadUint32(&word))
+				shm.UnlockByte(held)
+			})
 		})
 	}
 }
@@ -124,15 +125,23 @@ func Test_LockPid_HoldsPidUntilUnlock(t *testing.T) {
 // Test_LockPid_WaitsForHolder verifies that a taker waits while another
 // holds the process-id lock and takes it once released.
 func Test_LockPid_WaitsForHolder(t *testing.T) {
-	var word int32
-	holder := shm.LockPid(&word, 7)
+	synctest.Test(t, func(t *testing.T) {
+		var word int32
+		holder := shm.LockPid(&word, 7)
 
-	acquired := takeAsync(func() { shm.LockPid(&word, 42) })
-	requireBlocked(t, acquired)
+		var taker errgroup.Group
+		var acquired atomic.Bool
+		taker.Go(func() error {
+			shm.LockPid(&word, 42)
+			acquired.Store(true)
+			return nil
+		})
+		requireBlocked(t, &acquired)
 
-	holder.Unlock()
-	<-acquired
-	require.Equal(t, int32(42), atomic.LoadInt32(&word))
+		holder.Unlock()
+		require.NoError(t, taker.Wait())
+		require.Equal(t, int32(42), atomic.LoadInt32(&word))
+	})
 }
 
 // Test_LockPid_RefusesPidZero verifies that a lock cannot be taken for pid
