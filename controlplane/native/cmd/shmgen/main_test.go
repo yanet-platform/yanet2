@@ -1,6 +1,7 @@
 package main
 
 import (
+	"debug/dwarf"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,12 +18,20 @@ import (
 // returns its path.
 func buildFixture(t *testing.T, sources ...string) string {
 	t.Helper()
+	return buildFixtureWithFlags(t, nil, sources...)
+}
+
+// buildFixtureWithFlags compiles the C sources under testdata with extra
+// compiler flags into one binary and returns its path.
+func buildFixtureWithFlags(t *testing.T, flags []string, sources ...string) string {
+	t.Helper()
 	compiler := strings.Fields(os.Getenv("CC"))
 	if len(compiler) == 0 {
 		compiler = []string{"cc"}
 	}
 	binary := filepath.Join(t.TempDir(), "fixture")
-	arguments := append(slices.Clone(compiler[1:]), "-g", "-fno-eliminate-unused-debug-types", "-o", binary)
+	arguments := append(slices.Clone(compiler[1:]), flags...)
+	arguments = append(arguments, "-g", "-fno-eliminate-unused-debug-types", "-o", binary)
 	for _, source := range sources {
 		arguments = append(arguments, filepath.Join("testdata", source))
 	}
@@ -365,8 +374,9 @@ func Test_Shmgen_FailsOnNameCollisions(t *testing.T) {
 		{"accessor and field", "fixture_accessor", "struct FixtureAccessor: the accessor of a flexible array takes the field name Items"},
 		{"constant and view", "fixture_named", "enumerator constants take view names: FixtureNode"},
 		{"two enumerators", "fixture_twinned", "enum fixture_twins: enumerator fixture_twin: constant FixtureTwin is taken"},
+		{"distinct enum tags", "fixture_tag_collision", "enum FixtureTag: definitions disagree"},
 	}
-	binary := buildFixture(t, "collisions.c")
+	binary := buildFixtureWithFlags(t, []string{"-std=c2x"}, "collisions.c")
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			options := fixtureOptions(t, binary)
@@ -386,6 +396,124 @@ func Test_Shmgen_FailsOnSignedConstants(t *testing.T) {
 
 	err := run(options, nil)
 	require.ErrorContains(t, err, "enum fixture_signed: signed")
+}
+
+// Test_Shmgen_RejectsIncompatibleEnums verifies that width or signedness
+// conflicts fail generation regardless of which unit is read first.
+func Test_Shmgen_RejectsIncompatibleEnums(t *testing.T) {
+	cases := []struct {
+		name      string
+		roots     []string
+		constants []string
+		want      string
+	}{
+		{"constants", nil, []string{"fixture_sign"}, "enum fixture_sign: definitions disagree"},
+		{"view field", []string{"fixture_sign_holder"}, nil, "enum fixture_sign: definitions disagree"},
+		{"typedef field", []string{"fixture_alias_holder"}, nil, "struct fixture_alias_holder: definitions disagree"},
+		{"array elements", []string{"fixture_alias_array"}, nil, "struct fixture_alias_array: definitions disagree"},
+		{"nested named structure", []string{"fixture_envelope"}, nil, "struct fixture_alias_array: definitions disagree"},
+		{"nested anonymous structure", []string{"fixture_anonymous_holder"}, nil, "struct fixture_anonymous_holder: definitions disagree"},
+		{"pointer target", []string{"fixture_alias_indirect"}, nil, "struct fixture_alias_indirect: definitions disagree"},
+		{"forward width for constants", nil, []string{"fixture_width"}, "enum fixture_width: definitions disagree"},
+		{"forward width for a field", []string{"fixture_width_holder"}, nil, "enum fixture_width: definitions disagree"},
+	}
+	for _, order := range [][]string{
+		{"enum_sign_first.c", "enum_sign_second.c"},
+		{"enum_sign_second.c", "enum_sign_first.c"},
+	} {
+		t.Run(order[0], func(t *testing.T) {
+			binary := buildFixtureWithFlags(t, []string{"-std=c2x"}, order...)
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					options := fixtureOptions(t, binary)
+					options.Constants = tc.constants
+
+					err := run(options, tc.roots)
+					require.ErrorContains(t, err, tc.want)
+					require.NoFileExists(t, options.Output)
+				})
+			}
+		})
+	}
+}
+
+// Test_Shmgen_ChecksForwardEnumSignedness verifies that a declaration
+// constrains signedness only when its debug information records it.
+func Test_Shmgen_ChecksForwardEnumSignedness(t *testing.T) {
+	cases := []struct {
+		name  string
+		known bool
+	}{
+		{"unsigned declaration conflicts with signed definition", true},
+		{"unspecified declaration accepts signed definition", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			base := dwarf.CommonType{ByteSize: 4}
+			forward := &dwarf.EnumType{CommonType: base, EnumName: "state"}
+			complete := &dwarf.EnumType{
+				CommonType: base,
+				EnumName:   "state",
+				Val:        []*dwarf.EnumValue{{Name: "one", Val: 1}},
+			}
+			signs := map[*dwarf.EnumType]bool{complete: true}
+			if tc.known {
+				signs[forward] = false
+			}
+			m := generator{enums: map[string][]*dwarf.EnumType{"state": {forward, complete}}, signedEnums: signs}
+
+			got, err := m.enumDefinition("state")
+			if tc.known {
+				require.ErrorContains(t, err, "enum state: definitions disagree")
+				return
+			}
+			require.NoError(t, err)
+			require.Same(t, complete, got)
+		})
+	}
+}
+
+// Test_Shmgen_UsesRecordedEnumSignedness verifies that an explicit
+// integer type also governs units whose DWARF records only enumerators.
+func Test_Shmgen_UsesRecordedEnumSignedness(t *testing.T) {
+	cases := []struct {
+		name   string
+		value  int64
+		signed bool
+	}{
+		{"signed enum with positive values", 1, true},
+		{"unsigned enum with its high bit set", -1 << 63, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			legacy := &dwarf.EnumType{
+				CommonType: dwarf.CommonType{ByteSize: 8},
+				Val:        []*dwarf.EnumValue{{Name: "flag", Val: tc.value}},
+			}
+			explicit := *legacy
+			entries := []*dwarf.EnumType{legacy, &explicit}
+			for range 2 {
+				m := generator{signedEnums: map[*dwarf.EnumType]bool{&explicit: tc.signed}}
+				_, err := m.reconcileEnums("", entries)
+				require.NoError(t, err)
+				require.Equal(t, tc.signed, m.enumSigned(legacy))
+				slices.Reverse(entries)
+			}
+		})
+	}
+}
+
+// Test_Shmgen_ResolvesForwardEnum verifies that a forward declaration
+// takes its signedness and enumerators from the unit that defines it.
+func Test_Shmgen_ResolvesForwardEnum(t *testing.T) {
+	binary := buildFixtureWithFlags(t, []string{"-std=c2x"}, "enum_sign_first.c", "enum_sign_second.c")
+	options := fixtureOptions(t, binary)
+	require.NoError(t, run(options, []string{"fixture_forward_holder"}))
+
+	source, err := os.ReadFile(options.Output)
+	require.NoError(t, err)
+	require.Regexp(t, `\btype FixtureForward int32\b`, string(source))
+	require.Regexp(t, `\bFixtureForwardOne\s+FixtureForward = 1\b`, string(source))
 }
 
 // Test_Shmgen_RequiresImportForTest verifies that a test file without the

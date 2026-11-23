@@ -253,11 +253,10 @@ type generator struct {
 	// typedConstants holds the enumerators of the enumerations named as
 	// constants, in the order they were named.
 	typedConstants []typedConstant
-	// enumDefinitions holds every complete definition of a named
-	// enumeration, by tag name.
-	enumDefinitions map[string][]dwarf.Offset
-	// signedEnums tells, for each enumeration whose underlying type the
-	// DWARF names, whether that type is signed; debug/dwarf drops it.
+	// enums holds both definitions and forward declarations by tag name.
+	enums map[string][]*dwarf.EnumType
+	// signedEnums holds known signedness, including information from
+	// compatible declarations in other units.
 	signedEnums map[*dwarf.EnumType]bool
 	// atomics maps each _Atomic type to the type it qualifies, which
 	// debug/dwarf does not resolve.
@@ -266,11 +265,8 @@ type generator struct {
 	checks  []check
 	// methods holds the accessors of flexible array members.
 	methods []string
-	// signatures holds the layout each Go name was generated from.
-	//
-	// Two compilation units give one C type two DWARF values, which must
-	// agree.
-	signatures map[string]string
+	// namedTypes holds the first DWARF type queued under each Go name.
+	namedTypes map[string]dwarf.Type
 	// conflicts collects Go names whose C types disagree.
 	conflicts []string
 	// locals holds the struct.field pointers that hold a process-local
@@ -301,10 +297,10 @@ func newGenerator(data *dwarf.Data, locals, relatives map[string]bool) (*generat
 		views:       map[string]*view{},
 		constants:   map[string]string{},
 		atomics:     map[dwarf.Type]dwarf.Type{},
-		signatures:  map[string]string{},
+		namedTypes:  map[string]dwarf.Type{},
 
-		enumDefinitions: map[string][]dwarf.Offset{},
-		signedEnums:     map[*dwarf.EnumType]bool{},
+		enums:       map[string][]*dwarf.EnumType{},
+		signedEnums: map[*dwarf.EnumType]bool{},
 	}
 	reader := data.Reader()
 	for {
@@ -372,6 +368,20 @@ func (m *generator) addEnum(entry *dwarf.Entry) error {
 	if !ok {
 		return nil
 	}
+	// Some producers record an integer encoding on the enumeration itself.
+	const (
+		encodingSigned       = 0x05
+		encodingSignedChar   = 0x06
+		encodingUnsigned     = 0x07
+		encodingUnsignedChar = 0x08
+	)
+	encoding, _ := entry.Val(dwarf.AttrEncoding).(int64)
+	switch encoding {
+	case encodingSigned, encodingSignedChar:
+		m.signedEnums[enumType] = true
+	case encodingUnsigned, encodingUnsignedChar:
+		m.signedEnums[enumType] = false
+	}
 	if underlying, ok := entry.Val(dwarf.AttrType).(dwarf.Offset); ok {
 		base, err := m.data.Type(underlying)
 		if err != nil {
@@ -384,9 +394,8 @@ func (m *generator) addEnum(entry *dwarf.Entry) error {
 			m.signedEnums[enumType] = false
 		}
 	}
-	declaration, _ := entry.Val(dwarf.AttrDeclaration).(bool)
-	if enumType.EnumName != "" && !declaration {
-		m.enumDefinitions[enumType.EnumName] = append(m.enumDefinitions[enumType.EnumName], entry.Offset)
+	if enumType.EnumName != "" {
+		m.enums[enumType.EnumName] = append(m.enums[enumType.EnumName], enumType)
 	}
 	return nil
 }
@@ -399,33 +408,18 @@ func (m *generator) addEnum(entry *dwarf.Entry) error {
 // with its enumeration's name: in enum native_layout_u32, the enumerator
 // native_layout_module_ABI_version becomes ModuleABIVersion.
 func (m *generator) addConstants(name string) error {
-	offsets := m.enumDefinitions[name]
-	if len(offsets) == 0 {
-		return fmt.Errorf("enum %s: no definition in the binary", name)
+	first, err := m.enumDefinition(name)
+	if err != nil {
+		return err
 	}
-	var first *dwarf.EnumType
-	for _, offset := range offsets {
-		typ, err := m.data.Type(offset)
-		if err != nil {
-			return err
-		}
-		enumType := typ.(*dwarf.EnumType)
-		if first == nil {
-			first = enumType
-			continue
-		}
-		if enumType.ByteSize != first.ByteSize || enumType.String() != first.String() {
-			return fmt.Errorf("enum %s: definitions disagree:\n%s\n%s", name, first, enumType)
-		}
+	if first == nil || len(first.Val) == 0 {
+		return fmt.Errorf("enum %s: no definition in the binary", name)
 	}
 	if m.enumSigned(first) {
 		return fmt.Errorf("enum %s: signed, by its underlying type or a negative enumerator", name)
 	}
 	if !slices.Contains([]int64{1, 2, 4, 8}, first.ByteSize) {
 		return fmt.Errorf("enum %s: %d bytes is no integer size", name, first.ByteSize)
-	}
-	if len(first.Val) == 0 {
-		return fmt.Errorf("enum %s: no enumerators", name)
 	}
 	goType := integer(first.ByteSize, false)
 	for _, value := range first.Val {
@@ -447,6 +441,86 @@ func (m *generator) addConstants(name string) error {
 		m.typedConstants = append(m.typedConstants, typedConstant{Name: constant, Type: goType, Value: unsigned})
 	}
 	return nil
+}
+
+// enumDefinition reconciles the integer representation and enumerators
+// recorded in different compilation units.
+//
+// A forward declaration can supply a width or signedness while omitting
+// the enumerators. Only the properties present in both units must agree.
+func (m *generator) enumDefinition(name string) (*dwarf.EnumType, error) {
+	return m.reconcileEnums(name, m.enums[name])
+}
+
+func (m *generator) reconcileEnums(name string, entries []*dwarf.EnumType) (*dwarf.EnumType, error) {
+	if len(entries) == 0 {
+		return nil, nil
+	}
+	label := "enum " + name
+	if name == "" {
+		label = "anonymous enum"
+	}
+	disagreement := func(first, other *dwarf.EnumType) error {
+		return fmt.Errorf("%s: definitions disagree:\n%s\n%s", label, m.enumSignature(first), m.enumSignature(other))
+	}
+	var sized, signed, complete *dwarf.EnumType
+	for _, entry := range entries {
+		if entry.EnumName != entries[0].EnumName {
+			return nil, disagreement(entries[0], entry)
+		}
+		if entry.ByteSize > 0 {
+			if sized != nil && sized.ByteSize != entry.ByteSize {
+				return nil, disagreement(sized, entry)
+			}
+			sized = entry
+		}
+		if sign, known := m.signedEnums[entry]; known {
+			if signed != nil && m.signedEnums[signed] != sign {
+				return nil, disagreement(signed, entry)
+			}
+			signed = entry
+		}
+		if len(entry.Val) != 0 {
+			if complete != nil && complete.String() != entry.String() {
+				return nil, disagreement(complete, entry)
+			}
+			complete = entry
+		}
+	}
+	if sized == nil || (complete == nil && signed == nil) {
+		return nil, fmt.Errorf("%s: incomplete integer representation in the binary", label)
+	}
+	if complete == nil {
+		complete = sized
+	}
+	for _, entry := range entries {
+		entry.ByteSize = sized.ByteSize
+		if signed != nil {
+			m.signedEnums[entry] = m.signedEnums[signed]
+		}
+	}
+	return complete, nil
+}
+
+func (m *generator) enumSignature(typ *dwarf.EnumType) string {
+	sign := "unknown signedness"
+	if m.signedEnums[typ] {
+		sign = "signed"
+	} else if _, known := m.signedEnums[typ]; known {
+		sign = "unsigned"
+	}
+	return fmt.Sprintf("size %d %s %s", typ.ByteSize, sign, typ)
+}
+
+// enumView selects the complete enumeration when another unit defines it.
+func (m *generator) enumView(typ *dwarf.EnumType) *dwarf.EnumType {
+	full, err := m.enumDefinition(typ.EnumName)
+	if err != nil {
+		m.conflicts = append(m.conflicts, err.Error())
+	} else if full != nil {
+		return full
+	}
+	return typ
 }
 
 // enumeratorStem returns an enumerator's name less the prefix, up to an
@@ -510,7 +584,7 @@ func (m *generator) addRoot(name string) error {
 	if typ == nil {
 		return fmt.Errorf("struct %s: no definition in the binary", name)
 	}
-	m.goType(typ, "")
+	m.named(typ, camel(name))
 	return nil
 }
 
@@ -526,7 +600,6 @@ func (m *generator) definition(name string) (*dwarf.StructType, error) {
 		return nil, nil
 	}
 	var first *dwarf.StructType
-	var firstSignature string
 	for _, offset := range offsets {
 		typ, err := m.data.Type(offset)
 		if err != nil {
@@ -536,33 +609,88 @@ func (m *generator) definition(name string) (*dwarf.StructType, error) {
 		if !ok {
 			return nil, fmt.Errorf("%s at %#x is %T", name, offset, typ)
 		}
-		signature := structSignature(structType)
 		if first == nil {
-			first, firstSignature = structType, signature
-			continue
-		}
-		if signature != firstSignature {
-			return nil, fmt.Errorf(
-				"struct %s: definitions disagree:\n%s\n%s",
-				name, firstSignature, signature,
-			)
+			first = structType
+		} else if err := m.compareStructs(name, first, structType); err != nil {
+			return nil, err
 		}
 	}
 	return first, nil
 }
 
-func structSignature(typ *dwarf.StructType) string {
+func (m *generator) compareStructs(name string, first, other *dwarf.StructType) error {
+	var left, right []*dwarf.EnumType
+	firstLayout := m.structSignature(first, &left)
+	otherLayout := m.structSignature(other, &right)
+	if firstLayout != otherLayout || len(left) != len(right) {
+		return fmt.Errorf("struct %s: definitions disagree:\n%s\n%s", name, firstLayout, otherLayout)
+	}
+	for idx, enum := range left {
+		if _, err := m.reconcileEnums(enum.EnumName, []*dwarf.EnumType{enum, right[idx]}); err != nil {
+			return fmt.Errorf("struct %s: definitions disagree: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func (m *generator) structSignature(typ *dwarf.StructType, enums *[]*dwarf.EnumType) string {
 	var builder strings.Builder
 	fmt.Fprintf(&builder, "%s %s size %d:", typ.Kind, typ.StructName, typ.ByteSize)
 	for _, field := range typ.Field {
 		fmt.Fprintf(&builder, " %s@%d/%d+%d:%s",
-			field.Name, field.ByteOffset, field.DataBitOffset, field.BitSize, field.Type,
+			field.Name, field.ByteOffset, field.DataBitOffset, field.BitSize, m.fieldSignature(field.Type, enums),
 		)
 	}
 	return builder.String()
 }
 
+// fieldSignature records enum leaves in field order so their DWARF
+// properties can be reconciled after the enclosing shapes match.
+func (m *generator) fieldSignature(typ dwarf.Type, enums *[]*dwarf.EnumType) string {
+	var prefix strings.Builder
+	sawTypedef := false
+	for current := typ; current != nil; {
+		if atomic, ok := m.atomics[current]; ok {
+			prefix.WriteString("_Atomic ")
+			current = atomic
+			continue
+		}
+		switch field := current.(type) {
+		case *dwarf.QualType:
+			prefix.WriteString(field.Qual + " ")
+			current = field.Type
+		case *dwarf.TypedefType:
+			if !sawTypedef {
+				prefix.WriteString(field.Name + " ")
+				sawTypedef = true
+			}
+			current = field.Type
+		case *dwarf.PtrType:
+			prefix.WriteByte('*')
+			current = field.Type
+		case *dwarf.ArrayType:
+			fmt.Fprintf(&prefix, "[%d]", field.Count)
+			current = field.Type
+		case *dwarf.EnumType:
+			if field.EnumName != "" {
+				field = m.enumView(field)
+			}
+			*enums = append(*enums, field)
+			return prefix.String() + "enum " + field.EnumName
+		case *dwarf.StructType:
+			if field.StructName == "" {
+				return prefix.String() + m.structSignature(field, enums)
+			}
+			return typ.String()
+		default:
+			return typ.String()
+		}
+	}
+	return typ.String()
+}
+
 func (m *generator) drain() error {
+	var enums []pending
 	for len(m.queue) > 0 {
 		next := m.queue[0]
 		m.queue = m.queue[1:]
@@ -571,7 +699,7 @@ func (m *generator) drain() error {
 		case *dwarf.StructType:
 			err = m.emitStruct(next.Name, typ)
 		case *dwarf.EnumType:
-			err = m.emitEnum(next.Name, typ)
+			enums = append(enums, next)
 		}
 		if err != nil {
 			return err
@@ -580,6 +708,11 @@ func (m *generator) drain() error {
 	if len(m.conflicts) > 0 {
 		slices.Sort(m.conflicts)
 		return fmt.Errorf("types disagree between compilation units:\n%s", strings.Join(m.conflicts, "\n"))
+	}
+	for _, enum := range enums {
+		if err := m.emitEnum(enum.Name, enum.Type.(*dwarf.EnumType)); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -604,28 +737,27 @@ func (m *generator) goType(typ dwarf.Type, context string) string {
 		}
 		return m.goType(typ.Type, context)
 	case *dwarf.StructType:
-		if typ.Incomplete && typ.StructName != "" {
-			full, err := m.definition(typ.StructName)
-			if err != nil {
-				m.conflicts = append(m.conflicts, err.Error())
-				return "byte"
-			}
-			if full == nil {
-				// An opaque structure: nothing reads it through a view.
-				return "byte"
-			}
-			return m.goType(full, context)
-		}
-		name := camel(typ.StructName)
 		if typ.StructName == "" {
-			name = context
+			return m.named(typ, context)
 		}
-		return m.named(typ, name)
+		if existing, ok := m.names[typ]; ok {
+			return existing
+		}
+		full, err := m.definition(typ.StructName)
+		if err != nil {
+			m.conflicts = append(m.conflicts, err.Error())
+			return "byte"
+		}
+		if full == nil {
+			// An opaque structure: nothing reads it through a view.
+			return "byte"
+		}
+		return m.named(full, camel(typ.StructName))
 	case *dwarf.EnumType:
 		if typ.EnumName == "" {
 			return integer(typ.ByteSize, m.enumSigned(typ))
 		}
-		return m.named(typ, camel(typ.EnumName))
+		return m.named(m.enumView(typ), camel(typ.EnumName))
 	case *dwarf.BoolType:
 		return "bool"
 	case *dwarf.CharType:
@@ -672,19 +804,30 @@ func (m *generator) named(typ dwarf.Type, name string) string {
 		return existing
 	}
 	m.names[typ] = name
-	signature := typ.String()
-	if structType, ok := typ.(*dwarf.StructType); ok {
-		signature = structSignature(structType)
-	}
-	if previous, ok := m.signatures[name]; ok {
-		if previous != signature {
-			m.conflicts = append(m.conflicts, fmt.Sprintf("%s:\n%s\n%s", name, previous, signature))
+	if previous, ok := m.namedTypes[name]; ok {
+		if err := m.compareViews(name, previous, typ); err != nil {
+			m.conflicts = append(m.conflicts, err.Error())
 		}
 		return name
 	}
-	m.signatures[name] = signature
+	m.namedTypes[name] = typ
 	m.queue = append(m.queue, pending{Name: name, Type: typ})
 	return name
+}
+
+func (m *generator) compareViews(name string, first, other dwarf.Type) error {
+	switch first := first.(type) {
+	case *dwarf.StructType:
+		if current, ok := other.(*dwarf.StructType); ok {
+			return m.compareStructs(name, first, current)
+		}
+	case *dwarf.EnumType:
+		if current, ok := other.(*dwarf.EnumType); ok {
+			_, err := m.reconcileEnums(name, []*dwarf.EnumType{first, current})
+			return err
+		}
+	}
+	return fmt.Errorf("%s names both a structure and an enumeration", name)
 }
 
 // fieldType returns the Go type of a structure field, applying what the C
@@ -781,6 +924,11 @@ func (m *generator) isAtomic(typ dwarf.Type) bool {
 // for _Atomic types and the arrays and typedefs built on them.
 func (m *generator) size(typ dwarf.Type) int64 {
 	switch typ := m.resolved(typ).(type) {
+	case *dwarf.EnumType:
+		if typ.ByteSize <= 0 && typ.EnumName != "" {
+			return m.enumView(typ).ByteSize
+		}
+		return typ.ByteSize
 	case *dwarf.ArrayType:
 		if typ.Count < 0 {
 			return 0
@@ -847,8 +995,8 @@ func rawScalar(typ dwarf.Type) bool {
 	}
 }
 
-// enumSigned reports whether an enumeration is signed: by its underlying
-// type where the DWARF names one, else by a negative enumerator.
+// enumSigned uses the DWARF encoding or underlying integer type when
+// known and otherwise infers signedness from a negative enumerator.
 func (m *generator) enumSigned(typ *dwarf.EnumType) bool {
 	if signed, known := m.signedEnums[typ]; known {
 		return signed

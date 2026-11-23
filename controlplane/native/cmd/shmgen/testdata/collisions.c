@@ -32,6 +32,14 @@ struct fixture_twinned {
 	enum fixture_twins twins;
 };
 
+enum fixture_tag : unsigned;
+enum fixture__tag : unsigned { fixture_tag_one = 1 };
+
+struct fixture_tag_collision {
+	enum fixture_tag partial;
+	enum fixture__tag defined;
+};
+
 int
 main(void) {
 	return 0;
