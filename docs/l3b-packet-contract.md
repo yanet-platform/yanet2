@@ -532,7 +532,9 @@ The following vectors are required and **NOT RUN**:
   offset 4, 8, 12, and so on, using the one-based RFC 791 pointer.
   In live and quoted IPv4 option walks, End of Option List stops the scan and
   padding is not parsed. No Operation advances one byte. Other options require
-  bounded encoded lengths. Neither walk changes the option bytes.
+  an encoded length of at least two bytes and full containment in the option
+  area. Reject invalid lengths as a malformed live option or malformed quote,
+  respectively. Neither walk changes the option bytes.
   A terminal fault in an earlier option stops the scan. With valid length and
   a pointer greater than length, the option is exhausted and stays unchanged.
   Record Route and Timestamp handling stays unchanged.

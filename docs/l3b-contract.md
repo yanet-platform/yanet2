@@ -3319,12 +3319,10 @@ Required discriminating vectors include:
   detachment/free/growth nor bypasses reader rights, RCU grace, physical accounting
   until release, growth rejection while a back physically exists, or the one-back/
   no-third-table rule. Terminal deletion still waits for reader rights, not expiry.
-- Capacity/refill vectors (NOT RUN): invalid whole-config burst<n preserves prior
-  state. Independently exercise runtime n>burst: immediate not-ready counted-drop,
-  no clones/reservation despite elapsed time. Only configuration or peer-group
-  change permitting full funding exits; no implicit growth, accepted-invalid
-  external update or corruption-only assumption. Contrast n<=burst with temporary
-  credit shortage, where refill can fund n; policy/peers/local/budget stay coherent.
+- Capacity/refill vectors (**NOT RUN**): invalid whole-config burst<n preserves
+  prior state. For a valid n<=burst, temporary credit shortage can recover after
+  refill without changing policy or peers. The defensive above-burst guard
+  has the separate proof prerequisite below.
 - Clone bucket millisecond refill (**NOT RUN**): from zero credit, rate=3 clones/second
   and burst=2, elapsed 100 ms yields 0.3 clone; three such intervals yield 0.9,
   the fourth 1.2, allowing one reservation and retaining 0.2. A 1000 ms interval
