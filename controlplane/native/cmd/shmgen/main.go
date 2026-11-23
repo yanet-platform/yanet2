@@ -930,6 +930,14 @@ func (m *generator) size(typ dwarf.Type) int64 {
 	}
 }
 
+// flexibleArray returns the array for a member omitted from the Go view.
+func (m *generator) flexibleArray(typ dwarf.Type) *dwarf.ArrayType {
+	if array, ok := m.resolved(typ).(*dwarf.ArrayType); ok && m.size(array) == 0 {
+		return array
+	}
+	return nil
+}
+
 func integer(size int64, signed bool) string {
 	name := fmt.Sprintf("int%d", size*8)
 	if !signed {
@@ -950,7 +958,7 @@ func (m *generator) goAlign(typ dwarf.Type) int64 {
 		}
 		align := int64(1)
 		for _, field := range typ.Field {
-			if field.BitSize != 0 {
+			if field.BitSize != 0 || m.flexibleArray(field.Type) != nil {
 				continue
 			}
 			fieldAlign := m.goAlign(field.Type)
@@ -964,13 +972,12 @@ func (m *generator) goAlign(typ dwarf.Type) int64 {
 		return m.goAlign(typ.Type)
 	case *dwarf.PtrType:
 		return 8
-	default:
-		size := m.size(typ)
-		if size <= 0 || rawScalar(typ) {
-			return 1
+	case *dwarf.IntType, *dwarf.UintType, *dwarf.FloatType, *dwarf.EnumType:
+		if size := m.size(typ); size > 0 && !rawScalar(typ) {
+			return min(size, 8)
 		}
-		return min(size, 8)
 	}
+	return 1
 }
 
 // rawScalar reports whether a C scalar has no Go type of its size, as
@@ -1064,8 +1071,7 @@ func (m *generator) emitStruct(name string, typ *dwarf.StructType) error {
 		}
 
 		offset := field.ByteOffset
-		size := m.size(field.Type)
-		if array, ok := m.underlying(field.Type).(*dwarf.ArrayType); ok && (array.Count < 0 || size == 0) {
+		if array := m.flexibleArray(field.Type); array != nil {
 			// A flexible array member: no bytes of its own, reached
 			// through an accessor sized by the caller.
 			//
@@ -1132,6 +1138,10 @@ func (m *generator) emitStruct(name string, typ *dwarf.StructType) error {
 		if m.isAtomic(field.Type) {
 			comment = " // atomic"
 		}
+		size := m.size(field.Type)
+		if size == 0 && offset > 0 && offset == typ.ByteSize {
+			return fmt.Errorf("struct %s: trailing zero-sized field %s would add Go padding", cName(typ), fieldName)
+		}
 		if offset%m.goAlign(field.Type) != 0 {
 			fmt.Fprintf(&body, "\t%s [%d]byte // packed %s %s\n", fieldName, size, field.Name, goType)
 		} else {
@@ -1143,6 +1153,9 @@ func (m *generator) emitStruct(name string, typ *dwarf.StructType) error {
 			Want:       offset,
 		})
 		cursor = offset + size
+	}
+	if align := m.goAlign(typ); typ.ByteSize%align != 0 {
+		return fmt.Errorf("struct %s: size %d is not a multiple of Go alignment %d", cName(typ), typ.ByteSize, align)
 	}
 	pad(typ.ByteSize)
 	body.WriteString("}\n")

@@ -309,6 +309,55 @@ func Test_Shmgen_FailsOnMistypedKeys(t *testing.T) {
 	}
 }
 
+// Test_Shmgen_RejectsImplicitTailPadding verifies that generation fails
+// before writing a view whose Go size would change the C array stride.
+func Test_Shmgen_RejectsImplicitTailPadding(t *testing.T) {
+	binary := buildFixture(t, "packed.c")
+	cases := []struct {
+		root string
+		want string
+	}{
+		{"fixture_short_tail", "struct fixture_short_tail: size 9 is not a multiple of Go alignment 8"},
+		{"fixture_tail_array", "struct fixture_short_tail: size 9 is not a multiple of Go alignment 8"},
+		{"fixture_empty_tail", "struct fixture_empty_tail: trailing zero-sized field End would add Go padding"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.root, func(t *testing.T) {
+			options := fixtureOptions(t, binary)
+
+			err := run(options, []string{tc.root})
+			require.ErrorContains(t, err, tc.want)
+			require.NoFileExists(t, options.Output)
+			require.NoFileExists(t, options.TestOutput)
+		})
+	}
+}
+
+// Test_Shmgen_PreservesPackedFields verifies that byte storage and a
+// flexible array accessor impose no alignment on the enclosing view.
+func Test_Shmgen_PreservesPackedFields(t *testing.T) {
+	binary := buildFixture(t, "packed.c")
+	options := fixtureOptions(t, binary)
+	require.NoError(t, run(options, []string{"fixture_packed"}))
+
+	source, err := os.ReadFile(options.Output)
+	require.NoError(t, err)
+	cases := []struct {
+		name string
+		want string
+	}{
+		{"opaque scalar", `\bSample\s+\[16\]byte\b`},
+		{"misaligned integer", `\bWord\s+\[4\]byte\b`},
+		{"nested flexible array header", `\bHeader\s+FixtureHeader\b`},
+		{"flexible array accessor", `func \(m \*FixtureHeader\) Values\(count int\) \[\]uint64`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Regexp(t, tc.want, string(source))
+		})
+	}
+}
+
 // Test_Shmgen_MapsScalarsByEncoding verifies that a scalar becomes the Go
 // type of its encoding and size, or raw bytes when Go has none.
 func Test_Shmgen_MapsScalarsByEncoding(t *testing.T) {
