@@ -12,3 +12,9 @@ typedef unsigned int fixture_word;
 struct fixture_aliased {
 	fixture_word value;
 };
+
+typedef signed char fixture_char;
+
+struct fixture_character {
+	fixture_char value;
+};

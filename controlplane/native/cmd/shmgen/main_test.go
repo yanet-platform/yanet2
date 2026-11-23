@@ -63,8 +63,8 @@ func Test_Shmgen_FailsOnDisagreeingUnits(t *testing.T) {
 		{"disagree_first.c", "disagree_second.c"},
 		{"disagree_second.c", "disagree_first.c"},
 	} {
-		binary := buildFixture(t, order...)
-		for _, root := range []string{"fixture_shared", "fixture_aliased"} {
+		binary := buildFixtureWithFlags(t, []string{"-fsigned-char"}, order...)
+		for _, root := range []string{"fixture_shared", "fixture_aliased", "fixture_character"} {
 			t.Run(order[0]+"/"+root, func(t *testing.T) {
 				options := fixtureOptions(t, binary)
 				err := run(options, []string{root})
