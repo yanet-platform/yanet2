@@ -151,16 +151,24 @@ func (m *Storage) findInstances() error {
 		if dp.StorageSize == 0 {
 			return fmt.Errorf("instance %d: zero storage size", idx)
 		}
-		// Every pointer read later lands inside the instance, so the whole
-		// extent must be mapped; it also keeps the next offset in range.
+		// The extent must be mapped and hold both zones whole: the reader
+		// writes the locks inside them, and the next instance starts where
+		// this extent ends.
 		if !m.Contains(address, uintptr(dp.StorageSize)) {
 			return fmt.Errorf("instance %d: storage of %d bytes at offset %d runs past the mapping", idx, dp.StorageSize, offset)
+		}
+		memory := unsafe.Slice((*byte)(address), dp.StorageSize)
+		if !contains(memory, address, unsafe.Sizeof(layout.DpConfig{})) {
+			return fmt.Errorf("instance %d: storage of %d bytes cannot hold its dataplane zone", idx, dp.StorageSize)
+		}
+		if !contains(memory, unsafe.Pointer(cp), unsafe.Sizeof(layout.CpConfig{})) {
+			return fmt.Errorf("instance %d: control-plane zone outside the instance", idx)
 		}
 		m.Instances = append(m.Instances, &Instance{
 			Index:  idx,
 			Dp:     dp,
 			Cp:     cp,
-			memory: unsafe.Slice((*byte)(address), dp.StorageSize),
+			memory: memory,
 		})
 		offset += uintptr(dp.StorageSize)
 	}

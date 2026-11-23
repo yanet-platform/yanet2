@@ -137,6 +137,22 @@ func Test_Storage_RefusesMalformedInstances(t *testing.T) {
 			"zero storage size",
 		},
 		{
+			"storage too short for the dataplane zone",
+			func(data []byte, dp *layout.DpConfig) []byte {
+				dp.StorageSize = 8
+				return data
+			},
+			"cannot hold its dataplane zone",
+		},
+		{
+			"control-plane zone outside the instance",
+			func(data []byte, dp *layout.DpConfig) []byte {
+				dp.StorageSize = uint64(uintptr(unsafe.Pointer(dp.CpConfig.Get())) - uintptr(unsafe.Pointer(&data[0])))
+				return data
+			},
+			"control-plane zone outside the instance",
+		},
+		{
 			"storage size past the mapping",
 			func(data []byte, dp *layout.DpConfig) []byte {
 				dp.StorageSize = uint64(len(data)) + 8
