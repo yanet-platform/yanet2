@@ -96,6 +96,8 @@ web/dist/
 *.pb.go
 zz_yanet_cdeps.c
 zz_yanet_cgo.go
+/controlplane/native/layout/layout_*.go
+/controlplane/native/layout/.layout_*
 
 # Ignore lock for subprojects
 subprojects/.wraplock

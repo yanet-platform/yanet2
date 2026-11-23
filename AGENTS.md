@@ -19,7 +19,7 @@ make test | make test-asan | make test-tsan        # Go + meson tests
 make test-functional                               # QEMU VM suite
 meson test -C build <name>; make build && go test -count=1 ./modules/route/...
 make proto-lint | make lint-go | make lint/clang-syntax | make lint-commit
-make proto-go                                      # *.pb.go, needed before go lint locally
+make proto-go | make native-layout                 # *.pb.go | Go shm views; both before go lint
 make gate                                          # CI checks for the layers changed since origin/main; prints failures only
 make hooks                                         # install git hooks (once per clone)
 make fuzz [MODULE=<name>]
@@ -54,13 +54,13 @@ modules/<name>/
 
 Active modules: `route, acl, l3b, blackhole, forward, decap, nat64, fwstate, dscp, pdump, route-mpls, mirror, unrdup`. Legacy shape: `pdump` (CGO in `controlplane/ffi.go`, no `bindings/`); `fwstate` partially migrated. The `l3b` module links virtual-service and session-table objects under `objects/l3b/`. Dataplane symbols are exported via meson `--require-defined=new_module_<name>`.
 
-Shared-memory pattern: `ffi.SharedMemory` → `shm.AgentAttach(name, instanceIdx, size)` → write the C config through FFI (`<name>_module_config_update()`) with Go memory pinned by `runtime.Pinner` → the dataplane reads it atomically. Exported Go APIs whose arguments index C arrays (device IDs, queue/worker indices) validate the range on the Go side.
+Shared-memory pattern: `ffi.SharedMemory` → `shm.AgentAttach(name, instanceIdx, size)` → write the C config through FFI (`<name>_module_config_update()`) with Go memory pinned by `runtime.Pinner` → the dataplane reads it atomically. Exported Go APIs whose arguments index C arrays (device IDs, queue/worker indices) validate the range in Go.
 
 Rust CLI (`code-cli` skill has the rest): a CLI is registered in THREE places that move together — root `Cargo.toml` members, root `Makefile` (`CLI_CORE_MODULES` / `CLI_MODULES`), `debian/yanet2-cli.install`; a miss in the last two builds green and is never installed. Private CLIs are standalone workspaces.
 
 ## Conventions
 
-Language rules: `.agents/conventions/{go,rust,c,ts}.md` — read the one for the language you touch (Claude Code loads them by path via `.claude/rules/`). Comments (all languages): `.agents/conventions/comments.md`. Tests (all languages): `.agents/conventions/tests.md`.
+Language rules: `.agents/conventions/{go,rust,c,ts}.md` — read the one for your language (Claude Code loads them via `.claude/rules/`); all languages: `comments.md`, `tests.md` there.
 
 - After native changes run `meson compile -C build` before direct Go commands; `go test` needs the cache-line and sanitizer CGO flags that `make test`/`make test-asan` supply. Shm layout or `YANET_MODULE_ABI_VERSION` changes need rebuilt standalone CGO binaries and coordinated restarts; stop attached processes before removing stale `/dev/hugepages/yanet*`.
 - Skills live in `.agents/skills/<name>/` (symlinked from `.claude/skills/`). Hooks in `.agents/hooks/` (`.claude/settings.json`, `.codex/hooks.json`; Codex needs `/hooks` trust) format edited files and refuse writes on `main`, whole-tree `git add`, `--no-verify`, `git stash` and git commands that discard changes.
@@ -71,13 +71,13 @@ Language rules: `.agents/conventions/{go,rust,c,ts}.md` — read the one for the
 
 ## Worktrees
 
-Use linked worktrees at `.claude/worktrees/` (Claude Code) or `.agent-state/worktrees/` (Codex), on task branches from confirmed `origin/main`. Confirm root and branch first. Keep primary on `main`; write only ignored trees there, by absolute path. Gates using `build/` need their own build and initialized submodules; cargo/npm/lint-only gates may link primary `build/` and `*.pb.go`.
+Use linked worktrees at `.claude/worktrees/` (Claude Code) or `.agent-state/worktrees/` (Codex), on task branches from confirmed `origin/main`. Confirm root and branch first. Keep primary on `main`; write only ignored trees there, by absolute path. Gates using `build/` need their own build and initialized submodules; cargo/npm-only gates may link primary `build/` and `*.pb.go`. Go changes need this checkout's own configured `build/` (`lint-go` and the gate write native layouts into its tree).
 
 ## Commits & PRs
 
-- Write every PR review comment in English only, including inline comments, summaries, and replies. Do not mix languages.
+- PR review comments (inline, summaries, replies): English only, never mixed.
 - Never `git commit`/`--amend` unless the request asks for it; never `stash`/`checkout`/`reset`/`restore` to A/B a pre-existing state — read `git show HEAD:<path>` instead.
-- Subject: `feat|fix|refactor|perf|chore|docs|test|build|ci|style(<scope>)[!]: brief` — scope mandatory (lowercase, comma-separated), brief lowercase, no trailing period, no code-level detail. Enforced by the `commit-msg` hook and the Commit Lint CI job.
+- Subject: `feat|fix|refactor|perf|chore|docs|test|build|ci|style(<scope>)[!]: brief` — scope mandatory (lowercase, comma-separated), brief lowercase, no trailing period, no code-level detail. Enforced by the `commit-msg` hook and CI.
 - No `Co-Authored-By` / `Generated with` footers.
 - PR title = commit subject format. Body: bullets starting with a capital and ending with a period, `Closes #<n>.` when applicable, no `## Summary` header, no test-plan section.
 - GitHub via `gh`: reads freely, writes (PRs, comments, issues) only when the task asks.
