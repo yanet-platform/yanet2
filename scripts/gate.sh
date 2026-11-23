@@ -135,6 +135,14 @@ gate_go() {
 	if matching '\.proto$' >/dev/null || [ ! -f "${proto%.proto}.pb.go" ]; then
 		step proto-go make --no-print-directory proto-go || return 1
 	fi
+	# The native views of the shared-memory structures are generated too,
+	# into the source tree build/ belongs to: a link to another checkout's
+	# build/ would write them there.
+	if [ -L build ]; then
+		fail native-layout "the native layouts need this checkout's own build/, not a link to another one; run 'meson setup build' (AGENTS.md, Worktrees)"
+		return 1
+	fi
+	step native-layout make --no-print-directory native-layout || return 1
 	files=$(present '\.go$' | grep -v '\.pb\.go$')
 	if [ -n "$files" ]; then
 		# shellcheck disable=SC2086

@@ -1,4 +1,5 @@
 subdir('ynpb')
+subdir('native/layout')
 
 install_data(
     'etc/yanet2/controlplane.d/default.yaml',
