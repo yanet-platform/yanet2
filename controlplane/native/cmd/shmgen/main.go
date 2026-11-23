@@ -28,6 +28,7 @@ import (
 	"debug/dwarf"
 	"debug/elf"
 	"encoding/binary"
+	"errors"
 	"flag"
 	"fmt"
 	"go/format"
@@ -37,6 +38,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 func main() {
@@ -158,8 +160,6 @@ func run(options options, roots []string) error {
 		return err
 	}
 
-	// Both files are rendered before either is written, so a failure
-	// never leaves new views beside an old test.
 	source, err := m.render(packageName, filepath.Base(binary), constraint)
 	if err != nil {
 		return err
@@ -171,13 +171,7 @@ func run(options options, roots []string) error {
 			return err
 		}
 	}
-	if err := writeFile(output, source); err != nil {
-		return err
-	}
-	if testOutput == "" {
-		return nil
-	}
-	return writeFile(testOutput, test)
+	return writeOutputs(output, source, testOutput, test)
 }
 
 // checkNames fails on an enumerator constant that takes the name of a
@@ -195,30 +189,110 @@ func (m *generator) checkNames() error {
 	return nil
 }
 
-// writeFile replaces a file with data unless it holds data already, in one
-// rename, so a Go build reading the file meanwhile sees it whole.
-func writeFile(path string, data []byte) error {
-	if current, err := os.ReadFile(path); err == nil && bytes.Equal(current, data) {
-		return nil
+// writeOutputs restores the previous view if replacing its test fails.
+func writeOutputs(output string, source []byte, testOutput string, test []byte) error {
+	directory, err := os.Open(filepath.Dir(output))
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
+	// Concurrent generators for the same view must finish or roll back
+	// their writes before another one takes a snapshot.
+	if err := syscall.Flock(int(directory.Fd()), syscall.LOCK_EX); err != nil {
+		return err
+	}
+	if testOutput != "" && filepath.Base(output) == filepath.Base(testOutput) {
+		viewDir, err := directory.Stat()
+		if err != nil {
+			return err
+		}
+		testDir, err := os.Stat(filepath.Dir(testOutput))
+		if err != nil {
+			return err
+		}
+		if os.SameFile(viewDir, testDir) {
+			return fmt.Errorf("-out and -test name the same file: %s", output)
+		}
+	}
+	viewTemp, err := stageFile(output, source)
+	if err != nil {
+		return err
+	}
+	if viewTemp != "" {
+		defer os.Remove(viewTemp)
+	}
+	testTemp, err := stageFile(testOutput, test)
+	if err != nil {
+		return err
+	}
+	if testTemp == "" {
+		if viewTemp == "" {
+			return nil
+		}
+		return os.Rename(viewTemp, output)
+	}
+	defer os.Remove(testTemp)
+	if viewTemp == "" {
+		return os.Rename(testTemp, testOutput)
+	}
+
+	backup := viewTemp + ".old"
+	err = os.Link(output, backup)
+	existed := err == nil
+	if !existed && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := os.Rename(viewTemp, output); err != nil {
+		if existed {
+			os.Remove(backup)
+		}
+		return err
+	}
+	if err := os.Rename(testTemp, testOutput); err != nil {
+		if existed {
+			return errors.Join(err, os.Rename(backup, output))
+		}
+		return errors.Join(err, os.Remove(output))
+	}
+	if existed {
+		return os.Remove(backup)
+	}
+	return nil
+}
+
+// stageFile prepares a complete replacement next to its destination.
+// An omitted or unchanged output needs no temporary file.
+func stageFile(path string, data []byte) (name string, err error) {
+	if path == "" {
+		return "", nil
+	}
+	if info, err := os.Lstat(path); err == nil && info.Mode().IsRegular() {
+		if current, err := os.ReadFile(path); err == nil && bytes.Equal(current, data) {
+			return "", nil
+		}
 	}
 	// A dot-prefixed temporary file is one the Go tools never read.
 	temporary, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
 	if err != nil {
-		return err
+		return "", err
 	}
-	defer os.Remove(temporary.Name())
+	defer func() {
+		if err != nil {
+			os.Remove(temporary.Name())
+		}
+	}()
 	if _, err := temporary.Write(data); err != nil {
 		temporary.Close()
-		return err
+		return "", err
 	}
 	if err := temporary.Chmod(0o644); err != nil {
 		temporary.Close()
-		return err
+		return "", err
 	}
 	if err := temporary.Close(); err != nil {
-		return err
+		return "", err
 	}
-	return os.Rename(temporary.Name(), path)
+	return temporary.Name(), nil
 }
 
 // check is one size or offset the generated test pins.

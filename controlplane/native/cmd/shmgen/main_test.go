@@ -112,6 +112,40 @@ func Test_Shmgen_KeepsUnchangedOutput(t *testing.T) {
 	}
 }
 
+// Test_Shmgen_RestoresViewsOnTestWriteFailure verifies that a failure to
+// publish the test preserves the previous view, including its absence.
+func Test_Shmgen_RestoresViewsOnTestWriteFailure(t *testing.T) {
+	binary := buildFixture(t, "view.c")
+	for _, tc := range []struct {
+		name     string
+		existing bool
+	}{
+		{"first generation", false},
+		{"existing view", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			options := fixtureOptions(t, binary)
+			if tc.existing {
+				require.NoError(t, os.WriteFile(options.Output, []byte("previous view"), 0o644))
+			}
+			require.NoError(t, os.Mkdir(options.TestOutput, 0o755))
+
+			require.Error(t, run(options, []string{"fixture_view"}))
+
+			if tc.existing {
+				content, err := os.ReadFile(options.Output)
+				require.NoError(t, err)
+				require.Equal(t, "previous view", string(content))
+			} else {
+				require.NoFileExists(t, options.Output)
+			}
+			temporary, err := filepath.Glob(filepath.Join(filepath.Dir(options.Output), ".*"))
+			require.NoError(t, err)
+			require.Empty(t, temporary)
+		})
+	}
+}
+
 // Test_Shmgen_EmitsUnsignedConstants verifies that the enumerators of an
 // enumeration named as constants become unsigned constants as wide as
 // their enumeration, a 64-bit value with its top bit set included.
