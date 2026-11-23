@@ -548,8 +548,8 @@ func Test_Shmgen_UsesRecordedEnumSignedness(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			legacy := &dwarf.EnumType{
-				CommonType: dwarf.CommonType{ByteSize: 8},
-				Val:        []*dwarf.EnumValue{{Name: "flag", Val: tc.value}},
+				ByteSize: 8,
+				Val:      []*dwarf.EnumValue{{Name: "flag", Val: tc.value}},
 			}
 			explicit := *legacy
 			entries := []*dwarf.EnumType{legacy, &explicit}
