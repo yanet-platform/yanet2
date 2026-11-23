@@ -1245,8 +1245,12 @@ func (m *generator) renderTest(packageName, importPath, binary, constraint strin
 	if len(m.checks) > 0 {
 		unsafeImport = "\t\"unsafe\"\n"
 	}
-	fmt.Fprintf(&out, "import (\n\t\"testing\"\n%s\n\t\"github.com/stretchr/testify/require\"\n\n\t%q\n)\n\n",
-		unsafeImport, importPath,
+	layoutImport := strconv.Quote(importPath)
+	if packageName != "layout" {
+		layoutImport = "layout " + layoutImport
+	}
+	fmt.Fprintf(&out, "import (\n\t\"testing\"\n%s\n\t\"github.com/stretchr/testify/require\"\n\n\t%s\n)\n\n",
+		unsafeImport, layoutImport,
 	)
 	if len(m.checks) > 0 {
 		out.WriteString("// Test_Layout_MatchesDWARF verifies that every view has the size and\n")

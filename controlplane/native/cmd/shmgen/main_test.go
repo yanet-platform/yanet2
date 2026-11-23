@@ -585,6 +585,19 @@ func Test_Shmgen_ResolvesForwardEnum(t *testing.T) {
 	require.Regexp(t, `\bFixtureForwardOne\s+FixtureForward = 1\b`, string(source))
 }
 
+// Test_Shmgen_ImportsCustomPackage verifies that generated checks can
+// refer to views declared under a caller-selected package name.
+func Test_Shmgen_ImportsCustomPackage(t *testing.T) {
+	options := fixtureOptions(t, buildFixture(t, "view.c"))
+	options.PackageName = "wire"
+	options.ImportPath = "example.com/views"
+	require.NoError(t, run(options, []string{"fixture_view"}))
+
+	test, err := os.ReadFile(options.TestOutput)
+	require.NoError(t, err)
+	require.Contains(t, string(test), `layout "example.com/views"`)
+}
+
 // Test_Shmgen_RequiresImportForTest verifies that a test file without the
 // import path of its package fails before anything is written.
 func Test_Shmgen_RequiresImportForTest(t *testing.T) {
