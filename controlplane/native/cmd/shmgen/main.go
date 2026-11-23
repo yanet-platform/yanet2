@@ -837,18 +837,9 @@ func (m *generator) compareViews(name string, first, other dwarf.Type) error {
 // word and must be an 8-byte pointer. A relative one, whatever its name,
 // is a pointer to 8-byte pointers C stores relative while its elements
 // stay absolute: a relative pointer to opaque words.
-func (m *generator) fieldType(typ *dwarf.StructType, field *dwarf.StructField, context string) (string, error) {
-	key := typ.StructName + "." + field.Name
-	relative := m.relatives[key]
-	local := m.locals[key] || (strings.HasPrefix(field.Name, "abs_") && !relative)
-	if !local && !relative {
+func (m *generator) fieldType(typ *dwarf.StructType, field *dwarf.StructField, context string, local, relative bool) (string, error) {
+	if !local && !relative && !strings.HasPrefix(field.Name, "abs_") {
 		return m.goType(field.Type, context), nil
-	}
-	if m.locals[key] || relative {
-		m.matched[key] = true
-	}
-	if m.locals[key] && relative {
-		return "", fmt.Errorf("struct %s: field %s is both local and relative", typ.StructName, field.Name)
 	}
 	pointer, ok := m.resolved(field.Type).(*dwarf.PtrType)
 	if !ok || m.size(field.Type) != 8 {
@@ -857,7 +848,7 @@ func (m *generator) fieldType(typ *dwarf.StructType, field *dwarf.StructField, c
 			typ.StructName, field.Name,
 		)
 	}
-	if local {
+	if !relative {
 		return "shm.Local", nil
 	}
 	if !m.isPointer(pointer.Type) {
@@ -1063,6 +1054,15 @@ func (m *generator) emitStruct(name string, typ *dwarf.StructType) error {
 			continue
 		}
 
+		key := typ.StructName + "." + field.Name
+		local, relative := m.locals[key], m.relatives[key]
+		if local && relative {
+			return fmt.Errorf("struct %s: field %s is both local and relative", typ.StructName, field.Name)
+		}
+		if local || relative {
+			m.matched[key] = true
+		}
+
 		offset := field.ByteOffset
 		size := m.size(field.Type)
 		if array, ok := m.underlying(field.Type).(*dwarf.ArrayType); ok && (array.Count < 0 || size == 0) {
@@ -1071,8 +1071,13 @@ func (m *generator) emitStruct(name string, typ *dwarf.StructType) error {
 			//
 			// One named local holds the absolute pointers only the
 			// dataplane fills and follows, so it gets no accessor.
-			if key := typ.StructName + "." + field.Name; m.locals[key] {
-				m.matched[key] = true
+			if relative {
+				return fmt.Errorf(
+					"struct %s: field %s is a flexible array but -relative requires a pointer to 8-byte pointers",
+					typ.StructName, field.Name,
+				)
+			}
+			if local {
 				if !m.isPointer(array.Type) {
 					return fmt.Errorf(
 						"struct %s: field %s is local but no flexible array of 8-byte pointers",
@@ -1118,7 +1123,7 @@ func (m *generator) emitStruct(name string, typ *dwarf.StructType) error {
 			fieldName = fmt.Sprintf("Anonymous%d", offset)
 		}
 		fieldName = unique(used, fieldName)
-		goType, err := m.fieldType(typ, field, name+fieldName)
+		goType, err := m.fieldType(typ, field, name+fieldName, local, relative)
 		if err != nil {
 			return err
 		}

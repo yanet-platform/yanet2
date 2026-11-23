@@ -276,6 +276,18 @@ func Test_Shmgen_FailsOnMistypedKeys(t *testing.T) {
 			"struct fixture_pointers: field items is local but no flexible array of 8-byte pointers",
 		},
 		{
+			"local and relative flexible array", "fixture_table", "fixture_table.slots", "fixture_table.slots",
+			"struct fixture_table: field slots is both local and relative",
+		},
+		{
+			"relative flexible array of pointers", "fixture_table", "", "fixture_table.slots",
+			"struct fixture_table: field slots is a flexible array but -relative requires a pointer to 8-byte pointers",
+		},
+		{
+			"local and relative pointer", "fixture_table", "fixture_table.targets", "fixture_table.targets",
+			"struct fixture_table: field targets is both local and relative",
+		},
+		{
 			"relative pointer to a structure", "fixture_pointers", "", "fixture_pointers.resolved",
 			"struct fixture_pointers: field resolved is relative but no pointer to 8-byte pointers",
 		},
