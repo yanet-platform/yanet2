@@ -8,9 +8,9 @@
 
 // A test-and-test-and-set spinlock, held while its word is one.
 //
-// The lock is a whole aligned 32-bit word rather than a byte, so a
-// process that shares the memory without this header takes it with a
-// plain word-sized compare-and-swap instead of masking a shared word.
+// The lock fills a whole aligned 32-bit word, so a process that shares
+// the memory without this header takes it with a plain word-sized
+// compare-and-swap.
 struct spinlock {
 	_Atomic uint32_t locked;
 };

@@ -18,8 +18,9 @@ that attaches to its shared memory must be deployed and restarted together:
   memory not ready` after its startup timeout.
 - The native reader and the developer inspector `yanet-native` name both
   versions: `dataplane shared memory version differs: instance 0: dataplane
-  module ABI version 0, this build reads 52`. Every dataplane from before the
-  change reads as ABI version 0.
+  module ABI version 0, this build reads <version>`, where `<version>` is the
+  build's own module ABI version. Every dataplane from before the change reads
+  as ABI version 0.
 
 Every standalone binary that links the C control-plane library through cgo
 (the controlplane, module control planes and operators that attach agents)
