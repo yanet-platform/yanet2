@@ -93,6 +93,10 @@ jobs:
       - name: Generate native layouts
         run: make native-layout
 
+      # Builds the native control plane's packages with cgo disabled.
+      - name: Build native control plane without cgo
+        run: make native-nocgo
+
       - name: golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:

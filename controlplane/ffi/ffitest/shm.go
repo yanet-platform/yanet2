@@ -5,6 +5,7 @@ package ffitest
 #cgo CFLAGS: -I../../..
 #include <dlfcn.h>
 #include <stdlib.h>
+#include <string.h>
 #include "common/memory_address.h"
 #include "lib/controlplane/agent/agent.h"
 #include "lib/controlplane/config/zone.h"
@@ -147,6 +148,58 @@ static int mark_instance_ready(
 	dp_config_mark_ready(dp_config_nextk(first, instance_idx));
 	return 0;
 }
+
+// Gives an instance one idle worker, whose rounds the caller runs, at the
+// given time, so publications build execution contexts without packet I/O.
+static int prepare_worker(
+	struct yanet_shm *shm,
+	uint32_t instance_idx,
+	uint64_t current_time,
+	uint32_t *instance_count
+) {
+	struct dp_config *first = shm->base;
+	*instance_count = first->instance_count;
+	if (instance_idx >= *instance_count) {
+		return -1;
+	}
+	struct dp_config *config = dp_config_nextk(first, instance_idx);
+	struct dp_worker *worker =
+		memory_balloc(&config->memory_context, sizeof(*worker));
+	if (worker == NULL) {
+		return -2;
+	}
+	struct dp_worker **workers =
+		memory_balloc(&config->memory_context, sizeof(*workers));
+	if (workers == NULL) {
+		memory_bfree(&config->memory_context, worker, sizeof(*worker));
+		return -2;
+	}
+	if (pthread_mutex_init(dp_config_external_round_lock(config), NULL) != 0) {
+		memory_bfree(&config->memory_context, workers, sizeof(*workers));
+		memory_bfree(&config->memory_context, worker, sizeof(*worker));
+		return -3;
+	}
+	memset(worker, 0, sizeof(*worker));
+	worker->current_time = current_time;
+	SET_OFFSET_OF(workers, worker);
+	SET_OFFSET_OF(&config->workers, workers);
+	config->worker_count = 1;
+	config->external_worker_rounds = true;
+	return 0;
+}
+
+// Releases the worker prepare_worker gave an instance.
+static void free_worker(struct yanet_shm *shm, uint32_t instance_idx) {
+	struct dp_config *config =
+		dp_config_nextk((struct dp_config *)shm->base, instance_idx);
+	struct dp_worker **workers = ADDR_OF(&config->workers);
+	struct dp_worker *worker = ADDR_OF(workers);
+	pthread_mutex_destroy(dp_config_external_round_lock(config));
+	memory_bfree(&config->memory_context, worker, sizeof(*worker));
+	memory_bfree(&config->memory_context, workers, sizeof(*workers));
+	config->workers = NULL;
+	config->worker_count = 0;
+}
 */
 import "C"
 
@@ -243,6 +296,25 @@ func MarkInstanceReady(
 		)
 	}
 	return nil
+}
+
+// PrepareWorker gives a fixture instance one idle worker at the given time
+// in nanoseconds, so that publications build execution contexts and
+// counter storages without packet I/O, and releases it when the test
+// ends, after the cleanups registered later.
+func PrepareWorker(t *testing.T, memory *ffi.SharedMemory, instanceIdx uint32, currentTime uint64) {
+	t.Helper()
+	var instanceCount C.uint32_t
+	rc := C.prepare_worker(
+		(*C.struct_yanet_shm)(memory.AsRawPtr()),
+		C.uint32_t(instanceIdx),
+		C.uint64_t(currentTime),
+		&instanceCount,
+	)
+	require.Zero(t, rc, "prepare a worker on instance %d of %d", instanceIdx, uint32(instanceCount))
+	t.Cleanup(func() {
+		C.free_worker((*C.struct_yanet_shm)(memory.AsRawPtr()), C.uint32_t(instanceIdx))
+	})
 }
 
 // cStringArray creates C-owned names and returns their cleanup function.

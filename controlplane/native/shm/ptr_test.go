@@ -98,3 +98,23 @@ func Test_Ptr_Size(t *testing.T) {
 		})
 	}
 }
+
+// Test_String_StopsAtTerminator verifies that a C character array reads up
+// to its first NUL, or whole when it has none.
+func Test_String_StopsAtTerminator(t *testing.T) {
+	cases := []struct {
+		name  string
+		field []byte
+		want  string
+	}{
+		{"terminated with bytes after the terminator", []byte("abc\x00def"), "abc"},
+		{"filled without a terminator", []byte("abcdef"), "abcdef"},
+		{"empty string", []byte("\x00abc"), ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, shm.String(tc.field))
+			require.Equal(t, []byte(tc.want), shm.Bytes(tc.field))
+		})
+	}
+}
