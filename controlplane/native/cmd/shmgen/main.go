@@ -683,7 +683,7 @@ func (m *generator) fieldSignature(typ dwarf.Type, enums *[]*dwarf.EnumType) str
 			}
 			return typ.String()
 		default:
-			return typ.String()
+			return fmt.Sprintf("%s %s%T/%d", typ, prefix.String(), field, field.Size())
 		}
 	}
 	return typ.String()

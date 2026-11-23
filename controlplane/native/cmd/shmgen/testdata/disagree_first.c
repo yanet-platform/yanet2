@@ -8,6 +8,12 @@ struct fixture_shared {
 	uint32_t second;
 };
 
+typedef int fixture_word;
+
+struct fixture_aliased {
+	fixture_word value;
+};
+
 int
 main(void) {
 	return 0;

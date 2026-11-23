@@ -6,3 +6,9 @@
 struct fixture_shared {
 	uint64_t first;
 };
+
+typedef unsigned int fixture_word;
+
+struct fixture_aliased {
+	fixture_word value;
+};

@@ -59,12 +59,20 @@ func fixtureOptions(t *testing.T, binary string) options {
 // Test_Shmgen_FailsOnDisagreeingUnits verifies that a structure two
 // compilation units lay out differently fails generation, naming it.
 func Test_Shmgen_FailsOnDisagreeingUnits(t *testing.T) {
-	binary := buildFixture(t, "disagree_first.c", "disagree_second.c")
-	options := fixtureOptions(t, binary)
-
-	err := run(options, []string{"fixture_shared"})
-	require.ErrorContains(t, err, "struct fixture_shared: definitions disagree")
-	require.NoFileExists(t, options.Output)
+	for _, order := range [][]string{
+		{"disagree_first.c", "disagree_second.c"},
+		{"disagree_second.c", "disagree_first.c"},
+	} {
+		binary := buildFixture(t, order...)
+		for _, root := range []string{"fixture_shared", "fixture_aliased"} {
+			t.Run(order[0]+"/"+root, func(t *testing.T) {
+				options := fixtureOptions(t, binary)
+				err := run(options, []string{root})
+				require.ErrorContains(t, err, "struct "+root+": definitions disagree")
+				require.NoFileExists(t, options.Output)
+			})
+		}
+	}
 }
 
 // Test_Shmgen_KeepsUnchangedOutput verifies that generating the same
