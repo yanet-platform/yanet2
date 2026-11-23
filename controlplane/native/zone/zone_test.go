@@ -125,7 +125,8 @@ func requireModulesMatch(t *testing.T, cgo *ffi.DPConfig, native *zone.Instance)
 	for _, config := range cgo.CPConfigs() {
 		want = append(want, zone.Module{Type: config.Type, Name: config.Name, Generation: config.Gen})
 	}
-	generation := native.Pin()
+	generation, err := native.Pin()
+	require.NoError(t, err)
 	defer generation.Release()
 	var got []zone.Module
 	for _, module := range generation.Modules() {

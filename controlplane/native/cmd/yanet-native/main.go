@@ -95,7 +95,10 @@ func run(path string) error {
 // readGeneration fills in what the instance's published generation holds,
 // read under one pin.
 func readGeneration(instance *zone.Instance, entry *InstanceReport) error {
-	generation := instance.Pin()
+	generation, err := instance.Pin()
+	if err != nil {
+		return err
+	}
 	defer generation.Release()
 	if generation.Gen != nil {
 		entry.Generation = generation.Gen.Gen

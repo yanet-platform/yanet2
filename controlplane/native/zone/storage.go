@@ -48,6 +48,8 @@ type Instance struct {
 	Index int
 	Dp    *layout.DpConfig
 	Cp    *layout.CpConfig
+	// memory is the instance's whole storage extent.
+	memory []byte
 }
 
 // Attach maps the storage file at path and finds its ready instances.
@@ -107,12 +109,17 @@ func (m *Storage) Close() error {
 
 // Contains reports whether size bytes at address lie inside the mapping.
 func (m *Storage) Contains(address unsafe.Pointer, size uintptr) bool {
-	if len(m.data) == 0 {
+	return contains(m.data, address, size)
+}
+
+// contains reports whether size bytes at address lie inside memory.
+func contains(memory []byte, address unsafe.Pointer, size uintptr) bool {
+	if len(memory) == 0 {
 		return false
 	}
-	start := uintptr(unsafe.Pointer(&m.data[0]))
+	start := uintptr(unsafe.Pointer(&memory[0]))
 	at := uintptr(address)
-	return at >= start && size <= uintptr(len(m.data)) && at-start <= uintptr(len(m.data))-size
+	return at >= start && size <= uintptr(len(memory)) && at-start <= uintptr(len(memory))-size
 }
 
 // findInstances walks the instances the first one counts: each starts
@@ -149,7 +156,12 @@ func (m *Storage) findInstances() error {
 		if !m.Contains(address, uintptr(dp.StorageSize)) {
 			return fmt.Errorf("instance %d: storage of %d bytes at offset %d runs past the mapping", idx, dp.StorageSize, offset)
 		}
-		m.Instances = append(m.Instances, &Instance{Index: idx, Dp: dp, Cp: cp})
+		m.Instances = append(m.Instances, &Instance{
+			Index:  idx,
+			Dp:     dp,
+			Cp:     cp,
+			memory: unsafe.Slice((*byte)(address), dp.StorageSize),
+		})
 		offset += uintptr(dp.StorageSize)
 	}
 	return nil

@@ -18,15 +18,18 @@ import (
 // craftedStorage returns a storage image of one instance whose dataplane
 // zone carries this build's ready magic and points at a zeroed
 // control-plane zone right behind it, and that dataplane zone.
-func craftedStorage() ([]byte, *layout.DpConfig) {
+//
+// The image maps tail more zeroed bytes after the instance, starting at its
+// 8-byte aligned end.
+func craftedStorage(tail uintptr) ([]byte, *layout.DpConfig) {
 	dpSize := (unsafe.Sizeof(layout.DpConfig{}) + 7) &^ 7
-	size := dpSize + unsafe.Sizeof(layout.CpConfig{})
-	words := make([]uint64, (size+7)/8)
+	instanceSize := (dpSize + unsafe.Sizeof(layout.CpConfig{}) + 7) &^ 7
+	words := make([]uint64, (instanceSize+tail+7)/8)
 	data := unsafe.Slice((*byte)(unsafe.Pointer(&words[0])), len(words)*8)
 
 	dp := (*layout.DpConfig)(unsafe.Pointer(&data[0]))
 	dp.InstanceCount = 1
-	dp.StorageSize = uint64(len(data))
+	dp.StorageSize = uint64(instanceSize)
 	dp.CpConfig.Set((*layout.CpConfig)(unsafe.Pointer(&data[dpSize])))
 	dp.ReadyMagic = layout.DpConfigReadyMagic
 	return data, dp
@@ -64,7 +67,7 @@ func Test_Storage_ReadyMagic(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			data, dp := craftedStorage()
+			data, dp := craftedStorage(0)
 			dp.ReadyMagic = tc.magic
 			storage, err := zone.FromMemory(data)
 			if tc.wantErr == nil {
@@ -144,7 +147,7 @@ func Test_Storage_RefusesMalformedInstances(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			data, dp := craftedStorage()
+			data, dp := craftedStorage(0)
 			_, err := zone.FromMemory(tc.corrupt(data, dp))
 			require.ErrorContains(t, err, tc.message)
 		})
@@ -155,7 +158,7 @@ func Test_Storage_RefusesMalformedInstances(t *testing.T) {
 // the memory it holds, that a file too short for a dataplane zone is
 // refused, and that closing twice is harmless.
 func Test_Storage_Attach(t *testing.T) {
-	data, _ := craftedStorage()
+	data, _ := craftedStorage(0)
 	cases := []struct {
 		name    string
 		size    int

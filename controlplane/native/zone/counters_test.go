@@ -46,7 +46,8 @@ func Test_Generation_CountersMatchCgoReader(t *testing.T) {
 	_, err = harness.HandlePacketsOnWorker(1, xpacket.LayersToPacket(t, &eth, &ip, &icmp))
 	require.NoError(t, err)
 	native := nativeStorage(t, harness).Instances[0]
-	pinned := native.Pin()
+	pinned, err := native.Pin()
+	require.NoError(t, err)
 	t.Cleanup(pinned.Release)
 	cgo := harness.SharedMemory().DPConfig(0)
 	module, err := pinned.Counters([]zone.CounterTag{{Key: "module_name", Value: "first"}, {Key: "kind", Value: "module"}})

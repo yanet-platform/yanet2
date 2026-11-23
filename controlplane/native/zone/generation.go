@@ -3,7 +3,9 @@
 package zone
 
 import (
+	"fmt"
 	"sync/atomic"
+	"unsafe"
 
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
 	"github.com/yanet-platform/yanet2/controlplane/native/shm"
@@ -22,16 +24,24 @@ type Generation struct {
 }
 
 // Pin returns the generation the instance publishes now, with a reference
-// held. The publication lock is held for the load and the increment only,
-// as C's own readers do.
-func (m *Instance) Pin() *Generation {
+// held.
+//
+// The publication lock is held for the load and the increment only, as C's
+// own readers do. The increment is this reader's only write into shared
+// memory, so a published generation outside the instance is refused before
+// it is touched.
+func (m *Instance) Pin() (*Generation, error) {
 	shm.LockSpin(&m.Cp.GenLock.Locked)
+	defer shm.UnlockSpin(&m.Cp.GenLock.Locked)
 	gen := m.Cp.CpConfigGen.Load()
-	if gen != nil {
-		atomic.AddUint64(&gen.Refcnt, 1)
+	if gen == nil {
+		return &Generation{}, nil
 	}
-	shm.UnlockSpin(&m.Cp.GenLock.Locked)
-	return &Generation{Gen: gen}
+	if !contains(m.memory, unsafe.Pointer(gen), unsafe.Sizeof(*gen)) {
+		return nil, fmt.Errorf("instance %d: published generation lies outside the instance", m.Index)
+	}
+	atomic.AddUint64(&gen.Refcnt, 1)
+	return &Generation{Gen: gen}, nil
 }
 
 // Release drops the reference Pin took; a second call does nothing.

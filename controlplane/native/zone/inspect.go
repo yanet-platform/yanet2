@@ -5,6 +5,7 @@ package zone
 import (
 	"fmt"
 	"os"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
@@ -78,7 +79,7 @@ func (m *Instance) Workers() ([]Worker, error) {
 			Index:       worker.Idx,
 			CoreID:      worker.CoreId,
 			RxBurstSize: worker.RxBurstSize,
-			Generation:  worker.Gen,
+			Generation:  atomic.LoadUint64(&worker.Gen),
 		}
 		if assignments := worker.Assignments.Get(); assignments != nil {
 			for _, assignment := range unsafe.Slice(assignments, worker.AssignmentCount) {
@@ -175,7 +176,7 @@ func (m *Instance) Agents() []Agent {
 			Pid:               agent.Pid,
 			MemoryLimit:       agent.MemoryLimit,
 			Generation:        agent.Gen,
-			LoadedEntityCount: agent.LoadedEntityCount,
+			LoadedEntityCount: atomic.LoadUint64(&agent.LoadedEntityCount),
 		}
 		for previous := agent.Prev.Get(); previous != nil; previous = previous.Prev.Get() {
 			entry.Superseded++
