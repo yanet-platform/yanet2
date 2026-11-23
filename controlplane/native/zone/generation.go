@@ -27,9 +27,10 @@ type Generation struct {
 // held.
 //
 // The publication lock is held only while the generation is loaded,
-// checked and referenced, as C's own readers hold it. The increment is the only write this reader makes
-// through an address the storage supplies, so a published generation
-// outside the instance is refused before it is touched.
+// checked and referenced, as C's own readers hold it. The increment is the
+// only write this reader makes through an address the storage supplies, so
+// a published generation outside the instance is refused before it is
+// touched.
 func (m *Instance) Pin() (*Generation, error) {
 	shm.LockSpin(&m.Cp.GenLock.Locked)
 	defer shm.UnlockSpin(&m.Cp.GenLock.Locked)
