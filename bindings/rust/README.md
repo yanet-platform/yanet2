@@ -6,8 +6,6 @@ dataplane modules in Rust: the boundary crate both sides of the SDK
 share, the C bindings with the dataplane runtime and the configuration
 builder, the derive, the module-crate facade and the packet header views.
 
-The C header generator in `yanet-sdk-build/` is a separate host workspace. API crates still use it as a build dependency at the same path. Keeping it out of the SDK's target graph lets Cargo check the entire SDK workspace without enabling the generator's transitive `std` features in dataplane plugins.
-
 | Crate | Environment | Role |
 |-------|-------------|------|
 | `yanet-shm` | `no_std`, no `alloc` | the provenance root, relative-pointer field types, `Opaque`, `Mutex` with guard-bound access to plain shared state, the slots of an exact-match index with their placement and the `HashIndexRef` lookup, `ShmLayout` leaves (the fixed-width integers, their atomics and the IPv4 and IPv6 addresses of `core::net`, whose layout the build checks) |
@@ -135,6 +133,8 @@ plugin imports the packet allocator, copy and free (`worker_packet_alloc`,
 `worker_clone_packet`, `worker_packet_free`) from the dataplane executable,
 which exports them. The tests of `yanet-shm` need neither the compilation
 database nor a C compiler.
+
+The C header generator shares the SDK workspace and `Cargo.lock`. For a workspace-wide build, Clippy or rustdoc run, select `--workspace --exclude yanet-sdk-build`, then `-p yanet-sdk-build` in a second invocation. API crates still compile the generator as a build dependency. Selecting it as a target alongside the plugin would enable its transitive `bitflags/std` in the plugin, which has its own panic handler. Formatting, dependency auditing and `cargo test --workspace` do not need the split.
 
 ```sh
 meson setup build
