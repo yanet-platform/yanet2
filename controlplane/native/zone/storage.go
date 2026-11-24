@@ -122,10 +122,18 @@ func contains(memory []byte, address unsafe.Pointer, size uintptr) bool {
 	return at >= start && size <= uintptr(len(memory)) && at-start <= uintptr(len(memory))-size
 }
 
+// aligned reports whether address is a multiple of alignment.
+func aligned(address unsafe.Pointer, alignment uintptr) bool {
+	return uintptr(address)%alignment == 0
+}
+
 // findInstances walks the instances the first one counts: each starts
 // where the previous one's storage ends.
 func (m *Storage) findInstances() error {
 	base := unsafe.Pointer(&m.data[0])
+	if !aligned(base, unsafe.Alignof(layout.DpConfig{})) {
+		return errors.New("the storage is not aligned for a dataplane zone")
+	}
 	first := (*layout.DpConfig)(base)
 	if err := checkMagic(0, atomic.LoadUint64(&first.ReadyMagic)); err != nil {
 		return err
@@ -139,6 +147,9 @@ func (m *Storage) findInstances() error {
 		address := unsafe.Add(base, offset)
 		if !m.Contains(address, unsafe.Sizeof(layout.DpConfig{})) {
 			return fmt.Errorf("instance %d at offset %d lies outside the storage", idx, offset)
+		}
+		if !aligned(address, unsafe.Alignof(layout.DpConfig{})) {
+			return fmt.Errorf("instance %d at offset %d is misaligned", idx, offset)
 		}
 		dp := (*layout.DpConfig)(address)
 		if err := checkMagic(idx, atomic.LoadUint64(&dp.ReadyMagic)); err != nil {
@@ -163,6 +174,12 @@ func (m *Storage) findInstances() error {
 		}
 		if !contains(memory, unsafe.Pointer(cp), unsafe.Sizeof(layout.CpConfig{})) {
 			return fmt.Errorf("instance %d: control-plane zone outside the instance", idx)
+		}
+		if uintptr(unsafe.Pointer(cp)) < uintptr(address)+unsafe.Sizeof(layout.DpConfig{}) {
+			return fmt.Errorf("instance %d: control-plane zone overlaps the dataplane zone", idx)
+		}
+		if !aligned(unsafe.Pointer(cp), unsafe.Alignof(layout.CpConfig{})) {
+			return fmt.Errorf("instance %d: control-plane zone is misaligned", idx)
 		}
 		m.Instances = append(m.Instances, &Instance{
 			Index:  idx,

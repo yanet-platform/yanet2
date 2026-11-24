@@ -153,6 +153,14 @@ func Test_Storage_RefusesMalformedInstances(t *testing.T) {
 			"control-plane zone outside the instance",
 		},
 		{
+			"control-plane zone overlapping the dataplane zone",
+			func(data []byte, dp *layout.DpConfig) []byte {
+				dp.CpConfig.Set((*layout.CpConfig)(unsafe.Pointer(&data[8])))
+				return data
+			},
+			"control-plane zone overlaps the dataplane zone",
+		},
+		{
 			"storage size past the mapping",
 			func(data []byte, dp *layout.DpConfig) []byte {
 				dp.StorageSize = uint64(len(data)) + 8
@@ -199,4 +207,30 @@ func Test_Storage_Attach(t *testing.T) {
 			require.NoError(t, storage.Close())
 		})
 	}
+}
+
+// Test_Storage_RefusesMisalignedZones verifies that borrowed memory or a
+// control-plane zone not aligned for its structure is refused before any
+// field of it is read.
+func Test_Storage_RefusesMisalignedZones(t *testing.T) {
+	t.Run("misaligned borrowed memory", func(t *testing.T) {
+		data, _ := craftedStorage(8)
+		_, err := zone.FromMemory(data[1:])
+		require.ErrorContains(t, err, "not aligned for a dataplane zone")
+	})
+	t.Run("misaligned second instance", func(t *testing.T) {
+		data, dp := craftedStorage(unsafe.Sizeof(layout.DpConfig{}) + 16)
+		dp.InstanceCount = 2
+		dp.StorageSize++
+		_, err := zone.FromMemory(data)
+		require.ErrorContains(t, err, "instance 1 at offset")
+		require.ErrorContains(t, err, "is misaligned")
+	})
+	t.Run("misaligned control-plane zone", func(t *testing.T) {
+		data, dp := craftedStorage(8)
+		dp.StorageSize = uint64(len(data))
+		dp.CpConfig.Set((*layout.CpConfig)(unsafe.Add(unsafe.Pointer(dp.CpConfig.Get()), 1)))
+		_, err := zone.FromMemory(data)
+		require.ErrorContains(t, err, "control-plane zone is misaligned")
+	})
 }
