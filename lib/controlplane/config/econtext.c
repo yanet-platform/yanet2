@@ -797,6 +797,9 @@ function_ectx_create(
 	memset(function_ectx, 0, ectx_size);
 	SET_OFFSET_OF(&function_ectx->cp_function, cp_function);
 	function_ectx->chain_map_size = weight_sum;
+	// The count lands before the arrays, so a failure on the second array
+	// still frees the first at its real size.
+	function_ectx->chain_count = cp_function->chain_count;
 
 	struct chain_ectx **chains = (struct chain_ectx **)memory_balloc(
 		memory_context,
@@ -837,7 +840,6 @@ function_ectx_create(
 		       sizeof(struct chain_ectx *) * cp_function->chain_count);
 	}
 	SET_OFFSET_OF(&function_ectx->chains, abs_chains);
-	function_ectx->chain_count = cp_function->chain_count;
 
 	struct cp_device *cp_device = ADDR_OF(&device_ectx->cp_device);
 	struct cp_pipeline *cp_pipeline = ADDR_OF(&pipeline_ectx->cp_pipeline);
@@ -1213,6 +1215,9 @@ device_entry_ectx_create(
 
 	memset(device_entry_ectx, 0, ectx_size);
 	device_entry_ectx->handler = handler;
+	// The map size lands before the arrays, so a failed array frees the
+	// entry at the size it was allocated with.
+	device_entry_ectx->pipeline_map_size = weight_sum;
 
 	struct pipeline_ectx **pipelines =
 		(struct pipeline_ectx **)memory_balloc(
@@ -1264,7 +1269,6 @@ device_entry_ectx_create(
 	}
 	SET_OFFSET_OF(&device_entry_ectx->pipelines, abs_pipelines);
 
-	device_entry_ectx->pipeline_map_size = weight_sum;
 	uint64_t pos = 0;
 	for (uint64_t idx = 0; idx < cp_device_entry->pipeline_count; ++idx) {
 		struct cp_pipeline *cp_pipeline = cp_config_gen_lookup_pipeline(
