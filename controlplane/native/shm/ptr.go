@@ -3,13 +3,12 @@
 // The C structures are reached through views generated from the DWARF of
 // the dataplane's own compilation, so every field sits at the offset the C
 // compiler chose. This package holds what those views need at run time:
-// relative pointers, opaque process-local words, the byte and process-id
+// relative pointers, opaque process-local words, the spin and process-id
 // locks C takes on shared memory, and the NUL-terminated strings of its
 // character arrays.
 package shm
 
 import (
-	"bytes"
 	"sync/atomic"
 	"unsafe"
 )
@@ -79,9 +78,3 @@ func (m *Ptr[T]) distance(target *T) int64 {
 //
 // A view keeps such a field at its size and offset and never follows it.
 type Local uintptr
-
-// String returns the NUL-terminated string a C character array holds.
-func String(field []byte) string {
-	text, _, _ := bytes.Cut(field, []byte{0})
-	return string(text)
-}
