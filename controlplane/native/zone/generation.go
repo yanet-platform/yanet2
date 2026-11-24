@@ -30,7 +30,8 @@ type Generation struct {
 // checked and referenced, as C's own readers hold it. The generation is
 // the only shared address this reader writes through that attach did not
 // check, since each publication may replace it, so one outside the
-// instance is refused before the increment touches it.
+// instance is refused before the increment touches it; its alignment is
+// not checked (attach: trust).
 func (m *Instance) Pin() (*Generation, error) {
 	shm.LockSpin(&m.Cp.GenLock.Locked)
 	defer shm.UnlockSpin(&m.Cp.GenLock.Locked)

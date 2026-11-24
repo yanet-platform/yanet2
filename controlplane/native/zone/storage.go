@@ -14,7 +14,8 @@
 //
 //   - placement: an instance starts with its dataplane zone, and its
 //     control-plane zone follows that zone; both are aligned for their
-//     structures. The storage bootstrap refuses sizes that break this.
+//     structures. The storage bootstrap refuses storage or sizes that
+//     break this.
 //   - trust: a dataplane of this version writes well-formed pointers, so
 //     nested structures are read without bounds checks, as the C readers
 //     read them.
@@ -159,8 +160,8 @@ func (m *Storage) findInstances() error {
 		if err := checkMagic(idx, atomic.LoadUint64(&dp.ReadyMagic)); err != nil {
 			return err
 		}
-		// The zone's alignment and its place after the dataplane zone are
-		// not checked (attach: placement).
+		// The control-plane zone's alignment and its place after the
+		// dataplane zone are not checked (attach: placement).
 		cp := dp.CpConfig.Get()
 		if cp == nil || !m.Contains(unsafe.Pointer(cp), unsafe.Sizeof(layout.CpConfig{})) {
 			return fmt.Errorf("instance %d: control-plane zone outside the storage", idx)

@@ -203,9 +203,9 @@ func Test_Storage_Attach(t *testing.T) {
 }
 
 // requirePlacement fails unless every instance of the storage keeps the
-// placement the reader assumes: the dataplane zone at the instance start,
-// the control-plane zone after it and inside the instance, both aligned
-// for their structures.
+// placement the reader assumes: the control-plane zone after the
+// dataplane zone and inside the instance, both aligned for their
+// structures.
 func requirePlacement(t *testing.T, storage *zone.Storage) {
 	t.Helper()
 	require.NotEmpty(t, storage.Instances)

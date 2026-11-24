@@ -25,8 +25,8 @@ dp_storage_layout_valid(
 // are mutually navigable via offset pointers. Caller owns storage.
 // The control-plane zone's lock is taken and released inside this
 // routine; callers pair their own lock around any further control-plane
-// mutations. Storage dp_storage_layout_valid rejects is refused. Returns 0
-// on success, -1 on failure.
+// mutations. Refuses storage whose layout dp_storage_layout_valid
+// rejects. Returns 0 on success, -1 on failure.
 int
 dp_storage_init(
 	uint32_t numa_idx,
