@@ -29,13 +29,19 @@ its own.
 
 ## Limitations
 
-- After a control-plane restart, `RingService` does not pick up the rings
-  that are still in shared memory. `list` and `show` do not see them.
-  `delete` reports not found. An operator can replay `create` with
-  `allow_existing`, then pdump `SetConfig`. This recreates the ring empty
-  in the new agent's arena; existing capture configs still link it by name.
-  Manual rings and capture configs are not automatically restored to the
-  Go registries. Module shutdown does not free the old published rings.
+- At startup, pdump removes published captures and rings owned by its
+  predecessor agents before serving RPCs. It removes only those capture
+  references from functions, preserving chain names, weights, order and
+  empty pass-through chains. Both manual and operator-created captures
+  and their dumps are intentionally discarded; the operator must replay
+  its configuration.
+- A stale ring still linked by another published consumer is retained with
+  a warning. That consumer can keep the old arena reserved. Foreign-owned
+  objects are not removed. Startup cleanup does not restore Go registries.
+- Cleanup requires room for the new agent and configuration publications.
+  An error stops startup without rolling back completed removals; the next
+  start retries the remaining targets. An empty failed-start agent follows
+  normal attach/detach semantics and is reclaimed by a later attach.
 - Stop the previous control plane completely before starting its replacement.
   Replay does not guarantee hot replacement for active old control-plane
   readers. The fwstate map service's restart limitation is unchanged.

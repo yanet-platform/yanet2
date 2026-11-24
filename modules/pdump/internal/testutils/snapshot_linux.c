@@ -9,6 +9,8 @@
 
 struct module *
 new_module_pdump(void);
+struct module *
+new_module_forward(void);
 struct object *
 new_object_ring(void);
 
@@ -16,6 +18,7 @@ int
 pdump_test_prepare_worker(struct yanet_shm *shm) {
 	// Retain the real constructors for the fixture's dynamic type loader.
 	free(new_module_pdump());
+	free(new_module_forward());
 	free(new_object_ring());
 	struct dp_config *config = shm->base;
 	struct dp_worker *worker =
