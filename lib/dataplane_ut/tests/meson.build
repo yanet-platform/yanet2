@@ -104,3 +104,16 @@ nat64state_ops_test = executable(
   include_directories: yanet_rootdir,
 )
 test('nat64state_ops', nat64state_ops_test, suite: 'dataplane_ut')
+
+storage_layout_test = executable(
+  'storage_layout_test',
+  ['storage_layout_test.c'],
+  dependencies: [
+    lib_config_dp_dep,
+    lib_dp_zone_dep,
+    lib_logging_dep,
+    libdpdk_test_dep,
+  ],
+  include_directories: yanet_rootdir,
+)
+test('storage_layout', storage_layout_test, suite: 'dataplane_ut')

@@ -830,31 +830,17 @@ func TestHandleSegmentedPacketsOnDevice_ForwardDeviceScopedRule(t *testing.T) {
 	assert.Equal(t, []uint64{1, uint64(len(payload))}, counters[0].Values[1], "worker 1 ran the matching round")
 }
 
-// Test_NewHarness_RefusesSizesBreakingZonePlacement verifies that the
-// storage bootstrap refuses memory sizes that would leave a zone partial
-// or the control-plane zone misaligned, the placement every reader of
-// the storage assumes.
-func Test_NewHarness_RefusesSizesBreakingZonePlacement(t *testing.T) {
-	cases := []struct {
-		name     string
-		dpMemory uint64
-		cpMemory uint64
-	}{
-		{"dataplane memory misaligning the control-plane zone", uint64(datasize.MB*4) + 1, uint64(datasize.MB * 32)},
-		{"dataplane memory smaller than the dataplane zone", 16, uint64(datasize.MB * 32)},
-		{"control-plane memory smaller than the control-plane zone", uint64(datasize.MB * 4), 16},
+// Test_NewHarness_RefusesMisalignedControlPlaneZone verifies that the
+// storage bootstrap refuses dataplane memory that would misalign the
+// control-plane zone, the placement every reader of the storage assumes.
+func Test_NewHarness_RefusesMisalignedControlPlaneZone(t *testing.T) {
+	harness, err := NewHarness(Config{
+		CPMemory:    uint64(datasize.MB * 32),
+		DPMemory:    uint64(datasize.MB*4) + 1,
+		WorkerCount: 1,
+	})
+	if err == nil {
+		harness.Free()
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			harness, err := NewHarness(Config{
-				CPMemory:    tc.cpMemory,
-				DPMemory:    tc.dpMemory,
-				WorkerCount: 1,
-			})
-			if err == nil {
-				harness.Free()
-			}
-			require.Error(t, err)
-		})
-	}
+	require.Error(t, err)
 }
