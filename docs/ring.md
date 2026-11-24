@@ -13,9 +13,10 @@ its own.
   service.
 - No ring is created implicitly. Every ring exists because a `create` call
   named it.
-- `create` rejects a name that already exists. If you delete a name and
-  create it again, you get a new object with a new handle. A lease taken
-  on the old handle never matches the new one.
+- `create` rejects an existing name unless `allow_existing` is set. A
+  managed ring with matching capacity and publish batch keeps its state,
+  handle and leases; a managed conflict is rejected. An unmanaged published
+  ring is replaced by a new empty ring with the requested parameters.
 - Delete is refused in two cases. First, a consumer holds a lease on the
   ring (the Go owner checks this). Second, a published module config still
   links the ring by name (the generic `cp_object` check that every shared
@@ -30,10 +31,14 @@ its own.
 
 - After a control-plane restart, `RingService` does not pick up the rings
   that are still in shared memory. `list` and `show` do not see them.
-  `delete` reports not found. `create` with the same name reports that the
-  ring already exists. Module shutdown does not free these rings either.
-  The fwstate map service has the same limitation. Both are tracked as
-  follow-up work.
+  `delete` reports not found. An operator can replay `create` with
+  `allow_existing`, then pdump `SetConfig`. This recreates the ring empty
+  in the new agent's arena; existing capture configs still link it by name.
+  Manual rings and capture configs are not automatically restored to the
+  Go registries. Module shutdown does not free the old published rings.
+- Stop the previous control plane completely before starting its replacement.
+  Replay does not guarantee hot replacement for active old control-plane
+  readers. The fwstate map service's restart limitation is unchanged.
 
 ## Capacity
 
