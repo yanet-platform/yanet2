@@ -1,32 +1,14 @@
 //go:build linux && (amd64 || arm64)
 
 // Package agent attaches a control-plane agent to a dataplane instance
-// without cgo, as lib/controlplane/agent does, so C and Go agents live in
-// one registry.
+// without cgo, sharing one registry with the C control plane.
 //
-// An attach follows C step by step, since the order of allocations shapes
-// the storage: the agent and its arenas come from the control-plane zone
-// first; then, under the agent lock, the published generation is pinned
-// for the agent's stamp and the agent supersedes its name's agent or joins
-// the registry; the pin is dropped after the lock, and every attach that
-// got past its checks, a failed one too, ends with a sweep of superseded
-// agents no configuration holds.
-//
-// The agent lock is taken outside every allocator lock, never inside one:
-// under it the package only calls allocator functions that take and drop
-// their own lock, as C does, so neither side can wait on the other.
-//
-// Attach checks what a deployment can get wrong: the name, which must fit
-// with its terminator and hold no NUL, and the instance's ready magic; the
-// generation it stamps the agent from is pinned only if it lies inside the
-// instance. The rest relies on the attach assumptions the zone package
-// documents, cited as (attach: name): the registry, its agents and the
-// blocks the zone's allocator returns are well formed and inside the
-// instance (attach: trust).
-//
-// A generation that a publication retires while an attach holds its pin
-// keeps that reference and stays allocated: the pin's release never drops
-// the last reference until native generation teardown lands.
+// An attach allocates as the C one does, in the same order, so the storage
+// ends byte-identical; it registers the agent, superseding one of the same
+// name, and frees superseded agents no configuration holds. The agent lock
+// is always taken outside the allocator's, as in C. It checks the name and
+// the instance's readiness, and the zone package bounds the generation it
+// pins; the rest relies on the attach assumptions that package documents.
 package agent
 
 import (
@@ -58,7 +40,9 @@ type Agent struct {
 // Attach registers an agent of that name in the instance, with
 // memoryLimit bytes of arenas, superseding an agent of the same name.
 //
-// A failed attach returns what it allocated to the zone, as C does.
+// A failed attach returns what it allocated to the zone, as C does. A
+// generation a publication retires while the attach pins it stays
+// allocated until native generation teardown lands.
 func Attach(instance *zone.Instance, name string, memoryLimit uint64) (*Agent, error) {
 	if len(name) >= NameSize {
 		return nil, fmt.Errorf("agent name is longer than %d characters", NameSize-1)
@@ -104,11 +88,11 @@ func Attach(instance *zone.Instance, name string, memoryLimit uint64) (*Agent, e
 }
 
 // stampAndRegister stamps the agent with the published generation and
-// puts it into the registry, under the agent lock, and returns the pinned
-// generation, which the caller releases once the lock is dropped.
+// registers it under the agent lock, returning the generation still pinned.
 //
-// The stamp is read under the lock of the splice, so a stalled attach
-// cannot register an older stamp above a later one.
+// The caller releases the pin once the lock is dropped. The stamp is read
+// under the lock of the splice, so a stalled attach cannot register an
+// older stamp above a later one.
 func stampAndRegister(instance *zone.Instance, agent *layout.Agent) (*zone.Generation, error) {
 	cp := instance.Cp
 	shm.LockSpin(&cp.AgentLock.Locked)
@@ -234,8 +218,9 @@ func sweep(cp *layout.CpConfig) {
 	}
 }
 
-// cleanup returns an agent, its arenas and its arena table to the zone,
-// finalising the agent's memory context first, since its children may
+// cleanup returns an agent, its arenas and its arena table to the zone.
+//
+// The agent's memory context is finalised first, since its children may
 // live in those arenas.
 func cleanup(agent *layout.Agent) {
 	cp := agent.CpConfig.Get()
