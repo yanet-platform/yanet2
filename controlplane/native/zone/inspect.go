@@ -58,7 +58,7 @@ type Agent struct {
 	Superseded int `json:"superseded"`
 }
 
-// Workers returns the instance's workers.
+// Workers returns the instance's workers (attach: trust).
 func (m *Instance) Workers() ([]Worker, error) {
 	first := m.Dp.Workers.Get()
 	count := m.Dp.WorkerCount
@@ -96,7 +96,7 @@ func (m *Instance) Workers() ([]Worker, error) {
 }
 
 // DataplaneModules returns the module types the dataplane loaded, under
-// the dataplane zone's lock as C reads them.
+// the dataplane zone's lock as C reads them (attach: trust).
 func (m *Instance) DataplaneModules() []DataplaneModule {
 	lock := shm.LockPid(&m.Dp.ConfigLock, int32(os.Getpid()))
 	defer lock.Unlock()
@@ -116,7 +116,7 @@ func (m *Instance) DataplaneModules() []DataplaneModule {
 }
 
 // Modules returns the module configurations the generation publishes, in
-// registry order.
+// registry order (attach: trust).
 func (m *Generation) Modules() []Module {
 	if m.Gen == nil {
 		return nil
@@ -155,7 +155,7 @@ func (m *Generation) Modules() []Module {
 }
 
 // Agents returns the agents registered in the instance, under the agent
-// registry lock.
+// registry lock (attach: trust).
 func (m *Instance) Agents() []Agent {
 	shm.LockSpin(&m.Cp.AgentLock.Locked)
 	defer shm.UnlockSpin(&m.Cp.AgentLock.Locked)

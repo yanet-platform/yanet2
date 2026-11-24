@@ -16,6 +16,16 @@ dp_storage_init(
 	struct dp_config **res_dp_config,
 	struct cp_config **res_cp_config
 ) {
+	// The control-plane zone starts dp_memory bytes in: both zones must fit
+	// whole and stay aligned for their structures, as every reader of the
+	// storage assumes.
+	if ((uintptr_t)storage % _Alignof(struct dp_config) != 0 ||
+	    dp_memory < sizeof(struct dp_config) ||
+	    dp_memory % _Alignof(struct cp_config) != 0 ||
+	    cp_memory < sizeof(struct cp_config)) {
+		return -1;
+	}
+
 	struct dp_config *dp_config = (struct dp_config *)storage;
 
 	dp_config->numa_idx = numa_idx;

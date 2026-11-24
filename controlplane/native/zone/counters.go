@@ -39,7 +39,7 @@ type Counter struct {
 
 // CurrentTime returns the latest time, in nanoseconds, a worker of the
 // instance published, or false before any did, as
-// dataplane_instance_current_time reads it.
+// dataplane_instance_current_time reads it (attach: trust).
 func (m *Instance) CurrentTime() (uint64, bool) {
 	first := m.Dp.Workers.Get()
 	if first == nil {
@@ -58,7 +58,7 @@ func (m *Instance) CurrentTime() (uint64, bool) {
 // Counters returns the counters of every storage whose tags satisfy the
 // predicates, read from each worker's contexts of the pinned generation
 // as yanet_get_counters_by_tags_per_worker reads them, and merges a tag
-// set's storages on all workers into one group.
+// set's storages on all workers into one group (attach: trust).
 //
 // Predicates are refused as the cgo reader refuses them: a NUL byte, a
 // key or value too long for the C tag, a key named twice, more predicates

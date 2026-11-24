@@ -3,6 +3,21 @@
 // Package zone attaches to YANET's shared memory without cgo: it maps the
 // storage file a dataplane created, finds its instances and reads the
 // configuration they publish.
+//
+// Attach checks what a deployment can get wrong: the ready magic, so a
+// dataplane of another version or one not ready yet is refused, and the
+// bounds of every instance and of both its zones, so a short or foreign
+// file is refused instead of faulting. A pin also bounds the generation it
+// writes through. Everything else is an attach assumption, guaranteed
+// where the storage is made and cited as (attach: name) where the reader
+// relies on it:
+//
+//   - placement: an instance starts with its dataplane zone, and its
+//     control-plane zone follows that zone; both are aligned for their
+//     structures. The storage bootstrap refuses sizes that break this.
+//   - trust: a dataplane of this version writes well-formed pointers, so
+//     nested structures are read without bounds checks, as the C readers
+//     read them.
 package zone
 
 import (
@@ -122,18 +137,10 @@ func contains(memory []byte, address unsafe.Pointer, size uintptr) bool {
 	return at >= start && size <= uintptr(len(memory)) && at-start <= uintptr(len(memory))-size
 }
 
-// aligned reports whether address is a multiple of alignment.
-func aligned(address unsafe.Pointer, alignment uintptr) bool {
-	return uintptr(address)%alignment == 0
-}
-
 // findInstances walks the instances the first one counts: each starts
 // where the previous one's storage ends.
 func (m *Storage) findInstances() error {
 	base := unsafe.Pointer(&m.data[0])
-	if !aligned(base, unsafe.Alignof(layout.DpConfig{})) {
-		return errors.New("the storage is not aligned for a dataplane zone")
-	}
 	first := (*layout.DpConfig)(base)
 	if err := checkMagic(0, atomic.LoadUint64(&first.ReadyMagic)); err != nil {
 		return err
@@ -148,13 +155,12 @@ func (m *Storage) findInstances() error {
 		if !m.Contains(address, unsafe.Sizeof(layout.DpConfig{})) {
 			return fmt.Errorf("instance %d at offset %d lies outside the storage", idx, offset)
 		}
-		if !aligned(address, unsafe.Alignof(layout.DpConfig{})) {
-			return fmt.Errorf("instance %d at offset %d is misaligned", idx, offset)
-		}
 		dp := (*layout.DpConfig)(address)
 		if err := checkMagic(idx, atomic.LoadUint64(&dp.ReadyMagic)); err != nil {
 			return err
 		}
+		// The zone's alignment and its place after the dataplane zone are
+		// not checked (attach: placement).
 		cp := dp.CpConfig.Get()
 		if cp == nil || !m.Contains(unsafe.Pointer(cp), unsafe.Sizeof(layout.CpConfig{})) {
 			return fmt.Errorf("instance %d: control-plane zone outside the storage", idx)
@@ -174,12 +180,6 @@ func (m *Storage) findInstances() error {
 		}
 		if !contains(memory, unsafe.Pointer(cp), unsafe.Sizeof(layout.CpConfig{})) {
 			return fmt.Errorf("instance %d: control-plane zone outside the instance", idx)
-		}
-		if uintptr(unsafe.Pointer(cp)) < uintptr(address)+unsafe.Sizeof(layout.DpConfig{}) {
-			return fmt.Errorf("instance %d: control-plane zone overlaps the dataplane zone", idx)
-		}
-		if !aligned(unsafe.Pointer(cp), unsafe.Alignof(layout.CpConfig{})) {
-			return fmt.Errorf("instance %d: control-plane zone is misaligned", idx)
 		}
 		m.Instances = append(m.Instances, &Instance{
 			Index:  idx,

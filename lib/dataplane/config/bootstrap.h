@@ -13,7 +13,10 @@ struct cp_config;
 // are mutually navigable via offset pointers. Caller owns storage.
 // The control-plane zone's lock is taken and released inside this
 // routine; callers pair their own lock around any further control-plane
-// mutations. Returns 0 on success, -1 on failure.
+// mutations. Storage misaligned for the dataplane zone, a dp_memory that
+// cannot hold the dataplane zone or would misalign the control-plane zone,
+// and a cp_memory that cannot hold the control-plane zone are refused.
+// Returns 0 on success, -1 on failure.
 int
 dp_storage_init(
 	uint32_t numa_idx,
