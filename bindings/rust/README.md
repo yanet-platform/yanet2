@@ -6,6 +6,8 @@ dataplane modules in Rust: the boundary crate both sides of the SDK
 share, the C bindings with the dataplane runtime and the configuration
 builder, the derive, the module-crate facade and the packet header views.
 
+The C header generator in `yanet-sdk-build/` is a separate host workspace. API crates still use it as a build dependency at the same path. Keeping it out of the SDK's target graph lets Cargo check the entire SDK workspace without enabling the generator's transitive `std` features in dataplane plugins.
+
 | Crate | Environment | Role |
 |-------|-------------|------|
 | `yanet-shm` | `no_std`, no `alloc` | the provenance root, relative-pointer field types, `Opaque`, `Mutex` with guard-bound access to plain shared state, the slots of an exact-match index with their placement and the `HashIndexRef` lookup, `ShmLayout` leaves (the fixed-width integers, their atomics and the IPv4 and IPv6 addresses of `core::net`, whose layout the build checks) |
