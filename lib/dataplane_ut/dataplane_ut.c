@@ -71,7 +71,9 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 	// Allocate the shared arena. calloc zeros the struct so every pointer
 	// field is NULL until explicitly set — partial-init free is safe.
 	ut->arena_size = cfg->cp_memory + cfg->dp_memory;
-	ut->arena = aligned_alloc(64, ut->arena_size);
+	// aligned_alloc takes only a multiple of the alignment, so odd zone
+	// sizes round the allocation up; the arena keeps its own size.
+	ut->arena = aligned_alloc(64, (ut->arena_size + 63) & ~(size_t)63);
 	if (ut->arena == NULL) {
 		LOG(ERROR,
 		    "dataplane_ut_new: failed to allocate %zu-byte arena",
