@@ -61,3 +61,36 @@ func Test_CopyString_TruncatesAndTerminates(t *testing.T) {
 func Test_CopyString_EmptyArray(t *testing.T) {
 	require.NotPanics(t, func() { shm.CopyString([]byte{}, "abc") })
 }
+
+// Test_Bytes_StopsAtTerminatorInPlace verifies that the bytes of a C
+// character array end at its first NUL and share the array's memory.
+func Test_Bytes_StopsAtTerminatorInPlace(t *testing.T) {
+	field := []byte("abc\x00def")
+
+	text := shm.Bytes(field)
+
+	require.Equal(t, []byte("abc"), text)
+	require.Same(t, &field[0], &text[0])
+}
+
+// Test_Equal_ComparesUpToTerminator verifies that a C character array
+// equals a string when the bytes before its first NUL are that string.
+func Test_Equal_ComparesUpToTerminator(t *testing.T) {
+	cases := []struct {
+		name  string
+		field []byte
+		value string
+		want  bool
+	}{
+		{"same string before the terminator", []byte("abc\x00def"), "abc", true},
+		{"filled array without a terminator", []byte("abc"), "abc", true},
+		{"prefix of the held string", []byte("abc\x00"), "ab", false},
+		{"string longer than the held one", []byte("ab\x00c"), "abc", false},
+		{"empty string", []byte("\x00abc"), "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, shm.Equal(tc.field, tc.value))
+		})
+	}
+}

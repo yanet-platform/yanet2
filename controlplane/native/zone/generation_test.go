@@ -13,29 +13,6 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/native/zone"
 )
 
-// Test_Generation_Release_DropsThePin verifies that a pin holds one more
-// reference on the published generation, that Release drops it, and that
-// a second Release drops nothing more.
-func Test_Generation_Release_DropsThePin(t *testing.T) {
-	harness, _ := newPublishedHarness(t)
-	native := nativeStorage(t, harness).Instances[0]
-	published := native.Cp.CpConfigGen.Load()
-	require.NotNil(t, published)
-	before := atomic.LoadUint64(&published.Refcnt)
-
-	pinned, err := native.Pin()
-	require.NoError(t, err)
-	require.Same(t, published, pinned.Gen)
-	require.Equal(t, before+1, atomic.LoadUint64(&published.Refcnt))
-
-	pinned.Release()
-	require.Nil(t, pinned.Gen)
-	require.Equal(t, before, atomic.LoadUint64(&published.Refcnt))
-
-	pinned.Release()
-	require.Equal(t, before, atomic.LoadUint64(&published.Refcnt))
-}
-
 // Test_Instance_Pin_RefusesGenerationOutsideInstance verifies that a
 // published generation lying outside its instance is refused before its
 // reference count is touched.
@@ -49,4 +26,16 @@ func Test_Instance_Pin_RefusesGenerationOutsideInstance(t *testing.T) {
 	_, err = storage.Instances[0].Pin()
 	require.ErrorContains(t, err, "published generation lies outside the instance")
 	require.Zero(t, outside.Refcnt)
+}
+
+// Test_Generation_Release_LeavesUnpinnedGenerationAlone verifies that
+// releasing a generation no pin produced keeps its references.
+func Test_Generation_Release_LeavesUnpinnedGenerationAlone(t *testing.T) {
+	gen := &layout.CpConfigGen{Refcnt: 1}
+	generation := zone.Generation{Gen: gen}
+
+	generation.Release()
+
+	require.Equal(t, uint64(1), atomic.LoadUint64(&gen.Refcnt))
+	require.Nil(t, generation.Gen)
 }

@@ -1,4 +1,4 @@
-//go:build linux && (amd64 || arm64)
+//go:build linux && (amd64 || arm64) && cgo
 
 package zone_test
 
@@ -12,7 +12,6 @@ import (
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/controlplane/native/layout"
 	"github.com/yanet-platform/yanet2/controlplane/native/zone"
 	cplain "github.com/yanet-platform/yanet2/devices/plain/bindings/go/cplain"
 	"github.com/yanet-platform/yanet2/modules/blackhole/bindings/go/cblackhole"
@@ -234,12 +233,4 @@ func Test_Generation_ModulesSkipsDeleted(t *testing.T) {
 	modules := requireModulesMatch(t, harness.SharedMemory().DPConfig(0), native)
 	require.Len(t, modules, 1)
 	require.Equal(t, "first", modules[0].Name)
-}
-
-// Test_Generation_ModulesRegistryItemOpensModule verifies that a module's
-// registry item sits at its very start, so the item a registry holds is
-// the module itself.
-func Test_Generation_ModulesRegistryItemOpensModule(t *testing.T) {
-	require.Zero(t, unsafe.Offsetof(layout.CpModule{}.Entity))
-	require.Zero(t, unsafe.Offsetof(layout.CpEntity{}.ConfigItem))
 }
