@@ -82,7 +82,9 @@ jobs:
           toolchain: nightly-2026-10-22
           components: rustfmt
       - working-directory: bindings/rust
-        run: cargo fmt -- --check
+        run: |
+          cargo fmt -- --check
+          cargo fmt --manifest-path yanet-sdk-build/Cargo.toml -- --check
 
   # Unused dependencies of each package as a whole, its tests included.
   shear:
@@ -98,7 +100,9 @@ jobs:
         with:
           tool: cargo-shear@1.14.1
       - working-directory: bindings/rust
-        run: cargo shear --deny-warnings --locked
+        run: |
+          cargo shear --deny-warnings --locked
+          (cd yanet-sdk-build && cargo shear --deny-warnings --locked)
 
   # Every check on this toolchain runs in this one job, which owns the
   # rust-sdk cache family for the host and bare-metal builds.
@@ -139,7 +143,9 @@ jobs:
       # --keep-going checks its dependents too and the run lists every warning
       # before it fails.
       - working-directory: bindings/rust
-        run: cargo clippy --workspace --all-targets --locked --keep-going
+        run: |
+          cargo clippy --workspace --all-targets --locked --keep-going
+          cargo clippy --manifest-path yanet-sdk-build/Cargo.toml --target-dir target --all-targets --locked --keep-going
         env:
           CARGO_BUILD_WARNINGS: deny
       # The plugin examples need the `plugin` feature and the plugin profile
@@ -159,7 +165,9 @@ jobs:
       # the tests of other crates, so its feature is named here; the fixture's
       # no_std plugin feature cannot be documented with std and stays out.
       - working-directory: bindings/rust
-        run: cargo doc --workspace --no-deps --locked --features yanet-sdk-testing/cp
+        run: |
+          cargo doc --workspace --no-deps --locked --features yanet-sdk-testing/cp
+          cargo doc --manifest-path yanet-sdk-build/Cargo.toml --target-dir target --no-deps --locked
         env:
           RUSTDOCFLAGS: -D warnings
       # A bare-metal target has no std: the crates compile only if nothing
@@ -197,7 +205,9 @@ jobs:
         env:
           PROPTEST_CASES: "200"
           PROPTEST_RNG_SEED: "19567271"
-        run: cargo test --workspace --locked
+        run: |
+          cargo test --workspace --locked
+          cargo test --manifest-path yanet-sdk-build/Cargo.toml --target-dir target --locked
       - working-directory: bindings/rust
         run: cargo test -p yanet-sys --release --locked
       # Criterion's test mode runs setup checks and each case once.

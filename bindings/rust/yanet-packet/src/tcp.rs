@@ -1,5 +1,6 @@
 use core::net::{Ipv4Addr, Ipv6Addr};
 
+use bitflags::bitflags;
 use zerocopy::{
     FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned,
     byteorder::network_endian::{U16, U32},
@@ -16,6 +17,34 @@ pub mod options;
 /// The bits of the data offset and flags word that hold the nine flags.
 const FLAG_BITS: u16 = 0x01ff;
 
+bitflags! {
+    /// TCP control flags in host byte order (RFC 9293, section 3.1).
+    ///
+    /// Accurate ECN uses AE, CWR and ECE together as the three-bit ACE
+    /// field (RFC 9768, section 3.2.2).
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct TcpFlags: u16 {
+        /// No more data from the sender.
+        const FIN = 0x001;
+        /// Synchronize sequence numbers.
+        const SYN = 0x002;
+        /// Reset the connection.
+        const RST = 0x004;
+        /// Push data to the receiving application.
+        const PSH = 0x008;
+        /// The acknowledgment field is significant.
+        const ACK = 0x010;
+        /// The urgent pointer field is significant.
+        const URG = 0x020;
+        /// ECN-Echo (RFC 3168, section 6.1).
+        const ECE = 0x040;
+        /// Congestion Window Reduced (RFC 3168, section 6.1).
+        const CWR = 0x080;
+        /// Accurate ECN (RFC 9768, section 7).
+        const AE = 0x100;
+    }
+}
+
 /// TCP fixed header (20 bytes, options excluded).
 ///
 /// The fields change through a mutation, which keeps the checksum valid and
@@ -28,7 +57,7 @@ pub struct TcpHeader {
     dst_port: U16,
     seq: U32,
     ack: U32,
-    /// The data offset, three reserved bits and the nonce flag.
+    /// The data offset, three reserved bits and the Accurate ECN flag.
     offset: u8,
     flags: u8,
     window: U16,
@@ -39,18 +68,6 @@ pub struct TcpHeader {
 impl TcpHeader {
     /// Bytes of the header without options.
     pub const MIN_LEN: usize = 20;
-    /// Flag bit: the sender has no more data.
-    pub const FIN: u16 = 0x01;
-    /// Flag bit: synchronise sequence numbers.
-    pub const SYN: u16 = 0x02;
-    /// Flag bit: reset the connection.
-    pub const RST: u16 = 0x04;
-    /// Flag bit: push the data to the receiving application.
-    pub const PSH: u16 = 0x08;
-    /// Flag bit: the acknowledgment number is significant.
-    pub const ACK: u16 = 0x10;
-    /// Flag bit: the urgent pointer is significant.
-    pub const URG: u16 = 0x20;
 
     /// Source port, in host byte order.
     pub fn src_port(&self) -> u16 {
@@ -84,9 +101,9 @@ impl TcpHeader {
         usize::from(self.data_offset()) * 4
     }
 
-    /// Flag bits, including the nonce bit.
-    pub fn flags(&self) -> u16 {
-        self.offset_flags() & FLAG_BITS
+    /// The nine control flags, excluding the data offset and reserved bits.
+    pub fn flags(&self) -> TcpFlags {
+        TcpFlags::from_bits_retain(self.offset_flags() & FLAG_BITS)
     }
 
     /// The data offset and flags word, in host byte order.
@@ -276,12 +293,12 @@ where
         self
     }
 
-    /// Sets the flags; the data offset is kept and the bits above the nine
-    /// flags are dropped.
+    /// Replaces the nine control flags without changing the data offset or
+    /// reserved bits. Higher bits in the supplied flags are ignored.
     #[inline]
-    pub fn set_flags(mut self, flags: u16) -> Self {
+    pub fn set_flags(mut self, flags: TcpFlags) -> Self {
         let old = self.header.offset_flags();
-        let word = (old & !FLAG_BITS) | (flags & FLAG_BITS);
+        let word = (old & !FLAG_BITS) | (flags.bits() & FLAG_BITS);
         self.header.offset = (word >> 8) as u8;
         self.header.flags = word as u8;
         self.mode.add16(old.to_be(), word.to_be());
@@ -475,21 +492,49 @@ mod tests {
         (buf, total)
     }
 
+    /// verifies that the fixed fields of a segment with options are read in
+    /// host byte order.
     #[test]
     fn test_tcp_parse_fields() {
         let (buf, total) = build([1, 2, 3, 4], [5, 6, 7, 8], 1, &[7, 7, 7]);
+
         let p = TcpPacket::parse(&buf[..total]).unwrap();
+
         assert_eq!(40000, p.header.src_port());
         assert_eq!(443, p.header.dst_port());
         assert_eq!(0x01020304, p.header.seq());
         assert_eq!(0x0a0b0c0d, p.header.ack());
         assert_eq!(6, p.header.data_offset());
         assert_eq!(24, p.header.header_len());
-        assert_eq!(TcpHeader::SYN | TcpHeader::ACK, p.header.flags());
+        assert_eq!(TcpFlags::SYN | TcpFlags::ACK, p.header.flags());
         assert_eq!(0x2000, p.header.window());
         assert_eq!(0, p.header.urgent());
         assert_eq!(4, p.options.len());
         assert_eq!([7, 7, 7], p.payload);
+    }
+
+    /// verifies that changing AE preserves the data offset, reserved bits
+    /// and checksum validity even when the input includes non-flag bits.
+    #[test]
+    fn test_tcp_set_flags_ae_preserves_neighboring_bits() {
+        let (src, dst) = (Ipv4Addr::new(192, 0, 2, 1), Ipv4Addr::new(192, 0, 2, 2));
+        let mut segment = [0; 24];
+        segment[12..14].copy_from_slice(&[0x6a, 0x02]);
+        TcpHeader::fill_checksum_ipv4(&mut segment, src, dst).unwrap();
+        let mut expected = segment;
+        expected[12] = 0x6b;
+        TcpHeader::fill_checksum_ipv4(&mut expected, src, dst).unwrap();
+
+        let flags = TcpPacketMut::parse(&mut segment)
+            .unwrap()
+            .header
+            .mutate()
+            .set_flags(TcpFlags::from_bits_retain(0xff02))
+            .finish()
+            .flags();
+
+        assert_eq!(TcpFlags::AE | TcpFlags::SYN, flags);
+        assert_eq!(expected, segment);
     }
 
     #[test]
@@ -661,7 +706,7 @@ mod tests {
                 dst_port: header.dst_port(),
                 seq: header.seq(),
                 ack: header.ack(),
-                flags: header.flags(),
+                flags: header.flags().bits(),
                 window: header.window(),
                 checksum: header.checksum(),
                 urgent: header.urgent(),
@@ -751,7 +796,7 @@ mod tests {
             TcpOp::L4(ref op) => testing::apply(mutation, family, op, addrs),
             TcpOp::Seq(seq) => mutation.set_seq(seq),
             TcpOp::Ack(ack) => mutation.set_ack(ack),
-            TcpOp::Flags(flags) => mutation.set_flags(flags),
+            TcpOp::Flags(flags) => mutation.set_flags(TcpFlags::from_bits_retain(flags)),
             TcpOp::Window(window) => mutation.set_window(window),
             TcpOp::Urgent(urgent) => mutation.set_urgent(urgent),
         }
@@ -906,6 +951,8 @@ mod tests {
             prop_assert!(family.l4_is_valid(addrs.0, addrs.1, IPPROTO_TCP, &buf));
         }
 
+        /// verifies that unadjusted writes preserve the original checksum,
+        /// options and payload.
         #[test]
         fn test_tcp_unadjusted_mutation_stores_fields_alone(
             start in fields(),
@@ -913,6 +960,7 @@ mod tests {
             payload in vec(any::<u8>(), 0..=32),
         ) {
             let mut buf = start.to_bytes(&payload);
+
             TcpPacketMut::parse(&mut buf)
                 .unwrap()
                 .header
@@ -921,10 +969,11 @@ mod tests {
                 .set_dst_port(new.dst_port)
                 .set_seq(new.seq)
                 .set_ack(new.ack)
-                .set_flags(new.flags)
+                .set_flags(TcpFlags::from_bits_retain(new.flags))
                 .set_window(new.window)
                 .set_urgent(new.urgent)
                 .finish_unadjusted();
+
             let packet = TcpPacket::parse(&buf).unwrap();
             let expected = Fields { checksum: start.checksum, options: start.options.clone(), ..new };
             prop_assert_eq!(expected, Fields::read(&packet));
@@ -950,19 +999,23 @@ mod tests {
             prop_assert_eq!(empty, Fields::read(&packet));
         }
 
+        /// verifies that setting fields on a fresh header does not depend
+        /// on the prior bytes.
         #[test]
         fn test_tcp_init_and_setters_read_back_fields(fields in fields(), junk in any::<[u8; 20]>()) {
             let mut buf = junk;
+
             TcpHeader::init(&mut buf)
                 .unwrap()
                 .set_src_port(fields.src_port)
                 .set_dst_port(fields.dst_port)
                 .set_seq(fields.seq)
                 .set_ack(fields.ack)
-                .set_flags(fields.flags)
+                .set_flags(TcpFlags::from_bits_retain(fields.flags))
                 .set_window(fields.window)
                 .set_urgent(fields.urgent)
                 .finish_unadjusted();
+
             let packet = TcpPacket::parse(&buf).unwrap();
             prop_assert_eq!(bare(Fields { checksum: 0, ..fields }), Fields::read(&packet));
         }

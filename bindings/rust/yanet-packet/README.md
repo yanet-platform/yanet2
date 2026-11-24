@@ -18,12 +18,12 @@ header handling of the C packet library and grows on demand.
   unknown L3 type.
 - IPv4 and IPv6 headers as values written whole (`IpRepr`), their lengths
   and the IPv4 checksum filled, for a header built anew or translated.
+- TCP control flags use `TcpFlags`. `header.flags().contains(TcpFlags::SYN)` matches both SYN and SYN-ACK, as required for MSS clamping. `mutation.set_flags(TcpFlags::SYN | TcpFlags::ACK)` replaces the nine control bits without changing the data offset or reserved bits.
 - Setters keep checksums consistent incrementally where the C code does (TTL,
   DSCP, addresses, ports). Rewriting an address also requires a call to the
   L4 header to fix the pseudo-header checksum.
 
-Out of scope for now: DSCP policy, MSS clamping, encapsulation and
-decapsulation.
+Out of scope for now: DSCP policy, encapsulation and decapsulation.
 
 ## no_std and safety
 

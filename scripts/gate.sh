@@ -202,6 +202,7 @@ gate_rust() {
 # runs there.
 gate_sdk() {
 	local toolchain stable clang libclang target sdk=(env -C bindings/rust YANET_BUILD_DIR="$root/build")
+	local host=(env -C bindings/rust/yanet-sdk-build CARGO_TARGET_DIR="$root/bindings/rust/target")
 	if [ ! -f subprojects/dpdk/meson.build ] || [ ! -d build ] || [ -L build ]; then
 		fail sdk "the SDK bindings read the DPDK sources and this checkout's own build/; run 'git submodule update --init && meson setup build' (AGENTS.md, Worktrees)"
 		return 1
@@ -230,15 +231,19 @@ gate_sdk() {
 		skipped+=("sdk bindings with $clang and $libclang (not installed; used the local LLVM)")
 	fi
 	step sdk-fmt "${sdk[@]}" cargo "+$toolchain" fmt -- --check || return 1
+	step sdk-build-fmt "${host[@]}" cargo "+$toolchain" fmt -- --check || return 1
 	if command -v cargo-shear >/dev/null; then
 		step sdk-shear "${sdk[@]}" cargo "+$stable" shear --deny-warnings --locked || return 1
+		step sdk-build-shear "${host[@]}" cargo "+$stable" shear --deny-warnings --locked || return 1
 	else
 		skipped+=("cargo-shear (not installed)")
 	fi
 	step sdk-clippy "${sdk[@]}" CARGO_BUILD_WARNINGS=deny cargo "+$stable" clippy --workspace --all-targets --locked --keep-going || return 1
+	step sdk-build-clippy "${host[@]}" CARGO_BUILD_WARNINGS=deny cargo "+$stable" clippy --all-targets --locked --keep-going || return 1
 	step sdk-clippy-plugin "${sdk[@]}" CARGO_BUILD_WARNINGS=deny cargo "+$stable" clippy --profile plugin -p yanet-sdk-fixture --features plugin --examples --locked --keep-going || return 1
 	step sdk-clippy-deps "${sdk[@]}" cargo "+$stable" clippy --workspace --lib --locked -- -D unused_crate_dependencies || return 1
 	step sdk-doc "${sdk[@]}" RUSTDOCFLAGS='-D warnings' cargo "+$stable" doc --workspace --no-deps --locked --features yanet-sdk-testing/cp || return 1
+	step sdk-build-doc "${host[@]}" RUSTDOCFLAGS='-D warnings' cargo "+$stable" doc --no-deps --locked || return 1
 	target="$(uname -m)-unknown-none"
 	if rustup target list --installed --toolchain "$stable" 2>/dev/null | grep -qx "$target"; then
 		step sdk-no-std "${sdk[@]}" cargo "+$stable" check --locked --target "$target" -p yanet-shm -p yanet-sys -p yanet-sdk -p yanet-sdk-plugin -p yanet-packet || return 1
@@ -246,6 +251,7 @@ gate_sdk() {
 		skipped+=("sdk-no-std ($target not installed)")
 	fi
 	step sdk-test "${sdk[@]}" PROPTEST_CASES=200 PROPTEST_RNG_SEED=19567271 cargo "+$stable" test --workspace --locked || return 1
+	step sdk-build-test "${host[@]}" cargo "+$stable" test --locked || return 1
 	step sdk-test-release "${sdk[@]}" cargo "+$stable" test -p yanet-sys --release --locked || return 1
 	step sdk-bench "${sdk[@]}" cargo "+$stable" test -p yanet-sys --bench dp --bench lookup --locked || return 1
 	step sdk-bench-release "${sdk[@]}" cargo "+$stable" test -p yanet-sys --release --bench lookup --locked || return 1

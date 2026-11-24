@@ -9,7 +9,7 @@
 //! options it does not know; options of another size replace the area,
 //! written from [`TcpOptions`].
 
-use super::{TcpHeader, TcpMutation};
+use super::{TcpFlags, TcpMutation};
 use crate::{
     ParseError, fold,
     mutation::{self, Mode},
@@ -784,7 +784,7 @@ where
     /// another segment is no offer and stays as sent.
     #[inline]
     pub fn clamp_mss(self, max: u16) -> Self {
-        if self.header.flags() & TcpHeader::SYN == 0 {
+        if !self.header.flags().contains(TcpFlags::SYN) {
             return self;
         }
         self.edit_options(|option| {
@@ -821,7 +821,7 @@ mod tests {
     use core::{assert_matches, net::Ipv4Addr};
 
     use super::*;
-    use crate::TcpPacketMut;
+    use crate::{TcpHeader, TcpPacketMut};
 
     /// Reads every option of the area, or the error that ends the reading.
     fn read(area: &[u8]) -> Vec<Result<TcpOption<'_>, ParseError>> {
