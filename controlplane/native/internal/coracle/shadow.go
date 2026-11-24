@@ -105,6 +105,14 @@ func Snapshot(memory []byte) ([]byte, []Run) {
 	return image, runs
 }
 
+// Restore puts a snapshot back: the bytes and what AddressSanitizer marks
+// unaddressable.
+func Restore(memory, image []byte, runs []Run) {
+	C.coracle_unpoison(unsafe.Pointer(&memory[0]), C.size_t(len(memory)))
+	copy(memory, image)
+	repoison(memory, runs)
+}
+
 // Unpoison makes all of memory addressable, as memory about to be
 // unmapped must be left.
 func Unpoison(memory []byte) {
