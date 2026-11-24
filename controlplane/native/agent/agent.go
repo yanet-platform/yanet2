@@ -117,14 +117,11 @@ func stampAndRegister(instance *zone.Instance, agent *layout.Agent) (*zone.Gener
 // On failure everything it took is back in the zone and the agent holds
 // no arenas.
 func reserveArenas(cp *layout.CpConfig, agent *layout.Agent, memoryLimit uint64) error {
-	count := uintptr(0)
-	if memoryLimit != 0 {
-		count = uintptr((memoryLimit-1)/shmalloc.MaxSize + 1)
-	}
 	// A zero limit fails after the agent is allocated, as in C.
-	if count == 0 {
+	if memoryLimit == 0 {
 		return errors.New("agent memory limit is zero")
 	}
+	count := uintptr((memoryLimit-1)/shmalloc.MaxSize + 1)
 	arenaSize := unsafe.Sizeof(layout.AgentArena{})
 	table := zeroed(&cp.MemoryContext, arenaSize*count)
 	if table == nil {
@@ -242,8 +239,8 @@ func cleanup(agent *layout.Agent) {
 	shmalloc.ContextFree(&cp.MemoryContext, unsafe.Pointer(agent), unsafe.Sizeof(layout.Agent{}))
 }
 
-// zeroed allocates size bytes from the context and zeroes them, or
-// returns nil.
+// zeroed allocates a block of that many bytes from the context and
+// zeroes it, or returns nil.
 func zeroed(context *layout.MemoryContext, size uintptr) unsafe.Pointer {
 	block := shmalloc.ContextAlloc(context, size)
 	if block != nil {

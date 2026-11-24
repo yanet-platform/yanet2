@@ -158,7 +158,8 @@ func Test_Attach_MatchesC(t *testing.T) {
 			memory := newFixture(t)
 			previous := tc.setup(t, memory)
 			var attached *agent.Agent
-			memory.CompareWithC(t,
+			memory.CompareWithC(
+				t,
 				func() { attachC(t, memory, tc.agent, 8*datasize.MB) },
 				func() {
 					var err error
@@ -204,7 +205,8 @@ func Test_Attach_FailureMatchesC(t *testing.T) {
 			name:  "zone exhausted by the registry growth after the arenas fit",
 			limit: datasize.MB,
 			setup: func(t *testing.T, memory *nativetest.Fixture) {
-				leaveOnly(t, &memory.Instance().Cp.BlockAllocator,
+				leaveOnly(
+					t, &memory.Instance().Cp.BlockAllocator,
 					unsafe.Sizeof(layout.Agent{}), unsafe.Sizeof(layout.AgentArena{}), uintptr(datasize.MB),
 				)
 			},
@@ -227,7 +229,8 @@ func Test_Attach_FailureMatchesC(t *testing.T) {
 				Modules:     []string{"blackhole"},
 			})
 			tc.setup(t, memory)
-			memory.CompareWithC(t,
+			memory.CompareWithC(
+				t,
 				func() {
 					_, err := memory.Harness.SharedMemory().AgentAttach("probe", 0, tc.limit)
 					require.Error(t, err)
@@ -279,7 +282,8 @@ func Test_Attach_RefusesBadName(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			memory := newFixture(t)
-			memory.CompareWithC(t,
+			memory.CompareWithC(
+				t,
 				func() {},
 				func() {
 					_, err := agent.Attach(memory.Instance(), tc.agent, uint64(8*datasize.MB))
@@ -298,7 +302,8 @@ func Test_Attach_RefusesUnreadyInstance(t *testing.T) {
 	atomic.StoreUint64(&instance.Dp.ReadyMagic, 0)
 	t.Cleanup(func() { atomic.StoreUint64(&instance.Dp.ReadyMagic, layout.DpConfigReadyMagic) })
 
-	memory.CompareWithC(t,
+	memory.CompareWithC(
+		t,
 		func() {},
 		func() {
 			_, err := agent.Attach(instance, "probe", uint64(8*datasize.MB))

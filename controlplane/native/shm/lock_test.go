@@ -1,4 +1,4 @@
-//go:build linux && (amd64 || arm64)
+//go:build linux && (amd64 || arm64) && cgo
 
 package shm_test
 
@@ -160,8 +160,8 @@ func awaitThreads(baseline, wanted int) int {
 	return threadsCreated() - baseline
 }
 
-// awaitArrival waits until count reaches want, failing once the wait
-// bound passes.
+// awaitArrival waits until the counter reaches the wanted value, failing
+// once the wait bound passes.
 func awaitArrival(count *atomic.Int64, want int64) error {
 	for deadline := time.Now().Add(waitBound); count.Load() < want; {
 		if time.Now().After(deadline) {

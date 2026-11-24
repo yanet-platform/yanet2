@@ -83,7 +83,8 @@ func (m *Fixture) CompareWithC(t *testing.T, viaC, viaGo func()) {
 	require.Equal(t, wantRuns, gotRuns, "unaddressable runs differ")
 }
 
-// RequireSameBytes fails at the first byte where got differs from want.
+// RequireSameBytes fails at the first byte where the storage differs
+// from the expected one.
 func RequireSameBytes(t *testing.T, want, got []byte) {
 	t.Helper()
 	if bytes.Equal(want, got) {
