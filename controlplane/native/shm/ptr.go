@@ -3,13 +3,14 @@
 // The C structures are reached through views generated from the DWARF of
 // the dataplane's own compilation, so every field sits at the offset the C
 // compiler chose. This package holds what those views need at run time:
-// relative pointers, opaque process-local words, the byte and process-id
+// relative pointers, opaque process-local words, the spin and process-id
 // locks C takes on shared memory, and the NUL-terminated strings of its
 // character arrays.
 package shm
 
 import (
 	"bytes"
+	"strings"
 	"sync/atomic"
 	"unsafe"
 )
@@ -79,6 +80,23 @@ func (m *Ptr[T]) distance(target *T) int64 {
 //
 // A view keeps such a field at its size and offset and never follows it.
 type Local uintptr
+
+// CopyString copies value into a C character array as strtcpy does.
+//
+// It copies at most one byte short of the array, stopping at a NUL inside
+// value, and writes a terminating NUL after it; the bytes past the
+// terminator stay as they were. An empty array is left alone.
+func CopyString(field []byte, value string) {
+	if len(field) == 0 {
+		return
+	}
+	if end := strings.IndexByte(value, 0); end >= 0 {
+		value = value[:end]
+	}
+	length := min(len(value), len(field)-1)
+	copy(field, value[:length])
+	field[length] = 0
+}
 
 // String returns the NUL-terminated string a C character array holds.
 func String(field []byte) string {
