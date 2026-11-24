@@ -736,6 +736,20 @@ dataplane_init(
 			    "page size");
 			return -1;
 		}
+		if (!dp_storage_layout_valid(
+			    storage + instance_offset,
+			    instance_config->dp_memory,
+			    instance_config->cp_memory
+		    )) {
+			LOG(ERROR,
+			    "instance %u: dp_memory %zu and cp_memory %zu must "
+			    "each hold their zone, and dp_memory must keep the "
+			    "control-plane zone aligned",
+			    instance_idx,
+			    instance_config->dp_memory,
+			    instance_config->cp_memory);
+			return -1;
+		}
 
 		LOG(INFO, "initialize storage for instance %u", instance_idx);
 

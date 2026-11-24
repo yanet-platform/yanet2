@@ -3,6 +3,31 @@
 Manual steps required when upgrading an existing deployment. The packaging
 does not perform these automatically.
 
+## The ready magic carries the module ABI version
+
+The value a dataplane writes into its shared memory once an instance is ready
+(`DP_CONFIG_READY_MAGIC`) keeps `0xDEAD10CC` in its high 32 bits, carries
+`YANET_MODULE_ABI_VERSION` in bits 16–31 and a layout counter
+(`DP_CONFIG_READY_LAYOUT`) in the low 16 bits, so every ABI bump changes it.
+The value differs from every earlier one, so the dataplane and every process
+that attaches to its shared memory must be deployed and restarted together:
+
+- The cgo control plane, old or new, reports a dataplane of another version
+  as one not yet initialised: `dataplane shared memory instance 0 is not yet
+  initialised`, and the controlplane director gives up with `dataplane shared
+  memory not ready` after its startup timeout.
+- The native reader and the developer inspector `yanet-native` name both
+  versions: `dataplane shared memory version differs: instance 0: dataplane
+  module ABI version 0, this build reads <version>`, where `<version>` is the
+  build's own module ABI version. Every dataplane from before the change reads
+  as ABI version 0.
+
+Every standalone binary that links the C control-plane library through cgo
+(the controlplane, module control planes and operators that attach agents)
+carries the value it expects and must be rebuilt from the new headers.
+Dataplane plugins built against an older ABI version are rejected at load
+and must be rebuilt too.
+
 ## The generic operator configures modules it does not link
 
 A config entry of a generic operator instance may name the module's descriptor set in `descriptors`: a FileDescriptorSet as protoc writes it with `--descriptor_set_out`, installed by the module's package. The operator then resolves the method, its request and its reply from the set, so the stock binary configures a module built outside this tree. A file of the set resolves its imports in the set first, then among the files linked into the binary, so a set written without `--include_imports` serves too. An entry without `descriptors` works as before.

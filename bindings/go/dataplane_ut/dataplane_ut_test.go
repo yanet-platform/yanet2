@@ -829,3 +829,18 @@ func TestHandleSegmentedPacketsOnDevice_ForwardDeviceScopedRule(t *testing.T) {
 	assert.Equal(t, []uint64{0, 0}, counters[0].Values[0], "worker 0 never ran the round")
 	assert.Equal(t, []uint64{1, uint64(len(payload))}, counters[0].Values[1], "worker 1 ran the matching round")
 }
+
+// Test_NewHarness_RefusesMisalignedControlPlaneZone verifies that the
+// storage bootstrap refuses dataplane memory that would misalign the
+// control-plane zone, the placement every reader of the storage assumes.
+func Test_NewHarness_RefusesMisalignedControlPlaneZone(t *testing.T) {
+	harness, err := NewHarness(Config{
+		CPMemory:    uint64(datasize.MB * 32),
+		DPMemory:    uint64(datasize.MB*4) + 1,
+		WorkerCount: 1,
+	})
+	if err == nil {
+		harness.Free()
+	}
+	require.Error(t, err)
+}

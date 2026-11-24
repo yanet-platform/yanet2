@@ -6,6 +6,16 @@
 #include "lib/dataplane/config/zone.h"
 #include "lib/dataplane/packet/packet.h"
 
+bool
+dp_storage_layout_valid(
+	const void *storage, size_t dp_memory, size_t cp_memory
+) {
+	return (uintptr_t)storage % _Alignof(struct dp_config) == 0 &&
+	       dp_memory >= sizeof(struct dp_config) &&
+	       dp_memory % _Alignof(struct cp_config) == 0 &&
+	       cp_memory >= sizeof(struct cp_config);
+}
+
 int
 dp_storage_init(
 	uint32_t numa_idx,
@@ -16,6 +26,10 @@ dp_storage_init(
 	struct dp_config **res_dp_config,
 	struct cp_config **res_cp_config
 ) {
+	if (!dp_storage_layout_valid(storage, dp_memory, cp_memory)) {
+		return -1;
+	}
+
 	struct dp_config *dp_config = (struct dp_config *)storage;
 
 	dp_config->numa_idx = numa_idx;

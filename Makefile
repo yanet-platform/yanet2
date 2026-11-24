@@ -119,6 +119,7 @@ CLI_RELEASE_BINARIES := $(addprefix $(RELEASE_DIR)/,$(CLI_BINARIES))
 	dataplane \
 	go-test-prepare \
 	native-layout \
+	native-nocgo \
 	install \
 	clean \
 	go-cache-clean \
@@ -275,6 +276,12 @@ go-test-prepare:
 # first, so a build/ configured before this target existed learns it.
 native-layout:
 	ninja -C build controlplane/native/layout/native-layout.stamp
+
+# Builds every package of the native control plane without cgo.
+native-nocgo: native-layout
+	@set -eu; \
+	packages=$$(CGO_ENABLED=0 go list ./controlplane/native/...); \
+	if [ -n "$$packages" ]; then CGO_ENABLED=0 go build $$packages; fi
 
 cli: cli-build
 

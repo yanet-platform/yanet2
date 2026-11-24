@@ -136,6 +136,7 @@ gate_go() {
 		step proto-go make --no-print-directory proto-go || return 1
 	fi
 	step native-layout make --no-print-directory native-layout || return 1
+	step native-nocgo make --no-print-directory native-nocgo || return 1
 	files=$(present '\.go$' | grep -v '\.pb\.go$')
 	if [ -n "$files" ]; then
 		# shellcheck disable=SC2086

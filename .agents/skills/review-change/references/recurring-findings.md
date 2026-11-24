@@ -10,9 +10,10 @@ Any edit to a struct that crosses the control-plane/dataplane shm boundary —
 field added, removed, reordered, resized, or inserted between existing fields —
 is a compatibility break even when the total size is unchanged.
 
-- Bump `DP_CONFIG_READY_MAGIC` when a shm-published struct changes layout.
-  `YANET_MODULE_ABI_VERSION` covers only plugins; the magic covers everything
-  else (struct agent, registry items, module/device/object structs).
+- The ready magic (`DP_CONFIG_READY_MAGIC`) carries `YANET_MODULE_ABI_VERSION`
+  in bits 16–31, so an ABI bump changes it on its own. A shm-published struct
+  whose layout changes without an ABI bump (struct agent, registry items, the
+  control-plane zone) bumps `DP_CONFIG_READY_LAYOUT`, the magic's low 16 bits.
 - Mixed-version attach means wrong offsets or wrong free size class, not a
   clean error. A stale `.so` reading old offsets with an unchanged ABI version
   is still a break — bump that too when a module struct shifts.

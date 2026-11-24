@@ -164,8 +164,27 @@ struct dp_worker {
 // The value also versions the shared-memory layout: a process built
 // against a different layout of the control-plane zone or the dataplane
 // structures recognises a foreign magic and refuses the attach instead
-// of misreading shifted fields. Bump it on every layout change.
-#define DP_CONFIG_READY_MAGIC UINT64_C(0xDEAD10CC0000000F)
+// of misreading shifted fields.
+//
+// The high word is 0xDEAD10CC. YANET_MODULE_ABI_VERSION rides along in
+// bits 16-31, so every ABI bump changes the magic, and the low 16 bits
+// hold DP_CONFIG_READY_LAYOUT: bump that counter for a layout change the
+// ABI asserts of plugin_abi_assert.h miss, such as a change to the
+// control-plane zone alone.
+#define DP_CONFIG_READY_LAYOUT 0x0010
+#define DP_CONFIG_READY_MAGIC                                                  \
+	(UINT64_C(0xDEAD10CC) << 32 |                                          \
+	 (uint64_t)(YANET_MODULE_ABI_VERSION) << 16 |                          \
+	 (uint64_t)(DP_CONFIG_READY_LAYOUT))
+
+_Static_assert(
+	YANET_MODULE_ABI_VERSION >= 0 && YANET_MODULE_ABI_VERSION <= 0xFFFF,
+	"YANET_MODULE_ABI_VERSION no longer fits the ready magic's 16 bits"
+);
+_Static_assert(
+	DP_CONFIG_READY_LAYOUT >= 0 && DP_CONFIG_READY_LAYOUT <= 0xFFFF,
+	"DP_CONFIG_READY_LAYOUT no longer fits the ready magic's 16 bits"
+);
 
 struct dp_config {
 	uint32_t instance_count;
