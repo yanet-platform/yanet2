@@ -6,12 +6,13 @@
 // An attach allocates as the C one does, in the same order, so the storage
 // ends byte-identical; it registers the agent, superseding one of the same
 // name, and frees superseded agents no configuration holds. The agent lock
-// is always taken outside the allocator's, as in C. It checks the name and
-// the instance's readiness, and the zone package bounds the generation it
-// pins; the rest relies on the attach assumptions that package documents.
+// is always taken outside the allocator's, as in C. An attach checks the
+// name, the instance's readiness and that the generation it pins lies in
+// the instance; the rest relies on the storage reader's attach assumptions.
 package agent
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -37,8 +38,8 @@ type Agent struct {
 	Agent    *layout.Agent
 }
 
-// Attach registers an agent of that name in the instance, with
-// memoryLimit bytes of arenas, superseding an agent of the same name.
+// Attach registers an agent of that name in the instance, with arenas
+// totalling the memory limit, superseding an agent of the same name.
 //
 // A failed attach returns what it allocated to the zone, as C does. A
 // generation a publication retires while the attach pins it stays
@@ -110,7 +111,7 @@ func stampAndRegister(instance *zone.Instance, agent *layout.Agent) (*zone.Gener
 	return generation, register(cp, agent)
 }
 
-// reserveArenas takes memoryLimit bytes from the zone, in blocks of the
+// reserveArenas takes the memory limit from the zone, in blocks of the
 // largest size, and gives them to the agent's allocator.
 //
 // On failure everything it took is back in the zone and the agent holds
@@ -120,8 +121,11 @@ func reserveArenas(cp *layout.CpConfig, agent *layout.Agent, memoryLimit uint64)
 	if memoryLimit != 0 {
 		count = uintptr((memoryLimit-1)/shmalloc.MaxSize + 1)
 	}
+	// A zero limit fails after the agent is allocated, as in C.
+	if count == 0 {
+		return errors.New("agent memory limit is zero")
+	}
 	arenaSize := unsafe.Sizeof(layout.AgentArena{})
-	// No arenas allocate no table, which fails the attach, as in C.
 	table := zeroed(&cp.MemoryContext, arenaSize*count)
 	if table == nil {
 		return fmt.Errorf("allocate arena table: %w", ErrNoMemory)
@@ -230,7 +234,8 @@ func cleanup(agent *layout.Agent) {
 		for idx := range arenas {
 			shmalloc.ContextFree(&cp.MemoryContext, unsafe.Pointer(arenas[idx].Data.Get()), uintptr(arenas[idx].Size))
 		}
-		shmalloc.ContextFree(&cp.MemoryContext, unsafe.Pointer(table),
+		shmalloc.ContextFree(
+			&cp.MemoryContext, unsafe.Pointer(table),
 			unsafe.Sizeof(layout.AgentArena{})*uintptr(agent.ArenaCount),
 		)
 	}
