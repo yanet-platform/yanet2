@@ -25,6 +25,10 @@ type Ptr[T any] struct {
 	offset int64
 }
 
+// PtrSize is the size of a relative pointer in shared memory, whatever it
+// points at.
+const PtrSize = unsafe.Sizeof(Ptr[byte]{})
+
 // noCopy makes go vet report copies of the type that embeds it; it takes
 // no space.
 type noCopy struct{}

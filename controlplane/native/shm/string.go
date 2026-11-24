@@ -24,6 +24,21 @@ func CopyString(field []byte, value string) {
 
 // String returns the NUL-terminated string a C character array holds.
 func String(field []byte) string {
-	text, _, _ := bytes.Cut(field, []byte{0})
-	return string(text)
+	return string(Bytes(field))
+}
+
+// Bytes returns the bytes a C character array holds before its
+// terminating NUL, in place, so comparing or hashing them copies nothing.
+func Bytes(field []byte) []byte {
+	end := bytes.IndexByte(field, 0)
+	if end < 0 {
+		end = len(field)
+	}
+	return field[:end]
+}
+
+// Equal reports whether a C character array holds value, without copying
+// the array.
+func Equal(field []byte, value string) bool {
+	return string(Bytes(field)) == value
 }

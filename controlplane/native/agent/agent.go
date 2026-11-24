@@ -19,6 +19,8 @@ import (
 	"sync/atomic"
 	"unsafe"
 
+	"github.com/yanet-platform/yanet2/controlplane/native/internal/registry"
+	"github.com/yanet-platform/yanet2/controlplane/native/internal/teardown"
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
 	"github.com/yanet-platform/yanet2/controlplane/native/shm"
 	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
@@ -41,9 +43,7 @@ type Agent struct {
 // Attach registers an agent of that name in the instance, with arenas
 // totalling the memory limit, superseding an agent of the same name.
 //
-// A failed attach returns what it allocated to the zone, as C does. A
-// generation a publication retires while the attach pins it stays
-// allocated until native generation teardown lands.
+// A failed attach returns what it allocated to the zone, as C does.
 func Attach(instance *zone.Instance, name string, memoryLimit uint64) (*Agent, error) {
 	if len(name) >= NameSize {
 		return nil, fmt.Errorf("agent name is longer than %d characters", NameSize-1)
@@ -72,7 +72,7 @@ func Attach(instance *zone.Instance, name string, memoryLimit uint64) (*Agent, e
 	shmalloc.ContextInit(&agent.MemoryContext, name, &agent.BlockAllocator)
 
 	if err := reserveArenas(cp, agent, memoryLimit); err != nil {
-		cleanup(agent)
+		teardown.FreeAgent(agent)
 		return nil, err
 	}
 
@@ -82,7 +82,7 @@ func Attach(instance *zone.Instance, name string, memoryLimit uint64) (*Agent, e
 		generation.Release()
 	}
 	if err != nil {
-		cleanup(agent)
+		teardown.FreeAgent(agent)
 		return nil, err
 	}
 	return &Agent{Instance: instance, Agent: agent}, nil
@@ -172,71 +172,47 @@ func register(cp *layout.CpConfig, agent *layout.Agent) error {
 
 	count := len(slots)
 	agent.Prev.Set(nil)
-	slotSize := unsafe.Sizeof(shm.Ptr[layout.Agent]{})
 	headerSize := unsafe.Sizeof(layout.CpAgentRegistry{})
-	block := shmalloc.ContextAlloc(&cp.MemoryContext, headerSize+slotSize*uintptr(count+1))
+	block := shmalloc.ContextAlloc(&cp.MemoryContext, headerSize+shm.PtrSize*uintptr(count+1))
 	if block == nil {
 		return fmt.Errorf("allocate agent registry: %w", ErrNoMemory)
 	}
-	registry := (*layout.CpAgentRegistry)(block)
-	registry.Count = uint64(count + 1)
-	grown := registry.Agents(count + 1)
+	fresh := (*layout.CpAgentRegistry)(block)
+	fresh.Count = uint64(count + 1)
+	grown := fresh.Agents(count + 1)
 	for idx := range slots {
 		grown[idx].Set(slots[idx].Get())
 	}
 	grown[count].Set(agent)
-	shmalloc.ContextFree(&cp.MemoryContext, unsafe.Pointer(old), headerSize+slotSize*uintptr(count))
-	cp.AgentRegistry.Set(registry)
+	shmalloc.ContextFree(&cp.MemoryContext, unsafe.Pointer(old), headerSize+shm.PtrSize*uintptr(count))
+	cp.AgentRegistry.Set(fresh)
 	return nil
 }
 
 // sweep frees the superseded agents whose configurations no generation
 // holds any more, under the agent lock.
-//
-// A loaded count read stale and high only postpones a reclamation to a
-// later sweep; the load acquires the releasing decrements, so an agent is
-// freed after every access that preceded its last release.
 func sweep(cp *layout.CpConfig) {
 	shm.LockSpin(&cp.AgentLock.Locked)
 	defer shm.UnlockSpin(&cp.AgentLock.Locked)
-
-	registry := cp.AgentRegistry.Get()
-	if registry == nil {
-		return
-	}
-	slots := registry.Agents(int(registry.Count))
-	for idx := range slots {
-		agent := slots[idx].Get()
-		for agent != nil && !agent.Prev.IsNil() {
-			previous := agent.Prev.Get()
-			if atomic.LoadUint64(&previous.LoadedEntityCount) == 0 {
-				agent.Prev.Set(previous.Prev.Get())
-				cleanup(previous)
-				continue
-			}
-			agent = previous
-		}
-	}
+	teardown.SweepAgentsLocked(cp)
 }
 
-// cleanup returns an agent, its arenas and its arena table to the zone.
+// IsCurrent reports whether the agent heads the registry slot of its
+// name, as agent_is_current does.
 //
-// The agent's memory context is finalised first, since its children may
-// live in those arenas.
-func cleanup(agent *layout.Agent) {
-	cp := agent.CpConfig.Get()
-	shmalloc.ContextFini(&agent.MemoryContext)
-	if table := agent.Arenas.Get(); table != nil {
-		arenas := unsafe.Slice(table, agent.ArenaCount)
-		for idx := range arenas {
-			shmalloc.ContextFree(&cp.MemoryContext, unsafe.Pointer(arenas[idx].Data.Get()), uintptr(arenas[idx].Size))
-		}
-		shmalloc.ContextFree(
-			&cp.MemoryContext, unsafe.Pointer(table),
-			unsafe.Sizeof(layout.AgentArena{})*uintptr(agent.ArenaCount),
-		)
+// One a later attach of the same name superseded is not current. The
+// caller holds the agent lock.
+func IsCurrent(cp *layout.CpConfig, agent *layout.Agent) bool {
+	agents := cp.AgentRegistry.Get()
+	if agents == nil {
+		return false
 	}
-	shmalloc.ContextFree(&cp.MemoryContext, unsafe.Pointer(agent), unsafe.Sizeof(layout.Agent{}))
+	for head := range registry.Pointees(agents.Agents(int(agents.Count))) {
+		if shm.Equal(head.Name[:], shm.String(agent.Name[:])) {
+			return head == agent
+		}
+	}
+	return false
 }
 
 // zeroed allocates a block of that many bytes from the context and

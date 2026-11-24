@@ -7,20 +7,18 @@ import (
 	"sync/atomic"
 	"unsafe"
 
+	"github.com/yanet-platform/yanet2/controlplane/native/internal/teardown"
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
 	"github.com/yanet-platform/yanet2/controlplane/native/shm"
 )
 
-// Generation is a published configuration generation pinned by this
-// process: its registries and the configurations they hold stay valid
-// until Release.
-//
-// This package cannot free shared memory yet, so it never drops a
-// generation's last reference: a generation a publication retires while
-// pinned here is not freed by this reader and stays allocated until native
-// generation teardown lands.
+// Generation is a published configuration generation this process
+// pinned: its registries and configurations stay valid until Release.
 type Generation struct {
 	Gen *layout.CpConfigGen
+	// cp is the control-plane zone of the instance the generation was
+	// pinned in.
+	cp *layout.CpConfig
 }
 
 // Pin returns the generation the instance publishes now, with a reference
@@ -43,28 +41,22 @@ func (m *Instance) Pin() (*Generation, error) {
 		return nil, fmt.Errorf("instance %d: published generation lies outside the instance", m.Index)
 	}
 	atomic.AddUint64(&gen.Refcnt, 1)
-	return &Generation{Gen: gen}, nil
+	return &Generation{Gen: gen, cp: m.Cp}, nil
 }
 
-// Release drops the reference Pin took; a second call does nothing.
+// Release drops the reference Pin took, as cp_config_gen_release does; a
+// second call does nothing.
 //
-// The last reference is not dropped: dropping it obliges the dropper to
-// free the generation, which this reader cannot yet. A generation a
-// publication retires while pinned therefore keeps that reference and
-// stays allocated until native generation teardown lands.
+// A publication that retired the generation while it was pinned left it
+// to the last reference, so the release that drops it frees the
+// generation and then reclaims the superseded agents only it held. It
+// takes the agent lock, which the caller must not hold. A generation no
+// pin produced is left alone.
 func (m *Generation) Release() {
 	gen := m.Gen
 	m.Gen = nil
-	if gen == nil {
+	if gen == nil || m.cp == nil {
 		return
 	}
-	for {
-		count := atomic.LoadUint64(&gen.Refcnt)
-		if count <= 1 {
-			return
-		}
-		if atomic.CompareAndSwapUint64(&gen.Refcnt, count, count-1) {
-			return
-		}
-	}
+	teardown.ReleaseGeneration(m.cp, gen)
 }

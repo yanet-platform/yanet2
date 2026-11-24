@@ -55,7 +55,7 @@ var ErrNoMemory = errors.New("shared memory exhausted")
 const PoolCount = len(layout.BlockAllocator{}.Pools)
 
 // linkSize is the size of the link word a free block starts with.
-const linkSize = unsafe.Sizeof(shm.Ptr[byte]{})
+const linkSize = shm.PtrSize
 
 // MinBits is the binary logarithm of the smallest block size
 // (MEMORY_BLOCK_ALLOCATOR_MIN_BITS).
