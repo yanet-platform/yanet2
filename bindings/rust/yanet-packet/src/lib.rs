@@ -36,7 +36,7 @@ pub use ipv6::{Ipv6Fragment, Ipv6Header, Ipv6Repr};
 #[doc(hidden)]
 pub use mutation::resize;
 pub use mutation::{Adjusted, Mode, Unadjusted};
-pub use tcp::{TcpHeader, TcpMutation, TcpPacket, TcpPacketMut, options as tcp_options};
+pub use tcp::{TcpFlags, TcpHeader, TcpMutation, TcpPacket, TcpPacketMut, options as tcp_options};
 pub use udp::{UdpHeader, UdpMutation};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
