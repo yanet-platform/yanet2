@@ -299,9 +299,14 @@ cp_module_link_device(
 	uint64_t *index,
 	yanet_error **err
 ) {
+	// A link stores the name cut to its field, so the lookup matches the
+	// name cut the same way.
+	char key[CP_DEVICE_NAME_LEN];
+	strtcpy(key, name, sizeof(key));
+
 	struct cp_module_device *devices = ADDR_OF(&cp_module->devices);
 	for (uint64_t idx = 0; idx < cp_module->device_count; ++idx) {
-		if (!strncmp(devices[idx].name, name, CP_DEVICE_NAME_LEN)) {
+		if (!strncmp(devices[idx].name, key, CP_DEVICE_NAME_LEN)) {
 			*index = idx;
 			return 0;
 		}
@@ -340,14 +345,17 @@ cp_module_link_object(
 	uint64_t *index,
 	yanet_error **err
 ) {
+	// A link stores the type and name cut to their fields, so the lookup
+	// matches them cut the same way.
+	char type[CP_OBJECT_TYPE_LEN];
+	char name[CP_OBJECT_NAME_LEN];
+	strtcpy(type, object_type, sizeof(type));
+	strtcpy(name, object_name, sizeof(name));
+
 	struct cp_module_object *objects = ADDR_OF(&cp_module->objects);
 	for (uint64_t idx = 0; idx < cp_module->object_count; ++idx) {
-		if (!strncmp(
-			    objects[idx].type, object_type, CP_OBJECT_TYPE_LEN
-		    ) &&
-		    !strncmp(
-			    objects[idx].name, object_name, CP_OBJECT_NAME_LEN
-		    )) {
+		if (!strncmp(objects[idx].type, type, CP_OBJECT_TYPE_LEN) &&
+		    !strncmp(objects[idx].name, name, CP_OBJECT_NAME_LEN)) {
 			*index = idx;
 			return 0;
 		}
