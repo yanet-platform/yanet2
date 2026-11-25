@@ -16,6 +16,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/ffi/ffitest"
 	"github.com/yanet-platform/yanet2/controlplane/modulebase"
+	"github.com/yanet-platform/yanet2/controlplane/native/zone"
 )
 
 // nativeAttachConfig returns an attach config of a 4 MB agent serving the
@@ -126,5 +127,29 @@ func Test_NewNativeBase_FailsAtOnceOnMissingStorage(t *testing.T) {
 		require.Zero(t, logs.FilterMessage("waiting for dataplane instances").Len())
 	case <-time.After(10 * time.Second):
 		t.Fatal("the attach to a missing storage waited instead of failing")
+	}
+}
+
+// Test_NewNativeBase_GivesUpAtReadyDeadline verifies that an attach to a
+// storage whose later instance never becomes ready gives up at the
+// deadline it was given, reporting the instance as not ready.
+func Test_NewNativeBase_GivesUpAtReadyDeadline(t *testing.T) {
+	ready := uint32(1)
+	path := ffitest.NewStorage(t, ffitest.StorageTypes{InstanceCount: 2, ReadyInstanceCount: &ready})
+	deadline := time.Now().Add(100 * time.Millisecond)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := modulebase.NewNativeBase(
+			nativeAttachConfig(path, 0), "decap", "[::1]:0", modulebase.WithReadyDeadline(deadline),
+		)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, zone.ErrNotReady)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the attach waited past its deadline")
 	}
 }

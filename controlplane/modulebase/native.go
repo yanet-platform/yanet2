@@ -15,7 +15,8 @@ import (
 )
 
 // readyTimeout bounds the wait for every dataplane instance of the storage
-// to be ready, as long as the director waits for its own.
+// to be ready when no deadline is given, as long as the director waits
+// for its own.
 const readyTimeout = 60 * time.Second
 
 // nativeAttachment is an agent attached without cgo together with the
@@ -39,7 +40,7 @@ type nativeAttachment struct {
 // its instances ready one after another once all are set up, so a module
 // attaching as soon as its director's instance is ready waits for the
 // rest, within the bound.
-func attachNative(cfg ffi.AttachConfig, name string, log *zap.Logger) (*nativeAttachment, error) {
+func attachNative(cfg ffi.AttachConfig, name string, deadline time.Time, log *zap.Logger) (*nativeAttachment, error) {
 	path := cfg.MemoryPath.Unwrap()
 	instanceID := cfg.InstanceID.Unwrap()
 	log.Debug("mapping shared memory",
@@ -48,7 +49,7 @@ func attachNative(cfg ffi.AttachConfig, name string, log *zap.Logger) (*nativeAt
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
 
-	storage, err := attachReady(path, log)
+	storage, err := attachReady(path, deadline, log)
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach to shared memory %q: %w", path, err)
 	}
@@ -69,11 +70,15 @@ func attachNative(cfg ffi.AttachConfig, name string, log *zap.Logger) (*nativeAt
 }
 
 // attachReady maps the storage at path, retrying while one of its
-// instances is not ready yet, up to the ready bound.
+// instances is not ready yet, until the deadline or, without one, the
+// ready bound.
 //
 // Any other refusal of the storage fails at once.
-func attachReady(path string, log *zap.Logger) (*zone.Storage, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), readyTimeout)
+func attachReady(path string, deadline time.Time, log *zap.Logger) (*zone.Storage, error) {
+	if deadline.IsZero() {
+		deadline = time.Now().Add(readyTimeout)
+	}
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
 	defer cancel()
 
 	retry := xbackoff.New(
@@ -93,7 +98,7 @@ func attachReady(path string, log *zap.Logger) (*zone.Storage, error) {
 		return nil
 	})
 	if waitErr != nil {
-		return nil, fmt.Errorf("instances not ready after %s: %w", readyTimeout, attachErr)
+		return nil, fmt.Errorf("instances not ready by %s: %w", deadline.Format(time.RFC3339), attachErr)
 	}
 	return storage, attachErr
 }

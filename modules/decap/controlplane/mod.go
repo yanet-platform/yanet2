@@ -1,6 +1,8 @@
 package decap
 
 import (
+	"time"
+
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -14,6 +16,12 @@ type Option = modulebase.Option
 // WithLog sets the logger for the decap module.
 func WithLog(log *zap.Logger) Option {
 	return modulebase.WithLog(log)
+}
+
+// WithReadyDeadline bounds the decap module's wait for the dataplane's
+// instances when it attaches.
+func WithReadyDeadline(deadline time.Time) Option {
+	return modulebase.WithReadyDeadline(deadline)
 }
 
 // DecapModule is a control-plane component of a module that is responsible for
