@@ -2,6 +2,7 @@ package sshcert_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -16,8 +17,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stripe/krl"
 	"golang.org/x/crypto/ssh"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/grpc/tap"
 	"gopkg.in/yaml.v3"
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth"
@@ -78,8 +82,16 @@ func generateUserCert(t *testing.T, caSigner ssh.Signer, username string, serial
 	return cert, userSigner
 }
 
-// Test_ManagedPolicy_SSHTrustRotation verifies that trust is replaced and
-// then removed without touching the SSH principal or its grants.
+// policyServerStream carries credentials and a cancellable transport context.
+type policyServerStream struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (m *policyServerStream) Context() context.Context { return m.ctx }
+
+// Test_ManagedPolicy_SSHTrustRotation verifies that CA replacement and removal
+// revoke new admissions and active streams with unchanged accounts and grants.
 func Test_ManagedPolicy_SSHTrustRotation(t *testing.T) {
 	t.Parallel()
 	const method = "/test.Service/Read"
@@ -100,12 +112,27 @@ func Test_ManagedPolicy_SSHTrustRotation(t *testing.T) {
 	generation.Publish(t, directory)
 	manager := testpolicy.Start(t, &config)
 
-	admit := func(cert *ssh.Certificate, signer ssh.Signer, nonce string) error {
+	admit := func(cert *ssh.Certificate, signer ssh.Signer, nonce string, update func()) error {
 		t.Helper()
 		token := signCertToken(t, signer, cert, method, time.Now().UnixNano(), nonce)
-		_, _, release, err := manager.Admit(t.Context(), core.Credential{Token: token}, method)
-		if err == nil {
-			release()
+		ctx := metadata.NewIncomingContext(t.Context(), metadata.Pairs(auth.TokenMetadataKey, token))
+		ctx, err := auth.PolicyStreamTap(ctx, &tap.Info{FullMethodName: method})
+		require.NoError(t, err)
+		entered := false
+		err = manager.StreamServerInterceptor()(
+			nil, &policyServerStream{ctx: ctx}, &grpc.StreamServerInfo{FullMethod: method},
+			func(service any, stream grpc.ServerStream) error {
+				entered = true
+				require.NoError(t, stream.Context().Err())
+				if update != nil {
+					update()
+					require.ErrorIs(t, stream.Context().Err(), context.Canceled, "revoked CA left its stream active")
+				}
+				return nil
+			},
+		)
+		if update != nil {
+			require.True(t, entered, "trusted certificate did not reach the stream handler")
 		}
 		return err
 	}
@@ -124,13 +151,15 @@ func Test_ManagedPolicy_SSHTrustRotation(t *testing.T) {
 		require.ErrorContains(t, err, "CA verification failed")
 	}
 
-	require.NoError(t, admit(oldCert, oldSigner, "1"))
-	requireDenied(admit(newCert, newSigner, "2"))
-	publish(ssh.MarshalAuthorizedKey(replacement.PublicKey()))
-	requireDenied(admit(oldCert, oldSigner, "3"))
-	require.NoError(t, admit(newCert, newSigner, "4"))
-	publish(nil)
-	requireDenied(admit(newCert, newSigner, "5"))
+	requireDenied(admit(newCert, newSigner, "1", nil))
+	err := admit(oldCert, oldSigner, "2", func() {
+		publish(ssh.MarshalAuthorizedKey(replacement.PublicKey()))
+	})
+	require.Equal(t, codes.PermissionDenied, status.Code(err))
+	requireDenied(admit(oldCert, oldSigner, "3", nil))
+	err = admit(newCert, newSigner, "4", func() { publish(nil) })
+	require.Equal(t, codes.PermissionDenied, status.Code(err))
+	requireDenied(admit(newCert, newSigner, "5", nil))
 }
 
 // writeCAFile writes an authorized_keys-format CA file containing the

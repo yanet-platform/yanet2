@@ -141,9 +141,9 @@ func (m *admissionLookupContext) Value(key any) any {
 	return m.Context.Value(key)
 }
 
-// Test_ManagedPolicy_StaleHTTPAdmissionNeverReachesHandler verifies that a
-// revision switch invalidates parked admissions even during gRPC dispatch.
-func Test_ManagedPolicy_StaleHTTPAdmissionNeverReachesHandler(t *testing.T) {
+// Test_ManagedPolicy_RevisionFencesAdmissions verifies that a revision switch
+// rejects stale admissions while an admitted unary keeps its original policy.
+func Test_ManagedPolicy_RevisionFencesAdmissions(t *testing.T) {
 	t.Parallel()
 	config := managedAuthConfig(t)
 	directory := config.ManagedPolicy.Directory
@@ -169,4 +169,24 @@ func Test_ManagedPolicy_StaleHTTPAdmissionNeverReachesHandler(t *testing.T) {
 		_, _, err = admittedCall(ctx, manager, policyTestMethod)
 		require.Equal(t, codes.Unauthenticated, status.Code(err), "%v", err)
 	}
+
+	_, err := manager.UnaryServerInterceptor()(
+		park(), nil, &grpc.UnaryServerInfo{FullMethod: policyTestMethod},
+		func(ctx context.Context, request any) (any, error) {
+			next := aliceGeneration(3)
+			next.Identities = "identities: []\n"
+			next.Permissions = emptyGrants
+			next.Publish(t, directory)
+			require.Eventually(t, func() bool {
+				return testpolicy.Metric(manager.Collect(), "auth_policy_active_revision").GetGauge() == 3
+			}, time.Second, 5*time.Millisecond)
+			principal, err := manager.Authenticate(ctx, credential, nil)
+			require.NoError(t, err, "admitted unary lost its identity snapshot")
+			require.Equal(t, "alice", principal.User)
+			return nil, manager.Authorize(ctx, principal, policyTestMethod)
+		},
+	)
+	require.NoError(t, err, "admitted unary lost its permission snapshot")
+	_, _, _, err = manager.Admit(t.Context(), credential, policyTestMethod)
+	require.Equal(t, codes.Unauthenticated, status.Code(err), "new call used the old identity")
 }

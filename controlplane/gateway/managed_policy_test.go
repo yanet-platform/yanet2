@@ -3,24 +3,27 @@ package gateway_test
 import (
 	"bufio"
 	"context"
-	"crypto/rand"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/interop/grpc_testing"
 	"google.golang.org/grpc/status"
+	"google.golang.org/grpc/test/bufconn"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/testutils/tlscert"
@@ -301,10 +304,11 @@ func Test_Gateway_ManagedPolicy_UpdatesLiveConnections(t *testing.T) {
 	require.EqualValues(t, 1, handshakes.Load())
 }
 
+// managedFlowControlService keeps pooled codecs outside the isolated scheduler.
 type managedFlowControlService struct {
 	grpc_testing.UnimplementedTestServiceServer
-	attemptingSend chan struct{}
-	sendDone       chan error
+	firstSent bool
+	sendDone  chan error
 }
 
 func (m *managedFlowControlService) Name() string     { return "flow-control" }
@@ -316,16 +320,20 @@ func (m *managedFlowControlService) RegisterService(server *grpc.Server) {
 	grpc_testing.RegisterTestServiceServer(server, m)
 }
 
+func (m *managedFlowControlService) EmptyCall(ctx context.Context, request *grpc_testing.Empty) (*grpc_testing.Empty, error) {
+	return &grpc_testing.Empty{}, grpc.SetSendCompressor(ctx, encoding.Identity)
+}
+
 func (m *managedFlowControlService) StreamingOutputCall(request *grpc_testing.StreamingOutputCallRequest, stream grpc.ServerStreamingServer[grpc_testing.StreamingOutputCallResponse]) error {
-	// Larger than the receiver's fixed stream window and transport quota.
-	reply := &grpc_testing.StreamingOutputCallResponse{Payload: &grpc_testing.Payload{Body: make([]byte, 2<<20)}}
-	if _, err := rand.Read(reply.Payload.Body); err != nil {
+	if err := grpc.SetSendCompressor(stream.Context(), encoding.Identity); err != nil {
 		return err
 	}
+	// Larger than the receiver's fixed stream window and transport quota.
+	reply := &grpc_testing.StreamingOutputCallResponse{Payload: &grpc_testing.Payload{Body: make([]byte, 2<<20)}}
 	if err := stream.Send(reply); err != nil {
 		return err
 	}
-	close(m.attemptingSend)
+	m.firstSent = true
 	err := stream.Send(reply)
 	m.sendDone <- err
 	return err
@@ -335,41 +343,48 @@ func (m *managedFlowControlService) StreamingOutputCall(request *grpc_testing.St
 // Send blocked by flow control without first letting the client read.
 func Test_Gateway_ManagedPolicy_UnblocksTransportWrite(t *testing.T) {
 	t.Parallel()
-	ca := tlscert.NewCA(t)
-	directory := t.TempDir()
-	method := grpc_testing.TestService_StreamingOutputCall_FullMethodName
-	list := ynpb.Gateway_ListServices_FullMethodName
-	workloadPolicy(1, method, list).Publish(t, directory)
-	service := &managedFlowControlService{attemptingSend: make(chan struct{}), sendDone: make(chan error, 1)}
-	address := startX509Gateway(t, ca, managedX509GatewayConfig(t, ca, directory), gateway.WithBuiltinService(service))
-	conn, handshakes := managedClient(t, ca, address,
-		grpc.WithStaticStreamWindowSize(64<<10), grpc.WithStaticConnWindowSize(1<<20),
-	)
+	synctest.Test(t, func(t *testing.T) {
+		ca := tlscert.NewCA(t)
+		directory := t.TempDir()
+		method := grpc_testing.TestService_StreamingOutputCall_FullMethodName
+		keep := grpc_testing.TestService_EmptyCall_FullMethodName
+		workloadPolicy(1, method, keep).Publish(t, directory)
+		service := &managedFlowControlService{sendDone: make(chan error, 1)}
+		listener := bufconn.Listen(1 << 20)
+		t.Cleanup(func() { _ = listener.Close() })
+		address := startX509Gateway(t, ca, managedX509GatewayConfig(t, ca, directory),
+			gateway.WithListener(listener), gateway.WithBuiltinService(service),
+		)
+		conn, handshakes := managedClient(t, ca, "passthrough:///"+address,
+			grpc.WithContextDialer(func(ctx context.Context, address string) (net.Conn, error) {
+				return listener.DialContext(ctx)
+			}),
+			grpc.WithStaticStreamWindowSize(64<<10), grpc.WithStaticConnWindowSize(1<<20),
+		)
 
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	_, err := grpc_testing.NewTestServiceClient(conn).StreamingOutputCall(ctx,
-		&grpc_testing.StreamingOutputCallRequest{}, grpc.WaitForReady(true),
-	)
-	require.NoError(t, err)
-	select {
-	case <-service.attemptingSend:
-	case <-ctx.Done():
-		t.Fatal("server did not queue its first message")
-	}
-	select {
-	case err := <-service.sendDone:
-		t.Fatalf("second send completed without a window: %v", err)
-	default:
-	}
-	workloadPolicy(2, list).Publish(t, directory)
-	select {
-	case err := <-service.sendDone:
-		require.Equal(t, codes.Canceled, status.Code(err), "revoked transport write: %v", err)
-	case <-ctx.Done():
-		t.Fatal("revocation did not unblock the transport write")
-	}
-	_, err = ynpb.NewGatewayClient(conn).ListServices(ctx, &ynpb.ListServicesRequest{})
-	require.NoError(t, err)
-	require.EqualValues(t, 1, handshakes.Load())
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		_, err := grpc_testing.NewTestServiceClient(conn).StreamingOutputCall(ctx,
+			&grpc_testing.StreamingOutputCallRequest{}, grpc.WaitForReady(true),
+		)
+		require.NoError(t, err)
+		// Quiescence puts the unfinished second send in transport backpressure.
+		synctest.Wait()
+		require.True(t, service.firstSent, "server did not queue its first message")
+		select {
+		case err := <-service.sendDone:
+			t.Fatalf("second send completed without a window: %v", err)
+		default:
+		}
+		workloadPolicy(2, keep).Publish(t, directory)
+		select {
+		case err := <-service.sendDone:
+			require.Equal(t, codes.Canceled, status.Code(err), "revoked transport write: %v", err)
+		case <-ctx.Done():
+			t.Fatal("revocation did not unblock the transport write")
+		}
+		_, err = grpc_testing.NewTestServiceClient(conn).EmptyCall(ctx, &grpc_testing.Empty{})
+		require.NoError(t, err)
+		require.EqualValues(t, 1, handshakes.Load())
+	})
 }
