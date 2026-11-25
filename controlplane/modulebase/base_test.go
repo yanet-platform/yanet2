@@ -2,9 +2,13 @@ package modulebase_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -46,4 +50,55 @@ func Test_NewNativeBase_RefusesMissingInstance(t *testing.T) {
 	_, err := modulebase.NewNativeBase(nativeAttachConfig(path, 1), "decap", "[::1]:0")
 
 	require.ErrorContains(t, err, "no dataplane instance 1")
+}
+
+// Test_NewNativeBase_WaitsForLaterInstance verifies that an attach to a
+// ready instance of a storage whose later instance is not ready yet waits
+// for it and then attaches, as a module does while the dataplane marks its
+// instances ready one after another.
+func Test_NewNativeBase_WaitsForLaterInstance(t *testing.T) {
+	ready := uint32(1)
+	path := ffitest.NewStorage(t, ffitest.StorageTypes{InstanceCount: 2, ReadyInstanceCount: &ready})
+	memory, err := ffi.AttachSharedMemory(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, memory.Detach()) })
+
+	waiting := make(chan struct{}, 1)
+	core, _ := observer.New(zapcore.DebugLevel)
+	log := zap.New(core, zap.Hooks(func(entry zapcore.Entry) error {
+		if entry.Message == "waiting for dataplane instances" {
+			select {
+			case waiting <- struct{}{}:
+			default:
+			}
+		}
+		return nil
+	}))
+	type attached struct {
+		base *modulebase.Base
+		err  error
+	}
+	done := make(chan attached, 1)
+	go func() {
+		base, err := modulebase.NewNativeBase(nativeAttachConfig(path, 0), "decap", "[::1]:0", modulebase.WithLog(log))
+		done <- attached{base, err}
+	}()
+
+	select {
+	case <-waiting:
+	case result := <-done:
+		t.Fatalf("the attach returned before the later instance was ready: %v", result.err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the attach did not wait for the later instance")
+	}
+	require.NoError(t, ffitest.MarkInstanceReady(memory, 1))
+
+	select {
+	case result := <-done:
+		require.NoError(t, result.err)
+		require.NotNil(t, result.base.NativeAgent())
+		require.NoError(t, result.base.Close())
+	case <-time.After(10 * time.Second):
+		t.Fatal("the attach did not return once every instance was ready")
+	}
 }

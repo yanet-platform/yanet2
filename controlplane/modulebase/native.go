@@ -1,15 +1,22 @@
 package modulebase
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/yanet-platform/yanet2/common/go/xbackoff"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/native/agent"
 	"github.com/yanet-platform/yanet2/controlplane/native/zone"
 )
+
+// readyTimeout bounds the wait for every dataplane instance of the storage
+// to be ready, as long as the director waits for its own.
+const readyTimeout = 60 * time.Second
 
 // nativeAttachment is an agent attached without cgo together with the
 // mapping of the storage it lives in.
@@ -27,6 +34,11 @@ type nativeAttachment struct {
 // behind for the caller to release. A bus error on the mapping is left to
 // the process's handler, which the director installs through its own cgo
 // attach before any module attaches.
+//
+// The storage maps only once every instance is ready. The dataplane marks
+// its instances ready one after another once all are set up, so a module
+// attaching as soon as its director's instance is ready waits for the
+// rest, within the bound.
 func attachNative(cfg ffi.AttachConfig, name string, log *zap.Logger) (*nativeAttachment, error) {
 	path := cfg.MemoryPath.Unwrap()
 	instanceID := cfg.InstanceID.Unwrap()
@@ -36,7 +48,7 @@ func attachNative(cfg ffi.AttachConfig, name string, log *zap.Logger) (*nativeAt
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
 
-	storage, err := zone.Attach(path)
+	storage, err := attachReady(path, log)
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach to shared memory %q: %w", path, err)
 	}
@@ -54,6 +66,36 @@ func attachNative(cfg ffi.AttachConfig, name string, log *zap.Logger) (*nativeAt
 		)
 	}
 	return &nativeAttachment{Agent: owner, storage: storage}, nil
+}
+
+// attachReady maps the storage at path, retrying while one of its
+// instances is not ready yet, up to the ready bound.
+//
+// Any other refusal of the storage fails at once.
+func attachReady(path string, log *zap.Logger) (*zone.Storage, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), readyTimeout)
+	defer cancel()
+
+	retry := xbackoff.New(
+		10*time.Millisecond,
+		xbackoff.WithMax(2*time.Second),
+		xbackoff.WithOnRetry(func(_ int, _ time.Duration, err error) {
+			log.Debug("waiting for dataplane instances", zap.Error(err))
+		}),
+	)
+	var storage *zone.Storage
+	var attachErr error
+	waitErr := retry.RunContext(ctx, func() error {
+		storage, attachErr = zone.Attach(path)
+		if errors.Is(attachErr, zone.ErrNotReady) {
+			return attachErr
+		}
+		return nil
+	})
+	if waitErr != nil {
+		return nil, fmt.Errorf("instances not ready after %s: %w", readyTimeout, attachErr)
+	}
+	return storage, attachErr
 }
 
 // Close unmaps the storage.
