@@ -1342,6 +1342,13 @@ cp_config_delete_object(
 		goto error_unlock;
 	}
 
+	// A link stores the type and name cut to their fields, so the scan
+	// below matches them cut the same way.
+	char type[CP_OBJECT_TYPE_LEN];
+	char name[CP_OBJECT_NAME_LEN];
+	strtcpy(type, object_type, sizeof(type));
+	strtcpy(name, object_name, sizeof(name));
+
 	// Refuse to delete an object a module of the published generation
 	// still links: with the object gone, the per-worker
 	// execution-context build for that module would fail and wedge every
@@ -1362,12 +1369,12 @@ cp_config_delete_object(
 		     ++link_idx) {
 			if (!strncmp(
 				    linked_objects[link_idx].type,
-				    object_type,
+				    type,
 				    CP_OBJECT_TYPE_LEN
 			    ) &&
 			    !strncmp(
 				    linked_objects[link_idx].name,
-				    object_name,
+				    name,
 				    CP_OBJECT_NAME_LEN
 			    )) {
 				yanet_error_add_kind(

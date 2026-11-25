@@ -612,6 +612,130 @@ test_cp_module_link_object(struct yanet_shm *shm) {
 	return TEST_SUCCESS;
 }
 
+// Fills the whole buffer but its last byte with a name, NUL-terminated;
+// callers pass a buffer longer than the field the name is stored in.
+static void
+fill_overlong_name(char *buf, size_t size, char fill) {
+	memset(buf, fill, size - 1);
+	buf[size - 1] = '\0';
+}
+
+// Returns a zeroed base module whose memory context is a child of the
+// agent's, bypassing module-type loading.
+static struct cp_module *
+base_module_new(struct agent *agent) {
+	struct cp_module *module = (struct cp_module *)memory_balloc(
+		&agent->memory_context, sizeof(struct cp_module)
+	);
+	if (module == NULL) {
+		return NULL;
+	}
+	memset(module, 0, sizeof(struct cp_module));
+	memory_context_init_from(
+		&module->entity.memory_context,
+		&agent->memory_context,
+		"test-module"
+	);
+	return module;
+}
+
+// Verifies that linking an overlong device name twice finds the link stored
+// with the cut name: the repeat returns its index and appends nothing.
+static int
+test_cp_module_link_device_overlong_name(struct yanet_shm *shm) {
+	yanet_error *err = NULL;
+
+	struct agent *agent = agent_attach(
+		shm,
+		0,
+		"cp-module-link-device-overlong",
+		CP_MODULE_LINK_TEST_MEMORY_LIMIT,
+		&err
+	);
+	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
+
+	struct cp_module *module = base_module_new(agent);
+	TEST_ASSERT_NOT_NULL(module, "module allocation failed");
+
+	char name[CP_DEVICE_NAME_LEN * 2];
+	fill_overlong_name(name, sizeof(name), 'd');
+
+	uint64_t idx;
+	TEST_ASSERT_SUCCESS(
+		cp_module_link_device(module, name, &idx, &err),
+		"link_device(overlong) failed"
+	);
+	uint64_t idx_again;
+	TEST_ASSERT_SUCCESS(
+		cp_module_link_device(module, name, &idx_again, &err),
+		"link_device(overlong) repeat failed"
+	);
+	TEST_ASSERT_EQUAL(
+		(long)idx_again,
+		(long)idx,
+		"repeat link must return the existing index"
+	);
+	TEST_ASSERT_EQUAL(
+		(long)module->device_count, 1L, "device_count must be 1"
+	);
+
+	cp_module_fini(module);
+	memory_bfree(&agent->memory_context, module, sizeof(*module));
+
+	agent_detach(agent);
+	return TEST_SUCCESS;
+}
+
+// Verifies that linking an object with an overlong type and name twice finds
+// the link stored with both cut: the repeat returns its index and appends
+// nothing.
+static int
+test_cp_module_link_object_overlong_name(struct yanet_shm *shm) {
+	yanet_error *err = NULL;
+
+	struct agent *agent = agent_attach(
+		shm,
+		0,
+		"cp-module-link-object-overlong",
+		CP_MODULE_LINK_TEST_MEMORY_LIMIT,
+		&err
+	);
+	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
+
+	struct cp_module *module = base_module_new(agent);
+	TEST_ASSERT_NOT_NULL(module, "module allocation failed");
+
+	char type[CP_OBJECT_TYPE_LEN * 2];
+	char name[CP_OBJECT_NAME_LEN * 2];
+	fill_overlong_name(type, sizeof(type), 't');
+	fill_overlong_name(name, sizeof(name), 'n');
+
+	uint64_t idx;
+	TEST_ASSERT_SUCCESS(
+		cp_module_link_object(module, type, name, &idx, &err),
+		"link_object(overlong) failed"
+	);
+	uint64_t idx_again;
+	TEST_ASSERT_SUCCESS(
+		cp_module_link_object(module, type, name, &idx_again, &err),
+		"link_object(overlong) repeat failed"
+	);
+	TEST_ASSERT_EQUAL(
+		(long)idx_again,
+		(long)idx,
+		"repeat link must return the existing index"
+	);
+	TEST_ASSERT_EQUAL(
+		(long)module->object_count, 1L, "object_count must be 1"
+	);
+
+	cp_module_fini(module);
+	memory_bfree(&agent->memory_context, module, sizeof(*module));
+
+	agent_detach(agent);
+	return TEST_SUCCESS;
+}
+
 static int
 install_device_with_pipeline(
 	struct agent *agent,
@@ -874,6 +998,89 @@ test_module_object_link_missing_fails(struct yanet_shm *shm) {
 	return TEST_SUCCESS;
 }
 
+// Verifies that deleting an object with an overlong name that a published
+// module links is refused as busy and leaves the object published, as for a
+// name that fits.
+static int
+test_delete_overlong_linked_object_refused(struct yanet_shm *shm) {
+	yanet_error *err = NULL;
+
+	struct agent *agent = agent_attach(
+		shm,
+		0,
+		"del-overlong-linked-object",
+		MODULE_OBJECT_LINK_TEST_MEMORY_LIMIT,
+		&err
+	);
+	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
+
+	struct dp_config *dp_config = agent_dp_config(agent);
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+
+	char name[CP_OBJECT_NAME_LEN * 2];
+	fill_overlong_name(name, sizeof(name), 'o');
+
+	struct cp_object *obj = (struct cp_object *)memory_balloc(
+		&agent->memory_context, sizeof(struct cp_object)
+	);
+	TEST_ASSERT_NOT_NULL(obj, "object allocation failed");
+	TEST_ASSERT_SUCCESS(
+		cp_object_init(obj, agent, "test", name, &err),
+		"cp_object_init failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	struct cp_object *objects[] = {obj};
+	TEST_ASSERT_SUCCESS(
+		agent_update_objects(agent, 1, objects, &err),
+		"agent_update_objects failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+
+	struct cp_module *module =
+		forward_module_config_init(agent, "fwd-overlong", &err);
+	TEST_ASSERT_NOT_NULL(module, "forward_module_config_init failed");
+	uint64_t link_idx;
+	TEST_ASSERT_SUCCESS(
+		cp_module_link_object(module, "test", name, &link_idx, &err),
+		"cp_module_link_object failed"
+	);
+	struct cp_module *modules[] = {module};
+	TEST_ASSERT_SUCCESS(
+		cp_config_update_modules(
+			dp_config, cp_config, 1, modules, &err
+		),
+		"update_modules failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+
+	TEST_ASSERT(
+		agent_delete_object(agent, "test", name, &err) != 0,
+		"deleting a linked object must fail"
+	);
+	TEST_ASSERT_EQUAL(
+		(long)yanet_error_kind(err),
+		(long)YANET_ERROR_BUSY,
+		"the refusal must be reported as busy"
+	);
+	TEST_ASSERT_STR_CONTAINS(
+		yanet_error_message(err),
+		"is linked by module 'forward:fwd-overlong'",
+		"the refusal must name the linking module"
+	);
+	yanet_error_free(err);
+	err = NULL;
+
+	TEST_ASSERT_NOT_NULL(
+		cp_config_gen_lookup_object(
+			cp_config_current_gen(cp_config), "test", name
+		),
+		"a refused delete must leave the object published"
+	);
+
+	agent_detach(agent);
+	return TEST_SUCCESS;
+}
+
 // Constructor of the "test" object type, which the harness resolves from
 // this executable: it declares no hook and no prepared buffer.
 struct object *
@@ -933,10 +1140,19 @@ main(void) {
 		res = test_cp_module_link_object(shm);
 	}
 	if (res == TEST_SUCCESS) {
+		res = test_cp_module_link_device_overlong_name(shm);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_cp_module_link_object_overlong_name(shm);
+	}
+	if (res == TEST_SUCCESS) {
 		res = test_module_object_link_ectx(shm);
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_module_object_link_missing_fails(shm);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_delete_overlong_linked_object_refused(shm);
 	}
 
 	dataplane_ut_free(ut);
