@@ -34,3 +34,18 @@ func Test_UpdateModules_RefusesNilModule(t *testing.T) {
 
 	require.Error(t, err)
 }
+
+// Test_DeleteModule_RefusesNameItsFieldCannotHold verifies that a delete
+// naming a module type or name C would cut short is refused before the
+// instance is touched.
+//
+// The instance has no zones, so taking its lock would fault.
+func Test_DeleteModule_RefusesNameItsFieldCannotHold(t *testing.T) {
+	cases := invalidIdentities(len(layout.CpModule{}.Type), len(layout.CpModule{}.Name), "blackhole", "a")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := cpconfig.DeleteModule(&zone.Instance{}, tc.entityType, tc.entityName)
+			require.ErrorIs(t, err, cpconfig.ErrInvalidName)
+		})
+	}
+}

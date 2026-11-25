@@ -100,17 +100,20 @@ func counterInsert(counters *layout.CounterRegistry, name string, size uint64, a
 	return counters.Count - 1, nil
 }
 
-// counterRegister registers a counter of that many values, or returns
-// the index of the counter already registered under the name.
-func counterRegister(counters *layout.CounterRegistry, name string, size uint64) (uint64, error) {
+// RegisterCounter registers a counter of that many values in a module's
+// or an object's counter registry, as counter_registry_register does.
+//
+// It returns the counter's index. A name registered already restarts its
+// age and returns its index, or is refused when its size differs.
+func RegisterCounter(counters *layout.CounterRegistry, name string, size uint64) (uint64, error) {
 	switch {
 	case size == 0:
 		return counterUnplaced, fmt.Errorf("counter %q: zero size", name)
 	case size > counterMaxSize:
 		return counterUnplaced, fmt.Errorf("counter %q: size %d, at most %d", name, size, counterMaxSize)
-	// A name that fills the field leaves no room for its terminator.
-	case len(registry.FieldKey(name, counterNameSize+1)) == counterNameSize:
-		return counterUnplaced, fmt.Errorf("counter %q: name longer than %d bytes", name, counterNameSize-1)
+	}
+	if err := checkNames("counter", nameField{"name", name, counterNameSize}); err != nil {
+		return counterUnplaced, err
 	}
 	if index := counterLookup(counters, name); index != registry.Invalid {
 		counter := &counterNames(counters)[index]

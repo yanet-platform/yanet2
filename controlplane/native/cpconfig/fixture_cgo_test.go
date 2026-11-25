@@ -94,7 +94,8 @@ func newRichFixture(t testing.TB) *publishedFixture {
 		Devices:       []string{"port0", "port1"},
 		Modules:       []string{"blackhole"},
 		DevicesToLoad: []string{"plain"},
-		ObjectsToLoad: []string{"ring"},
+		// Ring loads second, so its type resolves to a nonzero index.
+		ObjectsToLoad: []string{"fwstate_map_v4", "ring"},
 	})
 	cAgent, owner := attachOwner(t, memory, "owner")
 	ring, err := cring.NewObject(cAgent, "events", 64, cring.DefaultPublishBatch)
@@ -106,10 +107,13 @@ func newRichFixture(t testing.TB) *publishedFixture {
 	linked, err := cblackhole.NewModuleConfig(cAgent, "linked")
 	require.NoError(t, err)
 	linkedModule := linked.AsFFIModule().AsRawPtr()
-	require.NoError(t, coracle.ModuleLinkObject(linkedModule, "ring", "events"))
+	_, err = coracle.ModuleLinkObject(linkedModule, "ring", "events")
+	require.NoError(t, err)
 	require.NoError(t, coracle.ModuleRegisterCounter(linkedModule, "rules", "hits", 4))
-	require.NoError(t, coracle.ModuleLinkDevice(linkedModule, "port1"))
-	require.NoError(t, coracle.ModuleLinkDevice(linkedModule, "virt"))
+	for _, device := range []string{"port1", "virt"} {
+		_, err = coracle.ModuleLinkDevice(linkedModule, device)
+		require.NoError(t, err)
+	}
 	require.NoError(t, cAgent.UpdateModules([]ffi.ModuleConfig{plain.AsFFIModule(), linked.AsFFIModule()}))
 
 	require.NoError(t, cAgent.UpdateFunction(ffi.FunctionConfig{
@@ -231,14 +235,34 @@ type shared struct {
 	Counts    map[*uint64]uint64
 }
 
+// configuration is what an update publishes: module configurations or
+// objects.
+type configuration interface {
+	*layout.CpModule | *layout.CpObject
+}
+
+// partsOf returns a configuration's entity, its counter registries and
+// its free through C.
+//
+// Every test object is of the test object size.
+func partsOf[C configuration](config C) (*layout.CpEntity, []*layout.CounterRegistry, func()) {
+	switch config := any(config).(type) {
+	case *layout.CpModule:
+		return &config.Entity, counterRegistries(config), func() { coracle.ModuleDestroy(unsafe.Pointer(config)) }
+	case *layout.CpObject:
+		return &config.Entity, objectRegistries(config), func() { coracle.ObjectDestroy(unsafe.Pointer(config), objectSize) }
+	}
+	panic("a configuration is a module or an object")
+}
+
 // sharedState reads the shared state of the fixture's instance and of
 // the configurations an update publishes.
-func sharedState(memory *publishedFixture, modules ...*layout.CpModule) shared {
+func sharedState[C configuration](memory *publishedFixture, configs ...C) shared {
 	cp := memory.Instance().Cp
 	gen := cp.CpConfigGen.Get()
 	state := shared{
 		ZoneFree:  shmalloc.FreeSize(&cp.BlockAllocator),
-		AgentFree: agentFreeWithout(memory, modules...),
+		AgentFree: agentFreeWithout(memory, configs...),
 		Published: gen,
 		Header:    bytes.Clone(bytesOf(gen)),
 		Counts:    map[*uint64]uint64{},
@@ -247,8 +271,9 @@ func sharedState(memory *publishedFixture, modules ...*layout.CpModule) shared {
 	for agent := range agentsOf(cp) {
 		count(&agent.LoadedEntityCount)
 	}
-	for _, module := range modules {
-		count(&module.Entity.ConfigItem.Refcnt)
+	for _, config := range configs {
+		entity, _, _ := partsOf(config)
+		count(&entity.ConfigItem.Refcnt)
 	}
 	registries := []*layout.Registry{
 		&gen.ModuleRegistry.EntityRegistry.Registry,
@@ -310,7 +335,7 @@ func agentsOf(cp *layout.CpConfig) iter.Seq[*layout.Agent] {
 // it after a failed update returns as much as destroying it before. The
 // destruction writes only to the agents and their arenas, which are kept
 // and put back instead of the whole storage.
-func agentFreeWithout(memory *publishedFixture, modules ...*layout.CpModule) map[*layout.Agent]uintptr {
+func agentFreeWithout[C configuration](memory *publishedFixture, configs ...C) map[*layout.Agent]uintptr {
 	var regions [][]byte
 	for agent := range agentsOf(memory.Instance().Cp) {
 		regions = append(regions, bytesOf(agent))
@@ -329,8 +354,9 @@ func agentFreeWithout(memory *publishedFixture, modules ...*layout.CpModule) map
 			coracle.Restore(region, images[idx], runs[idx])
 		}
 	}()
-	for _, module := range modules {
-		coracle.ModuleDestroy(unsafe.Pointer(module))
+	for _, config := range configs {
+		_, _, destroy := partsOf(config)
+		destroy()
 	}
 	free := map[*layout.Agent]uintptr{}
 	for agent := range agentsOf(memory.Instance().Cp) {
@@ -414,11 +440,12 @@ func requireIndexed(t testing.TB, counters *layout.CounterRegistry) {
 //
 // The configurations stay linked, and destroying them returns their
 // agents' memory as it did before the update.
-func requireLeftAsFound(t testing.TB, before shared, memory *publishedFixture, modules ...*layout.CpModule) {
+func requireLeftAsFound[C configuration](t testing.TB, before shared, memory *publishedFixture, configs ...C) {
 	t.Helper()
-	after := sharedState(memory, modules...)
-	for _, module := range modules {
-		for _, counters := range counterRegistries(module) {
+	after := sharedState(memory, configs...)
+	for _, config := range configs {
+		_, registries, _ := partsOf(config)
+		for _, counters := range registries {
 			requireIndexed(t, counters)
 		}
 	}

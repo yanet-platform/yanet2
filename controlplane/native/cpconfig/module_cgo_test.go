@@ -15,6 +15,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/native/agent"
 	"github.com/yanet-platform/yanet2/controlplane/native/cpconfig"
+	"github.com/yanet-platform/yanet2/controlplane/native/internal/coracle"
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
 	"github.com/yanet-platform/yanet2/controlplane/native/nativetest"
 	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
@@ -103,4 +104,130 @@ func Test_NewBlackhole_FailureFreesEverything(t *testing.T) {
 			require.True(t, owner.Agent.MemoryContext.FirstChild.IsNil(), "a failed configuration leaves no memory context")
 		})
 	}
+}
+
+// Test_FreeBlackhole_MatchesC verifies that freeing an unpublished
+// blackhole configuration from Go leaves the storage as C's typed free
+// does.
+//
+// A configuration that links objects and devices and counts into a
+// runtime registry gives back every block of them.
+func Test_FreeBlackhole_MatchesC(t *testing.T) {
+	cases := []struct {
+		name string
+		// links is whether the configuration links an object, a device
+		// and a runtime registry.
+		links bool
+	}{
+		{"header only", false},
+		{"linked objects, devices and runtime counters", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			memory := newPublishedFixture(t)
+			config, err := cblackhole.NewModuleConfig(memory.cAgent, "r")
+			require.NoError(t, err)
+			module := (*layout.CpModule)(config.AsFFIModule().AsRawPtr())
+			if tc.links {
+				_, err = cpconfig.LinkObject(module, "ring", "state")
+				require.NoError(t, err)
+				_, err = cpconfig.LinkDevice(module, "port0")
+				require.NoError(t, err)
+				require.NoError(t, coracle.ModuleRegisterCounter(unsafe.Pointer(module), "rules", "hits", 4))
+			}
+
+			memory.CompareWithC(
+				t,
+				func() { require.NoError(t, config.Free()) },
+				func() { require.NoError(t, cpconfig.FreeBlackhole(module)) },
+			)
+		})
+	}
+}
+
+// Test_FreeBlackhole_ReleaseThenFreeMatchesC verifies that a blackhole
+// configuration only a pinned retired generation holds is refused until
+// the pin is released, and then freed as C frees it.
+func Test_FreeBlackhole_ReleaseThenFreeMatchesC(t *testing.T) {
+	memory := newPublishedFixture(t)
+	instance := memory.Instance()
+	config, err := cblackhole.NewModuleConfig(memory.cAgent, "r")
+	require.NoError(t, err)
+	require.NoError(t, memory.cAgent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}))
+	pinned, err := instance.Pin()
+	require.NoError(t, err)
+	replacement, err := cblackhole.NewModuleConfig(memory.cAgent, "r")
+	require.NoError(t, err)
+	require.NoError(t, memory.cAgent.UpdateModules([]ffi.ModuleConfig{replacement.AsFFIModule()}))
+	module := (*layout.CpModule)(config.AsFFIModule().AsRawPtr())
+	require.ErrorIs(t, cpconfig.FreeBlackhole(module), cpconfig.ErrStillReferenced)
+
+	memory.CompareWithC(
+		t,
+		func() {
+			coracle.GenRelease(unsafe.Pointer(instance.Cp), unsafe.Pointer(pinned.Gen))
+			require.NoError(t, config.Free())
+		},
+		func() {
+			pinned.Release()
+			require.NoError(t, cpconfig.FreeBlackhole(module))
+		},
+	)
+}
+
+// Test_LinkDevice_MatchesC verifies that linking devices to a module from
+// Go leaves the storage and the device indexes as cp_module_link_device
+// does.
+//
+// The device named "" every module links comes first, and linking a
+// device a second time returns its first index.
+func Test_LinkDevice_MatchesC(t *testing.T) {
+	memory := nativetest.NewFixture(t, dataplaneut.Config{WorkerCount: 1, Modules: []string{"blackhole"}})
+	cAgent, owner := attachOwner(t, memory, "owner")
+	devices := []string{"port0", "virt", "port0", ""}
+	var cIndexes, goIndexes []uint64
+
+	memory.CompareWithC(
+		t,
+		func() {
+			config, err := cblackhole.NewModuleConfig(cAgent, "linking")
+			require.NoError(t, err)
+			for _, device := range devices {
+				index, err := coracle.ModuleLinkDevice(config.AsFFIModule().AsRawPtr(), device)
+				require.NoError(t, err)
+				cIndexes = append(cIndexes, index)
+			}
+		},
+		func() {
+			module, err := cpconfig.NewBlackhole(owner, "linking")
+			require.NoError(t, err)
+			for _, device := range devices {
+				index, err := cpconfig.LinkDevice(module, device)
+				require.NoError(t, err)
+				goIndexes = append(goIndexes, index)
+			}
+		},
+	)
+	require.Equal(t, []uint64{1, 2, 1, 0}, cIndexes)
+	require.Equal(t, cIndexes, goIndexes)
+}
+
+// Test_LinkDevice_AgentMemoryFailureKeepsLinks verifies that a link the
+// agent has no memory for fails, leaving the module's devices and the
+// agent's memory as they were.
+func Test_LinkDevice_AgentMemoryFailureKeepsLinks(t *testing.T) {
+	memory := nativetest.NewFixture(t, dataplaneut.Config{WorkerCount: 1, Modules: []string{"blackhole"}})
+	_, owner := attachOwner(t, memory, "owner")
+	module, err := cpconfig.NewBlackhole(owner, "linking")
+	require.NoError(t, err)
+	devices := module.Devices.Get()
+	nativetest.LeaveOnly(t, &owner.Agent.BlockAllocator)
+	free := shmalloc.FreeSize(&owner.Agent.BlockAllocator)
+
+	_, err = cpconfig.LinkDevice(module, "port0")
+
+	require.ErrorIs(t, err, shmalloc.ErrNoMemory)
+	require.Same(t, devices, module.Devices.Get(), "the module keeps its devices")
+	require.Equal(t, uint64(1), module.DeviceCount)
+	require.Equal(t, free, shmalloc.FreeSize(&owner.Agent.BlockAllocator), "the agent's free bytes")
 }

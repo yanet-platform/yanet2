@@ -181,9 +181,15 @@ func acquire(registry *layout.Registry) (uint64, bool) {
 
 // Replace puts an item in the slot of its key, or in an empty slot, as
 // registry_replace does; the displaced item loses the slot's reference.
+//
+// A nil item deletes the item of the key, returning its slot to the empty
+// ones, and fails when the key has none.
 func Replace(registry *layout.Registry, hash ItemHash, keyHash uint64, match Match, item *layout.RegistryItem) bool {
 	index, found := Lookup(registry, keyHash, match)
 	if !found {
+		if item == nil {
+			return false
+		}
 		var ok bool
 		if index, ok = acquire(registry); !ok {
 			return false
@@ -195,14 +201,20 @@ func Replace(registry *layout.Registry, hash ItemHash, keyHash uint64, match Mat
 		}
 	}
 	old := Item(registry, index)
-	atomic.AddUint64(&item.Refcnt, 1)
-	slots(registry)[index].Set(item)
+	if item != nil {
+		atomic.AddUint64(&item.Refcnt, 1)
+		slots(registry)[index].Set(item)
+	} else {
+		pushEmpty(registry, index)
+	}
 	// The index holds a slot for every slot of the registry, and the
 	// displaced item's entry is there to remove.
 	if old != nil {
 		_ = indexRemove(&registry.KeyIndex, fold(hash(old)), uint32(index))
 	}
-	_ = IndexInsert(&registry.KeyIndex, fold(hash(item)), uint32(index))
+	if item != nil {
+		_ = IndexInsert(&registry.KeyIndex, fold(hash(item)), uint32(index))
+	}
 	if old != nil {
 		atomic.AddUint64(&old.Refcnt, ^uint64(0))
 	}

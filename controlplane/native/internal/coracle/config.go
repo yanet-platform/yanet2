@@ -19,25 +19,6 @@ coracle_module_destroy(struct cp_module *module) {
 }
 
 static int
-coracle_module_link_object(
-	struct cp_module *module,
-	const char *type,
-	const char *name,
-	yanet_error **err
-) {
-	uint64_t index;
-	return cp_module_link_object(module, type, name, &index, err);
-}
-
-static int
-coracle_module_link_device(
-	struct cp_module *module, const char *name, yanet_error **err
-) {
-	uint64_t index;
-	return cp_module_link_device(module, name, &index, err);
-}
-
-static int
 coracle_module_register_counter(
 	struct cp_module *module,
 	const char *tag,
@@ -112,24 +93,26 @@ func ModuleDestroy(module unsafe.Pointer) {
 }
 
 // ModuleLinkObject runs cp_module_link_object, declaring that a module
-// links the object of a type and name.
-func ModuleLinkObject(module unsafe.Pointer, objectType, name string) error {
+// links the object of a type and name, and returns the link's index.
+func ModuleLinkObject(module unsafe.Pointer, objectType, name string) (uint64, error) {
 	cType, cName := C.CString(objectType), C.CString(name)
 	defer C.free(unsafe.Pointer(cType))
 	defer C.free(unsafe.Pointer(cName))
+	var index C.uint64_t
 	var cErr *C.yanet_error
-	rc := C.coracle_module_link_object((*C.struct_cp_module)(module), cType, cName, &cErr)
-	return failure(rc, cErr)
+	rc := C.cp_module_link_object((*C.struct_cp_module)(module), cType, cName, &index, &cErr)
+	return uint64(index), failure(rc, cErr)
 }
 
 // ModuleLinkDevice runs cp_module_link_device, adding a device to the
-// devices a module names.
-func ModuleLinkDevice(module unsafe.Pointer, name string) error {
+// devices a module names, and returns the device's index.
+func ModuleLinkDevice(module unsafe.Pointer, name string) (uint64, error) {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
+	var index C.uint64_t
 	var cErr *C.yanet_error
-	rc := C.coracle_module_link_device((*C.struct_cp_module)(module), cName, &cErr)
-	return failure(rc, cErr)
+	rc := C.cp_module_link_device((*C.struct_cp_module)(module), cName, &index, &cErr)
+	return uint64(index), failure(rc, cErr)
 }
 
 // ModuleRegisterCounter registers a counter of that many values in a

@@ -715,13 +715,8 @@ func (m *build) lookupPipeline(name string) *layout.CpPipeline {
 // lookupObject returns the registry slot of the object of a type and
 // name in the generation, as cp_config_gen_lookup_object_index does.
 func lookupObject(gen *layout.CpConfigGen, objectType, name string) (uint64, bool) {
-	nameKey := registry.FieldKey(name, len(layout.CpObject{}.Name))
-	typeKey := registry.FieldKey(objectType, len(layout.CpObject{}.Type))
 	return registry.Lookup(
-		&gen.ObjectRegistry.EntityRegistry.Registry, registry.HashNamePair(nameKey, typeKey),
-		func(item *layout.RegistryItem) bool {
-			object := registry.Container[layout.CpObject](item, 0)
-			return shm.Equal(object.Type[:], typeKey) && shm.Equal(object.Name[:], nameKey)
-		},
+		&gen.ObjectRegistry.EntityRegistry.Registry, objectKeyHash(objectType, name),
+		objectMatch(objectType, name),
 	)
 }

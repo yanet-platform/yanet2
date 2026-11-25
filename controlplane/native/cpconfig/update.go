@@ -31,13 +31,19 @@ var (
 	// ErrNeedsDelivery marks an update to a dataplane that runs worker
 	// rounds on request made without a delivery.
 	ErrNeedsDelivery = errors.New("update needs a delivery")
+	// ErrNotFound marks a delete of a configuration the published
+	// generation does not hold; C refuses it as not found.
+	ErrNotFound = errors.New("not found")
+	// ErrObjectLinked marks a delete of an object a module of the
+	// published generation links; C refuses it as busy.
+	ErrObjectLinked = errors.New("linked by a published module")
 )
 
 // Deliver hands a published generation's contexts to the workers of a
 // dataplane that runs worker rounds on request, under its round lock.
 type Deliver func(dp *layout.DpConfig, gen *layout.CpConfigGen)
 
-// UpdateOption configures UpdateModules.
+// UpdateOption configures an update or a delete.
 type UpdateOption func(*updateOptions)
 
 type updateOptions struct {
@@ -88,28 +94,57 @@ func UpdateModules(instance *zone.Instance, modules []*layout.CpModule, options 
 	})
 }
 
-// change is what an update publishes: its configurations, of one kind,
-// and how they go into the generation.
+// DeleteModule publishes a generation without the module configuration
+// of a type and name, as cp_config_delete_module does.
+//
+// It returns once every worker runs the generation. A type or name its
+// field cannot hold whole is refused before the instance is touched. A
+// module the published generation does not hold is refused as not found
+// after the copy, which is freed, and one a chain still runs fails the
+// contexts' build; neither publishes anything.
+func DeleteModule(instance *zone.Instance, moduleType, name string, options ...UpdateOption) error {
+	if err := checkModuleNames(moduleType, name); err != nil {
+		return err
+	}
+	return publish(instance, options, change{
+		Put: func(m *build) error {
+			if !registry.ReplaceEntity(
+				&m.gen.ModuleRegistry.EntityRegistry, moduleHash, moduleKeyHash(moduleType, name),
+				moduleMatch(moduleType, name), nil,
+			) {
+				return fmt.Errorf("delete module %s:%s: %w", moduleType, name, ErrNotFound)
+			}
+			return nil
+		},
+	})
+}
+
+// change is what an update or a delete publishes and how it goes into
+// the generation.
 type change struct {
+	// The configurations an update publishes are all of one kind; a delete
+	// publishes none.
 	Kind  string
 	Count int
 	// Entity reads a configuration's owner and identity, under the agent
 	// lock or with the owner held.
 	Entity func(idx int) entityRef
-	// Put puts the configurations into the copy of the published
-	// generation.
+	// Check, when set, refuses the change against the published
+	// generation before it is copied.
+	Check func(old *layout.CpConfigGen) error
+	// Put puts the change into the copy of the published generation.
 	Put func(m *build) error
 }
 
 // publish publishes a generation that carries a change, in C's lock
 // order, and retires the generation it replaces.
 //
-// Under the configuration lock it holds the change's agents, copies the
-// published generation, puts the change into the copy, builds the
-// workers' contexts and installs the result. A failed step frees the
-// generation it built and publishes nothing. Like every hold of the
-// configuration lock in C, it sweeps the superseded agents before
-// leaving, failed builds included.
+// Under the configuration lock it holds the agents of an update's
+// configurations, checks the change, copies the published generation,
+// puts the change into the copy, builds the workers' contexts and
+// installs the result. A failed step frees the generation it built and
+// publishes nothing. Like every hold of the configuration lock in C, it
+// sweeps the superseded agents before leaving, failed builds included.
 func publish(instance *zone.Instance, options []UpdateOption, update change) error {
 	var opts updateOptions
 	for _, option := range options {
@@ -124,12 +159,21 @@ func publish(instance *zone.Instance, options []UpdateOption, update change) err
 	defer lock.Unlock()
 	defer sweepAgents(cp)
 
-	owners, err := holdEntities(cp, update.Kind, update.Count, update.Entity)
-	if err != nil {
-		return err
+	var owners []*layout.Agent
+	if update.Entity != nil {
+		var err error
+		if owners, err = holdEntities(cp, update.Kind, update.Count, update.Entity); err != nil {
+			return err
+		}
 	}
 
 	old := cp.CpConfigGen.Get()
+	if update.Check != nil {
+		if err := update.Check(old); err != nil {
+			releaseOwners(owners)
+			return err
+		}
+	}
 	m := newBuild(cp, old)
 	if err := m.generation(update.Put); err != nil {
 		releaseOwners(owners)

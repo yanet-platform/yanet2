@@ -3,6 +3,7 @@
 package cpconfig
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -30,6 +31,23 @@ func NewBlackhole(owner *agent.Agent, name string) (*layout.CpModule, error) {
 		return nil, err
 	}
 	return module, nil
+}
+
+// FreeBlackhole frees a blackhole module configuration no generation
+// holds, as blackhole_module_config_free does.
+//
+// One a generation holds is refused as still referenced, and nothing is
+// freed. The release of the agent's hold reclaims the agent when a later
+// attach superseded it during the free.
+func FreeBlackhole(module *layout.CpModule) error {
+	if err := TryDestroyModule(module); err != nil {
+		return err
+	}
+	owner := module.Entity.Agent.Get()
+	finiModule(module)
+	registry.FreeNode(&owner.MemoryContext, module, 0)
+	DestroyReleased(owner)
+	return nil
 }
 
 // InitModule prepares the header every module configuration opens with,
@@ -70,29 +88,44 @@ func initModule(module *layout.CpModule, owner *agent.Agent, moduleType, name st
 	return nil
 }
 
-// checkModuleNames refuses a module type or name its field cannot hold
-// whole.
+// ErrInvalidName marks a type or name its field cannot hold whole.
+var ErrInvalidName = errors.New("invalid name")
+
+// nameField is a type or name given for a C character field of that
+// size.
+type nameField struct {
+	Kind  string
+	Value string
+	Size  int
+}
+
+// checkNames refuses a type or name its field cannot hold whole.
 //
-// C would cut it short, and a NUL would end it early, so the module would
-// answer to another identity.
-func checkModuleNames(moduleType, name string) error {
-	fields := []struct {
-		Kind  string
-		Value string
-		Size  int
-	}{
-		{"type", moduleType, len(layout.CpModule{}.Type)},
-		{"name", name, len(layout.CpModule{}.Name)},
-	}
+// C would cut it short, and a NUL would end it early, so the entity would
+// answer to another identity and a link would not find its own copy.
+func checkNames(entity string, fields ...nameField) error {
 	for _, field := range fields {
 		if len(field.Value) >= field.Size {
-			return fmt.Errorf("module %s %q is longer than %d bytes", field.Kind, field.Value, field.Size-1)
+			return fmt.Errorf(
+				"%w: %s %s %q is longer than %d bytes",
+				ErrInvalidName, entity, field.Kind, field.Value, field.Size-1,
+			)
 		}
 		if strings.IndexByte(field.Value, 0) >= 0 {
-			return fmt.Errorf("module %s %q contains a NUL byte", field.Kind, field.Value)
+			return fmt.Errorf("%w: %s %s %q contains a NUL byte", ErrInvalidName, entity, field.Kind, field.Value)
 		}
 	}
 	return nil
+}
+
+// checkModuleNames refuses a module type or name its field cannot hold
+// whole.
+func checkModuleNames(moduleType, name string) error {
+	return checkNames(
+		"module",
+		nameField{"type", moduleType, len(layout.CpModule{}.Type)},
+		nameField{"name", name, len(layout.CpModule{}.Name)},
+	)
 }
 
 // initModuleCounters registers the counters every module has and links
@@ -110,7 +143,7 @@ func initModuleCounters(module *layout.CpModule) error {
 		{"pending_output", &module.PendingOutputCounterId},
 	}
 	for _, counter := range counters {
-		id, err := counterRegister(&module.CounterRegistry, counter.Name, 2)
+		id, err := RegisterCounter(&module.CounterRegistry, counter.Name, 2)
 		*counter.ID = id
 		if err != nil {
 			return fmt.Errorf(
@@ -161,8 +194,20 @@ func lookupDataplaneModule(dp *layout.DpConfig, name string) (uint64, bool) {
 	return 0, false
 }
 
-// linkDevice returns the index of the named device among the module's
+// LinkDevice returns the index of the named device among the module's
 // devices, appending it when missing, as cp_module_link_device does.
+//
+// The module's handler finds the device's targets at that index in its
+// context. A name its field cannot hold whole is refused before the
+// module is touched.
+func LinkDevice(module *layout.CpModule, name string) (uint64, error) {
+	if err := checkNames("device", nameField{"name", name, len(layout.CpModuleDevice{}.Name)}); err != nil {
+		return 0, err
+	}
+	return linkDevice(module, name)
+}
+
+// linkDevice is LinkDevice for a name already checked.
 func linkDevice(module *layout.CpModule, name string) (uint64, error) {
 	for idx, device := range registry.Slice(module.Devices.Get(), module.DeviceCount) {
 		if shm.Equal(device.Name[:], registry.FieldKey(name, len(device.Name))) {
