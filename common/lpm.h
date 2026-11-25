@@ -24,8 +24,10 @@
 
 #define LPM_VALUE_INVALID 0xffffffff
 #define LPM_VALUE_FLAG 0x00000001
-#define LPM_VALUE_SET(value) ((value << 1) | LPM_VALUE_FLAG)
-#define LPM_VALUE_GET(value) (value >> 1)
+// A leaf keeps its 32-bit value shifted past the flag bit, so the shift is
+// done in 64 bits to keep the value's top bit.
+#define LPM_VALUE_SET(value) ((((uint64_t)(value)) << 1) | LPM_VALUE_FLAG)
+#define LPM_VALUE_GET(value) ((value) >> 1)
 #define LPM_CHUNK_SIZE 16
 // Max LPM key size in bytes (IPv6 address).
 #define LPM_KEY_SIZE_MAX 16

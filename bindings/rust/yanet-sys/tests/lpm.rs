@@ -25,7 +25,7 @@ const PAGE: usize = PAGE_SLOTS * 8;
 
 /// Leaf slot of `value`, as `LPM_VALUE_SET` stores it.
 const fn leaf(value: u32) -> u64 {
-    ((value << 1) | bindings::LPM_VALUE_FLAG) as u64
+    ((value as u64) << 1) | bindings::LPM_VALUE_FLAG as u64
 }
 
 /// Points the relative slot at `slot` to `target`.

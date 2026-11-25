@@ -32,7 +32,7 @@ type Page = [u64; 256];
 /// An inclusive range of keys of `K` big-endian bytes and the value it maps
 /// to, as the C insert takes them.
 ///
-/// Values keep the C semantics documented on [`Lpm::lookup`]: bit 31 is lost.
+/// Values keep the C semantics documented on [`Lpm::lookup`].
 ///
 /// The first key must not exceed the last: the C insert does not check it and
 /// a reversed range would wrap round, so a build refuses one. Ranges are
@@ -135,10 +135,9 @@ impl<const K: usize> Lpm<K> {
     /// value of the last visited slot is returned shifted past the flag, as C
     /// does when the key ends on an intermediate node.
     ///
-    /// Values keep the C semantics. A stored value loses bit 31: the C insert
-    /// stores `LPM_VALUE_SET(value)`, `(value << 1) | LPM_VALUE_FLAG` on a
-    /// 32-bit value (`common/lpm.h:26`, `:247`), and the lookup shifts it back,
-    /// so a value inserted with bit 31 set reads back without it.
+    /// Values keep the C semantics: the C insert stores a value shifted past
+    /// the flag in a 64-bit slot, so every 32-bit value reads back whole,
+    /// except the invalid mark, which reads as `None`.
     #[doc(alias = "lpm_lookup")]
     #[inline(always)]
     pub fn lookup<'g>(&'g self, cx: &impl Resolve<'g>, key: impl LpmKey<K>) -> Option<u32> {
