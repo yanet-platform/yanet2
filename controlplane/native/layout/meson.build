@@ -81,6 +81,7 @@ if native_layout_archs.has_key(host_machine.cpu_family()) and import('fs').is_sa
     'agent',
     'cp_module',
     'dp_worker',
+    'lpm',
   ]
   # The enumerations of c/types.c that carry the values a native attach
   # expects.

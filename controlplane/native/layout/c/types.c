@@ -6,6 +6,7 @@
 // dataplane. The structures reach DPDK through pointers only, which the
 // views keep opaque, so DPDK's own headers take no part in the layouts.
 
+#include "common/lpm.h"
 #include "lib/controlplane/agent/agent.h"
 #include "lib/controlplane/config/cp_module.h"
 #include "lib/controlplane/config/zone.h"
