@@ -16,8 +16,8 @@ service RingService {
   //
   // By default an existing name returns AlreadyExists. When existing rings
   // are allowed, a matching managed ring succeeds without publication or
-  // changes to records, readers or leases. Parameter conflicts return
-  // AlreadyExists; a published but unmanaged name returns FailedPrecondition.
+  // changes to records, readers or leases. Managed parameter conflicts return
+  // AlreadyExists; a published but unmanaged name is replaced by an empty ring.
   rpc CreateRing(CreateRingRequest) returns (CreateRingResponse);
   // ListRings returns every registered ring, sorted by name.
   //
@@ -66,11 +66,12 @@ message CreateRingRequest {
   //
   // The range is 1 to 1024. A value of 0 selects the default of 8.
   uint32 publish_batch = 3;
-  // allow_existing permits a matching locally managed ring to succeed.
+  // allow_existing preserves a managed match or replaces an unmanaged ring.
   //
-  // Capacity and effective publish batch must match exactly. A match keeps
-  // the existing handle and state without publication. The default false
-  // rejects every existing name; external publications are never adopted.
+  // A managed ring must match capacity and effective publish batch exactly.
+  // A match keeps its handle and state without publication. The default false
+  // rejects every existing name. An unmanaged publication is replaced with
+  // a new empty ring using the requested parameters, not adopted.
   bool allow_existing = 4;
 }
 

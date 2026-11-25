@@ -403,7 +403,7 @@ func Test_RingService_CreateRing_AllowExistingReclaimsDeferred(t *testing.T) {
 	}{
 		{name: "matching managed ring", capacity: 64, code: codes.OK},
 		{name: "managed parameter conflict", capacity: 128, code: codes.AlreadyExists},
-		{name: "unmanaged publication", unmanaged: true, capacity: 64, code: codes.FailedPrecondition},
+		{name: "unmanaged publication refused", unmanaged: true, capacity: 64, code: codes.AlreadyExists},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fixture := newRingFixture(t)
@@ -429,7 +429,7 @@ func Test_RingService_CreateRing_AllowExistingReclaimsDeferred(t *testing.T) {
 			reference.Release()
 
 			_, err = fixture.client.CreateRing(t.Context(), &ringpb.CreateRingRequest{
-				Name: "target", Capacity: tc.capacity, AllowExisting: true,
+				Name: "target", Capacity: tc.capacity, AllowExisting: !tc.unmanaged,
 			})
 			require.Equal(t, tc.code, status.Code(err))
 			require.Equal(t, baseline, fixture.agent.BlockAllocatorFreeSize())
@@ -622,27 +622,87 @@ func Test_RingService_CreateRing_AllowExistingConflictPreservesRing(t *testing.T
 	}
 }
 
-// Test_RingService_CreateRing_AllowExistingUnmanagedRingRefused verifies that
-// even a compatible external publication cannot be adopted or replaced.
-func Test_RingService_CreateRing_AllowExistingUnmanagedRingRefused(t *testing.T) {
+// Test_RingService_CreateRing_AllowExistingUnmanagedRingReplaced verifies that
+// replay registers a fresh empty ring instead of preserving external records.
+func Test_RingService_CreateRing_AllowExistingUnmanagedRingReplaced(t *testing.T) {
 	fixture := newRingFixture(t)
 	external, err := cring.NewObject(fixture.agent, "external", 128, cring.DefaultPublishBatch)
 	require.NoError(t, err)
 	require.NoError(t, external.Publish())
 	t.Cleanup(func() {
-		_ = cring.DeleteObject(fixture.agent, "external")
 		_ = external.Free()
 	})
-	baseline := fixture.agent.BlockAllocatorFreeSize()
+	oldWriter, err := ringtest.NewPublishedWriter(fixture.agent, "external", 0)
+	require.NoError(t, err)
+	_, err = oldWriter.WriteRecord([]byte("old-record"))
+	require.NoError(t, err)
+
 	_, err = fixture.client.CreateRing(t.Context(), &ringpb.CreateRingRequest{Name: "external", Capacity: 128, AllowExisting: true})
-	require.Equal(t, codes.FailedPrecondition, status.Code(err))
-	require.ErrorContains(t, err, "not managed by this service")
-	require.Empty(t, fixture.list(t))
-	require.Equal(t, baseline, fixture.agent.BlockAllocatorFreeSize())
+	require.NoError(t, err)
+	require.Equal(t, []string{"external/128/8"}, fixture.list(t))
+	handle, ok := fixture.service.LookupHandle("external")
+	require.True(t, ok)
+	lease, err := fixture.service.Acquire("external", handle)
+	require.NoError(t, err)
+	defer lease.Release()
 	writer, err := ringtest.NewPublishedWriter(fixture.agent, "external", 0)
 	require.NoError(t, err)
-	require.Equal(t, external.AsRawPtr(), writer.Object())
+	require.NotEqual(t, external.AsRawPtr(), writer.Object())
+	require.Equal(t, lease.Object().AsRawPtr(), writer.Object())
+	readers, err := lease.Object().OpenReaders()
+	require.NoError(t, err)
+	require.Empty(t, readers[0].Read(1024))
 	requireRingUsable(t, fixture.agent, "external", 128)
+}
+
+// Test_RingService_CreateRing_UnmanagedReplacementFailurePreservesRing verifies
+// that allocation and publication failures leave the external ring intact.
+func Test_RingService_CreateRing_UnmanagedReplacementFailurePreservesRing(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		exhaustPool bool
+		capacity    uint64
+	}{
+		{name: "allocation failure", capacity: 32 << 20},
+		{name: "publication failure", exhaustPool: true, capacity: 128},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := newRingFixture(t)
+			external, err := cring.NewObject(fixture.agent, "external", 128, cring.DefaultPublishBatch)
+			require.NoError(t, err)
+			require.NoError(t, external.Publish())
+			t.Cleanup(func() {
+				_ = cring.DeleteObject(fixture.agent, "external")
+				_ = external.Free()
+			})
+			if tc.exhaustPool {
+				filler, err := fixture.shm.AgentAttach("replacement-cp-filler", 0, datasize.B)
+				require.NoError(t, err)
+				for size := 64 * datasize.MB; size > 0; {
+					if filler.Extend(size) != nil {
+						size /= 2
+					}
+				}
+			}
+			baseline := fixture.agent.BlockAllocatorFreeSize()
+
+			_, err = fixture.client.CreateRing(t.Context(), &ringpb.CreateRingRequest{
+				Name: "external", Capacity: tc.capacity, AllowExisting: true,
+			})
+			require.Equal(t, codes.Internal, status.Code(err))
+			if tc.exhaustPool {
+				require.ErrorContains(t, err, "failed to publish ring")
+			} else {
+				require.ErrorContains(t, err, "failed to create ring")
+			}
+			require.Empty(t, fixture.list(t))
+			require.Equal(t, baseline, fixture.agent.BlockAllocatorFreeSize())
+			writer, err := ringtest.NewPublishedWriter(fixture.agent, "external", 0)
+			require.NoError(t, err)
+			require.Equal(t, external.AsRawPtr(), writer.Object())
+			requireRingUsable(t, fixture.agent, "external", 128)
+		})
+	}
 }
 
 // Test_RingService_CreateRing_AllowExistingConcurrentShareHandle verifies that

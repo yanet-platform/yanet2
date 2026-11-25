@@ -148,11 +148,11 @@ func NewRingService(agent *ffi.Agent, opts ...Option) *RingService {
 	}
 }
 
-// CreateRing creates a named ring or, when allowed, preserves a matching one.
+// CreateRing creates a named ring or, when allowed, preserves a managed match.
 //
 // A matching managed ring keeps its records, readers, handle and leases
-// without publication. Conflicts return AlreadyExists; an unmanaged
-// publication returns FailedPrecondition only when existing rings are allowed.
+// without publication. Managed conflicts return AlreadyExists. An allowed
+// unmanaged publication is replaced with a new empty ring.
 func (m *RingService) CreateRing(
 	ctx context.Context,
 	req *ringpb.CreateRingRequest,
@@ -182,14 +182,8 @@ func (m *RingService) CreateRing(
 		}
 		return &ringpb.CreateRingResponse{}, nil
 	}
-	if cring.Exists(m.agent, name) {
-		if !req.GetAllowExisting() {
-			return nil, status.Errorf(codes.AlreadyExists, "ring %q already exists", name)
-		}
-		return nil, status.Errorf(
-			codes.FailedPrecondition,
-			"ring %q is published but not managed by this service", name,
-		)
+	if !req.GetAllowExisting() && cring.Exists(m.agent, name) {
+		return nil, status.Errorf(codes.AlreadyExists, "ring %q already exists", name)
 	}
 
 	capacity := uint32(req.GetCapacity())

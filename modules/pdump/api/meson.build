@@ -35,7 +35,7 @@ cp_dependencies = [
   libdpdk_inc_dep,
   libpcap_dep,
 ]
-api_sources = files('controlplane.c')
+api_sources = files('controlplane.c', 'cleanup.c')
 
 lib_pdump_cp = static_library(
   'pdump_cp',

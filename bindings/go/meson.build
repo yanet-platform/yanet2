@@ -151,7 +151,7 @@ cgo_packages += {
     'libraries': [lib_l3b_objects, lib_l3state],
   },
   'modules/pdump/internal/testutils': {
-    'libraries': [lib_pdump_dp],
+    'libraries': [lib_pdump_dp, lib_forward_dp],
     'archives': [lib_rte_bpf],
   },
   'objects/ring/tests/ringtest': {

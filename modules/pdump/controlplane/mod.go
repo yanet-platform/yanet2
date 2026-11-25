@@ -2,6 +2,8 @@ package pdump
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -27,12 +29,14 @@ func WithLog(log *zap.Logger) Option {
 type PdumpModule struct {
 	*modulebase.Base
 
-	cfg         *Config
-	service     *PdumpService
-	ringService *ring.RingService
-	log         *zap.Logger
+	service *PdumpService
+	log     *zap.Logger
 }
 
+// NewPdumpModule discards predecessor capture state before serving requests.
+//
+// The previous control plane must have stopped and startup must be the exclusive
+// writer of the target names. Completed removals are not rolled back on error.
 func NewPdumpModule(cfg *Config, options ...Option) (*PdumpModule, error) {
 	base, err := modulebase.NewBase(cfg.AttachConfig, moduleType, cfg.Endpoint.Unwrap(), options...)
 	if err != nil {
@@ -44,6 +48,19 @@ func NewPdumpModule(cfg *Config, options ...Option) (*PdumpModule, error) {
 	cpdump.SetLogger(base.Log())
 	cpdump.SetDebugEBPF(cfg.DebugEBPF)
 
+	retained, err := cleanupStale(base.Agent())
+	for _, ring := range retained {
+		base.Log().Warn("retained stale ring with published consumers",
+			zap.String("ring", ring.Name), zap.Error(ring.Err),
+		)
+	}
+	if err != nil {
+		return nil, errors.Join(
+			fmt.Errorf("failed to clean up stale pdump state: %w", err),
+			base.Close(),
+		)
+	}
+
 	ringService := ring.NewRingService(base.Agent(), ring.WithLog(base.Log()))
 
 	service := NewPdumpService(
@@ -53,17 +70,17 @@ func NewPdumpModule(cfg *Config, options ...Option) (*PdumpModule, error) {
 	)
 	base.AddService(pdumppb.PdumpService_ServiceDesc.ServiceName, func(server *grpc.Server) {
 		pdumppb.RegisterPdumpServiceServer(server, service)
-	})
+	},
+	)
 	base.AddService(ring.ServiceName, func(server *grpc.Server) {
 		ringService.Register(server)
-	})
+	},
+	)
 
 	return &PdumpModule{
-		Base:        base,
-		cfg:         cfg,
-		service:     service,
-		ringService: ringService,
-		log:         base.Log(),
+		Base:    base,
+		service: service,
+		log:     base.Log(),
 	}, nil
 }
 
