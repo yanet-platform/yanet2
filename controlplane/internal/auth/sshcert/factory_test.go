@@ -16,10 +16,14 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stripe/krl"
 	"golang.org/x/crypto/ssh"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"gopkg.in/yaml.v3"
 
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/sshcert"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/testpolicy"
 )
 
 // decodeConfigNode parses text as the "config: ..." wrapper production uses,
@@ -72,6 +76,61 @@ func generateUserCert(t *testing.T, caSigner ssh.Signer, username string, serial
 	require.NoError(t, cert.SignCert(rand.Reader, caSigner))
 
 	return cert, userSigner
+}
+
+// Test_ManagedPolicy_SSHTrustRotation verifies that trust is replaced and
+// then removed without touching the SSH principal or its grants.
+func Test_ManagedPolicy_SSHTrustRotation(t *testing.T) {
+	t.Parallel()
+	const method = "/test.Service/Read"
+	directory := t.TempDir()
+	config := auth.Config{
+		Mode: auth.ModeEnabled,
+		Authenticators: []auth.AuthenticatorConfig{
+			{Type: "sshcert", Config: *decodeConfigNode(t, "config: {}")},
+		},
+		ManagedPolicy: testpolicy.Config(directory),
+	}
+	config.ManagedPolicy.SSHTrust = true
+	authority, replacement := generateECDSASigner(t), generateECDSASigner(t)
+	oldCert, oldSigner := generateUserCert(t, authority, "alice", 1)
+	newCert, newSigner := generateUserCert(t, replacement, "alice", 2)
+	generation := testpolicy.ForAccount(1, "alice", method)
+	generation.SSHTrust = ssh.MarshalAuthorizedKey(authority.PublicKey())
+	generation.Publish(t, directory)
+	manager := testpolicy.Start(t, &config)
+
+	admit := func(cert *ssh.Certificate, signer ssh.Signer, nonce string) error {
+		t.Helper()
+		token := signCertToken(t, signer, cert, method, time.Now().UnixNano(), nonce)
+		_, _, release, err := manager.Admit(t.Context(), core.Credential{Token: token}, method)
+		if err == nil {
+			release()
+		}
+		return err
+	}
+	publish := func(trust []byte) {
+		t.Helper()
+		generation.Sequence++
+		generation.SSHTrust = trust
+		generation.Publish(t, directory)
+		require.Eventually(t, func() bool {
+			return testpolicy.Metric(manager.Collect(), "auth_policy_active_revision").GetGauge() == float64(generation.Sequence)
+		}, time.Second, 5*time.Millisecond)
+	}
+	requireDenied := func(err error) {
+		t.Helper()
+		require.Equal(t, codes.Unauthenticated, status.Code(err), "%v", err)
+		require.ErrorContains(t, err, "CA verification failed")
+	}
+
+	require.NoError(t, admit(oldCert, oldSigner, "1"))
+	requireDenied(admit(newCert, newSigner, "2"))
+	publish(ssh.MarshalAuthorizedKey(replacement.PublicKey()))
+	requireDenied(admit(oldCert, oldSigner, "3"))
+	require.NoError(t, admit(newCert, newSigner, "4"))
+	publish(nil)
+	requireDenied(admit(newCert, newSigner, "5"))
 }
 
 // writeCAFile writes an authorized_keys-format CA file containing the

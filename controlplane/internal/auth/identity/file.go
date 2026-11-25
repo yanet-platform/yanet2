@@ -5,10 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/yanet-platform/yanet2/common/go/rcucache"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/loader"
 )
 
 type userName = string
@@ -18,7 +17,7 @@ type IdentityProvider struct {
 	identities *rcucache.Cache[userName, Identity]
 }
 
-// NewIdentityProvider creates a IdentityProvider from an in-memory map of
+// NewIdentityProvider creates an IdentityProvider from an in-memory map of
 // identities.
 func NewIdentityProvider(identities map[userName]Identity) *IdentityProvider {
 	return &IdentityProvider{
@@ -26,15 +25,23 @@ func NewIdentityProvider(identities map[userName]Identity) *IdentityProvider {
 	}
 }
 
-// NewIdentityProviderFromFile creates a IdentityProvider by loading identities
+// NewIdentityProviderFromFile creates an IdentityProvider by loading identities
 // from a YAML file.
 func NewIdentityProviderFromFile(path string) (*IdentityProvider, error) {
-	identities, err := loadIdentitiesFile(path)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load identities: failed to read file: %w", err)
+	}
+	provider, err := decodeIdentities(data, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load identities: %w", err)
 	}
+	return provider, nil
+}
 
-	return NewIdentityProvider(identities), nil
+// ParsePolicyIdentities builds the managed identity index from verified bytes.
+func ParsePolicyIdentities(data []byte) (*IdentityProvider, error) {
+	return decodeIdentities(data, true)
 }
 
 // Name returns the provider name for logging.
@@ -60,30 +67,27 @@ func (m *IdentityProvider) ResolveIdentity(
 	return identity.Clone(), nil
 }
 
-// loadIdentitiesFile reads and parses the identities YAML file into a map.
-func loadIdentitiesFile(path string) (map[string]Identity, error) {
-	buf, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read file: %w", err)
-	}
-
+func decodeIdentities(data []byte, strict bool) (*IdentityProvider, error) {
 	var file struct {
 		Identities []Identity `yaml:"identities"`
 	}
-
-	if err := yaml.Unmarshal(buf, &file); err != nil {
+	if err := loader.DecodeYAML(data, &file, strict); err != nil {
 		return nil, fmt.Errorf("failed to parse YAML: %w", err)
 	}
-
-	// Build username index.
-	identities := map[string]Identity{}
-	for _, identity := range file.Identities {
-		if identity.Username == "" {
-			return nil, fmt.Errorf("identity with empty username")
-		}
-
-		identities[identity.Username] = identity
+	if strict && file.Identities == nil {
+		return nil, fmt.Errorf("missing identities list")
 	}
 
-	return identities, nil
+	identities := map[string]Identity{}
+	for _, account := range file.Identities {
+		if account.Username == "" {
+			return nil, fmt.Errorf("identity with empty username")
+		}
+		if _, exists := identities[account.Username]; strict && exists {
+			return nil, fmt.Errorf("duplicate identity %q", account.Username)
+		}
+		identities[account.Username] = account
+	}
+
+	return NewIdentityProvider(identities), nil
 }

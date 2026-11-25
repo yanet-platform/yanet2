@@ -4,9 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/yanet-platform/yanet2/common/go/rcucache"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/loader"
 )
 
 type GroupName = string
@@ -14,23 +13,26 @@ type UserName = string
 
 // FilePermissionStore loads permissions from a YAML file.
 type FilePermissionStore struct {
-	path string
-
 	groupPermissions *rcucache.Cache[GroupName, []Permission]
 	userPermissions  *rcucache.Cache[UserName, []Permission]
 }
 
 // NewFilePermissionStore creates a new FilePermissionStore.
 func NewFilePermissionStore(path string) (*FilePermissionStore, error) {
-	m := &FilePermissionStore{
-		path:             path,
-		groupPermissions: rcucache.NewEmptyCache[GroupName, []Permission](),
-		userPermissions:  rcucache.NewEmptyCache[UserName, []Permission](),
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load permissions: failed to read file: %w", err)
 	}
-	if err := m.load(); err != nil {
+	store, err := decodePermissions(data, false)
+	if err != nil {
 		return nil, fmt.Errorf("failed to load permissions: %w", err)
 	}
-	return m, nil
+	return store, nil
+}
+
+// ParsePolicyPermissions compiles managed grants from verified bytes.
+func ParsePolicyPermissions(data []byte) (*FilePermissionStore, error) {
+	return decodePermissions(data, true)
 }
 
 // GetGroupPermissions returns permissions for the given groups.
@@ -56,13 +58,7 @@ func (m *FilePermissionStore) GetUserPermissions(username string) []Permission {
 	return nil
 }
 
-// load reads and parses the permissions file.
-func (m *FilePermissionStore) load() error {
-	buf, err := os.ReadFile(m.path)
-	if err != nil {
-		return fmt.Errorf("failed to read file: %w", err)
-	}
-
+func decodePermissions(data []byte, strict bool) (*FilePermissionStore, error) {
 	var file struct {
 		Permissions struct {
 			Groups []struct {
@@ -76,16 +72,22 @@ func (m *FilePermissionStore) load() error {
 		} `yaml:"permissions"`
 	}
 
-	if err := yaml.Unmarshal(buf, &file); err != nil {
-		return fmt.Errorf("failed to parse YAML: %w", err)
+	if err := loader.DecodeYAML(data, &file, strict); err != nil {
+		return nil, fmt.Errorf("failed to parse YAML: %w", err)
+	}
+	if strict && file.Permissions.Groups == nil && file.Permissions.Users == nil {
+		return nil, fmt.Errorf("missing group and user permission lists")
 	}
 
 	// Parse group permissions.
 	groupPermissions := map[string][]Permission{}
 	for _, gp := range file.Permissions.Groups {
+		if _, exists := groupPermissions[gp.Name]; strict && (exists || gp.Name == "") {
+			return nil, fmt.Errorf("empty or duplicate permission group %q", gp.Name)
+		}
 		perms, err := compilePermissions(gp.Permissions)
 		if err != nil {
-			return fmt.Errorf("group %q: %w", gp.Name, err)
+			return nil, fmt.Errorf("group %q: %w", gp.Name, err)
 		}
 		groupPermissions[gp.Name] = perms
 	}
@@ -93,19 +95,20 @@ func (m *FilePermissionStore) load() error {
 	// Parse user permissions.
 	userPermissions := map[string][]Permission{}
 	for _, up := range file.Permissions.Users {
+		if _, exists := userPermissions[up.Username]; strict && (exists || up.Username == "") {
+			return nil, fmt.Errorf("empty or duplicate permission user %q", up.Username)
+		}
 		perms, err := compilePermissions(up.Permissions)
 		if err != nil {
-			return fmt.Errorf("user %q: %w", up.Username, err)
+			return nil, fmt.Errorf("user %q: %w", up.Username, err)
 		}
 		userPermissions[up.Username] = perms
 	}
 
-	// Tiny out-of-sync is possible, but since users and groups permissions are
-	// independent, it's not a problem.
-	m.groupPermissions.Swap(groupPermissions)
-	m.userPermissions.Swap(userPermissions)
-
-	return nil
+	return &FilePermissionStore{
+		groupPermissions: rcucache.NewCache(groupPermissions),
+		userPermissions:  rcucache.NewCache(userPermissions),
+	}, nil
 }
 
 // compilePermissions compiles a list of permission patterns.

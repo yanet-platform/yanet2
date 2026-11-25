@@ -175,7 +175,16 @@ func (m *Authenticator) Authenticate(
 		)
 	}
 
-	if err := m.caVerifier.VerifyCA(cert); err != nil {
+	verifier := m.caVerifier
+	managed := verifier == nil
+	if managed {
+		current, ok := ctx.Value(policyCAKey{}).(*CAStore)
+		if !ok || current == nil {
+			return nil, status.Error(codes.Unauthenticated, "managed SSH trust unavailable")
+		}
+		verifier = current
+	}
+	if err := verifier.VerifyCA(cert); err != nil {
 		return nil, status.Errorf(
 			codes.Unauthenticated,
 			"CA verification failed: %v", err,
@@ -211,8 +220,12 @@ func (m *Authenticator) Authenticate(
 		zap.Uint64("cert_serial", cert.Serial),
 	)
 
+	subject := core.NewLocalSubject(username)
+	if managed {
+		subject.Assertion = signerAssertion{Key: cert.SignatureKey}
+	}
 	return &core.AuthInfo{
-		Subject:    core.NewLocalSubject(username),
+		Subject:    subject,
 		AuthMethod: "sshcert",
 	}, nil
 }
@@ -239,10 +252,12 @@ func (m *Authenticator) refreshLoop() {
 
 // doRefresh reloads CA and KRL data.
 func (m *Authenticator) doRefresh() {
-	if err := m.caVerifier.Reload(); err != nil {
-		m.log.Warn("failed to refresh CA store", zap.Error(err))
-	} else {
-		m.log.Info("refreshed CA store")
+	if m.caVerifier != nil {
+		if err := m.caVerifier.Reload(); err != nil {
+			m.log.Warn("failed to refresh CA store", zap.Error(err))
+		} else {
+			m.log.Info("refreshed CA store")
+		}
 	}
 
 	if err := m.revocationChecker.Reload(); err != nil {

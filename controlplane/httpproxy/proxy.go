@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/siderolabs/grpc-proxy/proxy"
 	"go.uber.org/zap"
@@ -61,16 +62,18 @@ type TransparentWebGRPCProxy struct {
 	backend  Backend
 	registry BackendRegistry
 	// trustedOrigins are the origins that get CORS headers.
-	trustedOrigins map[string]struct{}
-	log            *zap.Logger
+	trustedOrigins     map[string]struct{}
+	streamWriteTimeout time.Duration
+	log                *zap.Logger
 }
 
 // Option configures the HTTPHandler constructor.
 type Option func(*handlerOptions)
 
 type handlerOptions struct {
-	TrustedOrigins []string
-	Log            *zap.Logger
+	TrustedOrigins     []string
+	StreamWriteTimeout time.Duration
+	Log                *zap.Logger
 }
 
 func newHandlerOptions() *handlerOptions {
@@ -87,6 +90,14 @@ func newHandlerOptions() *handlerOptions {
 func WithTrustedOrigins(origins []string) Option {
 	return func(o *handlerOptions) {
 		o.TrustedOrigins = origins
+	}
+}
+
+// WithStreamWriteTimeout sets a write deadline for each SSE event, not an
+// idle timeout while waiting for the backend.
+func WithStreamWriteTimeout(timeout time.Duration) Option {
+	return func(o *handlerOptions) {
+		o.StreamWriteTimeout = timeout
 	}
 }
 
@@ -111,11 +122,12 @@ func NewHTTPHandler(backend Backend, registry BackendRegistry, admitter Admitter
 	}
 
 	return &TransparentWebGRPCProxy{
-		admitter:       admitter,
-		backend:        backend,
-		registry:       registry,
-		trustedOrigins: trustedOrigins,
-		log:            opts.Log,
+		admitter:           admitter,
+		backend:            backend,
+		registry:           registry,
+		trustedOrigins:     trustedOrigins,
+		streamWriteTimeout: opts.StreamWriteTimeout,
+		log:                opts.Log,
 	}
 }
 
@@ -469,7 +481,13 @@ func (m *TransparentWebGRPCProxy) handleServerStreaming(w http.ResponseWriter, r
 		return
 	}
 
-	ctx := metadata.NewOutgoingContext(r.Context(), admission.Metadata)
+	if _, ok := w.(http.Flusher); !ok {
+		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
+		return
+	}
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	ctx = metadata.NewOutgoingContext(ctx, admission.Metadata)
 	outCtx, conn, err := m.backend.GetConnection(ctx, fullMethodName)
 	if err != nil {
 		m.writeBackendUnreachableError(w, service, method, err)
@@ -516,12 +534,6 @@ func (m *TransparentWebGRPCProxy) handleServerStreaming(w http.ResponseWriter, r
 		return
 	}
 
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
-		return
-	}
-
 	codec := proxy.Codec()
 
 	for {
@@ -529,7 +541,6 @@ func (m *TransparentWebGRPCProxy) handleServerStreaming(w http.ResponseWriter, r
 		err := clientStream.RecvMsg(responseBuffer)
 		if err == io.EOF {
 			m.writeSSEEvent(w, "end", "{}")
-			flusher.Flush()
 			return
 		}
 		if err != nil {
@@ -539,7 +550,6 @@ func (m *TransparentWebGRPCProxy) handleServerStreaming(w http.ResponseWriter, r
 				zap.Error(err),
 			)
 			m.writeSSEError(w, err)
-			flusher.Flush()
 			return
 		}
 
@@ -574,14 +584,33 @@ func (m *TransparentWebGRPCProxy) handleServerStreaming(w http.ResponseWriter, r
 			continue
 		}
 
-		m.writeSSEEvent(w, "message", string(jsonData))
-		flusher.Flush()
+		if err := m.writeSSEEvent(w, "message", string(jsonData)); err != nil {
+			m.log.Debug("stopped writing sse response", zap.Error(err))
+			return
+		}
 	}
 }
 
-// writeSSEEvent writes an SSE event to the response writer.
-func (m *TransparentWebGRPCProxy) writeSSEEvent(w http.ResponseWriter, event, data string) {
-	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data)
+func (m *TransparentWebGRPCProxy) writeSSEEvent(w http.ResponseWriter, event, data string) error {
+	controller := http.NewResponseController(w)
+	timeout := m.streamWriteTimeout
+	if timeout > 0 {
+		if err := controller.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+			return fmt.Errorf("set SSE write deadline: %w", err)
+		}
+	}
+	if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data); err != nil {
+		return err
+	}
+	if err := controller.Flush(); err != nil {
+		return err
+	}
+	if timeout > 0 && event == "message" {
+		// Keep the deadline for terminal writes and response finalization,
+		// but clear it while waiting for the next event.
+		return controller.SetWriteDeadline(time.Time{})
+	}
+	return nil
 }
 
 // writeSSEError writes an error as an SSE event.
@@ -648,21 +677,28 @@ func grpcCodeToHTTPStatus(code codes.Code) int {
 // gzipResponseWriter wraps http.ResponseWriter to provide gzip compression.
 type gzipResponseWriter struct {
 	http.ResponseWriter
-	Writer io.Writer
+	Writer *gzip.Writer
 }
 
 func (m *gzipResponseWriter) Write(b []byte) (int, error) {
 	return m.Writer.Write(b)
 }
 
+func (m *gzipResponseWriter) Unwrap() http.ResponseWriter {
+	return m.ResponseWriter
+}
+
 // Flush flushes buffered data to the client for SSE streaming support.
 func (m *gzipResponseWriter) Flush() {
-	if gz, ok := m.Writer.(*gzip.Writer); ok {
-		gz.Flush()
+	_ = m.FlushError()
+}
+
+// FlushError flushes both buffers and propagates a response write failure.
+func (m *gzipResponseWriter) FlushError() error {
+	if err := m.Writer.Flush(); err != nil {
+		return err
 	}
-	if f, ok := m.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
+	return http.NewResponseController(m.ResponseWriter).Flush()
 }
 
 // gzipRequestBody decompresses a request body from its first read on, so a

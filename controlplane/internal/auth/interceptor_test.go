@@ -4,20 +4,21 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/grpc/tap"
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/testpolicy"
 )
 
 func TestUnaryServerInterceptor(t *testing.T) {
-	log := zap.NewNop()
 
 	tests := []struct {
 		name           string
@@ -65,7 +66,7 @@ func TestUnaryServerInterceptor(t *testing.T) {
 			})
 			require.NoError(t, err)
 
-			interceptor := auth.UnaryServerInterceptor(manager, log)
+			interceptor := manager.UnaryServerInterceptor()
 
 			// Create context with or without token.
 			ctx := context.Background()
@@ -99,13 +100,12 @@ func TestUnaryServerInterceptor(t *testing.T) {
 }
 
 func TestStreamServerInterceptor(t *testing.T) {
-	log := zap.NewNop()
 	manager, err := auth.NewManager(&auth.Config{
 		Mode: auth.ModeDisabled,
 	})
 	require.NoError(t, err)
 
-	interceptor := auth.StreamServerInterceptor(manager, log)
+	interceptor := manager.StreamServerInterceptor()
 
 	// Create context without token.
 	ctx := context.Background()
@@ -203,7 +203,7 @@ func Test_AuthenticationInterceptors_Enabled_RejectsInvalidCredentials(t *testin
 	require.NoError(t, manager.Authorize(t.Context(), anonymous, method))
 
 	ctx := metadata.NewIncomingContext(t.Context(), metadata.Pairs("x-yanet-authentication", basicToken("alice", "wrong")))
-	_, err = auth.UnaryServerInterceptor(manager, zap.NewNop())(
+	_, err = manager.UnaryServerInterceptor()(
 		ctx, "request", &grpc.UnaryServerInfo{FullMethod: method},
 		func(ctx context.Context, request any) (any, error) {
 			t.Fatal("unary handler ran after failed credential verification")
@@ -211,7 +211,7 @@ func Test_AuthenticationInterceptors_Enabled_RejectsInvalidCredentials(t *testin
 		},
 	)
 	require.Equal(t, codes.Unauthenticated, status.Code(err))
-	err = auth.StreamServerInterceptor(manager, zap.NewNop())(
+	err = manager.StreamServerInterceptor()(
 		nil, &mockServerStream{ctx: ctx}, &grpc.StreamServerInfo{FullMethod: method},
 		func(server any, stream grpc.ServerStream) error {
 			t.Fatal("stream handler ran after failed credential verification")
@@ -219,4 +219,58 @@ func Test_AuthenticationInterceptors_Enabled_RejectsInvalidCredentials(t *testin
 		},
 	)
 	require.Equal(t, codes.Unauthenticated, status.Code(err))
+}
+
+// revocableTestTransport makes a queued message available even after cancel.
+type revocableTestTransport struct {
+	mockServerStream
+	receive func()
+	calls   int
+}
+
+func (m *revocableTestTransport) SendMsg(message any) error {
+	m.calls++
+	return nil
+}
+
+func (m *revocableTestTransport) RecvMsg(message any) error {
+	m.calls++
+	m.receive()
+	return nil
+}
+
+// Test_ManagedPolicy_RevokedStreamDoesNotForwardMessages verifies that the
+// interceptor blocks queued I/O, including a read that started before revoke.
+func Test_ManagedPolicy_RevokedStreamDoesNotForwardMessages(t *testing.T) {
+	t.Parallel()
+	config := managedAuthConfig(t)
+	directory := config.ManagedPolicy.Directory
+	aliceGeneration(1).Publish(t, directory)
+	manager := testpolicy.Start(t, &config)
+
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	ctx = metadata.NewIncomingContext(ctx, metadata.Pairs(auth.TokenMetadataKey, basicToken("alice", "s3cret")))
+	ctx, err := auth.PolicyStreamTap(ctx, &tap.Info{FullMethodName: policyTestMethod})
+	require.NoError(t, err)
+	transport := &revocableTestTransport{mockServerStream: mockServerStream{ctx: ctx}}
+	transport.receive = func() {
+		next := aliceGeneration(2)
+		next.Permissions = emptyGrants
+		next.Publish(t, directory)
+		<-ctx.Done()
+		transport.receive = func() { t.Fatal("revoked read reached the transport") }
+	}
+	err = manager.StreamServerInterceptor()(
+		nil, transport, &grpc.StreamServerInfo{FullMethod: policyTestMethod},
+		func(service any, stream grpc.ServerStream) error {
+			require.NoError(t, stream.SendMsg("allowed"))
+			require.Equal(t, codes.PermissionDenied, status.Code(stream.RecvMsg(new(string))), "in-flight read escaped revocation")
+			require.Equal(t, codes.PermissionDenied, status.Code(stream.SendMsg("revoked")), "queued send escaped revocation")
+			require.Equal(t, codes.PermissionDenied, status.Code(stream.RecvMsg(new(string))))
+			return nil
+		},
+	)
+	require.Equal(t, codes.PermissionDenied, status.Code(err))
+	require.Equal(t, 2, transport.calls)
 }

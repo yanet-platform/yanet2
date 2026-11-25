@@ -39,6 +39,8 @@ type Config struct {
 	Authenticators []AuthenticatorConfig `yaml:"authenticators"`
 	// PermissionsPath is the path to the permissions YAML file.
 	PermissionsPath string `yaml:"permissions_path"`
+	// ManagedPolicy selects the node-local, versioned policy source.
+	ManagedPolicy *ManagedPolicyConfig `yaml:"managed_policy,omitempty"`
 }
 
 // Validate rejects ambiguous policies and unsupported authentication modes.
@@ -46,12 +48,34 @@ func (m *Config) Validate() error {
 	if m.Mode != "" && m.Disabled != nil {
 		return fmt.Errorf("mode and deprecated disabled cannot both be specified; remove disabled and use mode")
 	}
+	if m.ManagedPolicy != nil {
+		if m.EffectiveMode() != ModeEnabled {
+			return fmt.Errorf("managed_policy requires enabled authentication")
+		}
+		if m.PermissionsPath != "" || len(m.IdentityProviders) != 0 {
+			return fmt.Errorf("managed_policy cannot be combined with static identity or permission files")
+		}
+		if err := m.ManagedPolicy.Validate(); err != nil {
+			return fmt.Errorf("managed_policy: %w", err)
+		}
+	}
 	switch m.Mode {
 	case "", ModeDisabled, ModeAudit, ModeEnabled:
 		return nil
 	default:
 		return fmt.Errorf("unknown mode %q; use disabled, audit, or enabled", m.Mode)
 	}
+}
+
+// EffectiveMode resolves the default and the deprecated disabled flag.
+func (m *Config) EffectiveMode() Mode {
+	if m.Mode != "" {
+		return m.Mode
+	}
+	if m.Disabled != nil && !*m.Disabled {
+		return ModeEnabled
+	}
+	return ModeDisabled
 }
 
 // IdentityProviderConfig configures a single identity provider.

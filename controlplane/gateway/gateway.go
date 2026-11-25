@@ -371,6 +371,12 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create auth manager: %w", err)
 	}
+	keepAuth := false
+	defer func() {
+		if !keepAuth {
+			authManager.Close()
+		}
+	}()
 
 	// A client certificate is only ever verified in a TLS handshake, so an
 	// authenticator that reads one is dead without a TLS listener.
@@ -520,14 +526,14 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 		grpc.ChainUnaryInterceptor(
 			commonxgrpc.ResponseCompressionUnaryInterceptor(),
 			serverMetrics.UnaryServerInterceptor(),
-			auth.UnaryServerInterceptor(authManager, log),
+			authManager.UnaryServerInterceptor(),
 			xgrpc.AccessLogInterceptor(log),
 			commonxgrpc.ValidateUnaryInterceptor(),
 		),
 		grpc.ChainStreamInterceptor(
 			commonxgrpc.ResponseCompressionStreamInterceptor(),
 			serverMetrics.StreamServerInterceptor(),
-			auth.StreamServerInterceptor(authManager, log),
+			authManager.StreamServerInterceptor(),
 			xgrpc.StreamAccessLogInterceptor(log),
 			commonxgrpc.ValidateStreamInterceptor(),
 		),
@@ -537,6 +543,9 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 		grpc.UnknownServiceHandler(
 			proxy.TransparentHandler(director),
 		),
+	}
+	if cfg.Auth.ManagedPolicy != nil {
+		serverOpts = append(serverOpts, grpc.InTapHandle(auth.PolicyStreamTap))
 	}
 
 	gatewayService := NewGatewayService(registry, WithGatewayServiceAuthorizer(authManager), WithGatewayServiceLog(log))
@@ -697,6 +706,7 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 		}
 	}
 
+	keepAuth = true
 	return &Gateway{
 		cfg:               cfg,
 		server:            server,
@@ -724,6 +734,7 @@ func NewGateway(cfg Config, options ...GatewayOption) (*Gateway, error) {
 
 // Close closes the gateway API.
 func (m *Gateway) Close() error {
+	m.authManager.Close()
 	var errs []error
 
 	for _, runner := range m.runners {
@@ -776,6 +787,9 @@ func (m *Gateway) Run(ctx context.Context) error {
 	}
 
 	wg, ctx := errgroup.WithContext(ctx)
+	wg.Go(func() error {
+		return m.authManager.RunPolicyReload(ctx)
+	})
 
 	for _, entry := range listeners {
 		m.log.Info("exposing gRPC gateway",
@@ -947,9 +961,10 @@ const maxBodySize = 256 << 20
 // httpReadHeaderTimeout bounds how long a client of the HTTP server may take
 // over its TLS handshake and, over HTTP/1, its request headers.
 //
-// No read or write timeout bounds the rest, since a large config upload and
-// a server stream take as long as they need.
+// Body uploads and idle streams have no overall deadline.
 const httpReadHeaderTimeout = 10 * time.Second
+
+const managedSSEWriteTimeout = 5 * time.Second
 
 // httpIdleTimeout is how long the HTTP server keeps a connection open with
 // no request in flight.
@@ -966,6 +981,10 @@ func (m *Gateway) runHTTPServer(ctx context.Context) error {
 	// A service the registry does not know is answered without reading the
 	// request; one that leaves the registry after the handler last checked it
 	// is answered as an unknown service of the gateway.
+	options := []httpproxy.Option{httpproxy.WithTrustedOrigins(m.http.TrustedOrigins), httpproxy.WithLog(m.log)}
+	if m.cfg.Auth.ManagedPolicy != nil {
+		options = append(options, httpproxy.WithStreamWriteTimeout(managedSSEWriteTimeout))
+	}
 	server := &http.Server{
 		Handler: m.crossOrigin.Handler(
 			httpproxy.GzipMiddleware(
@@ -973,8 +992,7 @@ func (m *Gateway) runHTTPServer(ctx context.Context) error {
 					m.loopback,
 					m.registry,
 					m.admitHTTP,
-					httpproxy.WithTrustedOrigins(m.http.TrustedOrigins),
-					httpproxy.WithLog(m.log),
+					options...,
 				),
 			),
 		),
@@ -1029,6 +1047,11 @@ func (m *Gateway) runHTTPServer(ctx context.Context) error {
 		}
 		if err := server.Shutdown(shutdownCtx); err != nil {
 			m.log.Warn("failed to shut down HTTP server", zap.Error(err))
+			if m.cfg.Auth.ManagedPolicy != nil {
+				if closeErr := server.Close(); closeErr != nil {
+					m.log.Warn("failed to close HTTP server", zap.Error(closeErr))
+				}
+			}
 		}
 		return nil
 	})

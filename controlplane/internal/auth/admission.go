@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"crypto/rand"
+	"time"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -22,6 +23,9 @@ type admission struct {
 	Credential core.Credential
 	// Principal is who the call runs as.
 	Principal *core.Principal
+	Identity  *core.AuthInfo
+	Method    string
+	Revision  uint64
 }
 
 // Admit authenticates and authorizes a call to a method before the call
@@ -36,95 +40,95 @@ func (m *Manager) Admit(
 	credential core.Credential,
 	fullMethod string,
 ) (*core.Principal, string, func(), error) {
-	principal, err := admitCall(ctx, m, m.log, credential, fullMethod)
+	policy := m.policyFor(ctx)
+	principal, identity, err := m.admitCall(ctx, policy, credential, fullMethod)
 	if err != nil {
 		return nil, "", nil, err
 	}
 
 	id := rand.Text()
-	m.admissions.Store(id, admission{Credential: credential, Principal: principal})
+	m.admissions.Store(id, admission{
+		Credential: credential,
+		Principal:  principal,
+		Identity:   identity,
+		Method:     fullMethod,
+		Revision:   policy.Revision(),
+	})
 
 	return principal, id, func() { m.admissions.Delete(id) }, nil
-}
-
-// TakeAdmission takes the admission parked under id, which no later call can
-// take again, and reports whether there was one.
-func (m *Manager) TakeAdmission(id string) (core.Credential, *core.Principal, bool) {
-	value, ok := m.admissions.LoadAndDelete(id)
-	if !ok {
-		return core.Credential{}, nil, false
-	}
-	parked := value.(admission)
-
-	return parked.Credential, parked.Principal, true
 }
 
 // admitIncoming admits a call that reached a server and returns the call's
 // context with its principal.
 //
 // A call is admitted by the admission its metadata names when it carries
-// one, else on the credential it presents. An admission is taken once and
-// authorized again for the method the call reached.
-func admitIncoming(ctx context.Context, manager *Manager, log *zap.Logger, fullMethod string) (context.Context, error) {
+// one, else on the credential it presents. A parked admission is usable once
+// for the original method while the checked policy is still active.
+func (m *Manager) admitIncoming(
+	ctx context.Context,
+	fullMethod string,
+	policy *policySnapshot,
+) (context.Context, *core.AuthInfo, error) {
 	ids := metadata.ValueFromIncomingContext(ctx, AdmissionMetadataKey)
 	if len(ids) == 0 {
-		principal, err := admitCall(ctx, manager, log, ExtractCredential(ctx), fullMethod)
+		principal, identity, err := m.admitCall(ctx, policy, ExtractCredential(ctx), fullMethod)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
-		return core.WithPrincipal(ctx, principal), nil
+		return core.WithPrincipal(ctx, principal), identity, nil
 	}
 
-	credential, principal, ok := manager.TakeAdmission(ids[0])
+	value, ok := m.admissions.LoadAndDelete(ids[0])
 	if !ok {
-		return nil, status.Error(codes.Unauthenticated, "authentication failed: unknown admission")
+		return nil, nil, status.Error(codes.Unauthenticated, "authentication failed: unknown admission")
 	}
-	if err := authorizeCall(ctx, manager, log, principal, fullMethod); err != nil {
-		return nil, err
+	parked := value.(admission)
+	if parked.Method != fullMethod {
+		return nil, nil, status.Error(codes.PermissionDenied, "admission is for another method")
+	}
+	if parked.Revision != policy.Revision() || m.active.Load() != policy {
+		return nil, nil, status.Error(codes.Unavailable, "authorization changed before admission")
 	}
 
-	return WithCredential(core.WithPrincipal(ctx, principal), credential), nil
+	return WithCredential(core.WithPrincipal(ctx, parked.Principal), parked.Credential), parked.Identity, nil
 }
 
-// admitCall authenticates a call on its credential and authorizes its
-// principal for the method.
+// admitCall checks the credential and method against one policy.
 //
-// It fails with Unauthenticated or PermissionDenied.
-func admitCall(
+// Only admission treats invalid credentials as anonymous in audit mode.
+func (m *Manager) admitCall(
 	ctx context.Context,
-	manager *Manager,
-	log *zap.Logger,
+	policy *policySnapshot,
 	credential core.Credential,
 	fullMethod string,
-) (*core.Principal, error) {
-	principal, err := manager.AuthenticateRequest(ctx, credential, &core.RequestInfo{FullMethod: fullMethod})
+) (*core.Principal, *core.AuthInfo, error) {
+	principal, identity, err := m.authenticate(ctx, policy, credential, &core.RequestInfo{FullMethod: fullMethod})
 	if err != nil {
-		log.Warn("authentication failed",
+		if m.mode != ModeAudit {
+			m.log.Warn("authentication failed", zap.String("method", fullMethod), zap.Error(err))
+			return nil, nil, status.Errorf(codes.Unauthenticated, "authentication failed: %v", err)
+		}
+		m.log.Warn("authentication failed in audit mode",
 			zap.String("method", fullMethod),
-			zap.Error(err),
+			zap.String("reason", "invalid_credentials"),
 		)
-		return nil, status.Errorf(codes.Unauthenticated, "authentication failed: %v", err)
+		principal = &core.Principal{
+			User:        "anonymous",
+			Groups:      []string{},
+			AuthMethod:  "none",
+			AuthTime:    time.Now(),
+			IsAnonymous: true,
+		}
 	}
 
-	if err := authorizeCall(ctx, manager, log, principal, fullMethod); err != nil {
-		return nil, err
-	}
-
-	return principal, nil
-}
-
-// authorizeCall authorizes a principal for a method, failing with
-// PermissionDenied.
-func authorizeCall(ctx context.Context, manager *Manager, log *zap.Logger, principal *core.Principal, fullMethod string) error {
-	if err := manager.Authorize(ctx, principal, fullMethod); err != nil {
-		log.Warn("authorization failed",
+	if err := policy.Authorize(ctx, principal, fullMethod); err != nil {
+		m.log.Warn("authorization failed",
 			zap.String("method", fullMethod),
 			zap.String("user", principal.User),
 			zap.Error(err),
 		)
-		return status.Errorf(codes.PermissionDenied, "authorization failed: %v", err)
+		return nil, nil, status.Errorf(codes.PermissionDenied, "authorization failed: %v", err)
 	}
-
-	return nil
+	return principal, identity, nil
 }

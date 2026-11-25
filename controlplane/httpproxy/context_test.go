@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -43,13 +44,21 @@ func (m *workersProbeServer) Workers(ctx context.Context, _ *ynpb.WorkerCounters
 // signaling entry and then publishing the context's terminal state.
 type watchProbeServer struct {
 	ynpb.UnimplementedReadinessServiceServer
-	entered chan struct{}
-	results chan ctxObservation
+	entered     chan struct{}
+	results     chan ctxObservation
+	sendInitial bool
 }
 
-func (m *watchProbeServer) Watch(_ *readinesspb.ReadyRequest, stream ynpb.ReadinessService_WatchServer) error {
+func (m *watchProbeServer) Watch(request *readinesspb.ReadyRequest, stream ynpb.ReadinessService_WatchServer) error {
+	if m.sendInitial {
+		if err := stream.Send(&readinesspb.ReadyResponse{}); err != nil {
+			return err
+		}
+	}
 	ctx := stream.Context()
-	m.entered <- struct{}{}
+	if m.entered != nil {
+		m.entered <- struct{}{}
+	}
 	<-ctx.Done()
 	m.results <- ctxObservation{err: ctx.Err()}
 	return ctx.Err()
@@ -197,5 +206,65 @@ func TestServeHTTP_ClientAbortPropagatesToBackendCtx_Streaming(t *testing.T) {
 		require.ErrorIs(t, observation.err, context.Canceled)
 	case <-time.After(5 * time.Second):
 		t.Fatal("backend handler did not observe the aborted HTTP request")
+	}
+}
+
+// blockedResponse reports a write timeout only after a deadline is set.
+type blockedResponse struct {
+	*httptest.ResponseRecorder
+	deadline time.Time
+	timedOut bool
+}
+
+func (m *blockedResponse) SetWriteDeadline(deadline time.Time) error {
+	m.deadline = deadline
+	return nil
+}
+
+func (m *blockedResponse) FlushError() error {
+	if m.deadline.IsZero() {
+		return http.ErrNotSupported
+	}
+	m.timedOut = true
+	return os.ErrDeadlineExceeded
+}
+
+// Test_HTTPHandler_StreamWriteTimeoutCancelsBackend verifies that an SSE
+// timeout cancels the upstream RPC even through a gzip response wrapper.
+func Test_HTTPHandler_StreamWriteTimeoutCancelsBackend(t *testing.T) {
+	t.Parallel()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	server := grpc.NewServer()
+	results := make(chan ctxObservation, 1)
+	ynpb.RegisterReadinessServiceServer(server, &watchProbeServer{results: results, sendInitial: true})
+	go func() { _ = server.Serve(listener) }()
+	t.Cleanup(server.Stop)
+	conn, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, conn.Close()) })
+
+	handler := httpproxy.GzipMiddleware(httpproxy.NewHTTPHandler(
+		passthroughBackend{conn: conn}, everyServiceRegistry{}, admitAll,
+		httpproxy.WithStreamWriteTimeout(20*time.Millisecond),
+	))
+	for _, encoding := range []string{"identity", "gzip"} {
+		t.Run(encoding, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+			defer cancel()
+			method := "/api" + ynpb.ReadinessService_Watch_FullMethodName
+			request := httptest.NewRequestWithContext(ctx, http.MethodPost, method, strings.NewReader("{}"))
+			request.Header.Set("Accept-Encoding", encoding)
+			response := &blockedResponse{ResponseRecorder: httptest.NewRecorder()}
+			handler.ServeHTTP(response, request)
+			require.True(t, response.timedOut, "the stalled flush did not reach a write deadline")
+			select {
+			case observation := <-results:
+				require.NoError(t, ctx.Err())
+				require.ErrorIs(t, observation.err, context.Canceled)
+			case <-ctx.Done():
+				t.Fatal("failed HTTP write did not cancel the loopback call")
+			}
+		})
 	}
 }
