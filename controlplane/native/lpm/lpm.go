@@ -13,6 +13,7 @@ package lpm
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"math/bits"
 	"unsafe"
 
@@ -29,9 +30,9 @@ const (
 	// valueFlag marks a slot holding a value rather than a child page
 	// (LPM_VALUE_FLAG).
 	valueFlag = 1
-	// maxKeySize is the longest key, in bytes, a tree's walks hold
-	// (LPM_KEY_SIZE_MAX).
-	maxKeySize = 16
+	// maxKeySize is the longest key, in bytes, whose size C's functions
+	// take, as one byte.
+	maxKeySize = math.MaxUint8
 )
 
 // errTreeMemory reports that the memory of a tree's context ran out.
@@ -208,8 +209,9 @@ func insertPage(insert *insertRange, current *layout.LpmPage, hop int, onFrom, o
 // Insert maps the big-endian keys from the start through the end, both
 // included, to the value, as lpm_insert does.
 //
-// Both keys are as long as every key of the tree; keys of no, differing
-// or more than 16 bytes are refused before the tree is touched. A start past the end maps
+// Both keys are as long as every key of the tree; keys of no or differing
+// sizes, or longer than C can size, are refused before the tree is
+// touched. A start past the end maps
 // nothing. A later insert overwrites the keys it covers. A failure leaves
 // a tree the lookup and the free still read, with part of the range
 // mapped.
