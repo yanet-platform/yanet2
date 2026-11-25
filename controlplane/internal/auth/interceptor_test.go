@@ -253,7 +253,7 @@ func Test_ManagedPolicy_RevokedStreamDoesNotForwardMessages(t *testing.T) {
 	ctx = metadata.NewIncomingContext(ctx, metadata.Pairs(auth.TokenMetadataKey, basicToken("alice", "s3cret")))
 	ctx, err := auth.PolicyStreamTap(ctx, &tap.Info{FullMethodName: policyTestMethod})
 	require.NoError(t, err)
-	transport := &revocableTestTransport{mockServerStream: mockServerStream{ctx: ctx}}
+	transport := &revocableTestTransport{ctx: ctx}
 	transport.receive = func() {
 		next := aliceGeneration(2)
 		next.Permissions = emptyGrants
