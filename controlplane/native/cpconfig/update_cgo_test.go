@@ -707,7 +707,8 @@ func Test_UpdateModules_RefusesMissingObject(t *testing.T) {
 	memory := newPublishedFixture(t)
 	module, err := cpconfig.NewBlackhole(memory.owner, "a")
 	require.NoError(t, err)
-	require.NoError(t, coracle.ModuleLinkObject(unsafe.Pointer(module), "ring", "absent"))
+	_, err = cpconfig.LinkObject(module, "ring", "absent")
+	require.NoError(t, err)
 	before := sharedState(memory, module)
 
 	err = updateModules(t, memory, module)
@@ -779,6 +780,98 @@ func newBlackhole(t *testing.T, memory *publishedFixture, name string, extra ...
 		require.NoError(t, coracle.ModuleRegisterCounter(unsafe.Pointer(module), "", counter, 1))
 	}
 	return module
+}
+
+// deleteModule deletes the blackhole configuration natively, delivering
+// the contexts to the in-process workers, within the publication bound.
+func deleteModule(t *testing.T, memory *publishedFixture, name string) error {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() {
+		done <- cpconfig.DeleteModule(memory.Instance(), "blackhole", name, cpconfig.WithDelivery(nativetest.Deliver))
+	}()
+	return awaitPublication(t, memory, done)
+}
+
+// Test_DeleteModule_MatchesC verifies that deleting a published module
+// configuration no chain runs from Go leaves the storage as
+// cp_config_delete_module does.
+//
+// Its registry slot is emptied, its owner's loaded count dropped and every
+// worker's contexts rebuilt without it.
+func Test_DeleteModule_MatchesC(t *testing.T) {
+	memory := newPublishedFixture(t)
+
+	memory.CompareWithC(
+		t,
+		func() { require.NoError(t, memory.cAgent.DeleteModuleConfig("blackhole", "b")) },
+		func() { require.NoError(t, deleteModule(t, memory, "b")) },
+	)
+}
+
+// Test_DeleteModule_FailureFreesCopy verifies that a delete of a module
+// the generation does not publish, or of one a chain runs, frees the copy
+// it built, publishing nothing and taking nothing.
+func Test_DeleteModule_FailureFreesCopy(t *testing.T) {
+	cases := []struct {
+		name string
+		// module is the name of the module the delete names.
+		module string
+		// check checks the error the delete reports.
+		check func(t *testing.T, err error)
+	}{
+		{
+			name:   "module not published",
+			module: "absent",
+			check: func(t *testing.T, err error) {
+				require.ErrorIs(t, err, cpconfig.ErrNotFound)
+			},
+		},
+		{
+			name:   "module a chain runs",
+			module: "a",
+			check: func(t *testing.T, err error) {
+				require.ErrorContains(t, err, `chain "drop_chain": module blackhole:a not found`)
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			memory := newPublishedFixture(t)
+			before := sharedState[*layout.CpModule](memory)
+
+			err := deleteModule(t, memory, tc.module)
+
+			tc.check(t, err)
+			requireLeftAsFound[*layout.CpModule](t, before, memory)
+		})
+	}
+}
+
+// Test_DeleteModule_FreeRepublishAndDeleteAgain verifies that a module
+// configuration deleted, freed, published again under its name and
+// deleted again leaves nothing behind.
+//
+// Once both are freed the agent's memory and loaded count are back where
+// they were, and a third delete finds no module.
+func Test_DeleteModule_FreeRepublishAndDeleteAgain(t *testing.T) {
+	memory := newPublishedFixture(t)
+	owner := memory.owner.Agent
+	original := publishedModule(t, memory.Instance().Cp.CpConfigGen.Get(), "b")
+	require.NoError(t, deleteModule(t, memory, "b"))
+	require.NoError(t, cpconfig.FreeBlackhole(original))
+	free := shmalloc.FreeSize(&owner.BlockAllocator)
+	loaded := atomic.LoadUint64(&owner.LoadedEntityCount)
+
+	replacement, err := cpconfig.NewBlackhole(memory.owner, "b")
+	require.NoError(t, err)
+	require.NoError(t, updateModules(t, memory, replacement))
+	require.NoError(t, deleteModule(t, memory, "b"))
+	require.NoError(t, cpconfig.FreeBlackhole(replacement))
+
+	require.Equal(t, free, shmalloc.FreeSize(&owner.BlockAllocator), "the agent's free bytes")
+	require.Equal(t, loaded, atomic.LoadUint64(&owner.LoadedEntityCount), "the agent's loaded count")
+	require.ErrorIs(t, deleteModule(t, memory, "b"), cpconfig.ErrNotFound)
 }
 
 // Benchmark_UpdateModules_Blackhole measures building a blackhole

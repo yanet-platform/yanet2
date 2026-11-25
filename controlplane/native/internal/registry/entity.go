@@ -39,8 +39,9 @@ func CopyEntities(context *layout.MemoryContext, hash ItemHash, fresh, old *layo
 	return true
 }
 
-// ReplaceEntity replaces an entity and moves the loaded-entity counts of
-// the agents of the new and the displaced item.
+// ReplaceEntity replaces an entity, or deletes it for a nil item, and
+// moves the loaded-entity counts of the agents of the new and the
+// displaced item.
 //
 // It moves them as cp_entity_registry_replace does.
 func ReplaceEntity(
@@ -57,7 +58,9 @@ func ReplaceEntity(
 	if !Replace(&registry.Registry, hash, keyHash, match, item) {
 		return false
 	}
-	countOwner(item, 1)
+	if item != nil {
+		countOwner(item, 1)
+	}
 	if old != nil {
 		countOwner(old, -1)
 	}

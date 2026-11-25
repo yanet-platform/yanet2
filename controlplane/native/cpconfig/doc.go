@@ -1,7 +1,8 @@
 //go:build linux && (amd64 || arm64)
 
-// Package cpconfig builds and publishes YANET module configurations from
-// Go without cgo, as lib/controlplane/config does.
+// Package cpconfig builds, publishes, deletes and frees YANET module
+// configurations and objects from Go without cgo, as
+// lib/controlplane/config does.
 //
 // Configurations, the generations that publish them, every worker's
 // execution contexts and counter storages are laid out and hashed as C
