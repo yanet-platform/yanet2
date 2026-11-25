@@ -123,10 +123,8 @@ func newPage(tree *layout.Lpm, slot *layout.LpmValue) error {
 
 // fill writes the value into every slot of a page.
 //
-// It writes a run of slots on the stack and copies the run across the
-// page: a copy stores whole vector registers where a loop over the slots
-// stores a word at a time, and copying from the page itself would wait
-// for its lines to arrive from memory.
+// It copies a run of slots, built on the stack, across the page, so the
+// page is written in whole vector stores and never read.
 func fill(fresh *layout.LpmPage, value uint64) {
 	var run [32]layout.LpmValue
 	for idx := range run {
