@@ -1,6 +1,8 @@
 package modulebase_test
 
 import (
+	"io/fs"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -100,5 +102,29 @@ func Test_NewNativeBase_WaitsForLaterInstance(t *testing.T) {
 		require.NoError(t, result.base.Close())
 	case <-time.After(10 * time.Second):
 		t.Fatal("the attach did not return once every instance was ready")
+	}
+}
+
+// Test_NewNativeBase_FailsAtOnceOnMissingStorage verifies that an attach
+// to a storage file that does not exist fails without waiting for the
+// dataplane's instances.
+func Test_NewNativeBase_FailsAtOnceOnMissingStorage(t *testing.T) {
+	core, logs := observer.New(zapcore.DebugLevel)
+	path := filepath.Join(t.TempDir(), "absent")
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := modulebase.NewNativeBase(
+			nativeAttachConfig(path, 0), "decap", "[::1]:0", modulebase.WithLog(zap.New(core)),
+		)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, fs.ErrNotExist)
+		require.Zero(t, logs.FilterMessage("waiting for dataplane instances").Len())
+	case <-time.After(10 * time.Second):
+		t.Fatal("the attach to a missing storage waited instead of failing")
 	}
 }
