@@ -73,6 +73,49 @@ test_overlapping_prefixes(void) {
 	return rc;
 }
 
+// verifies that a value with its top bit set is looked up as it was
+// inserted, not cut to 31 bits.
+static int
+run_value_keeps_top_bit_test(void) {
+	void *arena = malloc(ARENA_SIZE);
+	if (arena == NULL) {
+		return -1;
+	}
+
+	struct block_allocator ba;
+	block_allocator_init(&ba);
+	block_allocator_put_arena(&ba, arena, ARENA_SIZE);
+
+	struct memory_context mctx;
+	memory_context_init(&mctx, "lpm_top_bit", &ba);
+
+	struct lpm tree;
+	if (lpm_init(&tree, &mctx, "lpm")) {
+		free(arena);
+		return -1;
+	}
+
+	uint8_t from[4] = {0x0a, 0x00, 0x00, 0x00};
+	uint8_t to[4] = {0x0a, 0xff, 0xff, 0xff};
+	uint32_t value = 0x80000001;
+	int rc = -1;
+	if (lpm_insert(&tree, 4, from, to, value)) {
+		fprintf(stdout, "insert failed\n");
+	} else if (lpm_lookup(&tree, 4, from) != value) {
+		fprintf(stdout,
+			"lookup returned %#x, want %#x\n",
+			lpm_lookup(&tree, 4, from),
+			value);
+	} else {
+		rc = 0;
+	}
+
+	lpm_free(&tree);
+	memory_context_fini(&mctx);
+	free(arena);
+	return rc;
+}
+
 // A deterministic xorshift generator, so a failing run reproduces.
 static uint64_t
 next_random(uint64_t *state) {
@@ -464,6 +507,11 @@ main(int argc, char **argv) {
 
 	if (test_overlapping_prefixes()) {
 		fprintf(stdout, "test_overlapping_prefixes: FAILED\n");
+		return -1;
+	}
+
+	if (run_value_keeps_top_bit_test()) {
+		fprintf(stdout, "run_value_keeps_top_bit_test: FAILED\n");
 		return -1;
 	}
 
