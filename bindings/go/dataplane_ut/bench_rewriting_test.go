@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/netip"
 	"testing"
+	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/gopacket/gopacket"
@@ -16,8 +17,9 @@ import (
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/native/nativetest"
 	"github.com/yanet-platform/yanet2/devices/plain/bindings/go/cplain"
-	"github.com/yanet-platform/yanet2/modules/decap/bindings/go/cdecap"
+	"github.com/yanet-platform/yanet2/modules/decap/controlplane/decapshm"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 )
@@ -51,7 +53,7 @@ const rewritingCounter = "matched"
 func newRewritingHarness(
 	t *testing.T,
 	rule cforward.ForwardRule,
-	before ...func(agent *ffi.Agent) ffi.ChainModuleConfig,
+	before ...func(harness *dataplaneut.Harness, agent *ffi.Agent) ffi.ChainModuleConfig,
 ) *dataplaneut.Harness {
 	t.Helper()
 
@@ -81,7 +83,7 @@ func newRewritingHarness(
 
 	modules := make([]ffi.ChainModuleConfig, 0, len(before)+1)
 	for _, configure := range before {
-		modules = append(modules, configure(agent))
+		modules = append(modules, configure(harness, agent))
 	}
 	modules = append(modules, ffi.ChainModuleConfig{Type: "forward", Name: "bench"})
 
@@ -216,16 +218,19 @@ func Test_BenchRewriting_ModuleReadsRewrittenFrames(t *testing.T) {
 // stripTunnel returns the configuration of a decap module that strips the
 // outer header of the packets sent to the tunnel endpoint, for
 // newRewritingHarness to run before its rule.
-func stripTunnel(t *testing.T) func(agent *ffi.Agent) ffi.ChainModuleConfig {
+func stripTunnel(t *testing.T) func(harness *dataplaneut.Harness, agent *ffi.Agent) ffi.ChainModuleConfig {
 	t.Helper()
 
-	return func(agent *ffi.Agent) ffi.ChainModuleConfig {
-		decap, err := cdecap.NewModuleConfig(agent, "strip")
+	return func(harness *dataplaneut.Harness, agent *ffi.Agent) ffi.ChainModuleConfig {
+		decap, err := decapshm.NewConfig(
+			nativetest.AgentOf(t, harness, agent),
+			"strip",
+			[]netip.Prefix{netip.PrefixFrom(tunnelEndpoint, 32)},
+		)
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = decap.Free() })
-		require.NoError(t, decap.PrefixAdd(netip.PrefixFrom(tunnelEndpoint, 32)))
+		t.Cleanup(func() { _ = decapshm.FreeConfig(decap) })
 		require.NoError(t, agent.UpdateModules(
-			[]ffi.ModuleConfig{decap.AsFFIModule()},
+			[]ffi.ModuleConfig{ffi.NewModuleConfig(unsafe.Pointer(decap))},
 		))
 		return ffi.ChainModuleConfig{Type: "decap", Name: "strip"}
 	}

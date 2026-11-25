@@ -13,6 +13,7 @@
 #include "lib/dataplane/config/zone.h"
 #include "lib/dataplane/module/module.h"
 #include "lib/dataplane/pipeline/econtext.h"
+#include "modules/decap/dataplane/config.h"
 
 // The versions a native attach expects, which become typed Go constants.
 //

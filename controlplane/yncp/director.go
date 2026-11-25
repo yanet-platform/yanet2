@@ -133,7 +133,15 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		zap.Uint32("instance_id", cfg.Gateway.InstanceID.Unwrap()),
 	)
 
-	bundle, err := bundle.NewBundle(cfg.Modules, cfg.Devices, bundle.WithLog(log))
+	// Natively attached modules wait for every instance only for what is
+	// left of the wait for the director's own.
+	readyDeadline, _ := waitCtx.Deadline()
+	bundle, err := bundle.NewBundle(
+		cfg.Modules,
+		cfg.Devices,
+		bundle.WithLog(log),
+		bundle.WithReadyDeadline(readyDeadline),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize bundle: %w", err)
 	}

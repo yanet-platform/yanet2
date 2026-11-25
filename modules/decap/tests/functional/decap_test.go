@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/netip"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -19,6 +20,9 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/native/cpconfig"
+	"github.com/yanet-platform/yanet2/controlplane/native/layout"
+	"github.com/yanet-platform/yanet2/controlplane/native/nativetest"
 	cplain "github.com/yanet-platform/yanet2/devices/plain/bindings/go/cplain"
 	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
@@ -57,8 +61,15 @@ func setupDecapHarnessWithLimit(
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = agent.CleanUp() })
 
-	backend := decap.NewBackend(agent)
-	return h, agent, backend
+	return h, agent, newBackend(t, h, agent)
+}
+
+// newBackend returns a decap backend publishing natively through the
+// agent the cgo control plane attached to the harness, handing the
+// workers their contexts as the harness needs.
+func newBackend(t *testing.T, h *dataplaneut.Harness, agent *ffi.Agent) decap.Backend {
+	t.Helper()
+	return decap.NewBackend(nativetest.AgentOf(t, h, agent), cpconfig.WithDelivery(nativetest.Deliver))
 }
 
 func wireDecapPipeline(t *testing.T, agent *ffi.Agent, configName string) {
@@ -1007,4 +1018,48 @@ func Test_Decap_MissDoesNotRenewTotalLimit(t *testing.T) {
 	)
 	require.Equal(t, []uint64{5, 5 * packetSize}, deviceCounters["input_rx"])
 	require.Equal(t, []uint64{1, packetSize}, deviceCounters["input_recirc_drop"])
+}
+
+// Test_Backend_RefusalsCarryCgoKinds verifies that the backend's refusals
+// carry the kinds the cgo control plane tagged them with, which the
+// service maps to its statuses.
+func Test_Backend_RefusalsCarryCgoKinds(t *testing.T) {
+	cases := []struct {
+		name   string
+		refuse func(t *testing.T, agent *ffi.Agent, backend decap.Backend) error
+		kind   error
+	}{
+		{
+			name: "delete of a config never published",
+			refuse: func(t *testing.T, agent *ffi.Agent, backend decap.Backend) error {
+				return backend.Delete("absent")
+			},
+			kind: ffi.ErrNotFound,
+		},
+		{
+			name: "delete of a config a chain runs",
+			refuse: func(t *testing.T, agent *ffi.Agent, backend decap.Backend) error {
+				applyDecapConfig(t, backend, agent, "chained", []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")})
+				return backend.Delete("chained")
+			},
+			kind: ffi.ErrFailedPrecondition,
+		},
+		{
+			name: "update of a name its field cannot hold",
+			refuse: func(t *testing.T, agent *ffi.Agent, backend decap.Backend) error {
+				_, err := backend.Update(strings.Repeat("n", len(layout.CpModule{}.Name)), decap.PrefixSets{})
+				return err
+			},
+			kind: ffi.ErrInvalidArgument,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, agent, backend := setupDecapHarness(t)
+
+			err := tc.refuse(t, agent, backend)
+
+			require.ErrorIs(t, err, tc.kind)
+		})
+	}
 }

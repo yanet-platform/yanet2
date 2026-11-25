@@ -8,10 +8,13 @@
 package modulebase
 
 import (
+	"time"
+
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/native/agent"
 )
 
 // Option configures the Base constructor.
@@ -19,7 +22,9 @@ type Option func(*options)
 
 // options holds the optional parameters of the Base constructor.
 type options struct {
-	Log *zap.Logger
+	// The zero deadline leaves a native attach its default bound.
+	ReadyDeadline time.Time
+	Log           *zap.Logger
 }
 
 func newOptions() *options {
@@ -32,6 +37,18 @@ func newOptions() *options {
 func WithLog(log *zap.Logger) Option {
 	return func(o *options) {
 		o.Log = log
+	}
+}
+
+// WithReadyDeadline bounds the wait of a native attach for every
+// dataplane instance of the storage to be ready.
+//
+// The director passes what is left of its own wait for its instance, so
+// startup waits once, not twice; without it the attach waits a bound of
+// its own.
+func WithReadyDeadline(deadline time.Time) Option {
+	return func(o *options) {
+		o.ReadyDeadline = deadline
 	}
 }
 
@@ -59,10 +76,14 @@ func (m registeredService) Register(server *grpc.Server) {
 // Services are added from the module constructor alone, before the
 // gateway reads the surface, so nothing guards the list.
 type Base struct {
+	// Exactly one attachment is set: the constructor attached the module
+	// either through cgo or natively.
 	attachment *ffi.Attachment
-	name       string
-	endpoint   string
-	services   []registeredService
+	native     *nativeAttachment
+
+	name     string
+	endpoint string
+	services []registeredService
 
 	log *zap.Logger
 }
@@ -72,12 +93,7 @@ type Base struct {
 //
 // The returned base carries a logger scoped to the module.
 func NewBase(cfg ffi.AttachConfig, name, endpoint string, options ...Option) (*Base, error) {
-	opts := newOptions()
-	for _, option := range options {
-		option(opts)
-	}
-
-	log := opts.Log.With(zap.String("module", name))
+	log := moduleOptions(name, options).Log
 
 	attachment, err := ffi.Attach(cfg, name, log)
 	if err != nil {
@@ -92,9 +108,54 @@ func NewBase(cfg ffi.AttachConfig, name, endpoint string, options ...Option) (*B
 	}, nil
 }
 
-// Agent returns the shared-memory agent the module publishes through.
+// NewNativeBase attaches to the shared-memory agent under the module's
+// type name without cgo.
+//
+// The module publishes through the native agent, and the cgo agent is
+// nil. The returned base carries a logger scoped to the module.
+func NewNativeBase(cfg ffi.AttachConfig, name, endpoint string, options ...Option) (*Base, error) {
+	opts := moduleOptions(name, options)
+	log := opts.Log
+
+	native, err := attachNative(cfg, name, opts.ReadyDeadline, log)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Base{
+		native:   native,
+		name:     name,
+		endpoint: endpoint,
+		log:      log,
+	}, nil
+}
+
+// moduleOptions applies the options, scoping their logger to the module.
+func moduleOptions(name string, options []Option) *options {
+	opts := newOptions()
+	for _, option := range options {
+		option(opts)
+	}
+	opts.Log = opts.Log.With(zap.String("module", name))
+	return opts
+}
+
+// Agent returns the shared-memory agent the module publishes through,
+// or nil for a module attached natively.
 func (m *Base) Agent() *ffi.Agent {
+	if m.attachment == nil {
+		return nil
+	}
 	return m.attachment.Agent
+}
+
+// NativeAgent returns the agent a natively attached module publishes
+// through, or nil for a module attached through cgo.
+func (m *Base) NativeAgent() *agent.Agent {
+	if m.native == nil {
+		return nil
+	}
+	return m.native.Agent
 }
 
 // Log returns the logger scoped to the module.
@@ -140,5 +201,8 @@ func (m *Base) RegisterService(server *grpc.Server) {
 
 // Close releases the shared-memory attachment.
 func (m *Base) Close() error {
+	if m.native != nil {
+		return m.native.Close()
+	}
 	return m.attachment.Close()
 }

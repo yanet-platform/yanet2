@@ -18,7 +18,7 @@ import (
 // NewBlackhole builds a blackhole module configuration in the agent's
 // memory: a module header and nothing else, as the C blackhole api does.
 func NewBlackhole(owner *agent.Agent, name string) (*layout.CpModule, error) {
-	if err := checkModuleNames("blackhole", name); err != nil {
+	if err := CheckModuleNames("blackhole", name); err != nil {
 		return nil, err
 	}
 	context := &owner.Agent.MemoryContext
@@ -44,7 +44,7 @@ func FreeBlackhole(module *layout.CpModule) error {
 		return err
 	}
 	owner := module.Entity.Agent.Get()
-	finiModule(module)
+	FiniModule(module)
 	registry.FreeNode(&owner.MemoryContext, module, 0)
 	DestroyReleased(owner)
 	return nil
@@ -60,7 +60,7 @@ func FreeBlackhole(module *layout.CpModule) error {
 // failed header is finalised again, its memory context unlinked from the
 // agent's.
 func InitModule(module *layout.CpModule, owner *agent.Agent, moduleType, name string) error {
-	if err := checkModuleNames(moduleType, name); err != nil {
+	if err := CheckModuleNames(moduleType, name); err != nil {
 		return err
 	}
 	return initModule(module, owner, moduleType, name)
@@ -82,7 +82,7 @@ func initModule(module *layout.CpModule, owner *agent.Agent, moduleType, name st
 	shmalloc.ContextInitFrom(&module.Entity.MemoryContext, &owner.Agent.MemoryContext, name)
 
 	if err := initModuleCounters(module); err != nil {
-		finiModule(module)
+		FiniModule(module)
 		return err
 	}
 	return nil
@@ -118,9 +118,12 @@ func checkNames(entity string, fields ...nameField) error {
 	return nil
 }
 
-// checkModuleNames refuses a module type or name its field cannot hold
+// CheckModuleNames refuses a module type or name its field cannot hold
 // whole.
-func checkModuleNames(moduleType, name string) error {
+//
+// A typed build checks them before it allocates its configuration, so a
+// refused name leaves the agent untouched.
+func CheckModuleNames(moduleType, name string) error {
 	return checkNames(
 		"module",
 		nameField{"type", moduleType, len(layout.CpModule{}.Type)},
@@ -156,9 +159,12 @@ func initModuleCounters(module *layout.CpModule) error {
 	return err
 }
 
-// finiModule frees what a module header holds and unlinks its memory
+// FiniModule frees what a module header holds and unlinks its memory
 // context from the agent's, as cp_module_fini does.
-func finiModule(module *layout.CpModule) {
+//
+// A typed free or a failed typed build runs it once the module's own
+// data is gone and before the module's block is returned to the agent.
+func FiniModule(module *layout.CpModule) {
 	context := &module.Entity.MemoryContext
 	teardown.FiniCounterRegistry(&module.CounterRegistry)
 	registries := runtimeRegistries(module)

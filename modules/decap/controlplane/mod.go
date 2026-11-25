@@ -1,6 +1,8 @@
 package decap
 
 import (
+	"time"
+
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -16,6 +18,12 @@ func WithLog(log *zap.Logger) Option {
 	return modulebase.WithLog(log)
 }
 
+// WithReadyDeadline bounds the decap module's wait for the dataplane's
+// instances when it attaches.
+func WithReadyDeadline(deadline time.Time) Option {
+	return modulebase.WithReadyDeadline(deadline)
+}
+
 // DecapModule is a control-plane component of a module that is responsible for
 // decapsulating various kinds of tunnels.
 type DecapModule struct {
@@ -23,12 +31,12 @@ type DecapModule struct {
 }
 
 func NewDecapModule(cfg *Config, options ...Option) (*DecapModule, error) {
-	base, err := modulebase.NewBase(cfg.AttachConfig, moduleType, cfg.Endpoint.Unwrap(), options...)
+	base, err := modulebase.NewNativeBase(cfg.AttachConfig, moduleType, cfg.Endpoint.Unwrap(), options...)
 	if err != nil {
 		return nil, err
 	}
 
-	decapService := NewDecapService(NewBackend(base.Agent()))
+	decapService := NewDecapService(NewBackend(base.NativeAgent()))
 	base.AddService(decappb.DecapService_ServiceDesc.ServiceName, func(server *grpc.Server) {
 		decappb.RegisterDecapServiceServer(server, decapService)
 	})

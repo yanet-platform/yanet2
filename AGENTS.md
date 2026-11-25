@@ -40,7 +40,7 @@ make fuzz [MODULE=<name>]
 
 - `lab/` — local QEMU lab library; `cmd/yanet-lab/` — developer-only lab CLI (not packaged); `tests/functional/framework/` — QEMU harness shared by functional tests and the lab (imports `testing`).
 
-### Module layout (canonical — decap, dscp, forward, route as reference)
+### Module layout (canonical — dscp, forward, route as reference)
 
 ```
 modules/<name>/

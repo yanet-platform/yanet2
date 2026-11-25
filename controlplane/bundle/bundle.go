@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -55,7 +56,10 @@ type Bundle struct {
 type Option func(*bundleOptions)
 
 type bundleOptions struct {
-	Log *zap.Logger
+	// The zero deadline leaves natively attached modules their default
+	// bound.
+	ReadyDeadline time.Time
+	Log           *zap.Logger
 }
 
 func newBundleOptions() *bundleOptions {
@@ -71,6 +75,15 @@ func WithLog(log *zap.Logger) Option {
 	}
 }
 
+// WithReadyDeadline bounds the wait of natively attached modules for the
+// dataplane's instances, so the director's own wait for its instance
+// leaves them only what is left of it.
+func WithReadyDeadline(deadline time.Time) Option {
+	return func(o *bundleOptions) {
+		o.ReadyDeadline = deadline
+	}
+}
+
 // NewBundle constructs every bundled module and device from the given config.
 func NewBundle(
 	modulesCfg ModulesConfig,
@@ -82,7 +95,7 @@ func NewBundle(
 		o(opts)
 	}
 
-	services, err := buildServices(modulesCfg, devicesCfg, opts.Log)
+	services, err := buildServices(modulesCfg, devicesCfg, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -93,8 +106,9 @@ func NewBundle(
 func buildServices(
 	modulesCfg ModulesConfig,
 	devicesCfg DevicesConfig,
-	log *zap.Logger,
+	opts *bundleOptions,
 ) ([]gateway.Service, error) {
+	log := opts.Log
 	factories := []serviceFactory{
 		{
 			Name:       "route module",
@@ -114,7 +128,11 @@ func buildServices(
 			Name:       "decap module",
 			Configured: modulesCfg.Decap.Unwrap() != nil,
 			New: func() (gateway.Service, error) {
-				return decap.NewDecapModule(modulesCfg.Decap.Unwrap(), decap.WithLog(log))
+				return decap.NewDecapModule(
+					modulesCfg.Decap.Unwrap(),
+					decap.WithLog(log),
+					decap.WithReadyDeadline(opts.ReadyDeadline),
+				)
 			},
 		},
 		{

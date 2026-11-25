@@ -28,6 +28,9 @@ var (
 	// ErrMissingObject marks a module linking an object the generation
 	// does not publish; C refuses it as a failed precondition.
 	ErrMissingObject = errors.New("linked object not found")
+	// ErrMissingModule marks a chain running a module the generation does
+	// not publish; C refuses it as a failed precondition.
+	ErrMissingModule = errors.New("chained module not found")
 	// ErrNeedsDelivery marks an update to a dataplane that runs worker
 	// rounds on request made without a delivery.
 	ErrNeedsDelivery = errors.New("update needs a delivery")
@@ -103,7 +106,7 @@ func UpdateModules(instance *zone.Instance, modules []*layout.CpModule, options 
 // after the copy, which is freed, and one a chain still runs fails the
 // contexts' build; neither publishes anything.
 func DeleteModule(instance *zone.Instance, moduleType, name string, options ...UpdateOption) error {
-	if err := checkModuleNames(moduleType, name); err != nil {
+	if err := CheckModuleNames(moduleType, name); err != nil {
 		return err
 	}
 	return publish(instance, options, change{

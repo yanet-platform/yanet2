@@ -831,7 +831,8 @@ func Test_DeleteModule_FailureFreesCopy(t *testing.T) {
 			name:   "module a chain runs",
 			module: "a",
 			check: func(t *testing.T, err error) {
-				require.ErrorContains(t, err, `chain "drop_chain": module blackhole:a not found`)
+				require.ErrorIs(t, err, cpconfig.ErrMissingModule)
+				require.ErrorContains(t, err, `chain "drop_chain"`)
 			},
 		},
 	}
