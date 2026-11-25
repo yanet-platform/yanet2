@@ -122,8 +122,8 @@ func DeleteModule(instance *zone.Instance, moduleType, name string, options ...U
 // change is what an update or a delete publishes and how it goes into
 // the generation.
 type change struct {
-	// Kind, Count and Entity name the configurations an update publishes,
-	// of one kind; a delete has none.
+	// The configurations an update publishes are all of one kind; a delete
+	// publishes none.
 	Kind  string
 	Count int
 	// Entity reads a configuration's owner and identity, under the agent
