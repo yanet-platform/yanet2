@@ -325,9 +325,8 @@ run_free_returns_memory_test(
 	size_t free = block_allocator_free_size(region.allocator);
 	if (free != arena) {
 		fprintf(stdout,
-			"%s: the allocator holds %zu free bytes after the "
-			"free, "
-			"want %zu\n",
+			"%s: the allocator holds %zu free bytes after "
+			"the free, want %zu\n",
 			tree_case->name,
 			free,
 			arena);
@@ -358,8 +357,7 @@ run_generator(const char *generator, const char *name) {
 		return -1;
 	}
 	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-		fprintf(stdout, "%s failed with status %#x\n", generator, status
-		);
+		fprintf(stdout, "%s failed: status %#x\n", generator, status);
 		return -1;
 	}
 	return 0;
@@ -385,14 +383,14 @@ header_check(const struct lpm_native_header *header, size_t size) {
 	if (header->red_zone != ASAN_RED_ZONE) {
 		fprintf(stdout,
 			"skipped: the generator's blocks carry %" PRIu64
-			"-byte red "
-			"zones, this build's %d-byte ones\n",
+			"-byte red zones, this build's %d-byte ones\n",
 			header->red_zone,
 			ASAN_RED_ZONE);
 		return TEST_SKIPPED;
 	}
 	uint64_t region_size = header->region_size;
-	if (region_size == 0 || (region_size & (region_size - 1)) != 0 ||
+	if (region_size == 0 || size < region_size ||
+	    (region_size & (region_size - 1)) != 0 ||
 	    region_size > MEMORY_BLOCK_ALLOCATOR_MAX_ALIGN ||
 	    header->allocator + sizeof(struct block_allocator) >
 		    header->context ||
@@ -456,6 +454,9 @@ check_file(const char *path) {
 		perror(path);
 		return -1;
 	}
+	// The mapping outlives the name, so a crash in the checks leaves
+	// no file behind.
+	unlink(path);
 	struct stat info;
 	if (fstat(fd, &info)) {
 		perror(path);
@@ -494,6 +495,9 @@ main(int argc, char **argv) {
 	snprintf(name, sizeof(name), "yanet-lpm-native-%d", (int)getpid());
 	snprintf(path, sizeof(path), "/dev/shm/%s", name);
 
+	// A file a killed run of a reused pid left would refuse the
+	// generator's exclusive create.
+	unlink(path);
 	int rc = run_generator(argv[1], name);
 	if (rc == 0) {
 		rc = check_file(path);

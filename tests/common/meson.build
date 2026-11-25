@@ -30,8 +30,10 @@ test('lpm', lpm_test, suite: ['common'])
 #
 # The test runs a pure Go generator that writes the trees into a file in
 # /dev/shm. The generator is test-only: built here, never installed, and
-# only where the native control plane builds.
-if yanet_go_binaries and native_layout_archs.has_key(host_machine.cpu_family())
+# only where the native layouts are generated. The generator is built
+# without cgo, so its blocks carry no AddressSanitizer red zones; the test
+# is compiled without AddressSanitizer to lay its blocks out the same way.
+if yanet_go_binaries and native_layout_enabled
   lpm_native_generator = custom_target(
     'lpm-native-generator',
     output: 'lpmgen',
@@ -51,7 +53,7 @@ if yanet_go_binaries and native_layout_archs.has_key(host_machine.cpu_family())
   lpm_native_test = executable(
     'lpm_native_test',
     ['lpm_native_test.c'],
-    c_args: yanet_test_c_args,
+    c_args: yanet_test_c_args + ['-fno-sanitize=address'],
     dependencies: lib_common_dep,
   )
   test(
