@@ -9,9 +9,11 @@
 
 native_layout_archs = {'x86_64': 'amd64', 'aarch64': 'arm64'}
 native_layout_gen = []
+native_layout_enabled = false
 
 if native_layout_archs.has_key(host_machine.cpu_family()) and import('fs').is_samepath(
     meson.global_build_root(), meson.global_source_root() / 'build')
+  native_layout_enabled = true
   native_layout_arch = native_layout_archs[host_machine.cpu_family()]
 
   native_layout_types = executable(
@@ -81,6 +83,7 @@ if native_layout_archs.has_key(host_machine.cpu_family()) and import('fs').is_sa
     'agent',
     'cp_module',
     'dp_worker',
+    'lpm',
   ]
   # The enumerations of c/types.c that carry the values a native attach
   # expects.
