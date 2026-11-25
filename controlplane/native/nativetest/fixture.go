@@ -16,7 +16,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/native/agent"
 	"github.com/yanet-platform/yanet2/controlplane/native/internal/coracle"
+	"github.com/yanet-platform/yanet2/controlplane/native/layout"
+	"github.com/yanet-platform/yanet2/controlplane/native/shm"
 	"github.com/yanet-platform/yanet2/controlplane/native/zone"
 )
 
@@ -60,11 +64,35 @@ func NewFixture(t testing.TB, config dataplaneut.Config) *Fixture {
 		}
 	})
 
-	raw := (*rawSharedMemory)(harness.SharedMemory().AsRawPtr())
-	m.Image = unsafe.Slice((*byte)(raw.Base), raw.Size)
-	m.Storage, err = zone.FromMemory(m.Image)
-	require.NoError(t, err)
+	m.Image, m.Storage = storageOf(t, harness)
 	return m
+}
+
+// storageOf returns the whole storage of the harness's dataplane and its
+// native view.
+func storageOf(t testing.TB, harness *dataplaneut.Harness) ([]byte, *zone.Storage) {
+	t.Helper()
+	raw := (*rawSharedMemory)(harness.SharedMemory().AsRawPtr())
+	image := unsafe.Slice((*byte)(raw.Base), raw.Size)
+	storage, err := zone.FromMemory(image)
+	require.NoError(t, err)
+	return image, storage
+}
+
+// AgentOf returns the native view of an agent the cgo control plane
+// attached to the harness's dataplane, for the native control plane to
+// build and publish through.
+func AgentOf(t testing.TB, harness *dataplaneut.Harness, attached *ffi.Agent) *agent.Agent {
+	t.Helper()
+	_, storage := storageOf(t, harness)
+	view := (*layout.Agent)(attached.AsRawPtr())
+	for _, instance := range storage.Instances {
+		if instance.Dp == view.DpConfig.Get() {
+			return &agent.Agent{Instance: instance, Agent: view}
+		}
+	}
+	t.Fatalf("agent %q serves no instance of the harness", shm.String(view.Name[:]))
+	return nil
 }
 
 // Abandon keeps the dataplane's memory past the end of the test, for a

@@ -22,6 +22,8 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/native/cpconfig"
+	"github.com/yanet-platform/yanet2/controlplane/native/nativetest"
 	cplain "github.com/yanet-platform/yanet2/devices/plain/bindings/go/cplain"
 	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
@@ -588,7 +590,8 @@ func Test_CompatMetabalancerDecap(t *testing.T) {
 	// the balancer's own addresses — the old dstAddresses list; the old
 	// srcPrefixes half of the early-decap contract is not part of the new
 	// module and is dropped from the port.
-	decapHandle, err := decap.NewBackend(agent).Update("meta", decap.PrefixSets{
+	decapBackend := decap.NewBackend(nativetest.AgentOf(t, h, agent), cpconfig.WithDelivery(nativetest.Deliver))
+	decapHandle, err := decapBackend.Update("meta", decap.PrefixSets{
 		Prefixes4: []netip.Prefix{netip.MustParsePrefix("1.210.198.65/32")},
 		Prefixes6: []netip.Prefix{netip.MustParsePrefix("2222:898:0:320::b2a/128")},
 	})

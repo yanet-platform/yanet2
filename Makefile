@@ -277,10 +277,14 @@ go-test-prepare:
 native-layout:
 	ninja -C build controlplane/native/layout/native-layout.stamp
 
-# Builds every package of the native control plane without cgo.
+# The packages the native control plane is built from: its own and the
+# module configuration builders on top of it.
+NATIVE_PACKAGES := ./controlplane/native/... ./modules/decap/controlplane/decapshm/...
+
+# Builds every native control-plane package without cgo.
 native-nocgo: native-layout
 	@set -eu; \
-	packages=$$(CGO_ENABLED=0 go list ./controlplane/native/...); \
+	packages=$$(CGO_ENABLED=0 go list $(NATIVE_PACKAGES)); \
 	if [ -n "$$packages" ]; then CGO_ENABLED=0 go build $$packages; fi
 
 cli: cli-build

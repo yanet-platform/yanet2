@@ -45,9 +45,6 @@ cgo_packages += {
   'modules/blackhole/bindings/go/cblackhole': {
     'libraries': [lib_blackhole_cp],
   },
-  'modules/decap/bindings/go/cdecap': {
-    'libraries': [lib_decap_cp],
-  },
   'modules/dscp/bindings/go/cdscp': {
     'libraries': [lib_dscp_cp],
   },

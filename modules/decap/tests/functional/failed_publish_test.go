@@ -3,13 +3,15 @@ package decap_test
 import (
 	"net/netip"
 	"testing"
+	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/modules/decap/bindings/go/cdecap"
+	"github.com/yanet-platform/yanet2/controlplane/native/nativetest"
+	"github.com/yanet-platform/yanet2/modules/decap/controlplane/decapshm"
 )
 
 // Memory sizes for the failed-publish regression harness.
@@ -46,11 +48,11 @@ func TestFailedPublish_LeavesCallersModuleIntact(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = agent.CleanUp() })
 
+	owner := nativetest.AgentOf(t, h, agent)
 	beforeCreate := agentRootMemoryNode(t, shm, agentName)
 
-	mod, err := cdecap.NewModuleConfig(agent, "decap0")
+	mod, err := decapshm.NewConfig(owner, "decap0", []netip.Prefix{netip.MustParsePrefix("2001:db8::/32")})
 	require.NoError(t, err)
-	require.NoError(t, mod.PrefixAdd(netip.MustParsePrefix("2001:db8::/32")))
 
 	afterCreate := agentRootMemoryNode(t, shm, agentName)
 	require.Equalf(
@@ -67,7 +69,7 @@ func TestFailedPublish_LeavesCallersModuleIntact(t *testing.T) {
 	// before the module is ever upserted into it.
 	originalWorkerCount := zeroWorkerCount(agent.AsRawPtr())
 
-	err = agent.UpdateModules([]ffi.ModuleConfig{mod.AsFFIModule()})
+	err = agent.UpdateModules([]ffi.ModuleConfig{ffi.NewModuleConfig(unsafe.Pointer(mod))})
 	restoreWorkerCount(agent.AsRawPtr(), originalWorkerCount)
 	require.Error(
 		t, err,
@@ -83,7 +85,7 @@ func TestFailedPublish_LeavesCallersModuleIntact(t *testing.T) {
 
 	// Create an unrelated config and free it: never published, so it is
 	// dangling, and its owner's free destroys exactly this one config.
-	other, err := cdecap.NewModuleConfig(agent, "decap1")
+	other, err := decapshm.NewConfig(owner, "decap1", nil)
 	require.NoError(t, err)
 
 	afterUnrelatedCreate := agentRootMemoryNode(t, shm, agentName)
@@ -92,7 +94,7 @@ func TestFailedPublish_LeavesCallersModuleIntact(t *testing.T) {
 		"creating the unrelated config must not destroy anything by itself",
 	)
 
-	other.Free()
+	require.NoError(t, decapshm.FreeConfig(other))
 
 	afterUnrelatedFree := agentRootMemoryNode(t, shm, agentName)
 	require.Equalf(
@@ -104,11 +106,11 @@ func TestFailedPublish_LeavesCallersModuleIntact(t *testing.T) {
 	// untouched reference count: exercise it the same way a caller that
 	// goes on using it would.
 	require.NoError(
-		t, mod.PrefixAdd(netip.MustParsePrefix("2001:db9::/32")),
+		t, decapshm.AddPrefix(mod, netip.MustParsePrefix("2001:db9::/32")),
 		"the caller must still be able to use the module after the failed publish",
 	)
 
-	mod.Free()
+	require.NoError(t, decapshm.FreeConfig(mod))
 
 	afterModFree := agentRootMemoryNode(t, shm, agentName)
 	require.Equalf(
@@ -118,7 +120,7 @@ func TestFailedPublish_LeavesCallersModuleIntact(t *testing.T) {
 
 	// Construct decap's type once more: nothing is left for it to
 	// destroy, since each earlier config was destroyed by its own owner.
-	_, err = cdecap.NewModuleConfig(agent, "decap2")
+	_, err = decapshm.NewConfig(owner, "decap2", nil)
 	require.NoError(t, err)
 
 	afterDrain := agentRootMemoryNode(t, shm, agentName)

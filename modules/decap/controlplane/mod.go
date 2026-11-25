@@ -23,12 +23,12 @@ type DecapModule struct {
 }
 
 func NewDecapModule(cfg *Config, options ...Option) (*DecapModule, error) {
-	base, err := modulebase.NewBase(cfg.AttachConfig, moduleType, cfg.Endpoint.Unwrap(), options...)
+	base, err := modulebase.NewNativeBase(cfg.AttachConfig, moduleType, cfg.Endpoint.Unwrap(), options...)
 	if err != nil {
 		return nil, err
 	}
 
-	decapService := NewDecapService(NewBackend(base.Agent()))
+	decapService := NewDecapService(NewBackend(base.NativeAgent()))
 	base.AddService(decappb.DecapService_ServiceDesc.ServiceName, func(server *grpc.Server) {
 		decappb.RegisterDecapServiceServer(server, decapService)
 	})

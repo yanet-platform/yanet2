@@ -106,7 +106,7 @@ func TestModuleLifetime_LiveGeneration_ReleaseDoesNotDestroy(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = agent.CleanUp() })
 
-	handle, err := decap.NewBackend(agent).Update(
+	handle, err := newBackend(t, h, agent).Update(
 		"decap0", decap.PrefixSets{Prefixes6: []netip.Prefix{netip.MustParsePrefix("2001:db8::/32")}},
 	)
 	require.NoError(t, err)
@@ -139,7 +139,7 @@ func TestModuleLifetime_Superseded_DestroyedOnceGenerationRetires(t *testing.T) 
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = agent.CleanUp() })
 
-	backend := decap.NewBackend(agent)
+	backend := newBackend(t, h, agent)
 
 	first, err := backend.Update(
 		"decap0", decap.PrefixSets{Prefixes6: []netip.Prefix{netip.MustParsePrefix("2001:db8::/32")}},
@@ -208,7 +208,7 @@ func TestModuleLifetime_PinnedGeneration_DefersDestruction(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = agent.CleanUp() })
 
-	backend := decap.NewBackend(agent)
+	backend := newBackend(t, h, agent)
 
 	first, err := backend.Update(
 		"decap0", decap.PrefixSets{Prefixes6: []netip.Prefix{netip.MustParsePrefix("2001:db8::/32")}},
