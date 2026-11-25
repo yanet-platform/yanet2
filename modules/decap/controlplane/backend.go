@@ -61,7 +61,8 @@ func (m *backend) Delete(name string) error {
 	return nil
 }
 
-// moduleHandle is the handle of a decap configuration the backend built.
+// moduleHandle owns a decap configuration the backend built until its free
+// succeeds.
 type moduleHandle struct {
 	module *layout.CpModule
 }

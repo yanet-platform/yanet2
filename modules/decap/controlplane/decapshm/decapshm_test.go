@@ -142,9 +142,9 @@ func Test_NewConfig_ExhaustionFreesEverything(t *testing.T) {
 	chunk := unsafe.Sizeof(layout.LpmPage{}) * 16
 	cases := []struct {
 		name string
-		// kept are the requests the agent's free blocks serve.
-		kept []uintptr
-		// place is the step the build fails in.
+		// Each case leaves the agent free blocks for only some requests
+		// and names the step of the build that runs out.
+		kept  []uintptr
 		place string
 	}{
 		{name: "no room for the configuration", place: "allocate decap module"},

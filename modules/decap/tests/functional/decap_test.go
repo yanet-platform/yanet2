@@ -1025,8 +1025,7 @@ func Test_Decap_MissDoesNotRenewTotalLimit(t *testing.T) {
 // service maps to its statuses.
 func Test_Backend_RefusalsCarryCgoKinds(t *testing.T) {
 	cases := []struct {
-		name string
-		// refuse runs the refused operation on a fresh harness.
+		name   string
 		refuse func(t *testing.T, agent *ffi.Agent, backend decap.Backend) error
 		kind   error
 	}{

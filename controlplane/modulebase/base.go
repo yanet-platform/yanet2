@@ -60,12 +60,11 @@ func (m registeredService) Register(server *grpc.Server) {
 // Services are added from the module constructor alone, before the
 // gateway reads the surface, so nothing guards the list.
 type Base struct {
-	// attachment is the cgo attachment, nil for a module attached
-	// natively.
+	// Exactly one attachment is set: the constructor attached the module
+	// either through cgo or natively.
 	attachment *ffi.Attachment
-	// native is the attachment without cgo, nil for a module attached
-	// through cgo.
-	native   *nativeAttachment
+	native     *nativeAttachment
+
 	name     string
 	endpoint string
 	services []registeredService
