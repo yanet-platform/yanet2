@@ -390,10 +390,20 @@ cp_module_link_object(
 	return 0;
 }
 
+// The key a module is looked up by: its type and name cut to their
+// fields, the form a stored module keeps them in.
 struct cp_module_cmp_data {
-	const char *type;
-	const char *name;
+	char type[CP_MODULE_TYPE_LEN];
+	char name[CP_MODULE_NAME_LEN];
 };
+
+static struct cp_module_cmp_data
+cp_module_cmp_data_init(const char *type, const char *name) {
+	struct cp_module_cmp_data cmp_data;
+	strtcpy(cmp_data.type, type, sizeof(cmp_data.type));
+	strtcpy(cmp_data.name, name, sizeof(cmp_data.name));
+	return cmp_data;
+}
 
 static int
 cp_module_registry_item_cmp(
@@ -596,10 +606,8 @@ cp_module_registry_lookup(
 	const char *type,
 	const char *name
 ) {
-	struct cp_module_cmp_data cmp_data = {
-		.type = type,
-		.name = name,
-	};
+	struct cp_module_cmp_data cmp_data =
+		cp_module_cmp_data_init(type, name);
 	uint64_t index;
 
 	if (registry_lookup(
@@ -627,10 +635,8 @@ cp_module_registry_upsert(
 	struct cp_module *new_module,
 	yanet_error **err
 ) {
-	struct cp_module_cmp_data cmp_data = {
-		.type = type,
-		.name = name,
-	};
+	struct cp_module_cmp_data cmp_data =
+		cp_module_cmp_data_init(type, name);
 
 	struct cp_module *old_module =
 		cp_module_registry_lookup(module_registry, type, name);
@@ -659,10 +665,8 @@ cp_module_registry_delete(
 	const char *type,
 	const char *name
 ) {
-	struct cp_module_cmp_data cmp_data = {
-		.type = type,
-		.name = name,
-	};
+	struct cp_module_cmp_data cmp_data =
+		cp_module_cmp_data_init(type, name);
 
 	return cp_entity_registry_replace(
 		&module_registry->entity_registry,

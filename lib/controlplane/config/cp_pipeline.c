@@ -274,11 +274,16 @@ cp_pipeline_registry_lookup_index(
 	const char *name,
 	uint64_t *index
 ) {
+	// A pipeline stores its name cut to its field, so the lookup matches
+	// the name cut the same way.
+	char key[CP_PIPELINE_NAME_LEN];
+	strtcpy(key, name, sizeof(key));
+
 	return registry_lookup(
 		&pipeline_registry->registry,
 		&cp_pipeline_registry_keys,
 		cp_pipeline_registry_item_cmp,
-		name,
+		key,
 		index
 	);
 }
@@ -308,6 +313,11 @@ cp_pipeline_registry_upsert(
 	struct cp_pipeline *new_pipeline,
 	yanet_error **err
 ) {
+	// A pipeline stores its name cut to its field, so the replacement
+	// matches the name cut the same way.
+	char key[CP_PIPELINE_NAME_LEN];
+	strtcpy(key, name, sizeof(key));
+
 	struct cp_pipeline *old_pipeline =
 		cp_pipeline_registry_lookup(pipeline_registry, name);
 
@@ -329,7 +339,7 @@ cp_pipeline_registry_upsert(
 		&pipeline_registry->registry,
 		&cp_pipeline_registry_keys,
 		cp_pipeline_registry_item_cmp,
-		name,
+		key,
 		&new_pipeline->config_item,
 		cp_pipeline_registry_item_free_cb,
 		NULL
@@ -340,11 +350,16 @@ int
 cp_pipeline_registry_delete(
 	struct cp_pipeline_registry *pipeline_registry, const char *name
 ) {
+	// A pipeline stores its name cut to its field, so the replacement
+	// matches the name cut the same way.
+	char key[CP_PIPELINE_NAME_LEN];
+	strtcpy(key, name, sizeof(key));
+
 	return registry_replace(
 		&pipeline_registry->registry,
 		&cp_pipeline_registry_keys,
 		cp_pipeline_registry_item_cmp,
-		name,
+		key,
 		NULL,
 		cp_pipeline_registry_item_free_cb,
 		NULL
