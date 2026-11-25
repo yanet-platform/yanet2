@@ -13,7 +13,6 @@ package lpm
 import (
 	"bytes"
 	"fmt"
-	"math"
 	"math/bits"
 	"unsafe"
 
@@ -30,9 +29,10 @@ const (
 	// valueFlag marks a slot holding a value rather than a child page
 	// (LPM_VALUE_FLAG).
 	valueFlag = 1
-	// maxKeySize is the longest key, in bytes, whose size C's functions
-	// take, as one byte.
-	maxKeySize = math.MaxUint8
+	// maxKeySize is the longest key, in bytes, C's iterator holds: it keeps
+	// keys and its stack of pages in arrays of that size
+	// (LPM_KEY_SIZE_MAX).
+	maxKeySize = 16
 )
 
 // errTreeMemory reports that the memory of a tree's context ran out.
@@ -208,11 +208,10 @@ func insertPage(insert *insertRange, current *layout.LpmPage, hop int, onFrom, o
 // included, to the value, as lpm_insert does.
 //
 // Both keys are as long as every key of the tree; keys of no or differing
-// sizes, or longer than C can size, are refused before the tree is
-// touched. A start past the end maps
-// nothing. A later insert overwrites the keys it covers. A failure leaves
-// a tree the lookup and the free still read, with part of the range
-// mapped.
+// sizes, or longer than 16 bytes, are refused before the tree is touched.
+// A start past the end maps nothing. A later insert overwrites the keys it
+// covers. A failure leaves a tree the lookup and the free still read, with
+// part of the range mapped.
 func Insert(tree *layout.Lpm, from, to []byte, value uint32) error {
 	if len(from) == 0 || len(from) > maxKeySize || len(from) != len(to) {
 		return fmt.Errorf("prefix tree keys must be of one size from 1 to %d bytes", maxKeySize)

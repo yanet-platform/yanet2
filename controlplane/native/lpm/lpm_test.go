@@ -44,7 +44,7 @@ func chunkedRanges(count int) []keyRange {
 }
 
 // Test_Insert_RefusesKeySizes verifies that keys of no or differing sizes,
-// or longer than C can size, are refused before the tree is touched.
+// or longer than 16 bytes, are refused before the tree is touched.
 //
 // The tree has no pages, so any read of one would fault.
 func Test_Insert_RefusesKeySizes(t *testing.T) {
@@ -55,7 +55,7 @@ func Test_Insert_RefusesKeySizes(t *testing.T) {
 	}{
 		{name: "empty keys", from: []byte{}, to: []byte{}},
 		{name: "keys of differing sizes", from: []byte{10, 0, 0, 0}, to: []byte{10, 0}},
-		{name: "keys longer than 255 bytes", from: make([]byte, 256), to: make([]byte, 256)},
+		{name: "keys longer than 16 bytes", from: make([]byte, 17), to: make([]byte, 17)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
