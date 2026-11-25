@@ -306,11 +306,16 @@ cp_function_registry_lookup_index(
 	const char *name,
 	uint64_t *index
 ) {
+	// A function stores its name cut to its field, so the lookup matches
+	// the name cut the same way.
+	char key[CP_FUNCTION_NAME_LEN];
+	strtcpy(key, name, sizeof(key));
+
 	return registry_lookup(
 		&function_registry->registry,
 		&cp_function_registry_keys,
 		cp_function_registry_item_cmp,
-		name,
+		key,
 		index
 	);
 }
@@ -340,6 +345,11 @@ cp_function_registry_upsert(
 	struct cp_function *new_function,
 	yanet_error **err
 ) {
+	// A function stores its name cut to its field, so the replacement
+	// matches the name cut the same way.
+	char key[CP_FUNCTION_NAME_LEN];
+	strtcpy(key, name, sizeof(key));
+
 	struct cp_function *old_function =
 		cp_function_registry_lookup(function_registry, name);
 
@@ -395,7 +405,7 @@ cp_function_registry_upsert(
 		    &function_registry->registry,
 		    &cp_function_registry_keys,
 		    cp_function_registry_item_cmp,
-		    name,
+		    key,
 		    &new_function->config_item,
 		    cp_function_registry_item_free_cb,
 		    NULL
@@ -411,11 +421,16 @@ int
 cp_function_registry_delete(
 	struct cp_function_registry *function_registry, const char *name
 ) {
+	// A function stores its name cut to its field, so the replacement
+	// matches the name cut the same way.
+	char key[CP_FUNCTION_NAME_LEN];
+	strtcpy(key, name, sizeof(key));
+
 	return registry_replace(
 		&function_registry->registry,
 		&cp_function_registry_keys,
 		cp_function_registry_item_cmp,
-		name,
+		key,
 		NULL,
 		cp_function_registry_item_free_cb,
 		NULL

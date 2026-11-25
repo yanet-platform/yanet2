@@ -1111,12 +1111,20 @@ cp_config_delete_device(
 	const char *name,
 	yanet_error **err
 ) {
+	// A topology device is stored under its port's name cut to the device
+	// name field, as a delete resolves the name it is given: both are
+	// matched cut.
+	char key[CP_DEVICE_NAME_LEN];
+	strtcpy(key, name, sizeof(key));
+
 	// Reject deletion of predefined topology devices.
 	for (uint64_t idx = 0; idx < dp_config->dp_topology.device_count;
 	     ++idx) {
 		struct dp_port *port =
 			&ADDR_OF(&dp_config->dp_topology.devices)[idx];
-		if (strncmp(port->device_name, name, CP_DEVICE_NAME_LEN) == 0) {
+		char port_name[CP_DEVICE_NAME_LEN];
+		strtcpy(port_name, port->device_name, sizeof(port_name));
+		if (strncmp(port_name, key, CP_DEVICE_NAME_LEN) == 0) {
 			yanet_error_add_kind(
 				err,
 				YANET_ERROR_FAILED_PRECONDITION,

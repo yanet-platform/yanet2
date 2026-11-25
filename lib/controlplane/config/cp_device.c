@@ -410,10 +410,20 @@ cp_device_fini(struct cp_device *self) {
 	cp_entity_fini(&self->entity);
 }
 
+// The key a device is looked up by: its type and name cut to their
+// fields, the form a stored device keeps them in.
 struct cp_device_cmp_data {
-	const char *type;
-	const char *name;
+	char type[CP_DEVICE_TYPE_LEN];
+	char name[CP_DEVICE_NAME_LEN];
 };
+
+static struct cp_device_cmp_data
+cp_device_cmp_data_init(const char *type, const char *name) {
+	struct cp_device_cmp_data cmp_data;
+	strtcpy(cmp_data.type, type, sizeof(cmp_data.type));
+	strtcpy(cmp_data.name, name, sizeof(cmp_data.name));
+	return cmp_data;
+}
 
 static int
 cp_device_registry_item_cmp(
@@ -587,10 +597,8 @@ cp_device_registry_lookup(
 	const char *type,
 	const char *name
 ) {
-	struct cp_device_cmp_data cmp_data = {
-		.type = type,
-		.name = name,
-	};
+	struct cp_device_cmp_data cmp_data =
+		cp_device_cmp_data_init(type, name);
 	uint64_t index;
 	if (registry_lookup(
 		    &device_registry->entity_registry.registry,
@@ -617,10 +625,8 @@ cp_device_registry_upsert(
 	struct cp_device *new_device,
 	yanet_error **err
 ) {
-	struct cp_device_cmp_data cmp_data = {
-		.type = type,
-		.name = name,
-	};
+	struct cp_device_cmp_data cmp_data =
+		cp_device_cmp_data_init(type, name);
 
 	struct cp_device *old_device =
 		cp_device_registry_lookup(device_registry, type, name);
@@ -647,11 +653,16 @@ int
 cp_device_registry_delete(
 	struct cp_device_registry *device_registry, const char *name
 ) {
+	// A device stores its name cut to its field, so the lookup matches
+	// the name cut the same way.
+	char key[CP_DEVICE_NAME_LEN];
+	strtcpy(key, name, sizeof(key));
+
 	return cp_entity_registry_replace(
 		&device_registry->entity_registry,
 		&cp_device_registry_keys,
 		cp_device_registry_name_cmp,
-		name,
+		key,
 		NULL
 	);
 }

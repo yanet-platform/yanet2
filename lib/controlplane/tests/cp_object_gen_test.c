@@ -42,6 +42,9 @@
 // device-pipeline-function-chain-module ectx tree plus a forward module
 // and an object.
 #define MODULE_OBJECT_LINK_TEST_MEMORY_LIMIT (2u * 1024u * 1024u)
+// The overlong-name test publishes the same device-pipeline-function-chain-
+// module ectx tree as the module-object-link test above.
+#define OVERLONG_NAME_TEST_MEMORY_LIMIT (2u * 1024u * 1024u)
 
 // Update installs objects into the live generation; lookup, lookup_index,
 // and get_object all agree on identity and index, and a missing name
@@ -613,11 +616,26 @@ test_cp_module_link_object(struct yanet_shm *shm) {
 }
 
 // Fills the whole buffer but its last byte with a name, NUL-terminated;
-// callers pass a buffer longer than the field the name is stored in.
+// a buffer longer than the field the name is stored in gives a name the
+// field cuts, one of the field's size the longest name it holds.
 static void
 fill_overlong_name(char *buf, size_t size, char fill) {
 	memset(buf, fill, size - 1);
 	buf[size - 1] = '\0';
+}
+
+// Fills the buffer, as long as the device name field, with the name of the
+// topology port of this suite whose device name fills that field.
+static void
+fill_full_port_name(char *buf) {
+	fill_overlong_name(buf, CP_DEVICE_NAME_LEN, 'u');
+}
+
+// Fills the buffer, longer than the device name field, with the configured
+// name of the topology port of this suite whose name that field cuts.
+static void
+fill_overlong_port_name(char *buf, size_t size) {
+	fill_overlong_name(buf, size, 'q');
 }
 
 // Returns a zeroed base module whose memory context is a child of the
@@ -1081,6 +1099,278 @@ test_delete_overlong_linked_object_refused(struct yanet_shm *shm) {
 	return TEST_SUCCESS;
 }
 
+// Verifies that a module, function, pipeline and device published under a
+// name longer than its field keeps are each found by that name and deleted
+// by it, as they are under a name that fits.
+static int
+run_overlong_names_found_and_deleted_test(struct yanet_shm *shm) {
+	yanet_error *err = NULL;
+
+	struct agent *agent = agent_attach(
+		shm, 0, "overlong-names", OVERLONG_NAME_TEST_MEMORY_LIMIT, &err
+	);
+	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
+
+	struct dp_config *dp_config = agent_dp_config(agent);
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+
+	size_t baseline = block_allocator_free_size(&agent->block_allocator);
+	uint64_t loaded_before = agent->loaded_entity_count;
+
+	char module_name[CP_MODULE_NAME_LEN * 2];
+	char function_name[CP_FUNCTION_NAME_LEN * 2];
+	char pipeline_name[CP_PIPELINE_NAME_LEN * 2];
+	char device_name[CP_DEVICE_NAME_LEN * 2];
+	fill_overlong_name(module_name, sizeof(module_name), 'm');
+	fill_overlong_name(function_name, sizeof(function_name), 'f');
+	fill_overlong_name(pipeline_name, sizeof(pipeline_name), 'p');
+	fill_overlong_name(device_name, sizeof(device_name), 'd');
+
+	// Publish the tree bottom up; every level names the one below it by
+	// its overlong name.
+	struct cp_module *module =
+		forward_module_config_init(agent, module_name, &err);
+	TEST_ASSERT_NOT_NULL(
+		module,
+		"forward_module_config_init failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	struct cp_module *modules[] = {module};
+	TEST_ASSERT_SUCCESS(
+		cp_config_update_modules(
+			dp_config, cp_config, 1, modules, &err
+		),
+		"update_modules failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+
+	const char *const chain_types[] = {"forward"};
+	const char *const chain_names[] = {module_name};
+	struct cp_chain_config *chain_cfg = cp_chain_config_create(
+		"overlong-chain", 1, chain_types, chain_names
+	);
+	TEST_ASSERT_NOT_NULL(chain_cfg, "chain_config_create failed");
+	struct cp_function_config *func_cfg =
+		cp_function_config_create(function_name, 1);
+	TEST_ASSERT_NOT_NULL(func_cfg, "function_config_create failed");
+	TEST_ASSERT_SUCCESS(
+		cp_function_config_set_chain(func_cfg, 0, chain_cfg, 1),
+		"set_chain failed"
+	);
+	struct cp_function_config *func_cfgs[] = {func_cfg};
+	TEST_ASSERT_SUCCESS(
+		cp_config_update_functions(
+			dp_config, cp_config, 1, func_cfgs, &err
+		),
+		"update_functions failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	cp_function_config_free(func_cfg);
+
+	struct cp_pipeline_config *pipe_cfg =
+		cp_pipeline_config_create(pipeline_name, 1);
+	TEST_ASSERT_NOT_NULL(pipe_cfg, "pipeline_config_create failed");
+	TEST_ASSERT_SUCCESS(
+		cp_pipeline_config_set_function(pipe_cfg, 0, function_name),
+		"set_function failed"
+	);
+	struct cp_pipeline_config *pipe_cfgs[] = {pipe_cfg};
+	TEST_ASSERT_SUCCESS(
+		cp_config_update_pipelines(
+			dp_config, cp_config, 1, pipe_cfgs, &err
+		),
+		"update_pipelines failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	cp_pipeline_config_free(pipe_cfg);
+
+	TEST_ASSERT_SUCCESS(
+		install_device_with_pipeline(
+			agent,
+			dp_config,
+			cp_config,
+			device_name,
+			pipeline_name,
+			&err
+		),
+		"update_devices failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+
+	struct cp_config_gen *gen = cp_config_current_gen(cp_config);
+	TEST_ASSERT(
+		cp_config_gen_lookup_module(gen, "forward", module_name) ==
+			module,
+		"the module must be found by its overlong name"
+	);
+	TEST_ASSERT_NOT_NULL(
+		cp_config_gen_lookup_function(gen, function_name),
+		"the function must be found by its overlong name"
+	);
+	TEST_ASSERT_NOT_NULL(
+		cp_config_gen_lookup_pipeline(gen, pipeline_name),
+		"the pipeline must be found by its overlong name"
+	);
+	struct cp_device *device = cp_device_registry_lookup(
+		&gen->device_registry, "plain", device_name
+	);
+	TEST_ASSERT_NOT_NULL(
+		device, "the device must be found by its overlong name"
+	);
+
+	// Take the tree down the same way, each by the name it was published
+	// under and a dependent before what it depends on.
+	TEST_ASSERT_SUCCESS(
+		agent_delete_device(agent, device_name, &err),
+		"delete_device failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	TEST_ASSERT_SUCCESS(
+		cp_device_plain_free(device, &err),
+		"freeing the deleted device failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	TEST_ASSERT_SUCCESS(
+		agent_delete_pipeline(agent, pipeline_name, &err),
+		"delete_pipeline failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	TEST_ASSERT_SUCCESS(
+		agent_delete_function(agent, function_name, &err),
+		"delete_function failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	TEST_ASSERT_SUCCESS(
+		agent_delete_module(agent, "forward", module_name, &err),
+		"delete_module failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	TEST_ASSERT_SUCCESS(
+		forward_module_config_free(module, &err),
+		"freeing the deleted module failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+
+	gen = cp_config_current_gen(cp_config);
+	TEST_ASSERT_NULL(
+		cp_config_gen_lookup_module(gen, "forward", module_name),
+		"a deleted module must not be found"
+	);
+	TEST_ASSERT_NULL(
+		cp_config_gen_lookup_function(gen, function_name),
+		"a deleted function must not be found"
+	);
+	TEST_ASSERT_NULL(
+		cp_config_gen_lookup_pipeline(gen, pipeline_name),
+		"a deleted pipeline must not be found"
+	);
+	TEST_ASSERT_NULL(
+		cp_device_registry_lookup(
+			&gen->device_registry, "plain", device_name
+		),
+		"a deleted device must not be found"
+	);
+	TEST_ASSERT_EQUAL(
+		agent->loaded_entity_count,
+		loaded_before,
+		"the deleted module and device must leave the agent's loaded "
+		"count"
+	);
+
+	size_t after = block_allocator_free_size(&agent->block_allocator);
+	TEST_ASSERT_EQUAL(
+		(long)after,
+		(long)baseline,
+		"arena did not return to baseline: baseline=%zu after=%zu",
+		baseline,
+		after
+	);
+
+	agent_detach(agent);
+	return TEST_SUCCESS;
+}
+
+// Verifies that predefined topology devices stay refused to delete under a
+// longer name that resolves to them: one by its name that fills the device
+// name field and by that name with one byte more, the other by its
+// configured name that the field cuts. Both stay published.
+static int
+run_delete_predefined_device_under_longer_name_refused_test(
+	struct yanet_shm *shm
+) {
+	yanet_error *err = NULL;
+
+	struct agent *agent = agent_attach(
+		shm,
+		0,
+		"del-predefined-longer-name",
+		CP_MODULE_LINK_TEST_MEMORY_LIMIT,
+		&err
+	);
+	TEST_ASSERT_NOT_NULL(agent, "agent_attach failed");
+
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+
+	char full_name[CP_DEVICE_NAME_LEN];
+	fill_full_port_name(full_name);
+
+	char longer_name[CP_DEVICE_NAME_LEN + 1];
+	fill_full_port_name(longer_name);
+	size_t full_len = strlen(longer_name);
+	longer_name[full_len] = 'x';
+	longer_name[full_len + 1] = '\0';
+
+	char configured_name[CP_DEVICE_NAME_LEN * 2];
+	fill_overlong_port_name(configured_name, sizeof(configured_name));
+
+	// The name that fills the field, the same with one byte more, and the
+	// configured name that the field cuts: the first two resolve to one
+	// predefined device, the last to the other.
+	const char *const names[] = {full_name, longer_name, configured_name};
+	for (uint64_t idx = 0; idx < sizeof(names) / sizeof(names[0]); ++idx) {
+		TEST_ASSERT(
+			agent_delete_device(agent, names[idx], &err) != 0,
+			"deleting the predefined device under '%s' must fail",
+			names[idx]
+		);
+		TEST_ASSERT_EQUAL(
+			(long)yanet_error_kind(err),
+			(long)YANET_ERROR_FAILED_PRECONDITION,
+			"the refusal under '%s' must be reported as failed "
+			"precondition",
+			names[idx]
+		);
+		TEST_ASSERT_STR_CONTAINS(
+			yanet_error_message(err),
+			"is a predefined topology device",
+			"the refusal under '%s' must name the device as "
+			"predefined",
+			names[idx]
+		);
+		yanet_error_free(err);
+		err = NULL;
+	}
+
+	char stored_name[CP_DEVICE_NAME_LEN];
+	strtcpy(stored_name, configured_name, sizeof(stored_name));
+	struct cp_config_gen *gen = cp_config_current_gen(cp_config);
+	TEST_ASSERT_NOT_NULL(
+		cp_device_registry_lookup(
+			&gen->device_registry, "plain", full_name
+		),
+		"the device of the full name must stay published"
+	);
+	TEST_ASSERT_NOT_NULL(
+		cp_device_registry_lookup(
+			&gen->device_registry, "plain", stored_name
+		),
+		"the device of the configured name must stay published"
+	);
+
+	agent_detach(agent);
+	return TEST_SUCCESS;
+}
+
 // Constructor of the "test" object type, which the harness resolves from
 // this executable: it declares no hook and no prepared buffer.
 struct object *
@@ -1097,7 +1387,16 @@ int
 main(void) {
 	log_enable_name("debug");
 
-	const char *port_names[] = {"01:00.0"};
+	// The two long ports give this suite predefined devices with a name
+	// that fills its field and with a configured name the field cuts.
+	char full_port_name[CP_DEVICE_NAME_LEN];
+	char overlong_port_name[CP_DEVICE_NAME_LEN * 2];
+	fill_full_port_name(full_port_name);
+	fill_overlong_port_name(overlong_port_name, sizeof(overlong_port_name));
+
+	const char *port_names[] = {
+		"01:00.0", full_port_name, overlong_port_name
+	};
 	const char *mods_to_load[] = {"forward"};
 	const char *devs_to_load[] = {"plain"};
 	const char *objs_to_load[] = {"test"};
@@ -1107,7 +1406,7 @@ main(void) {
 		.dp_memory = 1u << 20,
 		.worker_count = 1,
 		.devices = port_names,
-		.device_count = 1,
+		.device_count = 3,
 		.modules = mods_to_load,
 		.module_count = 1,
 		.devices_to_load = devs_to_load,
@@ -1153,6 +1452,14 @@ main(void) {
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_delete_overlong_linked_object_refused(shm);
+	}
+	if (res == TEST_SUCCESS) {
+		res = run_overlong_names_found_and_deleted_test(shm);
+	}
+	if (res == TEST_SUCCESS) {
+		res = run_delete_predefined_device_under_longer_name_refused_test(
+			shm
+		);
 	}
 
 	dataplane_ut_free(ut);
