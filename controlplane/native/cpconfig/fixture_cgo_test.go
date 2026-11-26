@@ -235,14 +235,14 @@ type shared struct {
 	Counts    map[*uint64]uint64
 }
 
-// configuration is what an update publishes: module configurations or
-// objects.
+// configuration is what an update publishes: module configurations,
+// objects or devices.
 type configuration interface {
-	*layout.CpModule | *layout.CpObject
+	*layout.CpModule | *layout.CpObject | *layout.CpDevice
 }
 
 // partsOf returns a configuration's entity, its counter registries and
-// its free through C.
+// its typed destruction past the destroy gate.
 //
 // Every test object is of the test object size.
 func partsOf[C configuration](config C) (*layout.CpEntity, []*layout.CounterRegistry, func()) {
@@ -251,8 +251,10 @@ func partsOf[C configuration](config C) (*layout.CpEntity, []*layout.CounterRegi
 		return &config.Entity, counterRegistries(config), func() { coracle.ModuleDestroy(unsafe.Pointer(config)) }
 	case *layout.CpObject:
 		return &config.Entity, objectRegistries(config), func() { coracle.ObjectDestroy(unsafe.Pointer(config), objectSize) }
+	case *layout.CpDevice:
+		return &config.Entity, []*layout.CounterRegistry{&config.CounterRegistry}, func() { destroyDevice(config) }
 	}
-	panic("a configuration is a module or an object")
+	panic("a configuration is a module, an object or a device")
 }
 
 // sharedState reads the shared state of the fixture's instance and of

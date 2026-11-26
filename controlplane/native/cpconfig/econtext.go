@@ -319,7 +319,7 @@ func (m *build) entry(
 		path.Pipeline = shm.String(named[idx].Name[:])
 		pipeline := m.lookupPipeline(path.Pipeline)
 		if pipeline == nil {
-			return nil, fmt.Errorf("device %q: pipeline %q not found", path.Device, path.Pipeline)
+			return nil, fmt.Errorf("device %q: %w: %s", path.Device, ErrMissingPipeline, path.Pipeline)
 		}
 		context, err := m.pipeline(device, path, pipeline)
 		if err != nil {

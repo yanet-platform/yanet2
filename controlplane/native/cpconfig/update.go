@@ -34,6 +34,9 @@ var (
 	// ErrMissingFunction marks a pipeline running a function the
 	// generation does not publish; C refuses it as a failed precondition.
 	ErrMissingFunction = errors.New("pipeline function not found")
+	// ErrMissingPipeline marks a device entry running a pipeline the
+	// generation does not publish; C refuses it as a failed precondition.
+	ErrMissingPipeline = errors.New("device pipeline not found")
 	// ErrNeedsDelivery marks an update to a dataplane that runs worker
 	// rounds on request made without a delivery.
 	ErrNeedsDelivery = errors.New("update needs a delivery")
@@ -247,11 +250,19 @@ func (m *build) putModules(modules []*layout.CpModule) error {
 }
 
 // entityRef is a configuration an update publishes: its owning agent and
-// its identity.
+// its identity, of a name alone when the type is empty.
 type entityRef struct {
 	Owner *layout.Agent
 	Type  string
 	Name  string
+}
+
+// String names the configuration as its type and name, or its name.
+func (m entityRef) String() string {
+	if m.Type == "" {
+		return m.Name
+	}
+	return m.Type + ":" + m.Name
 }
 
 // holdEntities holds the current agent of every configuration of an
@@ -272,7 +283,7 @@ func holdEntities(cp *layout.CpConfig, kind string, count int, entityOf func(idx
 	for _, entity := range entities {
 		if entity.Owner != nil && !agent.IsCurrent(cp, entity.Owner) {
 			releaseOwners(owners)
-			return nil, fmt.Errorf("%s %s:%s: %w", kind, entity.Type, entity.Name, ErrSupersededOwner)
+			return nil, fmt.Errorf("%s %s: %w", kind, entity, ErrSupersededOwner)
 		}
 		if entity.Owner != nil {
 			atomic.AddUint64(&entity.Owner.LoadedEntityCount, 1)
@@ -283,7 +294,7 @@ func holdEntities(cp *layout.CpConfig, kind string, count int, entityOf func(idx
 		for _, previous := range entities[:idx] {
 			if entity.Type == previous.Type && entity.Name == previous.Name {
 				releaseOwners(owners)
-				return nil, fmt.Errorf("%s %s:%s: %w", kind, entity.Type, entity.Name, ErrRepeated)
+				return nil, fmt.Errorf("%s %s: %w", kind, entity, ErrRepeated)
 			}
 		}
 	}
