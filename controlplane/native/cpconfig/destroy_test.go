@@ -99,9 +99,8 @@ func Test_TryDestroy_RefusesHeldConfiguration(t *testing.T) {
 //
 // The free passes the destroy gate, frees the body, finalises the header,
 // which unlinks its memory context from the agent's, returns the block
-// and then the hold on the agent. An attach superseding
-// the agent during the free leaves the agent to the free, whose release
-// reclaims it.
+// and then the hold on the agent. An attach superseding the agent during
+// the free leaves the agent to the free, whose release reclaims it.
 func Test_TryDestroyObject_TypedFreeGivesAgentBack(t *testing.T) {
 	cases := []struct {
 		name string
