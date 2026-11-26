@@ -776,6 +776,9 @@ func (m *Gateway) Run(ctx context.Context) error {
 	}
 
 	wg, ctx := errgroup.WithContext(ctx)
+	wg.Go(func() error {
+		return m.authManager.RunPolicyRefresh(ctx)
+	})
 
 	for _, entry := range listeners {
 		m.log.Info("exposing gRPC gateway",

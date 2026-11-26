@@ -3,6 +3,41 @@
 Manual steps required when upgrading an existing deployment. The packaging
 does not perform these automatically.
 
+## File identities can refresh without a restart
+
+File identity providers accept an opt-in polling interval:
+
+```yaml
+gateway:
+  auth:
+    identity_providers:
+      - type: file
+        path: /etc/yanet2/auth/identities.yaml
+        refresh_interval: 5s
+```
+
+Omitting the interval or setting it to zero preserves startup-only loading.
+A negative interval is rejected, including in audit and disabled modes.
+Enabled mode requires a valid initial file; audit and disabled modes do not
+read identity files. Each enabled source refreshes independently. A failed
+read or parse keeps its last valid identities and is retried on the next tick.
+Logs identify the source on failure and recovery; successful polls are silent.
+
+New admissions see account additions, group changes and disabled accounts
+without reconnecting. The caller still needs a credential accepted by the
+configured authenticator. Permissions and credential files remain static;
+existing admissions and streams are not revoked. Removing an account from
+the first provider allows lookup in later providers; disabling it does not.
+
+Write ordinary files through atomic rename. An empty valid document clears
+that provider; existing YAML parsing rules are unchanged. ConfigMap directory
+mounts update asynchronously, while `subPath` mounts do not refresh. The poll
+interval applies after delivery to the pod, not after updating the ConfigMap.
+A failed reload can preserve old access indefinitely.
+
+Deploy the new binary with the old configuration first, then enable polling.
+Remove the interval before rolling back to an older binary.
+
 ## The ready magic carries the module ABI version
 
 The value a dataplane writes into its shared memory once an instance is ready

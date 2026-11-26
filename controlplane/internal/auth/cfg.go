@@ -2,6 +2,7 @@ package auth
 
 import (
 	"fmt"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -46,6 +47,11 @@ func (m *Config) Validate() error {
 	if m.Mode != "" && m.Disabled != nil {
 		return fmt.Errorf("mode and deprecated disabled cannot both be specified; remove disabled and use mode")
 	}
+	for idx, provider := range m.IdentityProviders {
+		if provider.RefreshInterval < 0 {
+			return fmt.Errorf("identity_providers[%d].refresh_interval must not be negative", idx)
+		}
+	}
 	switch m.Mode {
 	case "", ModeDisabled, ModeAudit, ModeEnabled:
 		return nil
@@ -60,6 +66,8 @@ type IdentityProviderConfig struct {
 	Type string `yaml:"type"`
 	// Path is the file path (for file-based providers).
 	Path string `yaml:"path"`
+	// RefreshInterval enables polling; zero keeps the startup identities.
+	RefreshInterval time.Duration `yaml:"refresh_interval,omitempty"`
 }
 
 // AuthenticatorConfig is a generic authenticator configuration entry.
