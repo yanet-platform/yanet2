@@ -162,15 +162,16 @@ func Test_UpdateFunctions_RefusesRepeatedFunction(t *testing.T) {
 }
 
 // buildPlace matches where a failed build of functions or pipelines
-// stopped: the worker whose contexts it built, or the step of the
-// function, chain or pipeline it built.
+// stopped: the worker whose contexts it built, the step of the function,
+// chain or pipeline it built, or the upsert of one.
 var buildPlace = regexp.MustCompile(
-	`worker \d+|(function|pipeline) "[^"]*": (chain "[^"]*": )?(allocate \w+|register)`,
+	`worker \d+|(function|pipeline) "[^"]*": (chain "[^"]*": )?(allocate \w+|register)|` +
+		`upsert (function|pipeline) "[^"]*"`,
 )
 
-// requireExhaustionLeavesAsFound runs an update on fixtures whose zone
-// keeps the blocks of the copy and those of each budget, and fails unless
-// it stops at every one of the places.
+// requireExhaustionLeavesAsFound runs an update on fresh fixtures whose
+// zone keeps the blocks of the copy and those of each budget, and fails
+// unless it stops at every one of the places.
 //
 // An update that runs out of memory must leave the shared state as it
 // found it. A budget may also carry the update through: the contexts'
@@ -178,6 +179,7 @@ var buildPlace = regexp.MustCompile(
 // the update's own requests overlap to stop it in each worker of both.
 func requireExhaustionLeavesAsFound(
 	t *testing.T,
+	fixture func(t testing.TB) *publishedFixture,
 	update func(t *testing.T, memory *publishedFixture) error,
 	budgets []requestBudget,
 	places []string,
@@ -186,7 +188,7 @@ func requireExhaustionLeavesAsFound(
 	stopped := map[string]bool{}
 	for _, budget := range budgets {
 		t.Run(budget.name, func(t *testing.T) {
-			memory := newPublishedFixture(t)
+			memory := fixture(t)
 			cp := memory.Instance().Cp
 			kept := append(copyRequests(cp.CpConfigGen.Get()), budget.requests...)
 			nativetest.LeaveOnly(t, &cp.BlockAllocator, kept...)
@@ -287,29 +289,76 @@ func functionRequests(chainLengths ...int) []uintptr {
 // it took and drops every reference it took.
 //
 // The update replaces the published function and adds a new one, so a
-// failure inside the second finds the first in the copy.
+// failure inside the second finds the first in the copy. On a full
+// registry the upsert of a new function fails to grow it, and the
+// function it refused goes back too.
 func Test_UpdateFunctions_ExhaustedZoneFreesUpdate(t *testing.T) {
-	requests := append(functionRequests(1), functionRequests(1, 1)...)
-	budgets := prefixBudgets(requests, contextTails...)
-	requireExhaustionLeavesAsFound(t, func(t *testing.T, memory *publishedFixture) error {
-		return updateFunctions(t, memory,
-			cpconfig.FunctionConfig{Name: "drop", Chains: []cpconfig.FunctionChainConfig{chainOf("drop_chain", 1, "a")}},
-			cpconfig.FunctionConfig{Name: "fresh", Chains: []cpconfig.FunctionChainConfig{
-				chainOf("first", 1, "b"), chainOf("second", 1, "c"),
-			}},
-		)
-	}, budgets, []string{
-		`function "drop": allocate function`,
-		`function "drop": register`,
-		`function "drop": chain "drop_chain": allocate chain`,
-		`function "drop": chain "drop_chain": register`,
-		`function "fresh": allocate function`,
-		`function "fresh": register`,
-		`function "fresh": chain "first": allocate chain`,
-		`function "fresh": chain "first": register`,
-		`function "fresh": chain "second": allocate chain`,
-		`function "fresh": chain "second": register`,
-		"worker 0",
-		"worker 1",
+	t.Run("registry with room", func(t *testing.T) {
+		requests := append(functionRequests(1), functionRequests(1, 1)...)
+		budgets := prefixBudgets(requests, contextTails...)
+		requireExhaustionLeavesAsFound(t, newPublishedFixture, func(t *testing.T, memory *publishedFixture) error {
+			return updateFunctions(t, memory,
+				cpconfig.FunctionConfig{Name: "drop", Chains: []cpconfig.FunctionChainConfig{chainOf("drop_chain", 1, "a")}},
+				cpconfig.FunctionConfig{Name: "fresh", Chains: []cpconfig.FunctionChainConfig{
+					chainOf("first", 1, "b"), chainOf("second", 1, "c"),
+				}},
+			)
+		}, budgets, []string{
+			`function "drop": allocate function`,
+			`function "drop": register`,
+			`function "drop": chain "drop_chain": allocate chain`,
+			`function "drop": chain "drop_chain": register`,
+			`function "fresh": allocate function`,
+			`function "fresh": register`,
+			`function "fresh": chain "first": allocate chain`,
+			`function "fresh": chain "first": register`,
+			`function "fresh": chain "second": allocate chain`,
+			`function "fresh": chain "second": register`,
+			"worker 0",
+			"worker 1",
+		})
 	})
+	t.Run("full registry", func(t *testing.T) {
+		requests := functionRequests(1)
+		budgets := []requestBudget{
+			{"no room for grown slots", requests},
+			{"no room for a grown index", append(slices.Clip(requests), 16*shm.PtrSize)},
+		}
+		requireExhaustionLeavesAsFound(t, newFullFunctionsFixture, func(t *testing.T, memory *publishedFixture) error {
+			return updateFunctions(t, memory, cpconfig.FunctionConfig{
+				Name:   "ninth",
+				Chains: []cpconfig.FunctionChainConfig{chainOf("chain", 1, "a")},
+			})
+		}, budgets, []string{`upsert function "ninth"`})
+	})
+}
+
+// newFullFunctionsFixture returns a published fixture whose function
+// registry is full: drop and seven functions no pipeline runs fill its
+// eight slots.
+func newFullFunctionsFixture(t testing.TB) *publishedFixture {
+	t.Helper()
+	memory := newPublishedFixture(t)
+	var functions []cpconfig.FunctionConfig
+	for idx := range 7 {
+		functions = append(functions, cpconfig.FunctionConfig{
+			Name:   fmt.Sprintf("idle%d", idx),
+			Chains: []cpconfig.FunctionChainConfig{chainOf("chain", 1, "a")},
+		})
+	}
+	require.NoError(t, cpconfig.UpdateFunctions(memory.Instance(), functions, cpconfig.WithDelivery(nativetest.Deliver)))
+	requireFull(t, &memory.Instance().Cp.CpConfigGen.Get().FunctionRegistry.Registry)
+	return memory
+}
+
+// requireFull fails unless a registry holds eight items in its eight
+// slots, so one more grows it.
+func requireFull(t testing.TB, items *layout.Registry) {
+	t.Helper()
+	held := 0
+	for range registry.Items(items) {
+		held++
+	}
+	require.Equal(t, uint64(8), items.Capacity)
+	require.Equal(t, 8, held)
 }

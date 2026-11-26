@@ -3,6 +3,8 @@
 package cpconfig_test
 
 import (
+	"fmt"
+	"slices"
 	"testing"
 	"unsafe"
 
@@ -11,6 +13,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/native/cpconfig"
 	"github.com/yanet-platform/yanet2/controlplane/native/internal/registry"
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
+	"github.com/yanet-platform/yanet2/controlplane/native/nativetest"
 	"github.com/yanet-platform/yanet2/controlplane/native/shm"
 	"github.com/yanet-platform/yanet2/controlplane/native/zone"
 )
@@ -143,23 +146,52 @@ func pipelineRequests(length int) []uintptr {
 // it took and drops every reference it took.
 //
 // The update replaces the published pipeline and adds a new one, so a
-// failure inside the second finds the first in the copy.
+// failure inside the second finds the first in the copy. On a full
+// registry the upsert of a new pipeline fails to grow it, and the
+// pipeline it refused goes back too.
 func Test_UpdatePipelines_ExhaustedZoneFreesUpdate(t *testing.T) {
-	requests := append(pipelineRequests(1), pipelineRequests(2)...)
-	budgets := prefixBudgets(requests, contextTails...)
-	requireExhaustionLeavesAsFound(t, func(t *testing.T, memory *publishedFixture) error {
-		return updatePipelines(t, memory,
-			cpconfig.PipelineConfig{Name: "drop", Functions: []string{"drop"}},
-			cpconfig.PipelineConfig{Name: "fresh", Functions: []string{"drop", "drop"}},
-		)
-	}, budgets, []string{
-		`pipeline "drop": allocate pipeline`,
-		`pipeline "drop": register`,
-		`pipeline "fresh": allocate pipeline`,
-		`pipeline "fresh": register`,
-		"worker 0",
-		"worker 1",
+	t.Run("registry with room", func(t *testing.T) {
+		requests := append(pipelineRequests(1), pipelineRequests(2)...)
+		budgets := prefixBudgets(requests, contextTails...)
+		requireExhaustionLeavesAsFound(t, newPublishedFixture, func(t *testing.T, memory *publishedFixture) error {
+			return updatePipelines(t, memory,
+				cpconfig.PipelineConfig{Name: "drop", Functions: []string{"drop"}},
+				cpconfig.PipelineConfig{Name: "fresh", Functions: []string{"drop", "drop"}},
+			)
+		}, budgets, []string{
+			`pipeline "drop": allocate pipeline`,
+			`pipeline "drop": register`,
+			`pipeline "fresh": allocate pipeline`,
+			`pipeline "fresh": register`,
+			"worker 0",
+			"worker 1",
+		})
 	})
+	t.Run("full registry", func(t *testing.T) {
+		requests := pipelineRequests(0)
+		budgets := []requestBudget{
+			{"no room for grown slots", requests},
+			{"no room for a grown index", append(slices.Clip(requests), 16*shm.PtrSize)},
+		}
+		requireExhaustionLeavesAsFound(t, newFullPipelinesFixture, func(t *testing.T, memory *publishedFixture) error {
+			return updatePipelines(t, memory, cpconfig.PipelineConfig{Name: "ninth"})
+		}, budgets, []string{`upsert pipeline "ninth"`})
+	})
+}
+
+// newFullPipelinesFixture returns a published fixture whose pipeline
+// registry is full: drop, dummy and six empty pipelines no device runs
+// fill its eight slots.
+func newFullPipelinesFixture(t testing.TB) *publishedFixture {
+	t.Helper()
+	memory := newPublishedFixture(t)
+	var pipelines []cpconfig.PipelineConfig
+	for idx := range 6 {
+		pipelines = append(pipelines, cpconfig.PipelineConfig{Name: fmt.Sprintf("idle%d", idx)})
+	}
+	require.NoError(t, cpconfig.UpdatePipelines(memory.Instance(), pipelines, cpconfig.WithDelivery(nativetest.Deliver)))
+	requireFull(t, &memory.Instance().Cp.CpConfigGen.Get().PipelineRegistry.Registry)
+	return memory
 }
 
 // Test_UpdatePipelines_DataplaneRunsGoTopology verifies that packets on a

@@ -69,6 +69,9 @@ func UpdateFunctions(instance *zone.Instance, functions []FunctionConfig, option
 					return fmt.Errorf("function %q: %w", config.Name, err)
 				}
 				if err := m.upsertFunction(function); err != nil {
+					// A function its registry refuses belongs to no
+					// generation, so it goes with the update.
+					teardown.FreeFunction(function)
 					return fmt.Errorf("upsert function %q: %w", config.Name, err)
 				}
 			}
@@ -211,10 +214,8 @@ func newChain(context *layout.MemoryContext, config ChainConfig) (*layout.CpChai
 // cp_function_registry_upsert does.
 //
 // It continues the counters of the function of its name, and each chain
-// those of that function's chain of its name. A chain whose link fails
-// does not fail the upsert, as in C: every chain registers the same names,
-// so its link takes no memory. A function the upsert fails for stays
-// allocated, as C leaves it.
+// those of that function's chain of its name. A failed link writes only
+// into the function's own registries, which go with the function.
 func (m *build) upsertFunction(function *layout.CpFunction) error {
 	name := shm.String(function.Name[:])
 	old := m.lookupFunction(name)
@@ -240,7 +241,9 @@ func (m *build) upsertFunction(function *layout.CpFunction) error {
 				}
 			}
 		}
-		_ = linkCounters(&chain.CounterRegistry, oldChainCounters)
+		if err := linkCounters(&chain.CounterRegistry, oldChainCounters); err != nil {
+			return fmt.Errorf("link counter registry of chain %q: %w", shm.String(chain.Name[:]), err)
+		}
 	}
 
 	key := registry.FieldKey(name, len(function.Name))

@@ -48,6 +48,9 @@ func UpdatePipelines(instance *zone.Instance, pipelines []PipelineConfig, option
 					return fmt.Errorf("pipeline %q: %w", config.Name, err)
 				}
 				if err := m.upsertPipeline(pipeline); err != nil {
+					// A pipeline its registry refuses belongs to no
+					// generation, so it goes with the update.
+					teardown.FreePipeline(pipeline)
 					return fmt.Errorf("upsert pipeline %q: %w", config.Name, err)
 				}
 			}
@@ -118,8 +121,7 @@ func (m *build) newPipeline(config PipelineConfig) (*layout.CpPipeline, error) {
 
 // upsertPipeline puts a pipeline into the generation's registry,
 // continuing the counters of the pipeline of its name, as
-// cp_pipeline_registry_upsert does; a pipeline the upsert fails for stays
-// allocated, as C leaves it.
+// cp_pipeline_registry_upsert does.
 func (m *build) upsertPipeline(pipeline *layout.CpPipeline) error {
 	name := shm.String(pipeline.Name[:])
 	var oldCounters *layout.CounterRegistry
