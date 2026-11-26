@@ -68,20 +68,29 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 		return NULL;
 	}
 
-	// Allocate the shared arena. calloc zeros the struct so every pointer
-	// field is NULL until explicitly set — partial-init free is safe.
+	// Allocate the shared arena unless the caller owns it. calloc zeros
+	// the struct so every pointer field is NULL until explicitly set —
+	// partial-init free is safe.
 	ut->arena_size = cfg->cp_memory + cfg->dp_memory;
-	// aligned_alloc takes only a multiple of the alignment, so odd zone
-	// sizes round the allocation up; the arena keeps its own size.
-	ut->arena = aligned_alloc(64, (ut->arena_size + 63) & ~(size_t)63);
-	if (ut->arena == NULL) {
-		LOG(ERROR,
-		    "dataplane_ut_new: failed to allocate %zu-byte arena",
-		    ut->arena_size);
-		dataplane_ut_free(ut);
-		return NULL;
+	if (cfg->storage != NULL) {
+		ut->arena = cfg->storage;
+	} else {
+		// aligned_alloc takes only a multiple of the alignment, so odd
+		// zone sizes round the allocation up; the arena keeps its own
+		// size.
+		ut->arena =
+			aligned_alloc(64, (ut->arena_size + 63) & ~(size_t)63);
+		if (ut->arena == NULL) {
+			LOG(ERROR,
+			    "dataplane_ut_new: failed to allocate %zu-byte "
+			    "arena",
+			    ut->arena_size);
+			dataplane_ut_free(ut);
+			return NULL;
+		}
+		ut->owns_arena = true;
+		memset(ut->arena, 0, ut->arena_size);
 	}
-	memset(ut->arena, 0, ut->arena_size);
 	ut->shm.base = ut->arena;
 	ut->shm.size = ut->arena_size;
 
@@ -462,10 +471,10 @@ dataplane_ut_free(struct dataplane_ut *ut) {
 		memory_context_fini(&ut->dp_config->memory_context);
 	}
 
-	if (ut->arena != NULL) {
+	if (ut->owns_arena) {
 		free(ut->arena);
-		ut->arena = NULL;
 	}
+	ut->arena = NULL;
 
 	dp_unload_plugins(&ut->plugins);
 
@@ -515,6 +524,59 @@ dataplane_ut_get_time_ns(struct dataplane_ut *ut) {
 struct rte_mbuf *
 dataplane_ut_alloc_mbuf(struct dataplane_ut *ut) {
 	return rte_pktmbuf_alloc(ut->mempool);
+}
+
+int
+dataplane_ut_frame_packet(
+	struct dataplane_ut *ut,
+	const uint8_t *frame,
+	size_t len,
+	struct packet **packet
+) {
+	struct rte_mbuf *mbuf = dataplane_ut_alloc_mbuf(ut);
+	if (mbuf == NULL) {
+		return -ENOMEM;
+	}
+	if (len > rte_pktmbuf_tailroom(mbuf)) {
+		rte_pktmbuf_free(mbuf);
+		return -EMSGSIZE;
+	}
+	struct packet *built = mbuf_to_packet(mbuf);
+	memset(built, 0, sizeof(*built));
+	built->mbuf = mbuf;
+	if (len != 0) {
+		memcpy(rte_pktmbuf_append(mbuf, (uint16_t)len), frame, len);
+	}
+	if (parse_packet(built) != 0) {
+		rte_pktmbuf_free(mbuf);
+		return -EINVAL;
+	}
+	*packet = built;
+	return 0;
+}
+
+size_t
+dataplane_ut_packet_copy(
+	const struct packet *packet, uint8_t *dst, size_t size
+) {
+	size_t total = 0;
+	const struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+	for (const struct rte_mbuf *segment = mbuf; segment != NULL;
+	     segment = segment->next) {
+		total += segment->data_len;
+	}
+	if (dst == NULL || total > size) {
+		return total;
+	}
+	size_t done = 0;
+	for (const struct rte_mbuf *segment = mbuf; segment != NULL;
+	     segment = segment->next) {
+		memcpy(dst + done,
+		       rte_pktmbuf_mtod(segment, const void *),
+		       segment->data_len);
+		done += segment->data_len;
+	}
+	return total;
 }
 
 static void

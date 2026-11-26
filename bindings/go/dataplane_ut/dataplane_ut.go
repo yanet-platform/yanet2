@@ -5,12 +5,63 @@ package dataplaneut
 
 #cgo LDFLAGS: -Wl,-E
 
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
 
+#include "common/memory_block.h"
+#include "lib/controlplane/agent/agent.h"
+#include "lib/controlplane/config/zone.h"
+#include "lib/dataplane/config/zone.h"
 #include "lib/dataplane_ut/dataplane_ut.h"
 #include "lib/dataplane/packet/packet.h"
+#include "lib/logging/log.h"
+
+// The frames of a round: they lie back to back in data, lens[idx] bytes
+// each, received on devices[idx]. failed is the index of a frame that could
+// not enter the round.
+struct dataplane_ut_frames {
+	const uint8_t *data;
+	const uint32_t *lens;
+	const uint16_t *devices;
+	uint32_t count;
+	uint32_t failed;
+};
+
+// dataplane_ut_run_frames runs one round of frames in mbufs of the harness
+// pool.
+//
+// A frame that cannot enter the round fails it before it runs, with the
+// return value of dataplane_ut_frame_packet.
+static int
+dataplane_ut_run_frames(
+	struct dataplane_ut *ut,
+	size_t worker,
+	struct dataplane_ut_frames *frames,
+	struct dataplane_ut_round_result *result
+) {
+	struct dataplane_ut_round_result built;
+	packet_list_init(&built.output);
+	packet_list_init(&built.drop);
+	const uint8_t *data = frames->data;
+	for (uint32_t idx = 0; idx < frames->count; ++idx) {
+		struct packet *packet;
+		int rc = dataplane_ut_frame_packet(
+			ut, data, frames->lens[idx], &packet
+		);
+		if (rc != 0) {
+			frames->failed = idx;
+			// A failed build leaves the frames built so far.
+			dataplane_ut_round_result_free(&built);
+			return rc;
+		}
+		packet_list_add(&built.output, packet);
+		data += frames->lens[idx];
+	}
+	dataplane_ut_run(ut, worker, frames->devices, &built.output, result);
+	return 0;
+}
 
 // dataplane_ut_set_hashes writes hashes[i] into the hash field of the
 // i-th packet in list, stopping at count or the end of the list,
@@ -126,9 +177,11 @@ keep_refs(void **ptrs) {
 import "C"
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"runtime"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 	"unsafe"
@@ -187,7 +240,32 @@ type Config struct {
 	// otherwise. Leave it off for a module that keeps packets beyond the
 	// round: it would free what the module still holds.
 	ReclaimLostPackets bool
+	// Storage optionally holds the harness in memory the caller owns, of
+	// at least CPMemory + DPMemory bytes, zero-filled, aligned to 64 bytes
+	// and outside the Go heap, as a mapping is.
+	//
+	// The harness lays its storage out there and neither zeroes nor frees
+	// it; the caller keeps it until the harness is freed, and may allocate
+	// in the control-plane zone from another process once it is set up.
+	Storage []byte
 }
+
+// ErrInvalidArgument marks storage, an offset, a worker or a device the
+// harness refuses before it reaches C.
+var ErrInvalidArgument = errors.New("invalid argument")
+
+// EnableLog makes the harness's C log write the level named, one of trace,
+// debug, info, warn and error, and every level above it to the error
+// output, without colours when that output is no terminal.
+func EnableLog(level string) {
+	name := C.CString(level)
+	defer C.free(unsafe.Pointer(name))
+	C.log_enable_name(name)
+}
+
+// RedZone is the guard AddressSanitizer builds of the harness put on both
+// sides of every block they allocate, zero in other builds.
+const RedZone = C.ASAN_RED_ZONE
 
 // Result of one pipeline round.
 type Result struct {
@@ -237,6 +315,10 @@ type Harness struct {
 	workerCount int
 	// Whether a segmented round frees the input packets left on no list.
 	reclaimLostPackets bool
+	// The sizes of the dataplane zone and of the whole storage, which the
+	// control-plane zone ends.
+	dpMemory    uint64
+	storageSize uint64
 }
 
 // NewHarness constructs a Harness from cfg.
@@ -263,6 +345,16 @@ func NewHarness(cfg Config) (*Harness, error) {
 	deviceCount := len(cfg.Devices)
 	if deviceCount == 0 {
 		deviceCount = 1
+	}
+
+	storageSize := cfg.CPMemory + cfg.DPMemory
+	if cfg.Storage != nil && uint64(len(cfg.Storage)) < storageSize {
+		return nil, fmt.Errorf(
+			"%w: storage of %d bytes is shorter than %d",
+			ErrInvalidArgument,
+			len(cfg.Storage),
+			storageSize,
+		)
 	}
 
 	// The dp_worker->device_id field feeds the same per-device scheduling arrays
@@ -346,18 +438,26 @@ func NewHarness(cfg Config) (*Harness, error) {
 		cCfg.workers = cArr
 	}
 
+	if cfg.Storage != nil {
+		cCfg.storage = unsafe.Pointer(unsafe.SliceData(cfg.Storage))
+	}
+
 	ptr := C.dataplane_ut_new(&cCfg)
 	if ptr == nil {
 		return nil, fmt.Errorf("failed to create dataplane harness: dataplane_ut_new returned NULL")
 	}
-
 	return &Harness{
 		ptr:                ptr,
 		deviceCount:        deviceCount,
 		workerCount:        int(cfg.WorkerCount),
 		reclaimLostPackets: cfg.ReclaimLostPackets,
+		dpMemory:           cfg.DPMemory,
+		storageSize:        storageSize,
 	}, nil
 }
+
+// GenerationSize is the size of a configuration generation.
+const GenerationSize = C.sizeof_struct_cp_config_gen
 
 // Free tears down the harness. Nil-safe.
 func (m *Harness) Free() {
@@ -368,6 +468,33 @@ func (m *Harness) Free() {
 // OutstandingMbufs returns mock-mempool allocations not yet reclaimed.
 func (m *Harness) OutstandingMbufs() uint64 {
 	return uint64(C.dataplane_ut_mempool_outstanding(m.ptr))
+}
+
+// LeakMbuf takes an mbuf of the harness pool and never puts it back.
+//
+// A fault-injection hook for tests of what checks the outstanding mbufs.
+func (m *Harness) LeakMbuf() error {
+	if C.dataplane_ut_alloc_mbuf(m.ptr) == nil {
+		return fmt.Errorf("the mbuf pool is empty: %w", syscall.ENOMEM)
+	}
+	return nil
+}
+
+// Deliver hands the generation at the offset of the harness storage to the
+// workers under the round lock, as the publication of a dataplane without
+// workers of its own does.
+//
+// The commit handlers run and every worker holds its context of the
+// generation on return. The generation must lie in the control-plane zone.
+func (m *Harness) Deliver(offset uint64) error {
+	size := uint64(C.sizeof_struct_cp_config_gen)
+	if offset < m.dpMemory || m.storageSize < size || offset > m.storageSize-size {
+		return fmt.Errorf("%w: generation offset %#x lies outside the control-plane zone", ErrInvalidArgument, offset)
+	}
+	// The instance starts with its dataplane zone.
+	base := unsafe.Pointer(C.dataplane_ut_shm(m.ptr).base)
+	C.dp_config_wait_for_gen((*C.struct_dp_config)(base), (*C.struct_cp_config_gen)(unsafe.Add(base, offset)))
+	return nil
 }
 
 // holdRoundLock takes the harness round lock.
@@ -597,6 +724,92 @@ func (m *Harness) HandleSegmentedPacketsOnDevice(
 		)
 	}
 	return m.handleSegmentedPackets(worker, deviceID, nil, packets...)
+}
+
+// FrameResult holds the whole bytes of every packet a round put out and
+// dropped.
+type FrameResult struct {
+	Output [][]byte
+	Drop   [][]byte
+}
+
+// HandleFramesOnDevice runs one round of frames on a worker, all received
+// on one device, in mbufs of the harness pool.
+//
+// A frame the round neither puts out nor drops stays allocated from the
+// pool, so the harness counts it among its outstanding mbufs. A frame that
+// does not fit an mbuf or does not parse fails the round before it runs.
+func (m *Harness) HandleFramesOnDevice(
+	worker int,
+	deviceID uint16,
+	frames ...[]byte,
+) (*FrameResult, error) {
+	if err := m.validateWorkerIdx(worker); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidArgument, err)
+	}
+	// The round dispatch indexes per-device scheduling arrays by the
+	// packet device id.
+	if int(deviceID) >= m.deviceCount {
+		return nil, fmt.Errorf(
+			"%w: device id %d exceeds topology device count %d",
+			ErrInvalidArgument,
+			deviceID,
+			m.deviceCount,
+		)
+	}
+	// One spare element keeps the first address valid for no frames.
+	lens := make([]C.uint32_t, len(frames)+1)
+	devices := make([]C.uint16_t, len(frames)+1)
+	for idx, frame := range frames {
+		lens[idx] = C.uint32_t(len(frame))
+		devices[idx] = C.uint16_t(deviceID)
+	}
+	data := append(bytes.Join(frames, nil), 0)
+
+	pinner := runtime.Pinner{}
+	defer pinner.Unpin()
+	pinner.Pin(&data[0])
+	pinner.Pin(&lens[0])
+	pinner.Pin(&devices[0])
+	round := C.struct_dataplane_ut_frames{
+		data:    (*C.uint8_t)(&data[0]),
+		lens:    &lens[0],
+		devices: &devices[0],
+		count:   C.uint32_t(len(frames)),
+	}
+	var result C.struct_dataplane_ut_round_result
+	rc := C.dataplane_ut_run_frames(m.ptr, C.size_t(worker), &round, &result)
+	// The lists point into the result, which C reads again to free them.
+	pinner.Pin(&result)
+	defer C.dataplane_ut_round_result_free(&result)
+
+	failed := round.failed
+	switch rc {
+	case 0:
+	case -C.ENOMEM:
+		return nil, fmt.Errorf("frame %d: the mbuf pool is empty: %w", failed, syscall.ENOMEM)
+	case -C.EMSGSIZE:
+		return nil, fmt.Errorf("frame %d of %d bytes does not fit an mbuf: %w", failed, lens[failed], syscall.EMSGSIZE)
+	case -C.EINVAL:
+		return nil, fmt.Errorf("frame %d does not parse: %w", failed, syscall.EINVAL)
+	default:
+		return nil, fmt.Errorf("frame %d: %w", failed, syscall.Errno(-rc))
+	}
+
+	return &FrameResult{Output: frameBytes(&result.output), Drop: frameBytes(&result.drop)}, nil
+}
+
+// frameBytes copies the whole bytes of every packet of a list.
+func frameBytes(list *C.struct_packet_list) [][]byte {
+	var frames [][]byte
+	for packet := list.first; packet != nil; packet = packet.next {
+		frame := make([]byte, C.dataplane_ut_packet_copy(packet, nil, 0))
+		if len(frame) != 0 {
+			C.dataplane_ut_packet_copy(packet, (*C.uint8_t)(&frame[0]), C.size_t(len(frame)))
+		}
+		frames = append(frames, frame)
+	}
+	return frames
 }
 
 // freeLostPackets frees the packets that are on neither list.
