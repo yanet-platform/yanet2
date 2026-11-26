@@ -315,7 +315,7 @@ func Test_FreePlainDevice_GivesAgentBackEveryByte(t *testing.T) {
 func Test_FreePlainDevice_RefusesHeldDevice(t *testing.T) {
 	memory := newPublishedFixture(t)
 	instance := memory.Instance()
-	_, restarting := attachOwner(t, memory.Fixture, "restarting")
+	restarting := &agent.Agent{Instance: instance, Agent: attachRestarting(t, memory)}
 	free := shmalloc.FreeSize(&restarting.Agent.BlockAllocator)
 	device := newPlainDevice(t, restarting, "port0", 1)
 	require.NoError(t, updateDevices(t, memory, device))
