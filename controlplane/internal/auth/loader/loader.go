@@ -23,7 +23,7 @@ func NewLoader(source string) Loader {
 	if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
 		loader = &httpLoader{url: source}
 	} else {
-		loader = &fileLoader{path: source}
+		loader = NewFileLoader(source)
 	}
 
 	if strings.HasSuffix(source, ".zst") {

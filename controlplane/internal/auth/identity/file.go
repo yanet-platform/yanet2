@@ -3,47 +3,41 @@ package identity
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/yanet-platform/yanet2/common/go/rcucache"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/loader"
 )
 
 type userName = string
 
-// IdentityProvider keeps identities indexed by username.
-type IdentityProvider struct {
+// FileProvider keeps identities indexed by username.
+type FileProvider struct {
 	identities *rcucache.Cache[userName, Identity]
+	source     *loader.FileLoader
 }
 
-// NewIdentityProvider creates a IdentityProvider from an in-memory map of
-// identities.
-func NewIdentityProvider(identities map[userName]Identity) *IdentityProvider {
-	return &IdentityProvider{
-		identities: rcucache.NewCache(identities),
+// NewFileProvider loads the initial identities before accepting lookups.
+func NewFileProvider(path string) (*FileProvider, error) {
+	m := &FileProvider{
+		identities: rcucache.NewEmptyCache[userName, Identity](),
+		source:     loader.NewFileLoader(path),
 	}
-}
-
-// NewIdentityProviderFromFile creates a IdentityProvider by loading identities
-// from a YAML file.
-func NewIdentityProviderFromFile(path string) (*IdentityProvider, error) {
-	identities, err := loadIdentitiesFile(path)
-	if err != nil {
+	if err := m.Reload(); err != nil {
 		return nil, fmt.Errorf("failed to load identities: %w", err)
 	}
-
-	return NewIdentityProvider(identities), nil
+	return m, nil
 }
 
 // Name returns the provider name for logging.
-func (m *IdentityProvider) Name() string {
+func (m *FileProvider) Name() string {
 	return "file"
 }
 
 // ResolveIdentity retrieves an identity by the subject's account lookup name.
-func (m *IdentityProvider) ResolveIdentity(
+func (m *FileProvider) ResolveIdentity(
 	ctx context.Context,
 	subject core.Subject,
 ) (Identity, error) {
@@ -60,13 +54,23 @@ func (m *IdentityProvider) ResolveIdentity(
 	return identity.Clone(), nil
 }
 
-// loadIdentitiesFile reads and parses the identities YAML file into a map.
-func loadIdentitiesFile(path string) (map[string]Identity, error) {
-	buf, err := os.ReadFile(path)
+// Reload applies a complete valid file, preserving prior identities on error.
+//
+// A single writer may reload while lookups proceed concurrently.
+func (m *FileProvider) Reload() error {
+	buf, err := m.source.Load()
 	if err != nil {
-		return nil, fmt.Errorf("failed to read file: %w", err)
+		return err
 	}
+	identities, err := parseIdentities(buf)
+	if err != nil {
+		return err
+	}
+	m.identities.Swap(identities)
+	return nil
+}
 
+func parseIdentities(buf []byte) (map[string]Identity, error) {
 	var file struct {
 		Identities []Identity `yaml:"identities"`
 	}

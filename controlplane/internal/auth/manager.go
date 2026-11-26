@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"gopkg.in/yaml.v3"
@@ -65,6 +66,7 @@ type Manager struct {
 	authorizer       Authorizer
 	clientCAs        func() *x509.CertPool
 	mode             Mode
+	policyRefresh    []policyRefreshTask
 	// admissions holds, by id, the calls Admit let in that no server has
 	// taken yet.
 	admissions sync.Map
@@ -127,7 +129,7 @@ func (m *Manager) configureAuthorization(cfg *Config) error {
 	for _, providerCfg := range cfg.IdentityProviders {
 		switch providerCfg.Type {
 		case "file":
-			fileProvider, err := identity.NewIdentityProviderFromFile(
+			fileProvider, err := identity.NewFileProvider(
 				providerCfg.Path,
 			)
 			if err != nil {
@@ -136,6 +138,14 @@ func (m *Manager) configureAuthorization(cfg *Config) error {
 				)
 			}
 			identityProviders = append(identityProviders, fileProvider)
+			if providerCfg.RefreshInterval > 0 {
+				m.policyRefresh = append(m.policyRefresh, policyRefreshTask{
+					Source:   fileProvider,
+					Path:     providerCfg.Path,
+					Interval: providerCfg.RefreshInterval,
+					log:      m.log,
+				})
+			}
 			m.log.Info("registered identity provider",
 				zap.String("type", "file"),
 				zap.String("path", providerCfg.Path),
@@ -226,6 +236,58 @@ func (m *Manager) configureAuthenticators(cfg *Config) error {
 	)
 
 	return nil
+}
+
+// RunPolicyRefresh polls enabled sources until cancellation.
+//
+// Call once for the manager's lifetime; each source has a single writer.
+// Failed updates retain prior data and do not stop other sources.
+func (m *Manager) RunPolicyRefresh(ctx context.Context) error {
+	var group errgroup.Group
+	for _, task := range m.policyRefresh {
+		group.Go(func() error { return task.run(ctx) })
+	}
+	return group.Wait()
+}
+
+type policyReloader interface {
+	Reload() error
+}
+
+type policyRefreshTask struct {
+	Source   policyReloader
+	Path     string
+	Interval time.Duration
+	log      *zap.Logger
+}
+
+func (m policyRefreshTask) run(ctx context.Context) error {
+	ticker := time.NewTicker(m.Interval)
+	defer ticker.Stop()
+	var prevError error
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			if ctx.Err() != nil {
+				return nil
+			}
+			if err := m.Source.Reload(); err != nil {
+				if prevError == nil || err.Error() != prevError.Error() {
+					m.log.Warn("failed to refresh policy source",
+						zap.String("path", m.Path), zap.Error(err),
+					)
+					prevError = err
+				}
+				continue
+			}
+			if prevError != nil {
+				m.log.Info("recovered policy source", zap.String("path", m.Path))
+				prevError = nil
+			}
+		}
+	}
 }
 
 // Authenticate attempts to authenticate the given credential using

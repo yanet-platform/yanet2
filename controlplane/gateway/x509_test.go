@@ -162,6 +162,44 @@ func Test_Gateway_X509_ClientCertificateBecomesPrincipal(t *testing.T) {
 	require.False(t, principal.GetIsAnonymous())
 }
 
+// Test_Gateway_IdentityRefresh verifies that account revocation and recovery
+// reach new RPCs on an existing authenticated client.
+func Test_Gateway_IdentityRefresh(t *testing.T) {
+	t.Parallel()
+	ca := tlscert.NewCA(t)
+	cfg := gateway.DefaultConfig()
+	cfg.Auth = newX509AuthConfig(t, ca)
+	cfg.Auth.IdentityProviders[0].RefreshInterval = 5 * time.Millisecond
+	path := cfg.Auth.IdentityProviders[0].Path
+	initial, err := os.ReadFile(path)
+	require.NoError(t, err)
+	address := startX509Gateway(t, ca, cfg)
+	client := dialAuth(t, address, ca, ca.IssueClient(t, "route-operator").Certificate)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	require.Eventually(t, func() bool {
+		_, err := introspectSelf(t, ctx, client)
+		return err == nil
+	}, time.Second, 5*time.Millisecond)
+
+	for _, tc := range []struct {
+		content []byte
+		code    codes.Code
+	}{
+		{[]byte("identities: [{username: route-operator, disabled: true}]\n"), codes.Unauthenticated},
+		{initial, codes.OK},
+		{[]byte("identities: []\n"), codes.Unauthenticated},
+	} {
+		next := path + ".next"
+		require.NoError(t, os.WriteFile(next, tc.content, 0o600))
+		require.NoError(t, os.Rename(next, path))
+		require.Eventually(t, func() bool {
+			_, err := introspectSelf(t, ctx, client)
+			return status.Code(err) == tc.code
+		}, time.Second, 5*time.Millisecond)
+	}
+}
+
 // Test_Gateway_X509_NoCertificateIsAnonymous verifies that a TLS client
 // without a certificate is still accepted by the listener and ends up
 // anonymous, so the certificate stays optional at the transport.
