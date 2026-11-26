@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -16,9 +17,11 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/native/agent"
 	"github.com/yanet-platform/yanet2/controlplane/native/cpconfig"
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
@@ -175,19 +178,25 @@ func signalOf(state *os.ProcessState) syscall.Signal {
 
 // udpFrame returns an Ethernet frame of an IPv4 UDP datagram without
 // payload, which the dataplane parses.
-func udpFrame() []byte {
-	return []byte{
-		0x02, 0, 0, 0, 0, 0x01, // destination
-		0x02, 0, 0, 0, 0, 0x02, // source
-		0x08, 0x00, // IPv4
-		0x45, 0, 0, 28, // version, header length, total length
-		0, 0, 0, 0, // identification, fragment
-		64, 17, 0, 0, // time to live, UDP, checksum
-		192, 0, 2, 1, // source
-		198, 51, 100, 1, // destination
-		0x30, 0x39, 0, 53, // ports
-		0, 8, 0, 0, // length, checksum
+func udpFrame(t *testing.T) []byte {
+	ip := &layers.IPv4{
+		Version:  4,
+		TTL:      64,
+		Protocol: layers.IPProtocolUDP,
+		SrcIP:    net.IPv4(192, 0, 2, 1),
+		DstIP:    net.IPv4(198, 51, 100, 1),
 	}
+	udp := &layers.UDP{SrcPort: 12345, DstPort: 53}
+	require.NoError(t, udp.SetNetworkLayerForChecksum(ip))
+	return xpacket.LayersToPacket(t,
+		&layers.Ethernet{
+			SrcMAC:       net.HardwareAddr{0x02, 0, 0, 0, 0, 0x02},
+			DstMAC:       net.HardwareAddr{0x02, 0, 0, 0, 0, 0x01},
+			EthernetType: layers.EthernetTypeIPv4,
+		},
+		ip,
+		udp,
+	).Data()
 }
 
 // publishPipeline publishes through the dataplane a plain device whose
@@ -247,11 +256,12 @@ func Test_Dataplane_Round_DropsThroughPublishedBlackhole(t *testing.T) {
 		Modules: []cpconfig.ChainModuleConfig{{Type: "blackhole", Name: "sink"}},
 	})
 
-	result, err := dataplane.Round(1, 0, udpFrame(), udpFrame())
+	frame := udpFrame(t)
+	result, err := dataplane.Round(1, 0, frame, frame)
 
 	require.NoError(t, err)
 	require.Empty(t, result.Output)
-	require.Equal(t, [][]byte{udpFrame(), udpFrame()}, result.Drop)
+	require.Equal(t, [][]byte{frame, frame}, result.Drop)
 }
 
 // Test_Dataplane_Round_EmptyAcknowledgesGenerationAndTime verifies that a
