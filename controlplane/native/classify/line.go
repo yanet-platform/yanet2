@@ -2,7 +2,11 @@
 
 package classify
 
-import "github.com/yanet-platform/yanet2/controlplane/native/layout"
+import (
+	"fmt"
+
+	"github.com/yanet-platform/yanet2/controlplane/native/layout"
+)
 
 // LineRange is one closed interval of a line attribute's domain; the
 // compile clamps it to the domain.
@@ -29,8 +33,11 @@ type Line struct {
 
 // CompileLine compiles the line attribute of a ruleset over a domain of
 // size points, to the classes and the stage CLASSIFY_LINE_COMPILE
-// produces.
-func CompileLine(rules []LineRule, size uint32) *Line {
+// produces. An empty domain is refused.
+func CompileLine(rules []LineRule, size uint32) (*Line, error) {
+	if size == 0 {
+		return nil, fmt.Errorf("line domain of no points: %w", ErrInvalidRule)
+	}
 	groups, firsts := groupRules(len(rules), func(idx int) ([]LineRange, bool) {
 		return rules[idx].Ranges, rules[idx].Absent
 	})
@@ -68,7 +75,7 @@ func CompileLine(rules []LineRule, size uint32) *Line {
 			}
 		}
 	})
-	return &Line{values: values, Stage: stage}
+	return &Line{values: values, Stage: stage}, nil
 }
 
 // lineRuleIsAny reports whether a rule matches the whole domain, judged

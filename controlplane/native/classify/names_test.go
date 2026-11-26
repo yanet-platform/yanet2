@@ -52,9 +52,11 @@ func composeNames(t *testing.T) (*classifytest.Memory, uintptr) {
 	destination, err := classify.CompileNet4(namesNet4DstRules)
 	require.NoError(t, err)
 	require.NoError(t, destination.Commit(&memory.OtherNet4, &memory.Context, "ip4:net4_dst"))
-	protocol := classify.CompileLine(namesIPProtoRules, 0x100)
+	protocol, err := classify.CompileLine(namesIPProtoRules, 0x100)
+	require.NoError(t, err)
 	require.NoError(t, protocol.Commit(&memory.Line, &memory.Context, "ip4:ipproto"))
-	vlan := classify.CompileLine(namesVlanRules, 4096)
+	vlan, err := classify.CompileLine(namesVlanRules, 4096)
+	require.NoError(t, err)
 	require.NoError(t, vlan.Commit(&memory.OtherLine, &memory.Context, "l2:vlan"))
 	return memory, free
 }
@@ -89,7 +91,9 @@ func Test_LeafName_LongEntryNameCutsBeforeTheLeaf(t *testing.T) {
 	nets, err := classify.CompileNet4(nil)
 	require.NoError(t, err)
 	require.NoError(t, nets.Commit(&memory.Net4, &memory.Context, entry))
-	require.NoError(t, classify.CompileLine(nil, 0x100).Commit(&memory.Line, &memory.Context, entry))
+	line, err := classify.CompileLine(nil, 0x100)
+	require.NoError(t, err)
+	require.NoError(t, line.Commit(&memory.Line, &memory.Context, entry))
 
 	// A cut title fills the 63 characters a name holds.
 	require.Equal(t, strings.Repeat("x", 55)+"...:line", shm.String(memory.Line.Line.MemoryContext.Get().Name[:]))

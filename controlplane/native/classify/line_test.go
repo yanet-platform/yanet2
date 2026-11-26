@@ -67,7 +67,8 @@ func randomLineRules(seed uint64, count int, size uint32) []classify.LineRule {
 func requireLineMatchesReference(t *testing.T, rules []classify.LineRule, size uint32) {
 	t.Helper()
 	memory := classifytest.LayOut(make([]byte, memorySize))
-	line := classify.CompileLine(rules, size)
+	line, err := classify.CompileLine(rules, size)
+	require.NoError(t, err)
 	require.NoError(t, line.Commit(&memory.Line, &memory.Context, "line"))
 
 	classes := classifytest.LineClasses(&memory.Line)
@@ -76,7 +77,7 @@ func requireLineMatchesReference(t *testing.T, rules []classify.LineRule, size u
 	for point := range points {
 		points[point] = uint32(point)
 	}
-	err := classifytest.CheckStage(
+	err = classifytest.CheckStage(
 		&line.Stage,
 		points,
 		func(point uint32) uint32 { return classes[point] },
@@ -110,7 +111,8 @@ func Test_LineCommit_ExhaustedLeavesAttributeZeroed(t *testing.T) {
 		{name: "no room for the memory context"},
 		{name: "no room for the values", kept: []uintptr{unsafe.Sizeof(layout.MemoryContext{})}},
 	}
-	line := classify.CompileLine(randomLineRules(1, 16, 0x100), 0x100)
+	line, err := classify.CompileLine(randomLineRules(1, 16, 0x100), 0x100)
+	require.NoError(t, err)
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			memory := classifytest.LayOut(make([]byte, memorySize))
@@ -131,13 +133,21 @@ func Test_LineCommit_ExhaustedLeavesAttributeZeroed(t *testing.T) {
 func Test_FreeLine_ReturnsEveryByte(t *testing.T) {
 	memory := classifytest.LayOut(make([]byte, memorySize))
 	free := shmalloc.FreeSize(&memory.Allocator)
-	line := classify.CompileLine(randomLineRules(1, 16, 0x10000), 0x10000)
+	line, err := classify.CompileLine(randomLineRules(1, 16, 0x10000), 0x10000)
+	require.NoError(t, err)
 	require.NoError(t, line.Commit(&memory.Line, &memory.Context, "line"))
 
 	classify.FreeLine(&memory.Line)
 	requireZeroed(t, &memory.Line, "the attribute")
 	require.Equal(t, free, shmalloc.FreeSize(&memory.Allocator), "the allocator's free bytes")
 	require.True(t, memory.Context.FirstChild.IsNil(), "the line's memory context is unlinked")
+}
+
+// Test_CompileLine_RefusesEmptyDomain verifies that a line over a domain
+// of no points is refused as an invalid rule.
+func Test_CompileLine_RefusesEmptyDomain(t *testing.T) {
+	_, err := classify.CompileLine([]classify.LineRule{{Ranges: []classify.LineRange{{From: 0, To: 1}}}}, 0)
+	require.ErrorIs(t, err, classify.ErrInvalidRule)
 }
 
 // FuzzCompileLine verifies that any ruleset over a byte domain compiles
