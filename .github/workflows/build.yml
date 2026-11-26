@@ -549,6 +549,14 @@ jobs:
         with:
           packages: qemu-system-x86 qemu-utils genisoimage cloud-image-utils wget curl jq libpcap-dev just
 
+      # The apt cache holds only what its first runner had to install; a
+      # runner missing a library QEMU links gets the packages installed.
+      - name: Install libraries QEMU misses
+        run: |
+          if ldd "$(command -v qemu-system-x86_64)" "$(command -v qemu-img)" | grep -q 'not found'; then
+            sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils
+          fi
+
       - name: Configure system for QEMU
         run: |
           # Enable KVM access if available
