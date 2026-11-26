@@ -400,7 +400,7 @@ func Test_Manager_IdentityRefresh(t *testing.T) {
 		admit("ghost", codes.Unauthenticated)
 		added := append(append([]byte{}, initial...), []byte("  - username: ghost\n    groups: [operators]\n")...)
 		require.NoError(t, os.WriteFile(path, added, 0o600))
-		// This file is intentionally static for this change.
+		// An omitted polling interval keeps permissions static.
 		require.NoError(t, os.WriteFile(config.PermissionsPath, []byte("permissions: {}\n"), 0o600))
 		tick()
 		admit("ghost", codes.OK)
@@ -499,6 +499,131 @@ func Test_Manager_IdentityRefreshStartup(t *testing.T) {
 			}
 			if tc.mode == auth.ModeAudit || tc.mode == auth.ModeDisabled {
 				require.NoError(t, os.Remove(config.PermissionsPath))
+			}
+			manager, err := auth.NewManager(&config)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.NoError(t, manager.RunPolicyRefresh(t.Context()))
+		})
+	}
+}
+
+// Test_Manager_PermissionsRefresh verifies that grants and revocations apply
+// independently of identity reload failures and leave static sources untouched.
+func Test_Manager_PermissionsRefresh(t *testing.T) {
+	config := buildEnabledConfig(t)
+	config.PermissionsRefreshInterval = time.Second
+	path := config.PermissionsPath
+	initial, err := os.ReadFile(path)
+	require.NoError(t, err)
+	dynamicPath := filepath.Join(t.TempDir(), "dynamic.yaml")
+	require.NoError(t, os.WriteFile(dynamicPath, []byte("identities: []\n"), 0o600))
+	config.IdentityProviders = append(config.IdentityProviders, auth.IdentityProviderConfig{
+		Type: "file", Path: dynamicPath, RefreshInterval: time.Second,
+	})
+	encoded, err := yaml.Marshal(config)
+	require.NoError(t, err)
+	var decoded auth.Config
+	require.NoError(t, xcfg.Decode(encoded, &decoded, xcfg.WithEnv()))
+	logCore, logs := observer.New(zap.InfoLevel)
+	manager, err := auth.NewManager(&decoded, auth.WithLog(zap.New(logCore)))
+	require.NoError(t, err)
+
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() { done <- manager.RunPolicyRefresh(ctx) }()
+		defer func() {
+			cancel()
+			require.NoError(t, <-done)
+		}()
+		synctest.Wait()
+		tick := func() {
+			time.Sleep(time.Second)
+			synctest.Wait()
+		}
+		admit := func(username string, code codes.Code) {
+			_, _, release, err := manager.Admit(t.Context(), core.Credential{
+				Token: basicToken(username, "s3cret"),
+			}, "/test.Service/Method")
+			require.Equal(t, code, status.Code(err), "%v", err)
+			if release != nil {
+				release()
+			}
+		}
+		admit("alice", codes.OK)
+		admit("ghost", codes.Unauthenticated)
+		require.NoError(t, os.WriteFile(config.IdentityProviders[0].Path, []byte("identities: []\n"), 0o600))
+		added := []byte("identities: [{username: ghost, groups: [operators]}]\n")
+		require.NoError(t, os.WriteFile(dynamicPath, added, 0o600))
+		require.NoError(t, os.WriteFile(path, []byte("permissions: {groups: [], users: [{username: alice, permissions: ['[']}]}\n"), 0o600))
+		tick()
+		admit("alice", codes.OK)
+		admit("ghost", codes.OK)
+		failures := logs.FilterMessage("failed to refresh policy source").All()
+		require.Len(t, failures, 1)
+		require.Equal(t, path, failures[0].ContextMap()["path"])
+		tick()
+		require.Equal(t, 1, logs.FilterMessage("failed to refresh policy source").Len())
+
+		require.NoError(t, os.WriteFile(dynamicPath, []byte("identities: not-a-list"), 0o600))
+		require.NoError(t, os.WriteFile(path, []byte("permissions: {}\n"), 0o600))
+		tick()
+		admit("alice", codes.PermissionDenied)
+		admit("ghost", codes.PermissionDenied)
+		recoveries := logs.FilterMessage("recovered policy source").All()
+		require.Len(t, recoveries, 1)
+		require.Equal(t, path, recoveries[0].ContextMap()["path"])
+
+		require.NoError(t, os.WriteFile(dynamicPath, added, 0o600))
+		require.NoError(t, os.WriteFile(path, []byte("permissions: {users: [{username: alice, permissions: ['/test.Service/Method']}]}\n"), 0o600))
+		tick()
+		admit("alice", codes.OK)
+		admit("ghost", codes.PermissionDenied)
+		require.Equal(t, 2, logs.FilterMessage("recovered policy source").Len())
+		require.NoError(t, os.WriteFile(path, initial, 0o600))
+		tick()
+		admit("alice", codes.OK)
+		admit("ghost", codes.OK)
+		before := logs.Len()
+		tick()
+		require.Equal(t, before, logs.Len())
+	})
+}
+
+// Test_Manager_PermissionsRefreshStartup verifies that enabled mode requires
+// valid initial permissions while non-enforcing modes do not read the file.
+func Test_Manager_PermissionsRefreshStartup(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		mode    auth.Mode
+		legacy  bool
+		content string
+		missing bool
+		wantErr bool
+	}{
+		{name: "enabled malformed", mode: auth.ModeEnabled, content: "permissions: [", wantErr: true},
+		{name: "enabled invalid glob", mode: auth.ModeEnabled, content: "permissions: {users: [{username: alice, permissions: ['[']}]}", wantErr: true},
+		{name: "enabled missing", mode: auth.ModeEnabled, missing: true, wantErr: true},
+		{name: "legacy enabled missing", legacy: true, missing: true, wantErr: true},
+		{name: "audit ignores missing permissions", mode: auth.ModeAudit, missing: true},
+		{name: "disabled ignores missing permissions", mode: auth.ModeDisabled, missing: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			config := buildEnabledConfig(t)
+			config.Mode = tc.mode
+			if tc.legacy {
+				disabled := false
+				config.Disabled = &disabled
+			}
+			config.PermissionsRefreshInterval = time.Second
+			if tc.missing {
+				require.NoError(t, os.Remove(config.PermissionsPath))
+			} else {
+				require.NoError(t, os.WriteFile(config.PermissionsPath, []byte(tc.content), 0o600))
 			}
 			manager, err := auth.NewManager(&config)
 			if tc.wantErr {
