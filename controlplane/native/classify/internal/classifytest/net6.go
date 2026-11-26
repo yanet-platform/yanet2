@@ -38,6 +38,19 @@ func halves(network classify.Net6Network, offset int) (uint64, uint64) {
 // each half being both ends of every elementary interval the networks of
 // the rules cut it into.
 func Net6Keys(rules []classify.Net6Rule) []Net6Key {
+	hiKeys, loKeys := Net6HalfKeys(rules)
+	keys := make([]Net6Key, 0, len(hiKeys)*len(loKeys))
+	for _, hi := range hiKeys {
+		for _, lo := range loKeys {
+			keys = append(keys, Net6Key{Hi: hi, Lo: lo})
+		}
+	}
+	return keys
+}
+
+// Net6HalfKeys returns the keys of each half, ascending: both ends of
+// every elementary interval the networks of the rules cut it into.
+func Net6HalfKeys(rules []classify.Net6Rule) ([]uint64, []uint64) {
 	hiKeys := []uint64{0, ^uint64(0)}
 	loKeys := []uint64{0, ^uint64(0)}
 	for _, rule := range rules {
@@ -48,14 +61,7 @@ func Net6Keys(rules []classify.Net6Rule) []Net6Key {
 	}
 	slices.Sort(hiKeys)
 	slices.Sort(loKeys)
-	hiKeys, loKeys = slices.Compact(hiKeys), slices.Compact(loKeys)
-	keys := make([]Net6Key, 0, len(hiKeys)*len(loKeys))
-	for _, hi := range hiKeys {
-		for _, lo := range loKeys {
-			keys = append(keys, Net6Key{Hi: hi, Lo: lo})
-		}
-	}
-	return keys
+	return slices.Compact(hiKeys), slices.Compact(loKeys)
 }
 
 // appendEnds appends the first and last value of a network's half at an

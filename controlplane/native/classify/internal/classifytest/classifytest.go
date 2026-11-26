@@ -88,6 +88,32 @@ func DeviceMatches(rule classify.DeviceRule, id uint32) bool {
 	return len(rule.IDs) == 0 || slices.Contains(rule.IDs, id)
 }
 
+// PortMatches reports whether a rule matches a port.
+func PortMatches(rule classify.PortRule, port uint16) bool {
+	if rule.Absent {
+		return false
+	}
+	return len(rule.Ranges) == 0 || slices.ContainsFunc(rule.Ranges, func(span classify.PortRange) bool {
+		return span.From <= port && port <= span.To
+	})
+}
+
+// FragmentMatches reports whether a rule matches a packet, a fragment or
+// a whole one.
+func FragmentMatches(rule classify.FragmentRule, fragment bool) bool {
+	if rule.Absent {
+		return false
+	}
+	switch rule.Fragment {
+	case classify.FragmentNone:
+		return !fragment
+	case classify.FragmentFrag:
+		return fragment
+	default:
+		return true
+	}
+}
+
 // Net4Keys returns both ends of every elementary interval the prefixes of
 // the rules cut the IPv4 address space into, ascending.
 func Net4Keys(rules []classify.Net4Rule) []uint32 {
@@ -98,6 +124,36 @@ func Net4Keys(rules []classify.Net4Rule) []uint32 {
 			from := binary.BigEndian.Uint32(bytes[:])
 			to := from | uint32(uint64(1)<<(32-prefix.Bits())-1)
 			keys = append(keys, from, from-1, to, to+1)
+		}
+	}
+	slices.Sort(keys)
+	return slices.Compact(keys)
+}
+
+// LineKeys returns both ends of every elementary interval the ranges of
+// the rules cut a line domain of size points into, ascending.
+func LineKeys(rules []classify.LineRule, size uint32) []uint32 {
+	keys := []uint32{0, size - 1}
+	for _, rule := range rules {
+		for _, span := range rule.Ranges {
+			for _, key := range []uint32{span.From, span.From - 1, span.To, span.To + 1} {
+				if key < size {
+					keys = append(keys, key)
+				}
+			}
+		}
+	}
+	slices.Sort(keys)
+	return slices.Compact(keys)
+}
+
+// PortKeys returns both ends of every elementary interval the ranges of
+// the rules cut the port domain into, ascending.
+func PortKeys(rules []classify.PortRule) []uint16 {
+	keys := []uint16{0, classify.PortDomain - 1}
+	for _, rule := range rules {
+		for _, span := range rule.Ranges {
+			keys = append(keys, span.From, span.From-1, span.To, span.To+1)
 		}
 	}
 	slices.Sort(keys)
