@@ -189,6 +189,58 @@ func FiniModule(module *layout.CpModule) {
 	shmalloc.ContextFini(context)
 }
 
+// ModuleCounterRegistry returns the module's runtime counter registry of
+// a tag and its index among the module's runtime registries, adding an
+// empty one when missing, as cp_module_counter_registry does.
+//
+// Each registry lives in a block of its own, since it holds
+// self-relative offsets, so adding one only moves the array of pointers
+// to them; a failed addition leaves the array as it was. A tag its field
+// cannot hold whole is refused before the module is touched.
+func ModuleCounterRegistry(module *layout.CpModule, tag string) (*layout.CounterRegistry, uint64, error) {
+	err := checkNames("counter registry", nameField{"tag", tag, len(layout.CpModuleCounterRegistry{}.Tag)})
+	if err != nil {
+		return nil, 0, err
+	}
+	registries := runtimeRegistries(module)
+	for idx := range registries {
+		if entry := registries[idx].Get(); shm.Equal(entry.Tag[:], tag) {
+			return &entry.Registry, uint64(idx), nil
+		}
+	}
+
+	context := &module.Entity.MemoryContext
+	entry := newNode[layout.CpModuleCounterRegistry](context, 0)
+	if entry == nil {
+		return nil, 0, fmt.Errorf(
+			"allocate counter registry %q of module %s:%s: %w",
+			tag, shm.String(module.Type[:]), shm.String(module.Name[:]), errAgentMemory,
+		)
+	}
+	shm.CopyString(entry.Tag[:], tag)
+	counterRegistryInit(&entry.Registry, context)
+
+	count := module.RuntimeCounterRegistryCount
+	grown, ok := registry.AllocArray[shm.Ptr[layout.CpModuleCounterRegistry]](context, count+1)
+	if !ok {
+		teardown.FiniCounterRegistry(&entry.Registry)
+		registry.FreeNode(context, entry, 0)
+		return nil, 0, fmt.Errorf(
+			"allocate counter registries of module %s:%s: %w",
+			shm.String(module.Type[:]), shm.String(module.Name[:]), errAgentMemory,
+		)
+	}
+	// A pointer is relative to its own place, so each is set anew.
+	for idx := range registries {
+		grown[idx].Set(registries[idx].Get())
+	}
+	grown[count].Set(entry)
+	registry.FreeArray(context, registries)
+	module.RuntimeCounterRegistries.Set(&grown[0])
+	module.RuntimeCounterRegistryCount = count + 1
+	return &entry.Registry, count, nil
+}
+
 // lookupDataplaneModule returns the index of the dataplane's module type
 // of that name.
 func lookupDataplaneModule(dp *layout.DpConfig, name string) (uint64, bool) {

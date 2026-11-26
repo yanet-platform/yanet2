@@ -69,7 +69,7 @@ func counterRegistryExpand(counters *layout.CounterRegistry, capacity uint64) er
 	context := counters.MemoryContext.Get()
 	grown, ok := registry.AllocArray[layout.Counter](context, capacity)
 	if !ok {
-		return fmt.Errorf("allocate counter names: %w", errAgentMemory)
+		return fmt.Errorf("allocate counter names: %w", shmalloc.ErrNoMemory)
 	}
 	old := counterNames(counters)
 	copy(grown, old)
@@ -88,7 +88,7 @@ func counterInsert(counters *layout.CounterRegistry, name string, size uint64, a
 		}
 	}
 	if !registry.StrInsert(&counters.StrIndex, name, counterNameSize, uint32(counters.Count), counterName(counters)) {
-		return counterUnplaced, fmt.Errorf("index counter %q: %w", name, errAgentMemory)
+		return counterUnplaced, fmt.Errorf("index counter %q: %w", name, shmalloc.ErrNoMemory)
 	}
 	counter := &counterNames(counters)[counters.Count]
 	shm.CopyString(counter.Name[:], name)

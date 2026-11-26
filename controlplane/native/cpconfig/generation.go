@@ -10,6 +10,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/native/internal/teardown"
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
 	"github.com/yanet-platform/yanet2/controlplane/native/shm"
+	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
 )
 
 const (
@@ -39,7 +40,7 @@ func freeSlotPush(counters *layout.CounterRegistry, pool int, offset uint64) err
 		capacity := max(counters.FreeCapacities[pool]*2, 8)
 		grown, ok := registry.AllocArray[uint64](context, capacity)
 		if !ok {
-			return fmt.Errorf("allocate released slots of pool %d: %w", pool, errAgentMemory)
+			return fmt.Errorf("allocate released slots of pool %d: %w", pool, shmalloc.ErrNoMemory)
 		}
 		old := freeSlots(counters, pool)
 		copy(grown, old[:counters.FreeCounts[pool]])
