@@ -1,3 +1,9 @@
+yanet2 (0.8.0) unstable; urgency=medium
+
+  * Release 0.8.0.
+
+ -- Andrey Kiselev <2664303+ezhk@users.noreply.github.com>  Thu, 26 Nov 2026 12:55:12 +0300
+
 yanet2 (0.7.0) unstable; urgency=medium
 
   * Release 0.7.0.
