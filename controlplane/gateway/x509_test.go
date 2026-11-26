@@ -200,6 +200,46 @@ func Test_Gateway_IdentityRefresh(t *testing.T) {
 	}
 }
 
+// Test_Gateway_PermissionsRefresh verifies that grants and revocations reach
+// new RPCs on the same authenticated client.
+func Test_Gateway_PermissionsRefresh(t *testing.T) {
+	t.Parallel()
+	ca := tlscert.NewCA(t)
+	cfg := gateway.DefaultConfig()
+	cfg.Auth = newX509AuthConfig(t, ca)
+	cfg.Auth.PermissionsRefreshInterval = 5 * time.Millisecond
+	path := cfg.Auth.PermissionsPath
+	initial, err := os.ReadFile(path)
+	require.NoError(t, err)
+	address := startX509Gateway(t, ca, cfg)
+	client := dialAuth(t, address, ca, ca.IssueClient(t, "route-operator").Certificate)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	_, err = introspectSelf(t, ctx, client)
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name    string
+		content []byte
+		code    codes.Code
+	}{
+		{name: "revoke group grant", content: []byte("permissions: {}\n"), code: codes.PermissionDenied},
+		{name: "grant directly to user", content: []byte("permissions: {users: [{username: route-operator, permissions: ['/controlplane.ynpb.v1.AuthService/IntrospectToken']}]}\n"), code: codes.OK},
+		{name: "revoke direct grant", content: []byte("permissions: {}\n"), code: codes.PermissionDenied},
+		{name: "restore group grant", content: initial, code: codes.OK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			next := path + ".next"
+			require.NoError(t, os.WriteFile(next, tc.content, 0o600))
+			require.NoError(t, os.Rename(next, path))
+			require.Eventually(t, func() bool {
+				_, err := introspectSelf(t, ctx, client)
+				return status.Code(err) == tc.code
+			}, time.Second, 5*time.Millisecond)
+		})
+	}
+}
+
 // Test_Gateway_X509_NoCertificateIsAnonymous verifies that a TLS client
 // without a certificate is still accepted by the listener and ends up
 // anonymous, so the certificate stays optional at the transport.

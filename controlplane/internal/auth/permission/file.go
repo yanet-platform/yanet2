@@ -2,11 +2,11 @@ package permission
 
 import (
 	"fmt"
-	"os"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/yanet-platform/yanet2/common/go/rcucache"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/loader"
 )
 
 type GroupName = string
@@ -14,7 +14,7 @@ type UserName = string
 
 // FilePermissionStore loads permissions from a YAML file.
 type FilePermissionStore struct {
-	path string
+	source *loader.FileLoader
 
 	groupPermissions *rcucache.Cache[GroupName, []Permission]
 	userPermissions  *rcucache.Cache[UserName, []Permission]
@@ -23,11 +23,11 @@ type FilePermissionStore struct {
 // NewFilePermissionStore creates a new FilePermissionStore.
 func NewFilePermissionStore(path string) (*FilePermissionStore, error) {
 	m := &FilePermissionStore{
-		path:             path,
+		source:           loader.NewFileLoader(path),
 		groupPermissions: rcucache.NewEmptyCache[GroupName, []Permission](),
 		userPermissions:  rcucache.NewEmptyCache[UserName, []Permission](),
 	}
-	if err := m.load(); err != nil {
+	if err := m.Reload(); err != nil {
 		return nil, fmt.Errorf("failed to load permissions: %w", err)
 	}
 	return m, nil
@@ -56,11 +56,13 @@ func (m *FilePermissionStore) GetUserPermissions(username string) []Permission {
 	return nil
 }
 
-// load reads and parses the permissions file.
-func (m *FilePermissionStore) load() error {
-	buf, err := os.ReadFile(m.path)
+// Reload applies a complete valid file, preserving prior permissions on error.
+//
+// A single writer may reload while lookups proceed concurrently.
+func (m *FilePermissionStore) Reload() error {
+	buf, err := m.source.Load()
 	if err != nil {
-		return fmt.Errorf("failed to read file: %w", err)
+		return err
 	}
 
 	var file struct {
@@ -100,8 +102,8 @@ func (m *FilePermissionStore) load() error {
 		userPermissions[up.Username] = perms
 	}
 
-	// Tiny out-of-sync is possible, but since users and groups permissions are
-	// independent, it's not a problem.
+	// Group and user rules are published separately; readers may observe
+	// different versions during a successful reload.
 	m.groupPermissions.Swap(groupPermissions)
 	m.userPermissions.Swap(userPermissions)
 

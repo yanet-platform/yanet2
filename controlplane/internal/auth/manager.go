@@ -175,6 +175,14 @@ func (m *Manager) configureAuthorization(cfg *Config) error {
 			"failed to create permission store: %w", err,
 		)
 	}
+	if cfg.PermissionsRefreshInterval > 0 {
+		m.policyRefresh = append(m.policyRefresh, policyRefreshTask{
+			Source:   permissionStore,
+			Path:     cfg.PermissionsPath,
+			Interval: cfg.PermissionsRefreshInterval,
+			log:      m.log,
+		})
+	}
 	m.log.Info("loaded permissions",
 		zap.String("path", cfg.PermissionsPath),
 	)

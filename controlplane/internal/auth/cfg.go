@@ -40,6 +40,8 @@ type Config struct {
 	Authenticators []AuthenticatorConfig `yaml:"authenticators"`
 	// PermissionsPath is the path to the permissions YAML file.
 	PermissionsPath string `yaml:"permissions_path"`
+	// PermissionsRefreshInterval enables polling; zero keeps startup permissions.
+	PermissionsRefreshInterval time.Duration `yaml:"permissions_refresh_interval,omitempty"`
 }
 
 // Validate rejects ambiguous policies and unsupported authentication modes.
@@ -51,6 +53,9 @@ func (m *Config) Validate() error {
 		if provider.RefreshInterval < 0 {
 			return fmt.Errorf("identity_providers[%d].refresh_interval must not be negative", idx)
 		}
+	}
+	if m.PermissionsRefreshInterval < 0 {
+		return fmt.Errorf("permissions_refresh_interval must not be negative")
 	}
 	switch m.Mode {
 	case "", ModeDisabled, ModeAudit, ModeEnabled:
