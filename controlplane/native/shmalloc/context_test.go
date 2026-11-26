@@ -143,6 +143,62 @@ func Test_Context_ConcurrentChurn(t *testing.T) {
 	require.ElementsMatch(t, want, children)
 }
 
+// Test_ContextRealloc_MovesBlock verifies that a move keeps the bytes both
+// sizes cover, counts an allocation of the new size and a free of the old
+// one, if any, against the context, and that freeing the moved block
+// returns every byte to the allocator.
+func Test_ContextRealloc_MovesBlock(t *testing.T) {
+	cases := []struct {
+		name       string
+		oldSize    uintptr
+		newSize    uintptr
+		allocCount uint64
+		freeCount  uint64
+	}{
+		{name: "grow", oldSize: 64, newSize: 200, allocCount: 1, freeCount: 1},
+		{name: "shrink", oldSize: 200, newSize: 64, allocCount: 1, freeCount: 1},
+		{name: "from no block", oldSize: 0, newSize: 64, allocCount: 1, freeCount: 0},
+		{name: "to zero size", oldSize: 64, newSize: 0, allocCount: 0, freeCount: 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			memory, allocator := newAllocatorRegion(t)
+			context := (*layout.MemoryContext)(memory.context(0))
+			shmalloc.ContextInit(context, "realloc", allocator)
+			free := shmalloc.FreeSize(allocator)
+			var data unsafe.Pointer
+			if tc.oldSize != 0 {
+				data = shmalloc.ContextAlloc(context, tc.oldSize)
+				require.NotNil(t, data)
+				block := unsafe.Slice((*byte)(data), tc.oldSize)
+				for idx := range block {
+					block[idx] = byte(7 + idx)
+				}
+			}
+			kept := min(tc.oldSize, tc.newSize)
+			var want []byte
+			if kept != 0 {
+				want = bytes.Clone(unsafe.Slice((*byte)(data), kept))
+			}
+			before := *context
+
+			moved := shmalloc.ContextRealloc(context, data, tc.oldSize, tc.newSize)
+
+			require.Equal(t, tc.newSize == 0, moved == nil)
+			if kept != 0 {
+				require.Equal(t, want, unsafe.Slice((*byte)(moved), kept), "the kept bytes")
+			}
+			require.Equal(t, before.BallocCount+tc.allocCount, context.BallocCount)
+			require.Equal(t, before.BallocSize+tc.allocCount*uint64(tc.newSize), context.BallocSize)
+			require.Equal(t, before.BfreeCount+tc.freeCount, context.BfreeCount)
+			require.Equal(t, before.BfreeSize+tc.freeCount*uint64(tc.oldSize), context.BfreeSize)
+
+			shmalloc.ContextFree(context, moved, tc.newSize)
+			require.Equal(t, free, shmalloc.FreeSize(allocator), "free bytes after the final free")
+		})
+	}
+}
+
 // Test_ContextRealloc_KeepsBlockWhenExhausted verifies that a move to a
 // size no free block holds returns nil and leaves the old block
 // allocated, its bytes and the context's counts as they were.

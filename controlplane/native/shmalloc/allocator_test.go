@@ -157,6 +157,72 @@ func Test_Alloc_RefusesLeavingAllocatorAlone(t *testing.T) {
 	}
 }
 
+// newLargestBlockAllocator maps an allocator holding one free block of the
+// largest pool, so a request of any size is served by splitting it, and
+// unmaps it when the test ends.
+func newLargestBlockAllocator(t *testing.T) *layout.BlockAllocator {
+	t.Helper()
+	largest := uintptr(shmalloc.MaxSize + 2*shmalloc.RedZone)
+	mapping, err := syscall.Mmap(-1, 0, int(largest+2*shmalloc.MaxAlign),
+		syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_PRIVATE|syscall.MAP_ANONYMOUS,
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		nativetest.Unpoison(mapping)
+		require.NoError(t, syscall.Munmap(mapping))
+	})
+	start := unsafe.Pointer(&mapping[0])
+	base := unsafe.Add(start, (shmalloc.MaxAlign-uintptr(start)%shmalloc.MaxAlign)%shmalloc.MaxAlign)
+	allocator := (*layout.BlockAllocator)(base)
+	shmalloc.Init(allocator)
+	shmalloc.PutArena(allocator, unsafe.Add(base, shmalloc.MaxAlign), largest)
+	return allocator
+}
+
+// Test_Alloc_TakesSmallestPool verifies that a request takes exactly the
+// smallest block that holds it with its red zones, at both edges of every
+// pool from the smallest block to the largest, and that freeing it gives
+// the block back.
+func Test_Alloc_TakesSmallestPool(t *testing.T) {
+	// The rule of block_allocator_balloc in common/memory_block.h: the
+	// request grows by both red zones, then block_allocator_pool_index
+	// picks the smallest power of two that holds it, no less than the
+	// smallest block.
+	blockFor := func(size uintptr) uintptr {
+		block := uintptr(1) << shmalloc.MinBits
+		for block < size+2*shmalloc.RedZone {
+			block <<= 1
+		}
+		return block
+	}
+	// Every pool's largest request and one byte more, which needs the
+	// next pool; requests too small for any pool's edge start at 1.
+	sizes := []uintptr{1}
+	for block := uintptr(1) << shmalloc.MinBits; block <= shmalloc.MaxSize+2*shmalloc.RedZone; block <<= 1 {
+		if block <= 2*shmalloc.RedZone {
+			continue
+		}
+		fit := block - 2*shmalloc.RedZone
+		sizes = append(sizes, fit)
+		if fit < shmalloc.MaxSize {
+			sizes = append(sizes, fit+1)
+		}
+	}
+	for _, size := range sizes {
+		t.Run(fmt.Sprintf("%d bytes", size), func(t *testing.T) {
+			allocator := newLargestBlockAllocator(t)
+			free := shmalloc.FreeSize(allocator)
+
+			block := shmalloc.Alloc(allocator, size)
+			require.NotNil(t, block)
+			require.Equal(t, free-blockFor(size), shmalloc.FreeSize(allocator), "free bytes after the allocation")
+
+			shmalloc.Free(allocator, block, size)
+			require.Equal(t, free, shmalloc.FreeSize(allocator), "free bytes after the free")
+		})
+	}
+}
+
 // churnSizes returns the block sizes every worker of the concurrent test
 // allocates each round: small enough that all workers together never
 // exhaust the arena, though freed blocks are never merged.
