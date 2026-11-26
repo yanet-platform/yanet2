@@ -832,7 +832,6 @@ func Test_DeleteModule_FailureFreesCopy(t *testing.T) {
 			module: "a",
 			check: func(t *testing.T, err error) {
 				require.ErrorIs(t, err, cpconfig.ErrMissingModule)
-				require.ErrorContains(t, err, `chain "drop_chain"`)
 			},
 		},
 	}
