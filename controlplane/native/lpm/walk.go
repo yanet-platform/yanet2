@@ -9,8 +9,9 @@ import "github.com/yanet-platform/yanet2/controlplane/native/layout"
 // page that hold one value.
 //
 // The first and last key of a stretch come as slices of keySize bytes,
-// valid only during the call; keySize is the size of the tree's keys. Keys no insert mapped come with the invalid
-// value the lookup returns for them.
+// valid only during the call; keySize is the size of the tree's keys.
+// Keys no insert mapped come with the invalid value the lookup returns
+// for them.
 func Walk(tree *layout.Lpm, keySize int, visit func(from, to []byte, value uint32)) {
 	from := make([]byte, keySize)
 	to := make([]byte, keySize)

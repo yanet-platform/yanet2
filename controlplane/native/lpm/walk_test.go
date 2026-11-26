@@ -14,7 +14,6 @@ import (
 
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
 	"github.com/yanet-platform/yanet2/controlplane/native/lpm"
-	"github.com/yanet-platform/yanet2/controlplane/native/lpm/internal/lpmcases"
 	"github.com/yanet-platform/yanet2/controlplane/native/shm"
 )
 
@@ -58,7 +57,7 @@ func nextKey(key []byte) ([]byte, bool) {
 // randomRanges returns one to six inserts of random values whose key
 // bytes come mostly from page edges and their neighbours, so the ranges
 // nest, overlap and meet.
-func randomRanges(random *rand.Rand, keySize int) []lpmcases.Range {
+func randomRanges(random *rand.Rand, keySize int) []keyRange {
 	edges := []byte{0x00, 0x01, 0x7f, 0x80, 0xfe, 0xff}
 	randomKey := func() []byte {
 		key := make([]byte, keySize)
@@ -70,13 +69,13 @@ func randomRanges(random *rand.Rand, keySize int) []lpmcases.Range {
 		}
 		return key
 	}
-	ranges := make([]lpmcases.Range, 1+random.IntN(6))
+	ranges := make([]keyRange, 1+random.IntN(6))
 	for idx := range ranges {
 		from, to := randomKey(), randomKey()
 		if bytes.Compare(from, to) > 0 {
 			from, to = to, from
 		}
-		ranges[idx] = lpmcases.Range{From: from, To: to, Value: random.Uint32()}
+		ranges[idx] = keyRange{From: from, To: to, Value: random.Uint32()}
 	}
 	return ranges
 }
@@ -89,7 +88,7 @@ func randomRanges(random *rand.Rand, keySize int) []lpmcases.Range {
 // last key. The lookup changes only at a range's start and past its end,
 // so checking it there and at each stretch's start against the stretch
 // holding the key covers every key.
-func requireWalkMatchesLookup(t *testing.T, ranges []lpmcases.Range, keySize int) {
+func requireWalkMatchesLookup(t *testing.T, ranges []keyRange, keySize int) {
 	t.Helper()
 	memory := newTreeMemory()
 	require.NoError(t, lpm.Init(&memory.Tree, &memory.Context, "tree"))
@@ -129,12 +128,33 @@ func requireWalkMatchesLookup(t *testing.T, ranges []lpmcases.Range, keySize int
 	}
 }
 
-// Test_Walk_Trees verifies that walking each tree of the shared cases
-// visits every key once, in order, with its lookup value.
+// Test_Walk_Trees verifies that walking an empty tree, nested IPv4 and
+// IPv6 prefixes and a tree that grew its chunk directory visits every key
+// once, in order, with its lookup value.
 func Test_Walk_Trees(t *testing.T) {
-	for _, tc := range lpmcases.Trees {
-		t.Run(tc.Name, func(t *testing.T) {
-			requireWalkMatchesLookup(t, tc.Ranges, tc.KeySize())
+	cases := []struct {
+		name    string
+		ranges  []keyRange
+		keySize int
+	}{
+		{name: "no ranges", keySize: 4},
+		{name: "nested ipv4 prefixes", keySize: 4, ranges: []keyRange{
+			prefixRange("10.0.0.0/8", 1),
+			prefixRange("10.1.2.128/25", 2),
+			prefixRange("0.0.0.0/0", 3),
+			prefixRange("10.1.0.0/16", 4),
+		}},
+		{name: "ipv6 prefixes", keySize: 16, ranges: []keyRange{
+			prefixRange("2001:db8::/32", 1),
+			prefixRange("2001:db8:1::/48", 2),
+			prefixRange("::1/128", 3),
+			prefixRange("fe80::/10", 4),
+		}},
+		{name: "chunk directory grown", keySize: 4, ranges: chunkedRanges(40)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			requireWalkMatchesLookup(t, tc.ranges, tc.keySize)
 		})
 	}
 }
