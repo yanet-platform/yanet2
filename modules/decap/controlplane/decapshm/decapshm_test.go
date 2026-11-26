@@ -9,6 +9,7 @@ import (
 	"testing"
 	"unsafe"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
 	"github.com/yanet-platform/yanet2/controlplane/native/agent"
@@ -198,6 +199,33 @@ func Benchmark_NewConfig(b *testing.B) {
 		require.NoError(b, err)
 		b.StopTimer()
 		require.NoError(b, decapshm.FreeConfig(module))
+		b.StartTimer()
+	}
+}
+
+// Benchmark_UpdateModules measures building a decap configuration of 256
+// prefixes and publishing it through the dataplane helper's worker.
+//
+// The configuration each publication replaced is freed outside the
+// measurement, so the agent's memory lasts the run.
+func Benchmark_UpdateModules(b *testing.B) {
+	b.ReportAllocs()
+	prefixes := benchmarkPrefixes()
+	dataplane := nativetest.NewDataplane(b, nativetest.Config{Modules: []string{"decap"}})
+	instance := dataplane.Instance()
+	owner, err := agent.Attach(instance, "decap", uint64(16*datasize.MB))
+	require.NoError(b, err)
+	deliver := cpconfig.WithDelivery(dataplane.Deliver)
+	var replaced *layout.CpModule
+	for b.Loop() {
+		module, err := decapshm.NewConfig(owner, "d", prefixes)
+		require.NoError(b, err)
+		require.NoError(b, cpconfig.UpdateModules(instance, []*layout.CpModule{module}, deliver))
+		b.StopTimer()
+		if replaced != nil {
+			require.NoError(b, decapshm.FreeConfig(replaced))
+		}
+		replaced = module
 		b.StartTimer()
 	}
 }
