@@ -20,7 +20,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,6 +28,7 @@ import (
 
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
 	"github.com/yanet-platform/yanet2/controlplane/native/lpm"
+	"github.com/yanet-platform/yanet2/controlplane/native/lpm/internal/lpmcases"
 	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
 )
 
@@ -99,74 +99,6 @@ type region struct {
 	Tree      layout.Lpm
 }
 
-// keyRange is an insert of the keys from the start through the end, both
-// included, mapped to the value.
-type keyRange struct {
-	From  []byte
-	To    []byte
-	Value uint32
-}
-
-// prefixRange returns the insert of every address of a prefix.
-func prefixRange(prefix string, value uint32) keyRange {
-	parsed := netip.MustParsePrefix(prefix)
-	from := parsed.Masked().Addr().AsSlice()
-	to := parsed.Masked().Addr().AsSlice()
-	for bit := parsed.Bits(); bit < len(to)*8; bit++ {
-		to[bit/8] |= 0x80 >> (bit % 8)
-	}
-	return keyRange{From: from, To: to, Value: value}
-}
-
-// chunkedRanges returns count /25 ranges over distinct second octets,
-// each splitting two pages off the tree, so 40 of them outgrow five page
-// chunks and grow the chunk directory three times.
-func chunkedRanges(count int) []keyRange {
-	ranges := make([]keyRange, 0, count)
-	for idx := range count {
-		ranges = append(ranges, prefixRange(fmt.Sprintf("10.%d.%d.128/25", idx, idx%7), uint32(idx)))
-	}
-	return ranges
-}
-
-// treeCases are the trees the file holds, each built from its ranges in
-// order; a case without ranges has 4-byte keys.
-var treeCases = []struct {
-	Name   string
-	Ranges []keyRange
-}{
-	{Name: "no ranges"},
-	{Name: "one ipv4 range", Ranges: []keyRange{prefixRange("10.0.0.0/8", 1)}},
-	{Name: "value with its top bit set", Ranges: []keyRange{prefixRange("10.0.0.0/8", 0x80000001)}},
-	{
-		Name: "overlapping ipv4 ranges, the later winning",
-		Ranges: []keyRange{
-			prefixRange("10.0.0.0/8", 1),
-			prefixRange("10.1.2.128/25", 2),
-			prefixRange("0.0.0.0/0", 3),
-			prefixRange("10.1.0.0/16", 4),
-		},
-	},
-	{
-		Name:   "range off prefix boundaries",
-		Ranges: []keyRange{{From: []byte{10, 0, 0, 5}, To: []byte{10, 0, 3, 250}, Value: 7}},
-	},
-	{
-		Name:   "start past the end",
-		Ranges: []keyRange{{From: []byte{10, 0, 0, 9}, To: []byte{10, 0, 0, 1}, Value: 7}},
-	},
-	{
-		Name: "ipv6 ranges",
-		Ranges: []keyRange{
-			prefixRange("2001:db8::/32", 1),
-			prefixRange("2001:db8:1::/48", 2),
-			prefixRange("::1/128", 3),
-			prefixRange("fe80::/10", 4),
-		},
-	},
-	{Name: "chunk directory grown", Ranges: chunkedRanges(40)},
-}
-
 func main() {
 	if len(os.Args) != 2 || os.Args[1] == "" || strings.Contains(os.Args[1], "/") {
 		fmt.Fprintln(os.Stderr, "usage: lpmgen NAME")
@@ -199,8 +131,8 @@ func generate(path string) (err error) {
 
 	// The spare region lets the regions start aligned wherever the file is
 	// mapped.
-	headerSize := unsafe.Sizeof(header{}) + uintptr(len(treeCases))*unsafe.Sizeof(caseRecord{})
-	size := headerSize + regionSize + uintptr(2*len(treeCases))*regionSize
+	headerSize := unsafe.Sizeof(header{}) + uintptr(len(lpmcases.Trees))*unsafe.Sizeof(caseRecord{})
+	size := headerSize + regionSize + uintptr(2*len(lpmcases.Trees))*regionSize
 	if err := file.Truncate(int64(size)); err != nil {
 		return err
 	}
@@ -224,13 +156,13 @@ func generate(path string) (err error) {
 		Tree:       uint64(unsafe.Offsetof(region{}.Tree)),
 		Arena:      arenaOffset,
 		CaseSize:   uint64(unsafe.Sizeof(caseRecord{})),
-		CaseCount:  uint64(len(treeCases)),
+		CaseCount:  uint64(len(lpmcases.Trees)),
 	}
-	records := unsafe.Slice((*caseRecord)(unsafe.Pointer(&mapping[unsafe.Sizeof(header{})])), len(treeCases))
+	records := unsafe.Slice((*caseRecord)(unsafe.Pointer(&mapping[unsafe.Sizeof(header{})])), len(lpmcases.Trees))
 
-	for idx, treeCase := range treeCases {
+	for idx, treeCase := range lpmcases.Trees {
 		record := &records[idx]
-		if err := describe(record, treeCase.Name, treeCase.Ranges); err != nil {
+		if err := describe(record, treeCase); err != nil {
 			return err
 		}
 		record.Built = uint64(first + uintptr(2*idx)*regionSize)
@@ -249,15 +181,13 @@ func generate(path string) (err error) {
 }
 
 // describe writes a case's name, key size and inserts into its record.
-func describe(record *caseRecord, name string, ranges []keyRange) error {
+func describe(record *caseRecord, treeCase lpmcases.Tree) error {
+	name, ranges := treeCase.Name, treeCase.Ranges
 	if len(name) >= nameSize || len(ranges) > maxInserts {
 		return fmt.Errorf("%s: a case holds a name under %d bytes and at most %d inserts", name, nameSize, maxInserts)
 	}
 	copy(record.Name[:], name)
-	record.KeySize = 4
-	if len(ranges) > 0 {
-		record.KeySize = uint64(len(ranges[0].From))
-	}
+	record.KeySize = uint64(treeCase.KeySize())
 	record.InsertCount = uint64(len(ranges))
 	for idx, insert := range ranges {
 		if len(insert.From) > maxKeySize || len(insert.To) > maxKeySize {
@@ -273,7 +203,7 @@ func describe(record *caseRecord, name string, ranges []keyRange) error {
 // build fills the region with filler, lays out its allocator over its
 // arena and its root memory context, and builds the tree from the ranges,
 // in the order the C test takes the same steps.
-func build(memory []byte, ranges []keyRange) (*layout.Lpm, error) {
+func build(memory []byte, ranges []lpmcases.Range) (*layout.Lpm, error) {
 	for idx := range memory {
 		memory[idx] = filler
 	}

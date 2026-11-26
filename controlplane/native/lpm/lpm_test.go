@@ -3,8 +3,6 @@
 package lpm_test
 
 import (
-	"fmt"
-	"net/netip"
 	"testing"
 	"unsafe"
 
@@ -12,40 +10,11 @@ import (
 
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
 	"github.com/yanet-platform/yanet2/controlplane/native/lpm"
+	"github.com/yanet-platform/yanet2/controlplane/native/lpm/internal/lpmcases"
 	"github.com/yanet-platform/yanet2/controlplane/native/nativetest"
 	"github.com/yanet-platform/yanet2/controlplane/native/shm"
 	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
 )
-
-// keyRange is an insert of the keys from the start through the end, both
-// included, mapped to the value.
-type keyRange struct {
-	From  []byte
-	To    []byte
-	Value uint32
-}
-
-// prefixRange returns the insert of every address of a prefix.
-func prefixRange(prefix string, value uint32) keyRange {
-	parsed := netip.MustParsePrefix(prefix)
-	from := parsed.Masked().Addr().AsSlice()
-	to := parsed.Masked().Addr().AsSlice()
-	for bit := parsed.Bits(); bit < len(to)*8; bit++ {
-		to[bit/8] |= 0x80 >> (bit % 8)
-	}
-	return keyRange{From: from, To: to, Value: value}
-}
-
-// chunkedRanges returns count /25 ranges over distinct second octets,
-// each splitting two pages off the tree, so 40 of them outgrow five page
-// chunks and grow the chunk directory three times.
-func chunkedRanges(count int) []keyRange {
-	ranges := make([]keyRange, 0, count)
-	for idx := range count {
-		ranges = append(ranges, prefixRange(fmt.Sprintf("10.%d.%d.128/25", idx, idx%7), uint32(idx)))
-	}
-	return ranges
-}
 
 // treeMemory is what the memory of a test's tree holds before its arena.
 type treeMemory struct {
@@ -110,7 +79,7 @@ func Test_InitAndInsert_ExhaustionLeavesFreeableTree(t *testing.T) {
 			free := shmalloc.FreeSize(&memory.Allocator)
 
 			err := lpm.Init(&memory.Tree, &memory.Context, "tree")
-			for _, insert := range chunkedRanges(40) {
+			for _, insert := range lpmcases.ChunkedRanges(40) {
 				if err != nil {
 					break
 				}
