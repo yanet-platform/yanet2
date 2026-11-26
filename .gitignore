@@ -213,3 +213,6 @@ deploy/packages/
 !/modules/route-mpls/
 !/modules/unrdup/
 scripts/__pycache__/
+
+# Failing inputs the rapid property tests record.
+testdata/rapid/
