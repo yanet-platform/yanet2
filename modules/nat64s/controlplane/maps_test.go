@@ -13,10 +13,45 @@ import (
 )
 
 // newTestRegistry wires a map registry to an agent on a dataplane that has
-// the session-map object type loaded. The agent's zone holds the
-// default-sized tables of one map.
+// the session-map object type loaded.
+//
+// The maps are created small: the default sizing needs a block as large
+// as the allocator's largest, which a sanitizer build cannot provide.
 func newTestRegistry(t *testing.T) (*ffi.Agent, *nat64s.MapRegistry) {
 	t.Helper()
+
+	harness, err := dataplaneut.NewHarness(dataplaneut.Config{
+		CPMemory:      uint64(64 * datasize.MB),
+		DPMemory:      uint64(4 * datasize.MB),
+		WorkerCount:   1,
+		ObjectsToLoad: []string{cnat64s.MapObjectType},
+	})
+	require.NoError(t, err)
+	t.Cleanup(harness.Free)
+
+	agent, err := harness.SharedMemory().AgentAttach(
+		"nat64s-registry-test",
+		0,
+		16*datasize.MB,
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = agent.CleanUp() })
+
+	return agent, nat64s.NewMapRegistry(agent, nat64s.WithRegistryMapSizing(
+		cnat64s.MapConfig{IndexSize: 1024, ExtraBucketCount: 64},
+	))
+}
+
+// Test_MapRegistry_DefaultSizing_CreatesTheProductionMap verifies that a
+// registry left unsized creates the map production runs with, and that
+// this map fits the zone the module's defaults give their agent.
+//
+// Sanitizer builds skip it: the default sizing needs a block as large as
+// the allocator's largest, which a sanitizer build cannot provide.
+func Test_MapRegistry_DefaultSizing_CreatesTheProductionMap(t *testing.T) {
+	if asanBuild {
+		t.Skip("the default tables need a block a sanitizer build cannot provide")
+	}
 
 	harness, err := dataplaneut.NewHarness(dataplaneut.Config{
 		CPMemory:      uint64(640 * datasize.MB),
@@ -28,14 +63,26 @@ func newTestRegistry(t *testing.T) (*ffi.Agent, *nat64s.MapRegistry) {
 	t.Cleanup(harness.Free)
 
 	agent, err := harness.SharedMemory().AgentAttach(
-		"nat64s-registry-test",
+		"nat64s-default-registry-test",
 		0,
 		512*datasize.MB,
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = agent.CleanUp() })
 
-	return agent, nat64s.NewMapRegistry(agent)
+	registry := nat64s.NewMapRegistry(agent)
+	before := agent.BlockAllocatorFreeSize()
+	require.NoError(t, registry.Acquire("t0", "sessions"))
+	used := before - agent.BlockAllocatorFreeSize()
+	t.Logf("a default-sized map takes %s of its agent's zone", datasize.ByteSize(used))
+
+	require.Less(t,
+		used,
+		uint64(nat64s.DefaultConfig().MemoryRequirements.Unwrap()),
+		"the default sizing must fit the zone the module gives its agent",
+	)
+
+	releaseMap(t, registry, "t0", "sessions")
 }
 
 // releaseMap lets the config give its map back and frees the object at

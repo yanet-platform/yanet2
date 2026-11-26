@@ -70,17 +70,18 @@ func sessionMapGone(agent *ffi.Agent, name string) bool {
 	return errors.Is(agent.DeleteObject(cnat64s.MapObjectType, name), ffi.ErrNotFound)
 }
 
-// setupNAT64sHarness wires the module end to end: a dataplane with the
-// nat64s and forward modules and the session-map object type loaded, an
-// agent whose zone holds the default-sized tables of one map, and the
-// service over the real backend and map registry.
+// setupNAT64sHarness wires the module end to end, down to its service
+// over the real backend and map registry.
+//
+// The maps are created small: the default sizing needs a block as large
+// as the allocator's largest, which a sanitizer build cannot provide.
 func setupNAT64sHarness(
 	t *testing.T,
 ) (*dataplaneut.Harness, *ffi.Agent, *nat64s.MapRegistry, *nat64s.NAT64sService) {
 	t.Helper()
 
 	harness, err := dataplaneut.NewHarness(dataplaneut.Config{
-		CPMemory:      uint64(640 * datasize.MB),
+		CPMemory:      uint64(64 * datasize.MB),
 		DPMemory:      uint64(4 * datasize.MB),
 		WorkerCount:   1,
 		Devices:       []string{"port0"},
@@ -94,12 +95,14 @@ func setupNAT64sHarness(
 	agent, err := harness.SharedMemory().AgentAttach(
 		"nat64s-functional-test",
 		0,
-		512*datasize.MB,
+		16*datasize.MB,
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = agent.CleanUp() })
 
-	registry := nat64s.NewMapRegistry(agent)
+	registry := nat64s.NewMapRegistry(agent, nat64s.WithRegistryMapSizing(
+		cnat64s.MapConfig{IndexSize: 1024, ExtraBucketCount: 64},
+	))
 	service := nat64s.NewNAT64sService(nat64s.NewBackend(agent, registry))
 
 	return harness, agent, registry, service

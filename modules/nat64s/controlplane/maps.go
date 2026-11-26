@@ -40,6 +40,9 @@ type MapRegistry struct {
 	agent *ffi.Agent
 	mu    sync.Mutex
 	maps  map[string]*cnat64s.MapObjectConfig
+	// The sizing of the maps the registry creates, its zero fields
+	// selecting the defaults of the shared memory layout.
+	sizing cnat64s.MapConfig
 	// The config each map is reserved for, at most one, so the object is
 	// reclaimed when its config lets go: each map owns two large tables,
 	// and config churn with fresh names would otherwise exhaust the agent
@@ -59,6 +62,18 @@ func WithRegistryLog(log *zap.Logger) RegistryOption {
 		if log != nil {
 			m.log = log
 		}
+	}
+}
+
+// WithRegistryMapSizing sets the sizing of the maps the registry creates.
+//
+// The sizing names the index and the overflow buckets of their first
+// layer and the size of each worker's stash; zero fields leave those to
+// the defaults of the shared memory layout. Every map is sized for the
+// dataplane's workers, whatever worker count the sizing carries.
+func WithRegistryMapSizing(sizing cnat64s.MapConfig) RegistryOption {
+	return func(m *MapRegistry) {
+		m.sizing = sizing
 	}
 }
 
@@ -94,12 +109,14 @@ func (m *MapRegistry) ensureLocked(name string, workerCount uint16) (*cnat64s.Ma
 	if workerCount == 0 {
 		workerCount = uint16(m.agent.DPConfig().WorkerCount())
 	}
+	sizing := m.sizing
+	sizing.WorkerCount = workerCount
 
 	object, err := cnat64s.NewMapObjectConfig(m.agent, name)
 	if err != nil {
 		return nil, err
 	}
-	if err := object.CreateMap(cnat64s.MapConfig{WorkerCount: workerCount}); err != nil {
+	if err := object.CreateMap(sizing); err != nil {
 		_ = object.Free()
 		return nil, err
 	}
