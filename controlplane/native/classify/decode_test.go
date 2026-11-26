@@ -292,10 +292,8 @@ func Test_Decode_ForwardShapedResolvesFirstMatch(t *testing.T) {
 
 // coreShaped is what the two-stage composition commits: the core over
 // the union of the projections, its decode of the IPv6 projection, the
-// ports over the port-scoped projection and the root joining both with
-// its decode; the flat build of the same attributes follows. Port value
-// lines stand in for the port attribute and the root's decode for its
-// rule table until those land.
+// ports, and the port-scoped filter over the core and the ports: a rule
+// table in the composed build, a joint and its decode in the flat one.
 type coreShaped struct {
 	Device          layout.ClassifyAttrDevice
 	Source          layout.ClassifyAttrNet6
@@ -305,9 +303,10 @@ type coreShaped struct {
 	MidJoint        layout.ValueTable
 	ProtoJoint      layout.ValueTable
 	IP6RuleMap      layout.Vline
-	SourcePort      layout.ClassifyAttrLine
-	DestinationPort layout.ClassifyAttrLine
+	SourcePort      layout.ClassifyAttrPort
+	DestinationPort layout.ClassifyAttrPort
 	PortsJoint      layout.ValueTable
+	RootRules       layout.RuleTable
 	RootJoint       layout.ValueTable
 	PortRuleMap     layout.Vline
 }
@@ -316,27 +315,28 @@ type coreShaped struct {
 // port windows.
 type coreRule struct {
 	Source, Destination         classify.Net6Network
-	SourcePort, DestinationPort classify.LineRange
+	SourcePort, DestinationPort classify.PortRange
 }
 
 // commitCoreShaped compiles the rules as the ACL module's IPv6 core and
-// ports do, the core over every rule and the ports over the rules of
-// their projection, decodes each filter's members and commits the
-// composition into a holder carved from the memory.
-func commitCoreShaped(t *testing.T, memory *classifytest.Memory, rules []coreRule, ip6, ports, portMembers []bool) *coreShaped {
+// ports do and commits the composition into a holder carved from the
+// memory: the core over every rule, the ports over the port-scoped
+// projection joined to the core in a rule table or, flat, over every
+// rule joined to the core and decoded.
+func commitCoreShaped(t *testing.T, memory *classifytest.Memory, rules []coreRule, ip6, ports []bool, flat bool) *coreShaped {
 	t.Helper()
 	// The rules name no devices and no protocols, so they match any.
 	devices := make([]classify.DeviceRule, len(rules))
 	protocols := make([]classify.LineRule, len(rules))
 	sources := make([]classify.Net6Rule, len(rules))
 	destinations := make([]classify.Net6Rule, len(rules))
-	sourcePorts := make([]classify.LineRule, len(rules))
-	destinationPorts := make([]classify.LineRule, len(rules))
+	sourcePorts := make([]classify.PortRule, len(rules))
+	destinationPorts := make([]classify.PortRule, len(rules))
 	for idx, rule := range rules {
 		sources[idx] = classify.Net6Rule{Networks: []classify.Net6Network{rule.Source}}
 		destinations[idx] = classify.Net6Rule{Networks: []classify.Net6Network{rule.Destination}}
-		sourcePorts[idx] = classify.LineRule{Ranges: []classify.LineRange{rule.SourcePort}, Absent: !ports[idx]}
-		destinationPorts[idx] = classify.LineRule{Ranges: []classify.LineRange{rule.DestinationPort}, Absent: !ports[idx]}
+		sourcePorts[idx] = classify.PortRule{Ranges: []classify.PortRange{rule.SourcePort}, Absent: !flat && !ports[idx]}
+		destinationPorts[idx] = classify.PortRule{Ranges: []classify.PortRange{rule.DestinationPort}, Absent: !flat && !ports[idx]}
 	}
 	holder := classifytest.Alloc[coreShaped](memory)
 	context := &memory.Context
@@ -361,17 +361,23 @@ func commitCoreShaped(t *testing.T, memory *classifytest.Memory, rules []coreRul
 	require.NoError(t, err)
 	require.NoError(t, coreStage.Decode(ip6, &holder.IP6RuleMap, context, "rule_map"))
 
-	sourcePort, err := classify.CompileLine(sourcePorts, 0x10000)
-	require.NoError(t, err)
+	sourcePort := classify.CompilePort(sourcePorts)
 	require.NoError(t, sourcePort.Commit(&holder.SourcePort, context, "test_src_port"))
-	destinationPort, err := classify.CompileLine(destinationPorts, 0x10000)
-	require.NoError(t, err)
+	destinationPort := classify.CompilePort(destinationPorts)
 	require.NoError(t, destinationPort.Commit(&holder.DestinationPort, context, "test_dst_port"))
-	portStage, err := sourcePort.Stage().Join(destinationPort.Stage(), &holder.PortsJoint, context, "joint")
+	portsJoint := "joint"
+	if flat {
+		portsJoint = "ports_joint"
+	}
+	portStage, err := sourcePort.Stage().Join(destinationPort.Stage(), &holder.PortsJoint, context, portsJoint)
 	require.NoError(t, err)
-	root, err := coreStage.Join(portStage, &holder.RootJoint, context, "root_joint")
+	if !flat {
+		require.NoError(t, coreStage.JoinRules(portStage, ports, &holder.RootRules, context, "root_joint"))
+		return holder
+	}
+	root, err := coreStage.Join(portStage, &holder.RootJoint, context, "family_joint")
 	require.NoError(t, err)
-	require.NoError(t, root.Decode(portMembers, &holder.PortRuleMap, context, "root_rules"))
+	require.NoError(t, root.Decode(ports, &holder.PortRuleMap, context, "rule_map"))
 	return holder
 }
 
@@ -381,13 +387,15 @@ type coreClassifier struct {
 	device, protocol, sourcePort, destinationPort []uint32
 	source, destination                           classifytest.Net6Classes
 	netsJoint, midJoint, protoJoint, ports        [][]uint32
-	root                                          [][]uint32
-	ip6Rules, portRules                           []uint32
+	ip6Rules                                      []uint32
+	// portRule resolves the core and port classes through the
+	// port-scoped filter.
+	portRule func(core, ports uint32) uint32
 }
 
-// readCoreShaped reads a committed two-stage composition.
-func readCoreShaped(holder *coreShaped) coreClassifier {
-	return coreClassifier{
+// readCoreShaped reads a committed two-stage composition, flat or not.
+func readCoreShaped(holder *coreShaped, flat bool) coreClassifier {
+	classifier := coreClassifier{
 		device:          classifytest.Values(&holder.Device.Line),
 		protocol:        classifytest.Values(&holder.Protocol.Line),
 		sourcePort:      classifytest.Values(&holder.SourcePort.Line),
@@ -398,10 +406,16 @@ func readCoreShaped(holder *coreShaped) coreClassifier {
 		midJoint:        classifytest.Table(&holder.MidJoint),
 		protoJoint:      classifytest.Table(&holder.ProtoJoint),
 		ports:           classifytest.Table(&holder.PortsJoint),
-		root:            classifytest.Table(&holder.RootJoint),
 		ip6Rules:        classifytest.Values(&holder.IP6RuleMap),
-		portRules:       classifytest.Values(&holder.PortRuleMap),
 	}
+	if !flat {
+		rows := classifytest.RuleTable(&holder.RootRules)
+		classifier.portRule = func(core, ports uint32) uint32 { return rows[core][ports] }
+		return classifier
+	}
+	root, ruleMap := classifytest.Table(&holder.RootJoint), classifytest.Values(&holder.PortRuleMap)
+	classifier.portRule = func(core, ports uint32) uint32 { return ruleMap[root[core][ports]] }
+	return classifier
 }
 
 // Classify returns the rules a UDP packet of device zero resolves to
@@ -410,7 +424,7 @@ func (m coreClassifier) Classify(source, destination string, sourcePort, destina
 	nets := m.netsJoint[m.source.Class(key6(addr6(source)))][m.destination.Class(key6(addr6(destination)))]
 	core := m.protoJoint[m.midJoint[m.device[0]][nets]][m.protocol[17]]
 	ports := m.ports[m.sourcePort[sourcePort]][m.destinationPort[destinationPort]]
-	return m.ip6Rules[core], m.portRules[m.root[core][ports]]
+	return m.ip6Rules[core], m.portRule(core, ports)
 }
 
 // Test_Decode_CoreComposedAgreesWithFlat verifies that each filter of a
@@ -419,7 +433,7 @@ func (m coreClassifier) Classify(source, destination string, sourcePort, destina
 // same attributes over the union of the rules.
 func Test_Decode_CoreComposedAgreesWithFlat(t *testing.T) {
 	netA, netB := net6Network(0x2a02_0000_0000_0000, 32, 0, 0), net6Network(0x2a0d_0000_0000_0000, 32, 0, 0)
-	full, window := classify.LineRange{From: 0, To: 0xffff}, classify.LineRange{From: 100, To: 200}
+	full, window := classify.PortRange{From: 0, To: 0xffff}, classify.PortRange{From: 100, To: 200}
 	// The first rule has full port windows and lies in the IPv6
 	// projection only; the others restrict a port and lie in the
 	// port-scoped projection only.
@@ -428,12 +442,11 @@ func Test_Decode_CoreComposedAgreesWithFlat(t *testing.T) {
 		{Source: netA, Destination: netB, SourcePort: window, DestinationPort: full},
 		{Source: netB, Destination: netA, SourcePort: full, DestinationPort: window},
 	}
-	union := []bool{true, true, true}
 	ip6, ports := []bool{true, false, false}, []bool{false, true, true}
 	memory := classifytest.LayOut(make([]byte, memorySize))
 	free := shmalloc.FreeSize(&memory.Allocator)
-	composed := commitCoreShaped(t, memory, rules, ip6, ports, ports)
-	flat := commitCoreShaped(t, memory, rules, ip6, union, ports)
+	composed := commitCoreShaped(t, memory, rules, ip6, ports, false)
+	flat := commitCoreShaped(t, memory, rules, ip6, ports, true)
 
 	invalid := classify.InvalidRule
 	probes := []struct {
@@ -447,7 +460,7 @@ func Test_Decode_CoreComposedAgreesWithFlat(t *testing.T) {
 		{name: "destination port inside the window", source: "2a0d::", destination: "2a02::", sourcePort: 150, destinationPort: 150, ip6: invalid, port: 2},
 		{name: "destination port outside the window", source: "2a0d::", destination: "2a02::", sourcePort: 150, destinationPort: 300, ip6: invalid, port: invalid},
 	}
-	composedClassifier, flatClassifier := readCoreShaped(composed), readCoreShaped(flat)
+	composedClassifier, flatClassifier := readCoreShaped(composed, false), readCoreShaped(flat, true)
 	for _, tc := range probes {
 		ip6Rule, portRule := composedClassifier.Classify(tc.source, tc.destination, tc.sourcePort, tc.destinationPort)
 		require.Equal(t, tc.ip6, ip6Rule, "%s: the IPv6 filter's rule", tc.name)
@@ -457,13 +470,14 @@ func Test_Decode_CoreComposedAgreesWithFlat(t *testing.T) {
 	}
 
 	for _, holder := range []*coreShaped{composed, flat} {
+		classify.FreeRuleTable(&holder.RootRules)
 		classify.FreeDecode(&holder.PortRuleMap)
 		classify.FreeDecode(&holder.IP6RuleMap)
 		for _, table := range []*layout.ValueTable{&holder.RootJoint, &holder.PortsJoint, &holder.ProtoJoint, &holder.MidJoint, &holder.NetsJoint} {
 			classify.FreeJoin(table)
 		}
-		classify.FreeLine(&holder.SourcePort)
-		classify.FreeLine(&holder.DestinationPort)
+		classify.FreePort(&holder.SourcePort)
+		classify.FreePort(&holder.DestinationPort)
 		classify.FreeLine(&holder.Protocol)
 		classify.FreeNet6(&holder.Source)
 		classify.FreeNet6(&holder.Destination)

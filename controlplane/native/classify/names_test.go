@@ -17,8 +17,8 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
 )
 
-// The line and IPv4 network views of the two rules lib/classify's
-// context_names.c composes.
+// The attribute views of the two rules lib/classify's context_names.c
+// composes.
 var (
 	namesVlanRules = []classify.LineRule{
 		{Ranges: []classify.LineRange{{From: 10, To: 10}}},
@@ -47,45 +47,72 @@ var (
 		{Networks: []classify.Net6Network{net6Network(0xfe80_0000_0000_0000, 64, 0, 0)}},
 		{Networks: []classify.Net6Network{net6Network(0xfe80_0000_0000_0000, 64, 0, 0)}},
 	}
+	namesFragmentRules = []classify.FragmentRule{{Fragment: classify.FragmentNone}, {Fragment: classify.FragmentFrag}}
+	namesSrcPortRules  = []classify.PortRule{
+		{Ranges: []classify.PortRange{{From: 1000, To: 2000}}},
+		{Ranges: []classify.PortRange{{From: 1000, To: 1500}}},
+	}
+	namesDstPortRules = []classify.PortRule{
+		{Ranges: []classify.PortRange{{From: 2000, To: 3000}}},
+		{Ranges: []classify.PortRange{{From: 2500, To: 3000}}},
+	}
 )
 
-// namesArtefacts are the device and IPv6 network artefacts of the
-// composition, carved from its memory.
+// namesArtefacts are the artefacts of the composition beyond its lines
+// and IPv4 networks, carved from its memory.
 type namesArtefacts struct {
 	Device   layout.ClassifyAttrDevice
+	Nets4    layout.ValueTable
+	Mid4     layout.ValueTable
+	Proto4   layout.ValueTable
+	Fragment layout.ClassifyAttrIpfrag
+	Root4    layout.ValueTable
+	RuleMap4 layout.Vline
 	Net6Src  layout.ClassifyAttrNet6
 	Net6Dst  layout.ClassifyAttrNet6
 	Nets6    layout.ValueTable
 	RuleMap6 layout.Vline
+	SrcPort  layout.ClassifyAttrPort
+	DstPort  layout.ClassifyAttrPort
+	Ports    layout.ValueTable
 }
 
-// composeNames commits the compiles, the IPv6 joint and its decode of
-// the two rules under one root context, with the family scoped entry
-// names the modules pass, as context_names.c builds its composition,
-// and returns the memory, the artefacts carved from it and the
-// allocator's free bytes before the commits.
+// composeNames commits the compiles, joints and decodes of the two rules
+// under one root context, with the family scoped entry names the modules
+// pass, as context_names.c builds its composition, and returns the
+// memory, the artefacts carved from it and the allocator's free bytes
+// before the commits.
 func composeNames(t *testing.T) (*classifytest.Memory, *namesArtefacts, uintptr) {
 	t.Helper()
 	memory := classifytest.LayOut(make([]byte, memorySize))
 	free := shmalloc.FreeSize(&memory.Allocator)
 	artefacts := classifytest.Alloc[namesArtefacts](memory)
 
+	devices, err := classify.CompileDevice(namesDeviceRules)
+	require.NoError(t, err)
+	require.NoError(t, devices.Commit(&artefacts.Device, &memory.Context, "l2:device"))
 	source, err := classify.CompileNet4(namesNet4SrcRules)
 	require.NoError(t, err)
 	require.NoError(t, source.Commit(&memory.Net4, &memory.Context, "ip4:net4_src"))
 	destination, err := classify.CompileNet4(namesNet4DstRules)
 	require.NoError(t, err)
 	require.NoError(t, destination.Commit(&memory.OtherNet4, &memory.Context, "ip4:net4_dst"))
+	nets4, err := source.Stage().Join(destination.Stage(), &artefacts.Nets4, &memory.Context, "ip4:nets_joint")
+	require.NoError(t, err)
+	mid4, err := devices.Stage().Join(nets4, &artefacts.Mid4, &memory.Context, "ip4:mid_joint")
+	require.NoError(t, err)
 	protocol, err := classify.CompileLine(namesIPProtoRules, 0x100)
 	require.NoError(t, err)
 	require.NoError(t, protocol.Commit(&memory.Line, &memory.Context, "ip4:ipproto"))
-	vlan, err := classify.CompileLine(namesVlanRules, 4096)
+	proto4, err := mid4.Join(protocol.Stage(), &artefacts.Proto4, &memory.Context, "ip4:proto_joint")
 	require.NoError(t, err)
-	require.NoError(t, vlan.Commit(&memory.OtherLine, &memory.Context, "l2:vlan"))
+	fragment, err := classify.CompileFragment(namesFragmentRules)
+	require.NoError(t, err)
+	require.NoError(t, fragment.Commit(&artefacts.Fragment, &memory.Context, "ip4:ipfrag"))
+	root4, err := proto4.Join(fragment.Stage(), &artefacts.Root4, &memory.Context, "ip4:root_joint")
+	require.NoError(t, err)
+	require.NoError(t, root4.Decode([]bool{true, true}, &artefacts.RuleMap4, &memory.Context, "ip4:rules"))
 
-	devices, err := classify.CompileDevice(namesDeviceRules)
-	require.NoError(t, err)
-	require.NoError(t, devices.Commit(&artefacts.Device, &memory.Context, "l2:device"))
 	source6, err := classify.CompileNet6(namesNet6SrcRules)
 	require.NoError(t, err)
 	require.NoError(t, source6.Commit(&artefacts.Net6Src, &memory.Context, "ip6:net6_src"))
@@ -95,6 +122,16 @@ func composeNames(t *testing.T) (*classifytest.Memory, *namesArtefacts, uintptr)
 	nets6, err := source6.Stage().Join(destination6.Stage(), &artefacts.Nets6, &memory.Context, "ip6:nets_joint")
 	require.NoError(t, err)
 	require.NoError(t, nets6.Decode([]bool{true, true}, &artefacts.RuleMap6, &memory.Context, "ip6:rules"))
+
+	vlan, err := classify.CompileLine(namesVlanRules, 4096)
+	require.NoError(t, err)
+	require.NoError(t, vlan.Commit(&memory.OtherLine, &memory.Context, "l2:vlan"))
+	srcPort := classify.CompilePort(namesSrcPortRules)
+	require.NoError(t, srcPort.Commit(&artefacts.SrcPort, &memory.Context, "l4:src_port"))
+	dstPort := classify.CompilePort(namesDstPortRules)
+	require.NoError(t, dstPort.Commit(&artefacts.DstPort, &memory.Context, "l4:dst_port"))
+	_, err = srcPort.Stage().Join(dstPort.Stage(), &artefacts.Ports, &memory.Context, "l4:ports_joint")
+	require.NoError(t, err)
 	return memory, artefacts, free
 }
 
@@ -159,9 +196,11 @@ func Test_LeafName_AttributeChildrenAreLeafNamed(t *testing.T) {
 	memory, _, _ := composeNames(t)
 
 	require.ElementsMatch(t, []string{
-		"l2:vlan:line", "ip4:net4_src:lpm", "ip4:net4_dst:lpm", "ip4:ipproto:line",
-		"l2:device:line", "ip6:net6_src:hi", "ip6:net6_src:lo", "ip6:net6_src:comb",
-		"ip6:net6_dst:hi", "ip6:net6_dst:lo", "ip6:nets_joint:table", "ip6:rules",
+		"l2:device:line", "ip4:net4_src:lpm", "ip4:net4_dst:lpm", "ip4:nets_joint:table",
+		"ip4:mid_joint:table", "ip4:ipproto:line", "ip4:proto_joint:table", "ip4:ipfrag:table",
+		"ip4:root_joint:table", "ip4:rules", "ip6:net6_src:hi", "ip6:net6_src:lo",
+		"ip6:net6_src:comb", "ip6:net6_dst:hi", "ip6:net6_dst:lo", "ip6:nets_joint:table",
+		"ip6:rules", "l2:vlan:line", "l4:src_port:line", "l4:dst_port:line", "l4:ports_joint:table",
 	}, rootChildren(memory))
 }
 
@@ -170,7 +209,9 @@ func Test_LeafName_AttributeChildrenAreLeafNamed(t *testing.T) {
 func Test_LeafName_JointChildrenAreLeafNamed(t *testing.T) {
 	memory, _, _ := composeNames(t)
 
-	require.Equal(t, 1, countOf(rootChildren(memory), "ip6:nets_joint:table"))
+	for _, joint := range []string{"ip4:nets_joint", "ip4:mid_joint", "ip4:proto_joint", "ip4:root_joint", "ip6:nets_joint", "l4:ports_joint"} {
+		require.Equal(t, 1, countOf(rootChildren(memory), joint+":table"), "the table of %s", joint)
+	}
 }
 
 // Test_LeafName_DecodeRuleMapKeepsEntryName verifies that a decode
@@ -179,6 +220,7 @@ func Test_LeafName_JointChildrenAreLeafNamed(t *testing.T) {
 func Test_LeafName_DecodeRuleMapKeepsEntryName(t *testing.T) {
 	memory, _, _ := composeNames(t)
 
+	require.Equal(t, 1, countOf(rootChildren(memory), "ip4:rules"))
 	require.Equal(t, 1, countOf(rootChildren(memory), "ip6:rules"))
 }
 
@@ -199,10 +241,19 @@ func countOf(names []string, name string) int {
 func Test_LeafName_TeardownLeavesNothingBehind(t *testing.T) {
 	memory, artefacts, free := composeNames(t)
 
+	classify.FreeJoin(&artefacts.Ports)
+	classify.FreePort(&artefacts.SrcPort)
+	classify.FreePort(&artefacts.DstPort)
 	classify.FreeDecode(&artefacts.RuleMap6)
 	classify.FreeJoin(&artefacts.Nets6)
 	classify.FreeNet6(&artefacts.Net6Dst)
 	classify.FreeNet6(&artefacts.Net6Src)
+	classify.FreeDecode(&artefacts.RuleMap4)
+	classify.FreeJoin(&artefacts.Root4)
+	classify.FreeFragment(&artefacts.Fragment)
+	classify.FreeJoin(&artefacts.Proto4)
+	classify.FreeJoin(&artefacts.Mid4)
+	classify.FreeJoin(&artefacts.Nets4)
 	classify.FreeDevice(&artefacts.Device)
 	shmalloc.ContextFree(&memory.Context, unsafe.Pointer(artefacts), unsafe.Sizeof(*artefacts))
 	classify.FreeLine(&memory.OtherLine)

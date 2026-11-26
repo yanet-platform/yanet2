@@ -12,8 +12,8 @@
 // frees it. Classes are numbered as C numbers them, so every key maps to
 // C's class; the bytes of the tables need not match C's.
 //
-// A compile refuses input C cannot take before it allocates anything; a
-// commit that runs out of shared memory frees what it took and leaves its
+// A compile refuses input C cannot take, or that would panic in Go, before
+// it allocates anything; a commit that runs out of shared memory frees what it took and leaves its
 // artefact zeroed, as C's error paths do.
 package classify
 

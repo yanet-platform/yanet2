@@ -62,8 +62,9 @@ func randomLineRules(seed uint64, count int, size uint32) []classify.LineRule {
 }
 
 // requireLineMatchesReference compiles and commits the rules over a
-// domain of size points and requires every point's class to reach, through
-// the stage, exactly the rules matching the point.
+// domain of size points and requires the class of both ends of every
+// elementary interval to reach, through the stage, exactly the rules
+// matching the point.
 func requireLineMatchesReference(t *testing.T, rules []classify.LineRule, size uint32) {
 	t.Helper()
 	memory := classifytest.LayOut(make([]byte, memorySize))
@@ -73,22 +74,18 @@ func requireLineMatchesReference(t *testing.T, rules []classify.LineRule, size u
 
 	classes := classifytest.Values(&memory.Line.Line)
 	require.Len(t, classes, int(size))
-	points := make([]uint32, size)
-	for point := range points {
-		points[point] = uint32(point)
-	}
 	err = classifytest.CheckStage(
 		line.Stage(),
-		points,
+		classifytest.LineKeys(rules, size),
 		func(point uint32) uint32 { return classes[point] },
 		func(rule int, point uint32) bool { return classifytest.LineMatches(rules[rule], point) },
 	)
 	require.NoError(t, err)
 }
 
-// Test_CompileLine_MatchesReference verifies that every point of a line
-// domain gets a class whose stage reaches exactly the rules matching the
-// point.
+// Test_CompileLine_MatchesReference verifies that both ends of every
+// elementary interval of a line domain get a class whose stage reaches
+// exactly the rules matching the point.
 func Test_CompileLine_MatchesReference(t *testing.T) {
 	for _, size := range lineSizes {
 		for seed := range uint64(16) {
