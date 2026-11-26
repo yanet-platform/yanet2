@@ -35,6 +35,9 @@ const (
 	maxKeySize = 16
 )
 
+// InvalidValue is the value of a key no insert maps (LPM_VALUE_INVALID).
+const InvalidValue uint32 = 0xffffffff
+
 // errTreeMemory reports that the memory of a tree's context ran out.
 var errTreeMemory = fmt.Errorf("prefix tree memory: %w", shmalloc.ErrNoMemory)
 

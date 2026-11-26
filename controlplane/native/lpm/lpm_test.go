@@ -153,8 +153,7 @@ func Test_Insert_MatchesReference(t *testing.T) {
 				ranges = append(ranges, reversed)
 
 				requireWalkMatches(t, ranges, keySize, func(_ *layout.Lpm, key []byte) uint32 {
-					// C's LPM_VALUE_INVALID.
-					value := uint32(0xffffffff)
+					value := lpm.InvalidValue
 					for _, insert := range ranges {
 						if bytes.Compare(insert.From, key) <= 0 && bytes.Compare(key, insert.To) <= 0 {
 							value = insert.Value
