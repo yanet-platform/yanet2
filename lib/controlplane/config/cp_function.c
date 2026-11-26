@@ -373,13 +373,22 @@ cp_function_registry_upsert(
 				break;
 			}
 		}
-		// TODO: unlink on fail?
-		counter_registry_link(
-			&new_chain->counter_registry,
-			(old_chain != NULL) ? &old_chain->counter_registry
-					    : NULL,
-			err
-		);
+		// A failed link writes only into the new function's own
+		// registries, which its caller releases with the function.
+		if (counter_registry_link(
+			    &new_chain->counter_registry,
+			    (old_chain != NULL) ? &old_chain->counter_registry
+						: NULL,
+			    err
+		    )) {
+			yanet_error_add(
+				err,
+				"failed to link counter registry for chain "
+				"'%s'",
+				new_chain->name
+			);
+			return -1;
+		}
 	}
 
 	if (registry_replace(
