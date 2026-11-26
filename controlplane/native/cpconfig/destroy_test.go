@@ -98,7 +98,8 @@ func Test_TryDestroy_RefusesHeldConfiguration(t *testing.T) {
 // agent.
 //
 // The free passes the destroy gate, frees the body, finalises the header,
-// returns the block and then the hold on the agent. An attach superseding
+// which unlinks its memory context from the agent's, returns the block
+// and then the hold on the agent. An attach superseding
 // the agent during the free leaves the agent to the free, whose release
 // reclaims it.
 func Test_TryDestroyObject_TypedFreeGivesAgentBack(t *testing.T) {
@@ -115,6 +116,7 @@ func Test_TryDestroyObject_TypedFreeGivesAgentBack(t *testing.T) {
 			memory := newObjectsFixture(t, 0)
 			owner := attachRestarting(t, memory).Agent
 			free := shmalloc.FreeSize(&owner.BlockAllocator)
+			children := owner.MemoryContext.FirstChild.Get()
 			object := newObject(t, memory, owner, "state", "hits")
 			context := &object.Entity.MemoryContext
 			body := shmalloc.ContextAlloc(context, bodySize)
@@ -126,6 +128,7 @@ func Test_TryDestroyObject_TypedFreeGivesAgentBack(t *testing.T) {
 			}
 			shmalloc.ContextFree(context, body, bodySize)
 			cpconfig.FiniObject(object)
+			require.Same(t, children, owner.MemoryContext.FirstChild.Get(), "the agent's memory contexts")
 			shmalloc.ContextFree(&owner.MemoryContext, unsafe.Pointer(object), objectSize)
 			require.Equal(t, free, shmalloc.FreeSize(&owner.BlockAllocator), "the agent's free bytes")
 			cpconfig.DestroyReleased(owner)

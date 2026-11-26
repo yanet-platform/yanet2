@@ -24,7 +24,8 @@ import (
 //
 // The header names the blackhole module type and the configuration, is
 // owned by the agent, holds a memory context under the agent's, an
-// indexed counter registry and the link to the device named "".
+// indexed counter registry whose predefined counter ids name their
+// counters, and the link to the device named "".
 func Test_NewBlackhole_BuildsHeaders(t *testing.T) {
 	for _, count := range []int{1, 20} {
 		t.Run(strconv.Itoa(count)+" configurations", func(t *testing.T) {
@@ -41,6 +42,20 @@ func Test_NewBlackhole_BuildsHeaders(t *testing.T) {
 				require.Same(t, memory.owner.Agent, module.Entity.Agent.Get())
 				require.Same(t, &memory.owner.Agent.MemoryContext, module.Entity.MemoryContext.Parent.Get())
 				requireIndexed(t, &module.CounterRegistry)
+				names := registry.Slice(module.CounterRegistry.Names.Get(), module.CounterRegistry.Count)
+				for _, counter := range []struct {
+					name string
+					id   uint64
+				}{
+					{"rx", module.RxCounterId},
+					{"tx", module.TxCounterId},
+					{"drop", module.DropCounterId},
+					{"pending_input", module.PendingInputCounterId},
+					{"pending_output", module.PendingOutputCounterId},
+				} {
+					require.Less(t, counter.id, uint64(len(names)), "the %s counter id", counter.name)
+					require.Equal(t, counter.name, shm.String(names[counter.id].Name[:]), "the %s counter id", counter.name)
+				}
 				devices := registry.Slice(module.Devices.Get(), module.DeviceCount)
 				require.Len(t, devices, 1)
 				require.Empty(t, shm.String(devices[0].Name[:]))

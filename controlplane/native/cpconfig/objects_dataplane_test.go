@@ -112,9 +112,10 @@ func freeObject(t testing.TB, object *layout.CpObject) {
 // published from Go replace those of their names in the generation and in
 // every worker's contexts.
 //
-// A replacement continues the counters of the object it replaces, which
-// is released for its free, and a module linking a replaced object links
-// its replacement.
+// A replacement continues the counters of the object it replaces, in its
+// own storages and in those of the module links to it; the replaced
+// object is released for its free, and a module linking it links its
+// replacement.
 func Test_UpdateObjects_ReplacesObjects(t *testing.T) {
 	cases := []struct {
 		name string
@@ -137,6 +138,11 @@ func Test_UpdateObjects_ReplacesObjects(t *testing.T) {
 				replaced[name] = publishedObject(memory, name)
 				objects = append(objects, newObject(t, memory, memory.owner.Agent, name, grownCounters...))
 			}
+			linkTags := []zone.CounterTag{{Key: "object_name", Value: "events"}, {Key: "kind", Value: "module_object_link"}}
+			var linkHits uint64
+			if replaced["events"] != nil {
+				linkHits = counterTotal(t, memory, "hits", linkTags...)
+			}
 
 			require.NoError(t, updateObjects(t, memory, objects...))
 
@@ -157,6 +163,10 @@ func Test_UpdateObjects_ReplacesObjects(t *testing.T) {
 			linked := linkedModuleContext(t, memory)
 			link := &unsafe.Slice(linked.ObjectLinks.Get(), linked.ObjectLinkCount)[0]
 			require.Same(t, publishedObject(memory, "events"), link.ObjectEctx.Get().CpObject.Get())
+			if replaced["events"] != nil {
+				require.NotZero(t, linkHits)
+				require.Equal(t, linkHits, counterTotal(t, memory, "hits", linkTags...), "the module's link continues the hits")
+			}
 		})
 	}
 }

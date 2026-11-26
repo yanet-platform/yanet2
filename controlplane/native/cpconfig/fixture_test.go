@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"iter"
 	"regexp"
+	"slices"
 	"strconv"
 	"sync/atomic"
 	"testing"
@@ -19,6 +20,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/native/internal/registry"
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
 	"github.com/yanet-platform/yanet2/controlplane/native/nativetest"
+	"github.com/yanet-platform/yanet2/controlplane/native/nativetest/helperproto"
 	"github.com/yanet-platform/yanet2/controlplane/native/shm"
 	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
 )
@@ -194,12 +196,14 @@ func newObjectsFixture(t testing.TB, count int) *publishedFixture {
 
 // shared is what an update takes from or counts on that outlives it.
 //
-// It is the free bytes of the zone and of every agent, the published
-// generation with its header, items and worker roots, and every
-// reference count that generation reaches.
+// It is the free bytes of the zone and of every agent, the zone's
+// AddressSanitizer marks, the published generation with its header,
+// items and worker roots, and every reference count that generation
+// reaches.
 type shared struct {
 	ZoneFree  uintptr
 	AgentFree map[*layout.Agent]uintptr
+	Marks     []helperproto.Range
 	Published *layout.CpConfigGen
 	Header    []byte
 	Items     [][]*layout.RegistryItem
@@ -236,6 +240,7 @@ func sharedState(memory *publishedFixture) shared {
 	state := shared{
 		ZoneFree:  shmalloc.FreeSize(&cp.BlockAllocator),
 		AgentFree: map[*layout.Agent]uintptr{},
+		Marks:     memory.Marks(),
 		Published: gen,
 		Header:    bytes.Clone(bytesOf(gen)),
 		Counts:    map[*uint64]uint64{},
@@ -386,6 +391,16 @@ func requireLeftAsFound[C configuration](t testing.TB, before shared, memory *pu
 	require.Equal(t, before.Roots, after.Roots, "the published generation's worker roots")
 	require.Equal(t, before.ZoneFree, after.ZoneFree, "the zone's free bytes")
 	require.Equal(t, before.AgentFree, after.AgentFree, "the agents' free bytes once the configurations are freed")
+	// A free more than a red zone smaller than its block leaves the tail
+	// addressable, so every run unaddressable before must stay inside one
+	// after. More may be unaddressable after: a block taken before this
+	// process marked the zone starts addressable whole, and a later request
+	// that reuses it poisons up to its own size when freed.
+	for _, run := range before.Marks {
+		require.True(t, slices.ContainsFunc(after.Marks, func(kept helperproto.Range) bool {
+			return kept.Offset <= run.Offset && run.Offset+run.Size <= kept.Offset+kept.Size
+		}), "the zone's bytes %d long at offset %#x stay unaddressable", run.Size, run.Offset)
+	}
 	require.Equal(t, before.Counts, after.Counts, "the reference and loaded-entity counts")
 }
 
