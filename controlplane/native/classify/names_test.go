@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/stretchr/testify/require"
 
@@ -35,16 +36,39 @@ var (
 		{Prefixes: []netip.Prefix{netip.MustParsePrefix("10.1.0.0/16")}},
 		{Prefixes: []netip.Prefix{netip.MustParsePrefix("10.1.0.0/16")}},
 	}
+	namesDeviceRules = []classify.DeviceRule{{IDs: []uint32{0}}, {IDs: []uint32{3}}}
+	// The second source is a host inside the first one's network, so the
+	// source attribute keeps its table.
+	namesNet6SrcRules = []classify.Net6Rule{
+		{Networks: []classify.Net6Network{net6Network(0x2a02_06b8_0000_0000, 64, 0, 0)}},
+		{Networks: []classify.Net6Network{net6Network(0x2a02_06b8_0000_0000, 64, 0, 64)}},
+	}
+	namesNet6DstRules = []classify.Net6Rule{
+		{Networks: []classify.Net6Network{net6Network(0xfe80_0000_0000_0000, 64, 0, 0)}},
+		{Networks: []classify.Net6Network{net6Network(0xfe80_0000_0000_0000, 64, 0, 0)}},
+	}
 )
 
-// composeNames commits the line and IPv4 network compiles of the two
-// rules under one root context, with the family scoped entry names the
-// modules pass, as context_names.c builds its composition, and returns
-// the memory and the allocator's free bytes before the commits.
-func composeNames(t *testing.T) (*classifytest.Memory, uintptr) {
+// namesArtefacts are the device and IPv6 network artefacts of the
+// composition, carved from its memory.
+type namesArtefacts struct {
+	Device   layout.ClassifyAttrDevice
+	Net6Src  layout.ClassifyAttrNet6
+	Net6Dst  layout.ClassifyAttrNet6
+	Nets6    layout.ValueTable
+	RuleMap6 layout.Vline
+}
+
+// composeNames commits the compiles, the IPv6 joint and its decode of
+// the two rules under one root context, with the family scoped entry
+// names the modules pass, as context_names.c builds its composition,
+// and returns the memory, the artefacts carved from it and the
+// allocator's free bytes before the commits.
+func composeNames(t *testing.T) (*classifytest.Memory, *namesArtefacts, uintptr) {
 	t.Helper()
 	memory := classifytest.LayOut(make([]byte, memorySize))
 	free := shmalloc.FreeSize(&memory.Allocator)
+	artefacts := classifytest.Alloc[namesArtefacts](memory)
 
 	source, err := classify.CompileNet4(namesNet4SrcRules)
 	require.NoError(t, err)
@@ -58,14 +82,36 @@ func composeNames(t *testing.T) (*classifytest.Memory, uintptr) {
 	vlan, err := classify.CompileLine(namesVlanRules, 4096)
 	require.NoError(t, err)
 	require.NoError(t, vlan.Commit(&memory.OtherLine, &memory.Context, "l2:vlan"))
-	return memory, free
+
+	devices, err := classify.CompileDevice(namesDeviceRules)
+	require.NoError(t, err)
+	require.NoError(t, devices.Commit(&artefacts.Device, &memory.Context, "l2:device"))
+	source6, err := classify.CompileNet6(namesNet6SrcRules)
+	require.NoError(t, err)
+	require.NoError(t, source6.Commit(&artefacts.Net6Src, &memory.Context, "ip6:net6_src"))
+	destination6, err := classify.CompileNet6(namesNet6DstRules)
+	require.NoError(t, err)
+	require.NoError(t, destination6.Commit(&artefacts.Net6Dst, &memory.Context, "ip6:net6_dst"))
+	nets6, err := source6.Stage().Join(destination6.Stage(), &artefacts.Nets6, &memory.Context, "ip6:nets_joint")
+	require.NoError(t, err)
+	require.NoError(t, nets6.Decode([]bool{true, true}, &artefacts.RuleMap6, &memory.Context, "ip6:rules"))
+	return memory, artefacts, free
+}
+
+// rootChildren returns the names of the root context's children.
+func rootChildren(memory *classifytest.Memory) []string {
+	var names []string
+	for child := memory.Context.FirstChild.Get(); child != nil; child = child.NextSibling.Get() {
+		names = append(names, shm.String(child.Name[:]))
+	}
+	return names
 }
 
 // Test_LeafName_NoSiblingNameCollision verifies that no two sibling
 // memory contexts, at any depth under the composition's root, share a
 // name.
 func Test_LeafName_NoSiblingNameCollision(t *testing.T) {
-	memory, _ := composeNames(t)
+	memory, _, _ := composeNames(t)
 
 	var walk func(context *layout.MemoryContext)
 	walk = func(context *layout.MemoryContext) {
@@ -100,29 +146,65 @@ func Test_LeafName_LongEntryNameCutsBeforeTheLeaf(t *testing.T) {
 	require.Equal(t, strings.Repeat("x", 56)+"...:lpm", shm.String(memory.Net4.Lpm.MemoryContext.Name[:]))
 }
 
-// Test_LeafName_AttributeChildrenAreLeafNamed verifies that every line
-// and IPv4 network compile leaves its artefact behind as the one child
-// of the root titled with its entry name and artefact leaf.
+// Test_LeafName_AttributeChildrenAreLeafNamed verifies that every
+// compile, join and decode leaves its artefacts behind as children of
+// the root titled with its entry name and artefact leaf, a decode with
+// its entry name alone.
 //
-// C also leaves a registry child per compile; the native compile keeps
-// its stage in the Go heap, so the artefacts are the root's only
-// children.
+// C also leaves a registry child per compile and join; the native ones
+// keep their stages in the Go heap, so the artefacts are the root's
+// only children. The destination networks split no row, so they leave
+// no table.
 func Test_LeafName_AttributeChildrenAreLeafNamed(t *testing.T) {
-	memory, _ := composeNames(t)
+	memory, _, _ := composeNames(t)
 
-	var names []string
-	for child := memory.Context.FirstChild.Get(); child != nil; child = child.NextSibling.Get() {
-		names = append(names, shm.String(child.Name[:]))
+	require.ElementsMatch(t, []string{
+		"l2:vlan:line", "ip4:net4_src:lpm", "ip4:net4_dst:lpm", "ip4:ipproto:line",
+		"l2:device:line", "ip6:net6_src:hi", "ip6:net6_src:lo", "ip6:net6_src:comb",
+		"ip6:net6_dst:hi", "ip6:net6_dst:lo", "ip6:nets_joint:table", "ip6:rules",
+	}, rootChildren(memory))
+}
+
+// Test_LeafName_JointChildrenAreLeafNamed verifies that a joint leaves
+// exactly one table child behind, leaf named after the joint.
+func Test_LeafName_JointChildrenAreLeafNamed(t *testing.T) {
+	memory, _, _ := composeNames(t)
+
+	require.Equal(t, 1, countOf(rootChildren(memory), "ip6:nets_joint:table"))
+}
+
+// Test_LeafName_DecodeRuleMapKeepsEntryName verifies that a decode
+// titles its rule map with the plain entry name: it leaves a single
+// context behind, so no leaf tells siblings apart.
+func Test_LeafName_DecodeRuleMapKeepsEntryName(t *testing.T) {
+	memory, _, _ := composeNames(t)
+
+	require.Equal(t, 1, countOf(rootChildren(memory), "ip6:rules"))
+}
+
+// countOf returns how many times a name occurs.
+func countOf(names []string, name string) int {
+	count := 0
+	for _, each := range names {
+		if each == name {
+			count++
+		}
 	}
-	require.ElementsMatch(t, []string{"l2:vlan:line", "ip4:net4_src:lpm", "ip4:net4_dst:lpm", "ip4:ipproto:line"}, names)
+	return count
 }
 
 // Test_LeafName_TeardownLeavesNothingBehind verifies that freeing the
 // composition leaves the root context childless and gives the allocator
 // back every byte the commits took.
 func Test_LeafName_TeardownLeavesNothingBehind(t *testing.T) {
-	memory, free := composeNames(t)
+	memory, artefacts, free := composeNames(t)
 
+	classify.FreeDecode(&artefacts.RuleMap6)
+	classify.FreeJoin(&artefacts.Nets6)
+	classify.FreeNet6(&artefacts.Net6Dst)
+	classify.FreeNet6(&artefacts.Net6Src)
+	classify.FreeDevice(&artefacts.Device)
+	shmalloc.ContextFree(&memory.Context, unsafe.Pointer(artefacts), unsafe.Sizeof(*artefacts))
 	classify.FreeLine(&memory.OtherLine)
 	classify.FreeLine(&memory.Line)
 	classify.FreeNet4(&memory.OtherNet4)

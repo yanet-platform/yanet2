@@ -2,37 +2,65 @@
 
 package classify
 
+import "slices"
+
 // Stage is a compiled classification stage: the class space of an
 // attribute as one range of region values per rule group, and the group
 // of every rule.
+//
+// Only this package builds stages, so a stage always holds what its
+// readers index: its accessors hand out copies.
 type Stage struct {
-	// RuleGroups holds the group of every rule, or InvalidGroup for an
+	// ruleGroups holds the group of every rule, or InvalidGroup for an
 	// absent one.
-	RuleGroups []uint32
-	// Values holds the region values of every group, group after group,
+	ruleGroups []uint32
+	// values holds the region values of every group, group after group,
 	// each value once per group, in the order the group reached it.
-	Values []uint32
-	// Starts holds where every group's values begin in Values, and one
-	// more entry where the last group's end.
-	Starts []uint32
-	// MaxValue is the largest region value of any group.
-	MaxValue uint32
+	values []uint32
+	// starts holds where every group's values begin, and one more entry
+	// where the last group's end.
+	starts []uint32
+	// maxValue is the largest region value of any group.
+	maxValue uint32
 }
 
-// Group returns the region values of a group.
+// RuleGroups returns the group of every rule, or InvalidGroup for an
+// absent one.
+func (m *Stage) RuleGroups() []uint32 {
+	return slices.Clone(m.ruleGroups)
+}
+
+// Group returns the region values of a group, in the order the group
+// reached them.
 func (m *Stage) Group(group uint32) []uint32 {
-	return m.Values[m.Starts[group]:m.Starts[group+1]]
+	return slices.Clone(m.group(group))
 }
 
-// GroupCount returns the count of groups.
+// GroupCount returns the count of groups; a zero stage has none.
 func (m *Stage) GroupCount() uint32 {
-	return uint32(len(m.Starts) - 1)
+	if len(m.starts) == 0 {
+		return 0
+	}
+	return uint32(len(m.starts) - 1)
+}
+
+// MaxValue returns the largest region value of any group.
+func (m *Stage) MaxValue() uint32 {
+	return m.maxValue
+}
+
+// group returns the region values of a group in place.
+func (m *Stage) group(group uint32) []uint32 {
+	return m.values[m.starts[group]:m.starts[group+1]]
 }
 
 // stageBuilder collects the region values of one group at a time, each
 // value once.
 type stageBuilder struct {
-	Stage *Stage
+	// Values holds the values collected so far, group after group, and
+	// MaxValue the largest of them.
+	Values   []uint32
+	MaxValue uint32
 	// Seen stamps the values the current group reached with its number
 	// plus one.
 	Seen  []uint32
@@ -45,21 +73,21 @@ func (m *stageBuilder) Reach(value uint32) {
 		return
 	}
 	m.Seen[value] = m.Group + 1
-	m.Stage.Values = append(m.Stage.Values, value)
-	m.Stage.MaxValue = max(m.Stage.MaxValue, value)
+	m.Values = append(m.Values, value)
+	m.MaxValue = max(m.MaxValue, value)
 }
 
 // newStage builds the stage of a compile whose regions hold count
 // distinct values: forGroup reaches every region value a group matches,
 // repeats allowed, in the order the C registry collects them.
 func newStage(ruleGroups []uint32, groupCount int, count uint32, forGroup func(group uint32, builder *stageBuilder)) Stage {
-	stage := Stage{RuleGroups: ruleGroups, Starts: make([]uint32, groupCount+1)}
-	builder := &stageBuilder{Stage: &stage, Seen: make([]uint32, count)}
+	starts := make([]uint32, groupCount+1)
+	builder := &stageBuilder{Seen: make([]uint32, count)}
 	for group := range uint32(groupCount) {
-		stage.Starts[group] = uint32(len(stage.Values))
+		starts[group] = uint32(len(builder.Values))
 		builder.Group = group
 		forGroup(group, builder)
 	}
-	stage.Starts[groupCount] = uint32(len(stage.Values))
-	return stage
+	starts[groupCount] = uint32(len(builder.Values))
+	return Stage{ruleGroups: ruleGroups, values: builder.Values, starts: starts, maxValue: builder.MaxValue}
 }

@@ -25,3 +25,10 @@ var ErrInvalidRule = errors.New("invalid classifier rule")
 // InvalidGroup marks a rule outside the projection a ruleset spells
 // (FILTER_GROUP_INVALID).
 const InvalidGroup = ^uint32(0)
+
+// InvalidRule marks a key no member rule matches (FILTER_RULE_INVALID).
+const InvalidRule = ^uint32(0)
+
+// none marks an absent number, of a class, a network or a row, wherever
+// the package keeps one.
+const none = ^uint32(0)

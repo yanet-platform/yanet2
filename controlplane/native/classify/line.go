@@ -28,7 +28,14 @@ type LineRule struct {
 // domain, and the stage a join consumes.
 type Line struct {
 	values []uint32
-	Stage  Stage
+	stage  Stage
+}
+
+// Stage returns the stage a join consumes, a copy, so the compile keeps
+// its own.
+func (m *Line) Stage() *Stage {
+	stage := m.stage
+	return &stage
 }
 
 // CompileLine compiles the line attribute of a ruleset over a domain of
@@ -75,7 +82,7 @@ func CompileLine(rules []LineRule, size uint32) (*Line, error) {
 			}
 		}
 	})
-	return &Line{values: values, Stage: stage}, nil
+	return &Line{values: values, stage: stage}, nil
 }
 
 // lineRuleIsAny reports whether a rule matches the whole domain, judged

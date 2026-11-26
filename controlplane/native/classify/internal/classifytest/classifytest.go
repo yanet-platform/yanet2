@@ -49,6 +49,15 @@ func LayOut(block []byte) *Memory {
 	return memory
 }
 
+// Alloc carves a zeroed T out of the memory's arena, so the relative
+// pointers a commit writes into it stay inside the block.
+func Alloc[T any](memory *Memory) *T {
+	size := unsafe.Sizeof(*new(T))
+	block := shmalloc.ContextAlloc(&memory.Context, size)
+	clear(unsafe.Slice((*byte)(block), size))
+	return (*T)(block)
+}
+
 // LineMatches reports whether a rule matches a point of a line domain.
 func LineMatches(rule classify.LineRule, point uint32) bool {
 	if rule.Absent {
@@ -71,6 +80,14 @@ func Net4Matches(rule classify.Net4Rule, addr uint32) bool {
 	})
 }
 
+// DeviceMatches reports whether a rule matches a device.
+func DeviceMatches(rule classify.DeviceRule, id uint32) bool {
+	if rule.Absent {
+		return false
+	}
+	return len(rule.IDs) == 0 || slices.Contains(rule.IDs, id)
+}
+
 // Net4Keys returns both ends of every elementary interval the prefixes of
 // the rules cut the IPv4 address space into, ascending.
 func Net4Keys(rules []classify.Net4Rule) []uint32 {
@@ -87,33 +104,54 @@ func Net4Keys(rules []classify.Net4Rule) []uint32 {
 	return slices.Compact(keys)
 }
 
-// LineClasses returns the class of every point of a committed line
-// attribute, as the dataplane reads them off its value line.
-func LineClasses(attr *layout.ClassifyAttrLine) []uint32 {
-	return unsafe.Slice(attr.Line.Values.Get(), attr.Line.Size)
+// Values returns the values of a committed value line, as the dataplane
+// reads them.
+func Values(line *layout.Vline) []uint32 {
+	return unsafe.Slice(line.Values.Get(), line.Size)
 }
 
-// Net4Classes is the class of every stretch of addresses a committed
-// IPv4 network attribute maps to one class, read through a walk of its
-// prefix tree.
-type Net4Classes struct {
-	starts  []uint32
+// Table returns the rows of a committed value table, as the dataplane
+// reads them.
+func Table(table *layout.ValueTable) [][]uint32 {
+	chunks := unsafe.Slice(table.Values.Get(), table.VDim)
+	rows := make([][]uint32, table.VDim)
+	for row := range rows {
+		rows[row] = unsafe.Slice(chunks[row].Get(), table.HDim)
+	}
+	return rows
+}
+
+// Stretches is the class of every stretch of keys a committed prefix
+// tree maps to one class, read through a walk of the tree.
+type Stretches[K uint32 | uint64] struct {
+	starts  []K
 	classes []uint32
 }
 
-// ReadNet4 walks the prefix tree of a committed IPv4 network attribute.
-func ReadNet4(attr *layout.ClassifyAttrNet4) Net4Classes {
-	var starts, classes []uint32
-	lpm.Walk(&attr.Lpm, 4, func(from, _ []byte, class uint32) {
-		starts = append(starts, binary.BigEndian.Uint32(from))
+// readTree walks a prefix tree whose keys are the big-endian bytes of a
+// K.
+func readTree[K uint32 | uint64](tree *layout.Lpm) Stretches[K] {
+	var starts []K
+	var classes []uint32
+	lpm.Walk(tree, int(unsafe.Sizeof(K(0))), func(from, _ []byte, class uint32) {
+		start := K(0)
+		for _, octet := range from {
+			start = start<<8 | K(octet)
+		}
+		starts = append(starts, start)
 		classes = append(classes, class)
 	})
-	return Net4Classes{starts: starts, classes: classes}
+	return Stretches[K]{starts: starts, classes: classes}
 }
 
-// Class returns the class of an address.
-func (m Net4Classes) Class(addr uint32) uint32 {
-	stretch, found := slices.BinarySearch(m.starts, addr)
+// ReadNet4 walks the prefix tree of a committed IPv4 network attribute.
+func ReadNet4(attr *layout.ClassifyAttrNet4) Stretches[uint32] {
+	return readTree[uint32](&attr.Lpm)
+}
+
+// Class returns the class of a key.
+func (m Stretches[K]) Class(key K) uint32 {
+	stretch, found := slices.BinarySearch(m.starts, key)
 	if !found {
 		stretch--
 	}
@@ -123,21 +161,14 @@ func (m Net4Classes) Class(addr uint32) uint32 {
 // CheckStage returns an error naming the first key and rule for which
 // the stage, reaching the class the artefact gives the key, disagrees
 // with the reference on whether the rule matches.
-func CheckStage(stage *classify.Stage, keys []uint32, classOf func(key uint32) uint32, matches func(rule int, key uint32) bool) error {
-	// reaches tells, per group, which classes it reaches.
-	reaches := make([][]bool, stage.GroupCount())
-	for group := range reaches {
-		reaches[group] = make([]bool, stage.MaxValue+1)
-		for _, class := range stage.Group(uint32(group)) {
-			reaches[group][class] = true
-		}
-	}
+func CheckStage[K any](stage *classify.Stage, keys []K, classOf func(key K) uint32, matches func(rule int, key K) bool) error {
+	groupReaches := reaches(stage)
 	for _, key := range keys {
 		class := classOf(key)
-		for rule, group := range stage.RuleGroups {
-			reached := group != classify.InvalidGroup && class <= stage.MaxValue && reaches[group][class]
+		for rule, group := range stage.RuleGroups() {
+			reached := group != classify.InvalidGroup && class <= stage.MaxValue() && groupReaches[group][class]
 			if want := matches(rule, key); reached != want {
-				return fmt.Errorf("key %#x of class %d: rule %d matches %t through the stage, want %t", key, class, rule, reached, want)
+				return fmt.Errorf("key %#v of class %d: rule %d matches %t through the stage, want %t", key, class, rule, reached, want)
 			}
 		}
 	}

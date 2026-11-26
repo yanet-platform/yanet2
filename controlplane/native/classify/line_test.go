@@ -71,14 +71,14 @@ func requireLineMatchesReference(t *testing.T, rules []classify.LineRule, size u
 	require.NoError(t, err)
 	require.NoError(t, line.Commit(&memory.Line, &memory.Context, "line"))
 
-	classes := classifytest.LineClasses(&memory.Line)
+	classes := classifytest.Values(&memory.Line.Line)
 	require.Len(t, classes, int(size))
 	points := make([]uint32, size)
 	for point := range points {
 		points[point] = uint32(point)
 	}
 	err = classifytest.CheckStage(
-		&line.Stage,
+		line.Stage(),
 		points,
 		func(point uint32) uint32 { return classes[point] },
 		func(rule int, point uint32) bool { return classifytest.LineMatches(rules[rule], point) },

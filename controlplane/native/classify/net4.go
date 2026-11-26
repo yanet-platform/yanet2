@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/netip"
 	"slices"
+	"unsafe"
 
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
 	"github.com/yanet-platform/yanet2/controlplane/native/lpm"
@@ -29,7 +30,14 @@ type Net4 struct {
 	starts []uint32
 	// values holds the class of every stretch; neighbours differ.
 	values []uint32
-	Stage  Stage
+	stage  Stage
+}
+
+// Stage returns the stage a join consumes, a copy, so the compile keeps
+// its own.
+func (m *Net4) Stage() *Stage {
+	stage := m.stage
+	return &stage
 }
 
 // network is an IPv4 prefix as the compile reads it: its first and last
@@ -77,7 +85,9 @@ func CompileNet4(rules []Net4Rule) (*Net4, error) {
 		}
 		distinctOf[place] = uint32(len(distinct) - 1)
 	}
-	intervals := cutIntervals(distinct)
+	intervals := cutIntervals(len(distinct), func(idx int) (uint32, uint32) {
+		return distinct[idx].From, distinct[idx].To
+	})
 	// spanAt returns the intervals the network at a place covers.
 	spanAt := func(place int) intervalSpan {
 		return intervals.Spans[distinctOf[place]]
@@ -126,7 +136,7 @@ func CompileNet4(rules []Net4Rule) (*Net4, error) {
 		stretchStarts = append(stretchStarts, start)
 		stretchValues = append(stretchValues, values[idx])
 	}
-	return &Net4{starts: stretchStarts, values: stretchValues, Stage: stage}, nil
+	return &Net4{starts: stretchStarts, values: stretchValues, stage: stage}, nil
 }
 
 // normalizeNet4Rules returns the networks of every rule in one slice,
@@ -160,11 +170,16 @@ func net4RuleIsAny(nets []network) bool {
 	return len(nets) == 0 || nets[0].Bits == 0
 }
 
-// intervals is the address space cut into elementary intervals,
-// ascending by first address, and the intervals every network covers.
-type intervals struct {
-	Starts []uint32
-	Spans  []intervalSpan
+// intervals is a key space cut into elementary intervals, ascending by
+// first key, and the intervals every network covers.
+type intervals[K uint32 | uint64] struct {
+	Starts []K
+	// Classes holds the class of every interval, numbered as
+	// range_collector_collect numbers them: the innermost network over
+	// the interval, its parts on both sides of a nested one alike.
+	Classes    []uint32
+	ClassCount uint32
+	Spans      []intervalSpan
 }
 
 // intervalSpan is a run of intervals, from First up to End.
@@ -173,27 +188,35 @@ type intervalSpan struct {
 	End   uint32
 }
 
-// cutIntervals cuts the address space at the bounds of distinct networks
-// sorted by first address, then length, as range_collector_collect cuts
-// it.
+// cutIntervals cuts a key space at the bounds of count distinct networks
+// sorted by first key, then length, as range_collector_collect cuts it;
+// bounds returns a network's first and last key.
 //
 // A stack holds the networks containing the walk position, innermost on
-// top; a network ending where the one around it ends shares its frame,
-// and a network covers the intervals from its push up to its frame's pop.
-func cutIntervals(nets []network) intervals {
+// top, with the class the top emits; a network ending where the one
+// around it ends shares its frame and renews its class, and a network
+// covers the intervals from its push up to its frame's pop.
+func cutIntervals[K uint32 | uint64](count int, bounds func(idx int) (K, K)) intervals[K] {
 	type frame struct {
-		To uint32
+		To    K
+		Class uint32
 		// Pending is where the networks the frame ends begin in pending.
 		Pending int
 	}
-	cut := intervals{Spans: make([]intervalSpan, len(nets))}
-	stack := make([]frame, 0, 33)
+	cut := intervals[K]{Spans: make([]intervalSpan, count)}
+	var stack []frame
 	var pending []uint32
-	position := uint32(0)
-	// emit cuts an interval from the position up to an address; past the
-	// last address the position wraps to zero only after the last one.
-	emit := func(to uint32) {
+	position := K(0)
+	// emit cuts an interval from the position up to a key; past the last
+	// key the position wraps to zero only after the last one.
+	emit := func(to K) {
+		top := &stack[len(stack)-1]
+		if top.Class == none {
+			top.Class = cut.ClassCount
+			cut.ClassCount++
+		}
 		cut.Starts = append(cut.Starts, position)
+		cut.Classes = append(cut.Classes, top.Class)
 		position = to + 1
 	}
 	pop := func() {
@@ -205,17 +228,20 @@ func cutIntervals(nets []network) intervals {
 		pending = pending[:top.Pending]
 		stack = stack[:len(stack)-1]
 	}
-	stack = append(stack, frame{To: ^uint32(0)})
-	for idx, net := range nets {
-		for stack[len(stack)-1].To < net.From {
+	stack = append(stack, frame{To: ^K(0), Class: none})
+	for idx := range count {
+		from, to := bounds(idx)
+		for stack[len(stack)-1].To < from {
 			pop()
 		}
-		if position < net.From {
-			emit(net.From - 1)
+		if position < from {
+			emit(from - 1)
 		}
 		cut.Spans[idx].First = uint32(len(cut.Starts))
-		if stack[len(stack)-1].To != net.To {
-			stack = append(stack, frame{To: net.To, Pending: len(pending)})
+		if top := &stack[len(stack)-1]; top.To == to {
+			top.Class = none
+		} else {
+			stack = append(stack, frame{To: to, Class: none, Pending: len(pending)})
 		}
 		pending = append(pending, uint32(idx))
 	}
@@ -231,28 +257,31 @@ func cutIntervals(nets []network) intervals {
 //
 // A failure frees the tree and leaves the attribute zeroed, as C does.
 func (m *Net4) Commit(attr *layout.ClassifyAttrNet4, context *layout.MemoryContext, name string) error {
-	if err := m.insert(attr, context, name); err != nil {
+	if err := insertStretches(&attr.Lpm, context, leafName(name, "lpm"), m.starts, m.values); err != nil {
 		FreeNet4(attr)
 		return err
 	}
 	return nil
 }
 
-// insert builds the tree of the attribute's stretches.
-func (m *Net4) insert(attr *layout.ClassifyAttrNet4, context *layout.MemoryContext, name string) error {
-	tree := &attr.Lpm
-	if err := lpm.Init(tree, context, leafName(name, "lpm")); err != nil {
+// insertStretches builds a prefix tree in a child memory context of the
+// parent named name, mapping the keys from every start up to the next to
+// that start's value; a key is the big-endian bytes of a K.
+func insertStretches[K uint32 | uint64](tree *layout.Lpm, parent *layout.MemoryContext, name string, starts []K, values []uint32) error {
+	if err := lpm.Init(tree, parent, name); err != nil {
 		return err
 	}
-	var from, to [4]byte
-	for idx, start := range m.starts {
-		end := ^uint32(0)
-		if idx+1 < len(m.starts) {
-			end = m.starts[idx+1] - 1
+	size := int(unsafe.Sizeof(K(0)))
+	var from, to [8]byte
+	for idx, start := range starts {
+		end := ^K(0)
+		if idx+1 < len(starts) {
+			end = starts[idx+1] - 1
 		}
-		binary.BigEndian.PutUint32(from[:], start)
-		binary.BigEndian.PutUint32(to[:], end)
-		if err := lpm.Insert(tree, from[:], to[:], m.values[idx]); err != nil {
+		// The key's bytes lead the buffers.
+		binary.BigEndian.PutUint64(from[:], uint64(start)<<(64-8*size))
+		binary.BigEndian.PutUint64(to[:], uint64(end)<<(64-8*size))
+		if err := lpm.Insert(tree, from[:size], to[:size], values[idx]); err != nil {
 			return err
 		}
 	}
