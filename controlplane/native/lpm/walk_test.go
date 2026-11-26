@@ -80,15 +80,15 @@ func randomRanges(random *rand.Rand, keySize int) []keyRange {
 	return ranges
 }
 
-// requireWalkMatchesLookup asserts that the walk of a tree built from the
+// requireWalkMatches asserts that the walk of a tree built from the
 // ranges visits every key once, in ascending order, with the value the
-// tree's lookup gives it.
+// given reader finds for it in the tree.
 //
 // The stretches must tile the key space from the zero key through the
-// last key. The lookup changes only at a range's start and past its end,
+// last key. The value changes only at a range's start and past its end,
 // so checking it there and at each stretch's start against the stretch
 // holding the key covers every key.
-func requireWalkMatchesLookup(t *testing.T, ranges []keyRange, keySize int) {
+func requireWalkMatches(t *testing.T, ranges []keyRange, keySize int, valueOf func(tree *layout.Lpm, key []byte) uint32) {
 	t.Helper()
 	memory := newTreeMemory()
 	require.NoError(t, lpm.Init(&memory.Tree, &memory.Context, "tree"))
@@ -124,7 +124,7 @@ func requireWalkMatchesLookup(t *testing.T, ranges []keyRange, keySize int) {
 		idx, _ := slices.BinarySearchFunc(stretches, key, func(visited stretch, key []byte) int {
 			return bytes.Compare(visited.To, key)
 		})
-		require.Equal(t, lookup(&memory.Tree, key), stretches[idx].Value, "the value of key %x", key)
+		require.Equal(t, valueOf(&memory.Tree, key), stretches[idx].Value, "the value of key %x", key)
 	}
 }
 
@@ -154,7 +154,7 @@ func Test_Walk_Trees(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			requireWalkMatchesLookup(t, tc.ranges, tc.keySize)
+			requireWalkMatches(t, tc.ranges, tc.keySize, lookup)
 		})
 	}
 }
@@ -166,7 +166,7 @@ func Test_Walk_RandomTrees(t *testing.T) {
 		for seed := range uint64(8) {
 			t.Run(fmt.Sprintf("%d-byte keys, seed %d", keySize, seed), func(t *testing.T) {
 				random := rand.New(rand.NewPCG(seed, uint64(keySize)))
-				requireWalkMatchesLookup(t, randomRanges(random, keySize), keySize)
+				requireWalkMatches(t, randomRanges(random, keySize), keySize, lookup)
 			})
 		}
 	}

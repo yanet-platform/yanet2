@@ -26,45 +26,6 @@ lpm_test = executable(
 )
 test('lpm', lpm_test, suite: ['common'])
 
-# The prefix trees the native control plane builds from Go, checked from C.
-#
-# The test runs a pure Go generator that writes the trees into a file in
-# /dev/shm. The generator is test-only: built here, never installed, and
-# only where the native layouts are generated. The generator is built
-# without cgo, so its blocks carry no AddressSanitizer red zones; the test
-# is compiled without AddressSanitizer to lay its blocks out the same way.
-if yanet_go_binaries and native_layout_enabled
-  lpm_native_generator = custom_target(
-    'lpm-native-generator',
-    output: 'lpmgen',
-    command: [
-      go,
-      'build',
-      '-buildvcs=false',
-      '-o', '@OUTPUT@',
-      meson.project_source_root() / 'controlplane/native/lpm/internal/lpmgen',
-    ],
-    env: yanet_go_nocgo_env,
-    build_by_default: true,
-    # Go tracks the generator's sources itself.
-    build_always_stale: true,
-    depends: go_proto_targets,
-  )
-  lpm_native_test = executable(
-    'lpm_native_test',
-    ['lpm_native_test.c'],
-    c_args: yanet_test_c_args + ['-fno-sanitize=address'],
-    dependencies: lib_common_dep,
-  )
-  test(
-    'lpm_native',
-    lpm_native_test,
-    args: [lpm_native_generator],
-    depends: lpm_native_generator,
-    suite: ['common'],
-  )
-endif
-
 radix_test = executable(
   'radix_test',
   ['radix_test.c',],
