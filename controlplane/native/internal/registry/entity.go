@@ -55,7 +55,7 @@ func ReplaceEntity(
 	if index, found := Lookup(&registry.Registry, keyHash, match); found {
 		old = Item(&registry.Registry, index)
 	}
-	if !Replace(&registry.Registry, hash, keyHash, match, item) {
+	if !Replace(&registry.Registry, hash, keyHash, match, item, nil) {
 		return false
 	}
 	if item != nil {

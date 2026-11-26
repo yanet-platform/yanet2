@@ -32,26 +32,31 @@ func FreeGeneration(cp *layout.CpConfig, gen *layout.CpConfigGen) {
 	}
 	registry.FreeArray(&cp.EctxMemoryContext, roots)
 	registry.FiniEntities(&gen.ModuleRegistry.EntityRegistry)
-	registry.Fini(&gen.FunctionRegistry.Registry, freeFunction)
-	registry.Fini(&gen.PipelineRegistry.Registry, freePipeline)
+	registry.Fini(&gen.FunctionRegistry.Registry, FreeFunctionItem)
+	registry.Fini(&gen.PipelineRegistry.Registry, FreePipelineItem)
 	registry.FiniEntities(&gen.DeviceRegistry.EntityRegistry)
 	registry.FiniEntities(&gen.ObjectRegistry.EntityRegistry)
 	registry.FreeNode(&cp.MemoryContext, gen, 0)
 }
 
-// freeFunction frees a function no generation holds, with its chains, as
-// cp_function_fini and cp_function_free do.
-func freeFunction(item *layout.RegistryItem) {
-	function := registry.Function(item)
+// FreeFunctionItem frees the function of a registry item whose last
+// reference went, as the function registry's free callback does.
+func FreeFunctionItem(item *layout.RegistryItem) {
+	FreeFunction(registry.Function(item))
+}
+
+// FreeFunction frees a function and its chains, as cp_function_fini and
+// cp_function_free do.
+//
+// A failed build frees a function part-built with it: a chain not built
+// yet reads as absent.
+func FreeFunction(function *layout.CpFunction) {
 	chains := function.Chains(int(function.ChainCount))
 	for idx := range chains {
-		chain := chains[idx].CpChain.Get()
-		if chain == nil {
-			continue
+		if chain := chains[idx].CpChain.Get(); chain != nil {
+			FreeChain(chain)
+			chains[idx].CpChain.Set(nil)
 		}
-		FiniCounterRegistry(&chain.CounterRegistry)
-		registry.FreeNode(chain.MemoryContext.Get(), chain, unsafe.Sizeof(layout.CpChainModule{})*uintptr(chain.Length))
-		chains[idx].CpChain.Set(nil)
 	}
 	FiniCounterRegistry(&function.CounterRegistry)
 	registry.FreeNode(
@@ -60,10 +65,21 @@ func freeFunction(item *layout.RegistryItem) {
 	)
 }
 
-// freePipeline frees a pipeline no generation holds, as cp_pipeline_fini
-// and cp_pipeline_free do.
-func freePipeline(item *layout.RegistryItem) {
-	pipeline := registry.Pipeline(item)
+// FreeChain frees a chain, as cp_chain_fini and cp_chain_free do.
+func FreeChain(chain *layout.CpChain) {
+	FiniCounterRegistry(&chain.CounterRegistry)
+	registry.FreeNode(chain.MemoryContext.Get(), chain, unsafe.Sizeof(layout.CpChainModule{})*uintptr(chain.Length))
+}
+
+// FreePipelineItem frees the pipeline of a registry item whose last
+// reference went, as the pipeline registry's free callback does.
+func FreePipelineItem(item *layout.RegistryItem) {
+	FreePipeline(registry.Pipeline(item))
+}
+
+// FreePipeline frees a pipeline, as cp_pipeline_fini and
+// cp_pipeline_free do.
+func FreePipeline(pipeline *layout.CpPipeline) {
 	FiniCounterRegistry(&pipeline.CounterRegistry)
 	registry.FreeNode(
 		pipeline.MemoryContext.Get(), pipeline,

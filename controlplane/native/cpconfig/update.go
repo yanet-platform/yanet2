@@ -31,6 +31,9 @@ var (
 	// ErrMissingModule marks a chain running a module the generation does
 	// not publish; C refuses it as a failed precondition.
 	ErrMissingModule = errors.New("chained module not found")
+	// ErrMissingFunction marks a pipeline running a function the
+	// generation does not publish; C refuses it as a failed precondition.
+	ErrMissingFunction = errors.New("pipeline function not found")
 	// ErrNeedsDelivery marks an update to a dataplane that runs worker
 	// rounds on request made without a delivery.
 	ErrNeedsDelivery = errors.New("update needs a delivery")

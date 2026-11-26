@@ -371,7 +371,7 @@ func (m *build) pipeline(
 		path.Function = shm.String(named.Name[:])
 		function := m.lookupFunction(path.Function)
 		if function == nil {
-			return nil, fmt.Errorf("pipeline %q: function %q not found", path.Pipeline, path.Function)
+			return nil, fmt.Errorf("pipeline %q: %w: %s", path.Pipeline, ErrMissingFunction, path.Function)
 		}
 		context, err := m.function(device, path, function)
 		if err != nil {
@@ -686,30 +686,6 @@ func (m *build) linkModule(devices []shm.Ptr[layout.DeviceEctx], owner *layout.D
 		}
 	}
 	return nil
-}
-
-func (m *build) lookupFunction(name string) *layout.CpFunction {
-	functions := &m.gen.FunctionRegistry.Registry
-	key := registry.FieldKey(name, len(layout.CpFunction{}.Name))
-	index, ok := registry.Lookup(functions, registry.HashName(key), func(item *layout.RegistryItem) bool {
-		return shm.Equal(registry.Function(item).Name[:], key)
-	})
-	if !ok {
-		return nil
-	}
-	return registry.Function(registry.Item(functions, index))
-}
-
-func (m *build) lookupPipeline(name string) *layout.CpPipeline {
-	pipelines := &m.gen.PipelineRegistry.Registry
-	key := registry.FieldKey(name, len(layout.CpPipeline{}.Name))
-	index, ok := registry.Lookup(pipelines, registry.HashName(key), func(item *layout.RegistryItem) bool {
-		return shm.Equal(registry.Pipeline(item).Name[:], key)
-	})
-	if !ok {
-		return nil
-	}
-	return registry.Pipeline(registry.Item(pipelines, index))
 }
 
 // lookupObject returns the registry slot of the object of a type and
