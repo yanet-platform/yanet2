@@ -8,7 +8,7 @@
 // the joints chaining their stages, and the decoders of two
 // projections. The teardown case also pins that the whole composition
 // releases its root back to a childless state and the allocator to its
-// starting balance.
+// starting balance, and a refused device compile is held to the same.
 
 #include "lib/classify/classifiers/device.h"
 #include "lib/classify/classifiers/ipfrag.h"
@@ -895,6 +895,55 @@ test_teardown_leaves_nothing_behind(void *arena) {
 	return TEST_SUCCESS;
 }
 
+// Verifies that a compile naming a device id the device table cannot
+// hold is refused and leaves nothing behind.
+//
+// The table counts its slots in 32 bits, so a wider id would size it
+// by its low bits and the other rule's smaller id would index past it.
+static int
+test_device_id_the_table_cannot_hold_is_refused(void *arena) {
+	struct ctx_names_fixture fx;
+	TEST_ASSERT_SUCCESS(
+		fixture_init(&fx, arena), "failed to init root memory context"
+	);
+
+	// UINT32_MAX itself would wrap the slot count to zero.
+	const uint64_t wide_ids[] = {UINT32_MAX, (UINT64_C(1) << 32) + 1};
+	for (size_t idx = 0; idx < sizeof(wide_ids) / sizeof(wide_ids[0]);
+	     ++idx) {
+		struct filter_device devices[2] = {
+			{"port3", 3}, {"port_wide", wide_ids[idx]}
+		};
+		fx.rules[0].devices.items = devices;
+		fx.rules[1].devices.items = devices + 1;
+
+		struct classify_attr_device attr;
+		struct classifier stage;
+		TEST_ASSERT_EQUAL(
+			classify_names_device_compile(
+				&fx.mctx,
+				"l2:device",
+				fx.rule_ptrs,
+				2,
+				&attr,
+				&stage
+			),
+			-1,
+			"a device id the table cannot hold is accepted"
+		);
+
+		TEST_ASSERT_NULL(
+			ctx_child(&fx.mctx),
+			"the refused compile left a context behind"
+		);
+		TEST_ASSERT_SUCCESS(
+			fixture_check_balance(&fx), "leak refusing the compile"
+		);
+	}
+	fixture_fini(&fx);
+	return TEST_SUCCESS;
+}
+
 int
 main() {
 	log_enable_name("debug");
@@ -916,6 +965,8 @@ main() {
 		 test_decode_rule_map_keeps_entry_name},
 		{"teardown_leaves_nothing_behind",
 		 test_teardown_leaves_nothing_behind},
+		{"device_id_the_table_cannot_hold_is_refused",
+		 test_device_id_the_table_cannot_hold_is_refused},
 	};
 
 	for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {

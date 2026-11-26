@@ -59,6 +59,11 @@ classify_compile_device_create(
 		get_devices(rule, &devices);
 
 		for (uint32_t idx = 0; idx < devices.count; ++idx) {
+			// The table holds one slot past the largest id and
+			// counts its slots in 32 bits.
+			if (devices.items[idx].id >= UINT32_MAX) {
+				goto error_free;
+			}
 			if (devices.items[idx].id > max_device_id) {
 				max_device_id = devices.items[idx].id;
 			}
@@ -74,16 +79,16 @@ classify_compile_device_create(
 		    1,
 		    max_device_id + 1
 	    )) {
-		memory_bfree(
-			memory_context,
-			compile,
-			sizeof(struct classify_compile_device)
-		);
-
-		return NULL;
+		goto error_free;
 	}
 
 	return compile;
+
+error_free:
+	memory_bfree(
+		memory_context, compile, sizeof(struct classify_compile_device)
+	);
+	return NULL;
 }
 
 static inline uint32_t
