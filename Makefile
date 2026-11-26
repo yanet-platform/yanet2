@@ -355,6 +355,7 @@ test-only: go-test-prepare
 		printf '%s\n' 'ERROR: no Go test packages selected' >&2; exit 1; \
 	fi; \
 	go test $(GO_FIXTURE_TAGS) -count=1 $$packages
+	$(if $(GO_TEST_PACKAGES),,CGO_ENABLED=0 go test -count=1 $(NATIVE_PACKAGES))
 	$(if $(GO_TEST_PACKAGES),,meson test -C build)
 
 test-asan:

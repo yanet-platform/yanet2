@@ -553,6 +553,11 @@ func (m *Harness) SetWorkerCounter(worker int, name string, value uint64) error 
 	return nil
 }
 
+// storage returns the whole storage of the harness.
+func (m *Harness) storage() []byte {
+	return unsafe.Slice((*byte)(unsafe.Pointer(C.dataplane_ut_shm(m.ptr).base)), m.storageSize)
+}
+
 // SharedMemory returns the shared-memory handle backing this harness.
 func (m *Harness) SharedMemory() *ffi.SharedMemory {
 	shm := C.dataplane_ut_shm(m.ptr)

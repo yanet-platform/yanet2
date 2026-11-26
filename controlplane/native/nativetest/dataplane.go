@@ -431,7 +431,7 @@ func (m *Dataplane) deliverLocked(dp *layout.DpConfig, gen *layout.CpConfigGen) 
 		return errors.New("deliver: the dataplane zone is not this dataplane's")
 	}
 	offset := uintptr(unsafe.Pointer(gen)) - uintptr(unsafe.Pointer(&m.memory[0]))
-	request := &helperproto.Request{Op: helperproto.OpDeliver, Offset: uint64(offset), Marks: m.marks()}
+	request := &helperproto.Request{Op: helperproto.OpDeliver, Offset: uint64(offset), Marks: m.Marks()}
 	if _, err := m.exchangeLocked("deliver", request); err != nil {
 		return fmt.Errorf("deliver generation %d: %w", gen.Gen, err)
 	}
@@ -451,7 +451,7 @@ func (m *Dataplane) Round(worker int, device uint16, frames ...[]byte) (*RoundRe
 		Worker: worker,
 		Device: device,
 		Frames: frames,
-		Marks:  m.marks(),
+		Marks:  m.Marks(),
 	})
 	if err != nil {
 		return nil, err
@@ -459,11 +459,13 @@ func (m *Dataplane) Round(worker int, device uint16, frames ...[]byte) (*RoundRe
 	return &RoundResult{Output: reply.Output, Drop: reply.Drop}, nil
 }
 
-// marks returns the ranges of the control-plane zone this process's
-// AddressSanitizer holds unaddressable, so the dataplane's reads of this
-// process's red zones and free blocks are reported; other builds send
-// none.
-func (m *Dataplane) marks() []helperproto.Range {
+// Marks returns the ranges of the control-plane zone this process's
+// AddressSanitizer holds unaddressable; other builds hold none.
+//
+// The helper is sent them before each delivery and round, so the
+// dataplane's reads of this process's red zones and free blocks are
+// reported.
+func (m *Dataplane) Marks() []helperproto.Range {
 	if !sanitized {
 		return nil
 	}

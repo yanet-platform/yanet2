@@ -1,4 +1,4 @@
-//go:build linux && (amd64 || arm64) && cgo
+//go:build linux && (amd64 || arm64)
 
 package cpconfig_test
 
@@ -20,23 +20,11 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/native/zone"
 )
 
-// publishNatively runs a native publication on the fixture, delivering
-// the contexts to the in-process workers, within the publication bound.
-func publishNatively(t *testing.T, memory *publishedFixture, update func(options ...cpconfig.UpdateOption) error) error {
+// updateFunctions publishes the functions, delivering the contexts to
+// the workers.
+func updateFunctions(t testing.TB, memory *publishedFixture, functions ...cpconfig.FunctionConfig) error {
 	t.Helper()
-	done := make(chan error, 1)
-	go func() {
-		done <- update(cpconfig.WithDelivery(nativetest.Deliver))
-	}()
-	return awaitPublication(t, memory, done)
-}
-
-// updateFunctions publishes the functions natively on the fixture.
-func updateFunctions(t *testing.T, memory *publishedFixture, functions ...cpconfig.FunctionConfig) error {
-	t.Helper()
-	return publishNatively(t, memory, func(options ...cpconfig.UpdateOption) error {
-		return cpconfig.UpdateFunctions(memory.Instance(), functions, options...)
-	})
+	return cpconfig.UpdateFunctions(memory.Instance(), functions, memory.deliver())
 }
 
 // chainOf returns a chain of the name running the blackhole
@@ -90,20 +78,19 @@ func publishedFunction(t *testing.T, memory *publishedFixture, name string) *lay
 }
 
 // Test_UpdateFunctions_DataplaneRunsGoFunction verifies that the dataplane
-// runs weighted chains Go published in place of a function C published.
+// runs weighted chains Go published in place of a published function.
 //
 // The chains' modules together drop every packet, the function's counters
 // continue from the replaced function's, and the storage of the chain of
 // the replaced chain's name keeps the values counted before the update.
 func Test_UpdateFunctions_DataplaneRunsGoFunction(t *testing.T) {
 	memory := newPublishedFixture(t)
-	_, err := memory.Harness.HandlePackets(icmpPackets(t, 3)...)
-	require.NoError(t, err)
+	handlePackets(t, memory, icmpPackets(t, 3))
 	countAll(memory)
 	functionTags := []zone.CounterTag{{Key: "function", Value: "drop"}, {Key: "kind", Value: "function"}}
 	before := counterTotal(t, memory, "input", functionTags...)
 
-	err = updateFunctions(t, memory, cpconfig.FunctionConfig{
+	err := updateFunctions(t, memory, cpconfig.FunctionConfig{
 		Name:   "drop",
 		Chains: []cpconfig.FunctionChainConfig{chainOf("drop_chain", 3, "b"), chainOf("light", 1, "c")},
 	})
@@ -116,9 +103,7 @@ func Test_UpdateFunctions_DataplaneRunsGoFunction(t *testing.T) {
 	require.Equal(t, uint64(3), chains[0].Weight)
 	require.Equal(t, "light", shm.String(chains[1].CpChain.Get().Name[:]))
 
-	result, err := memory.Harness.HandlePackets(icmpPackets(t, 5)...)
-	require.NoError(t, err)
-	require.Len(t, result.Drop, 5, "the chains' blackholes drop every packet")
+	require.Len(t, handlePackets(t, memory, icmpPackets(t, 5)), 5, "the chains' blackholes drop every packet")
 	require.Equal(t, before+5, counterTotal(t, memory, "input", functionTags...), "function counters continue")
 	drops := uint64(0)
 	for _, name := range []string{"b", "c"} {
@@ -136,7 +121,7 @@ func Test_UpdateFunctions_DataplaneRunsGoFunction(t *testing.T) {
 // publishing nothing and taking nothing.
 func Test_UpdateFunctions_RefusesMissingModule(t *testing.T) {
 	memory := newPublishedFixture(t)
-	before := sharedState[*layout.CpModule](memory)
+	before := sharedState(memory)
 
 	err := updateFunctions(t, memory, cpconfig.FunctionConfig{
 		Name:   "drop",
@@ -152,7 +137,7 @@ func Test_UpdateFunctions_RefusesMissingModule(t *testing.T) {
 // nothing.
 func Test_UpdateFunctions_RefusesRepeatedFunction(t *testing.T) {
 	memory := newPublishedFixture(t)
-	before := sharedState[*layout.CpModule](memory)
+	before := sharedState(memory)
 	function := cpconfig.FunctionConfig{Name: "twice", Chains: []cpconfig.FunctionChainConfig{chainOf("chain", 1, "a")}}
 
 	err := updateFunctions(t, memory, function, function)
@@ -192,7 +177,7 @@ func requireExhaustionLeavesAsFound(
 			cp := memory.Instance().Cp
 			kept := append(copyRequests(cp.CpConfigGen.Get()), budget.requests...)
 			nativetest.LeaveOnly(t, &cp.BlockAllocator, kept...)
-			before := sharedState[*layout.CpModule](memory)
+			before := sharedState(memory)
 
 			err := update(t, memory)
 
@@ -346,7 +331,7 @@ func newFullFunctionsFixture(t testing.TB) *publishedFixture {
 			Chains: []cpconfig.FunctionChainConfig{chainOf("chain", 1, "a")},
 		})
 	}
-	require.NoError(t, cpconfig.UpdateFunctions(memory.Instance(), functions, cpconfig.WithDelivery(nativetest.Deliver)))
+	require.NoError(t, updateFunctions(t, memory, functions...))
 	requireFull(t, &memory.Instance().Cp.CpConfigGen.Get().FunctionRegistry.Registry)
 	return memory
 }

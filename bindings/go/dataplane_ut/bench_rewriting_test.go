@@ -17,7 +17,6 @@ import (
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/controlplane/native/nativetest"
 	"github.com/yanet-platform/yanet2/devices/plain/bindings/go/cplain"
 	"github.com/yanet-platform/yanet2/modules/decap/controlplane/decapshm"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
@@ -223,7 +222,7 @@ func stripTunnel(t *testing.T) func(harness *dataplaneut.Harness, agent *ffi.Age
 
 	return func(harness *dataplaneut.Harness, agent *ffi.Agent) ffi.ChainModuleConfig {
 		decap, err := decapshm.NewConfig(
-			nativetest.AgentOf(t, harness, agent),
+			harness.NativeAgent(t, agent),
 			"strip",
 			[]netip.Prefix{netip.PrefixFrom(tunnelEndpoint, 32)},
 		)

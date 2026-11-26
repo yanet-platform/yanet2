@@ -10,7 +10,6 @@ import (
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/controlplane/native/nativetest"
 	"github.com/yanet-platform/yanet2/modules/decap/controlplane/decapshm"
 )
 
@@ -48,7 +47,7 @@ func TestFailedPublish_LeavesCallersModuleIntact(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = agent.CleanUp() })
 
-	owner := nativetest.AgentOf(t, h, agent)
+	owner := h.NativeAgent(t, agent)
 	beforeCreate := agentRootMemoryNode(t, shm, agentName)
 
 	mod, err := decapshm.NewConfig(owner, "decap0", []netip.Prefix{netip.MustParsePrefix("2001:db8::/32")})

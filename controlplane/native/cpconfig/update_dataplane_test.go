@@ -1,72 +1,49 @@
-//go:build linux && (amd64 || arm64) && cgo
+//go:build linux && (amd64 || arm64)
 
 package cpconfig_test
 
 import (
 	"net"
 	"runtime"
+	"slices"
 	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
 	"unsafe"
 
-	"github.com/c2h5oh/datasize"
-	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/native/cpconfig"
-	"github.com/yanet-platform/yanet2/controlplane/native/internal/coracle"
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
 	"github.com/yanet-platform/yanet2/controlplane/native/nativetest"
 	"github.com/yanet-platform/yanet2/controlplane/native/shm"
 	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
-	"github.com/yanet-platform/yanet2/modules/blackhole/bindings/go/cblackhole"
+	"github.com/yanet-platform/yanet2/controlplane/native/zone"
 )
 
-// publishBound is how long a test waits for a publication before it
-// fails.
+// publishBound is how long a test waits for a publication to workers of
+// their own before it fails.
 //
-// A publication waits for every worker without a timeout of its own, so a
-// worker that never acknowledges would hang the test.
+// Such a publication waits for every worker without a timeout of its own,
+// so a worker that never acknowledges would hang the test.
 const publishBound = 10 * time.Second
 
-// updateModules publishes the modules natively, delivering the contexts
-// to the in-process workers, within the publication bound.
-func updateModules(t *testing.T, memory *publishedFixture, modules ...*layout.CpModule) error {
+// updateModules publishes the modules, delivering the contexts to the
+// workers.
+func updateModules(t testing.TB, memory *publishedFixture, modules ...*layout.CpModule) error {
 	t.Helper()
-	done := make(chan error, 1)
-	go func() {
-		done <- cpconfig.UpdateModules(memory.Instance(), modules, cpconfig.WithDelivery(nativetest.Deliver))
-	}()
-	return awaitPublication(t, memory, done)
+	return cpconfig.UpdateModules(memory.Instance(), modules, memory.deliver())
 }
 
-// awaitPublication returns the result of a publication running on the
-// fixture, failing the test if it does not return within the bound.
-//
-// A publication that never returns still runs on the dataplane's memory,
-// so the fixture keeps it.
-func awaitPublication(t *testing.T, memory *publishedFixture, done <-chan error) error {
+// icmpPackets returns the frames of that many echo requests.
+func icmpPackets(t *testing.T, count int) [][]byte {
 	t.Helper()
-	select {
-	case err := <-done:
-		return err
-	case <-time.After(publishBound):
-		memory.Abandon()
-		t.Fatalf("the publication did not return within %s", publishBound)
-		return nil
-	}
-}
-
-// icmpPackets returns that many echo requests through port0.
-func icmpPackets(t *testing.T, count int) []gopacket.Packet {
-	t.Helper()
-	packets := make([]gopacket.Packet, 0, count)
+	packets := make([][]byte, 0, count)
 	for idx := range count {
 		eth := layers.Ethernet{
 			SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
@@ -78,95 +55,127 @@ func icmpPackets(t *testing.T, count int) []gopacket.Packet {
 			SrcIP: net.IPv4(10, 0, 0, byte(idx+1)), DstIP: net.IPv4(192, 168, 1, 1),
 		}
 		icmp := layers.ICMPv4{TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoRequest, 0)}
-		packets = append(packets, xpacket.LayersToPacket(t, &eth, &ip, &icmp))
+		packets = append(packets, xpacket.LayersToPacket(t, &eth, &ip, &icmp).Data())
 	}
 	return packets
 }
 
-// moduleDrops returns the drop count of blackhole a in the wired chain,
-// summed over the workers, as the cgo reader reads it.
+// handlePackets runs the frames through port0 on the first worker and
+// returns the frames dropped.
+func handlePackets(t *testing.T, memory *publishedFixture, frames [][]byte) [][]byte {
+	t.Helper()
+	result, err := memory.Round(0, 0, frames...)
+	require.NoError(t, err)
+	return result.Drop
+}
+
+// moduleDrops returns the drop count of blackhole a, summed over the
+// workers.
 func moduleDrops(t *testing.T, memory *publishedFixture) uint64 {
 	t.Helper()
-	counters := memory.Harness.SharedMemory().DPConfig(0).ModuleCounters(
-		"port0", "drop", "drop", "drop_chain", "blackhole", "a", []string{"drop"},
-	)
-	require.Len(t, counters, 1)
-	total := uint64(0)
-	for _, values := range counters[0].Values {
-		total += values[0]
+	return counterTotal(t, memory, "drop", zone.CounterTag{Key: "module_name", Value: "a"}, zone.CounterTag{Key: "kind", Value: "module"})
+}
+
+// requireWorkersRunPublished fails unless every worker runs the contexts
+// the published generation built for it.
+func requireWorkersRunPublished(t *testing.T, memory *publishedFixture) {
+	t.Helper()
+	instance := memory.Instance()
+	published := instance.Cp.CpConfigGen.Get()
+	roots := unsafe.Slice(published.ConfigGenEctxs.Get(), published.ConfigGenEctxCount)
+	workers := unsafe.Slice(instance.Dp.Workers.Get(), instance.Dp.WorkerCount)
+	for idx := range workers {
+		require.Same(t, roots[idx].Get(), workers[idx].Get().ConfigGenEctx.Get(), "worker %d runs the published contexts", idx)
 	}
-	return total
+}
+
+// publishedModules returns the module configurations the published
+// generation lists.
+func publishedModules(t *testing.T, memory *publishedFixture) []zone.Module {
+	t.Helper()
+	pinned, err := memory.Instance().Pin()
+	require.NoError(t, err)
+	defer pinned.Release()
+	return pinned.Modules()
 }
 
 // Test_UpdateModules_DataplaneRunsGoGeneration verifies that the
 // dataplane runs a module configuration Go published on contexts Go built.
 //
-// The workers take the Go generation, the cgo control plane lists the
-// configuration, the module drops its packets, and the module's counters
-// continue from the generation C published.
+// The workers take the new generation, the module drops its packets, and
+// the module's counters continue from the generation it replaced.
 func Test_UpdateModules_DataplaneRunsGoGeneration(t *testing.T) {
 	memory := newPublishedFixture(t)
-	instance := memory.Instance()
-	result, err := memory.Harness.HandlePackets(icmpPackets(t, 3)...)
-	require.NoError(t, err)
-	require.Len(t, result.Drop, 3, "the C generation drops through blackhole a")
+	require.Len(t, handlePackets(t, memory, icmpPackets(t, 3)), 3, "the first generation drops through blackhole a")
 	before := moduleDrops(t, memory)
-	cGeneration := instance.Cp.CpConfigGen.Get().Gen
+	generation := memory.Instance().Cp.CpConfigGen.Get().Gen
 
-	module, err := cpconfig.NewBlackhole(memory.owner, "a")
-	require.NoError(t, err)
-	require.NoError(t, updateModules(t, memory, module))
+	require.NoError(t, updateModules(t, memory, newBlackhole(t, memory, "a")))
 
-	published := instance.Cp.CpConfigGen.Get()
-	require.Equal(t, cGeneration+1, published.Gen)
-	roots := unsafe.Slice(published.ConfigGenEctxs.Get(), published.ConfigGenEctxCount)
-	workers := unsafe.Slice(instance.Dp.Workers.Get(), instance.Dp.WorkerCount)
-	for idx := range workers {
-		require.Same(t, roots[idx].Get(), workers[idx].Get().ConfigGenEctx.Get(), "worker %d runs the contexts Go built", idx)
-	}
-	var listed bool
-	for _, config := range memory.Harness.SharedMemory().DPConfig(0).CPConfigs() {
-		if config.Type == "blackhole" && config.Name == "a" {
-			listed = true
-		}
-	}
-	require.True(t, listed, "the cgo control plane lists the Go configuration")
-
-	result, err = memory.Harness.HandlePackets(icmpPackets(t, 5)...)
-	require.NoError(t, err)
-	require.Len(t, result.Drop, 5, "the Go generation drops through blackhole a")
-	require.Equal(t, before+5, moduleDrops(t, memory), "module counters continue across the Go publication")
+	require.Equal(t, generation+1, memory.Instance().Cp.CpConfigGen.Get().Gen)
+	requireWorkersRunPublished(t, memory)
+	require.Len(t, handlePackets(t, memory, icmpPackets(t, 5)), 5, "the new generation drops through blackhole a")
+	require.Equal(t, before+5, moduleDrops(t, memory), "module counters continue across the publication")
 }
 
-// Test_UpdateModules_MatchesC verifies that a whole module update from Go
-// leaves the storage as cp_config_update_modules does.
+// Test_UpdateModules_ReplacesModule verifies that a module update
+// publishes the configuration in place of the one of its name.
 //
-// The update covers the generation copy, the upsert, every worker's
-// contexts and their counter storages, the publication and the teardown
-// of the replaced generation, on each fixture. The module is new, or
-// replaces one a chain runs, or, on the one-device fixture, one no chain
-// runs.
-func Test_UpdateModules_MatchesC(t *testing.T) {
+// The module is new, or replaces one a chain runs, or one no chain runs,
+// on each fixture. The generation lists it, holds it once and releases a
+// replaced one for its free; once that is freed, the zone and the agent
+// hold the free bytes they held before the update's configuration was
+// built.
+func Test_UpdateModules_ReplacesModule(t *testing.T) {
 	for _, fixture := range fixtures {
 		for _, name := range []string{"fresh", "a", "b"} {
 			t.Run(fixture.name+", module "+name, func(t *testing.T) {
 				memory := fixture.newFunc(t)
-				memory.CompareWithC(
-					t,
-					func() {
-						config, err := cblackhole.NewModuleConfig(memory.cAgent, name)
-						require.NoError(t, err)
-						require.NoError(t, memory.cAgent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}))
-					},
-					func() {
-						module, err := cpconfig.NewBlackhole(memory.owner, name)
-						require.NoError(t, err)
-						require.NoError(t, updateModules(t, memory, module))
-					},
-				)
+				cp := memory.Instance().Cp
+				listed := publishedModules(t, memory)
+				replaces := slices.ContainsFunc(listed, func(module zone.Module) bool { return module.Name == name })
+				var replaced *layout.CpModule
+				if replaces {
+					replaced = publishedModule(t, cp.CpConfigGen.Get(), name)
+				} else {
+					listed = append(listed, zone.Module{Type: "blackhole", Name: name, Agent: "owner"})
+				}
+				zoneFree := shmalloc.FreeSize(&cp.BlockAllocator)
+				agentFree := shmalloc.FreeSize(&memory.owner.Agent.BlockAllocator)
+				module := newBlackhole(t, memory, name)
+
+				require.NoError(t, updateModules(t, memory, module))
+
+				require.ElementsMatch(t, listed, publishedModules(t, memory))
+				require.Same(t, module, publishedModule(t, cp.CpConfigGen.Get(), name))
+				require.Equal(t, uint64(1), atomic.LoadUint64(&module.Entity.ConfigItem.Refcnt), "the generation holds the module")
+				if replaces {
+					require.NoError(t, cpconfig.FreeBlackhole(replaced))
+					require.Equal(t, zoneFree, shmalloc.FreeSize(&cp.BlockAllocator), "the zone's free bytes")
+					require.Equal(t, agentFree, shmalloc.FreeSize(&memory.owner.Agent.BlockAllocator), "the agent's free bytes")
+				}
 			})
 		}
 	}
+}
+
+// firstWorkerRoot returns the root context of the first worker of the
+// published generation.
+func firstWorkerRoot(memory *publishedFixture) *layout.ConfigGenEctx {
+	published := memory.Instance().Cp.CpConfigGen.Get()
+	return unsafe.Slice(published.ConfigGenEctxs.Get(), published.ConfigGenEctxCount)[0].Get()
+}
+
+// linkedModuleContext returns the first worker's context of blackhole
+// linked of the rich fixture: the second module of chain heavy, which
+// function drop runs on port0's input.
+func linkedModuleContext(t *testing.T, memory *publishedFixture) *layout.ModuleEctx {
+	t.Helper()
+	input := deviceContext(t, memory, "port0").InputPipelines.Get()
+	drop := unsafe.Slice(input.PipelinePtrs.Get(), input.PipelineCount)[0].Get()
+	function := unsafe.Slice(drop.FunctionPtrs.Get(), drop.Length)[0].Get()
+	heavy := unsafe.Slice(function.ChainPtrs.Get(), function.ChainCount)[0].Get()
+	return unsafe.Slice(heavy.ModulePtrs.Get(), heavy.Length)[1].Get()
 }
 
 // Test_UpdateModules_LinksObjectsAndDevices verifies that a module
@@ -175,11 +184,8 @@ func Test_UpdateModules_MatchesC(t *testing.T) {
 // Weights and ports shape the device and function tables as well.
 func Test_UpdateModules_LinksObjectsAndDevices(t *testing.T) {
 	memory := newRichFixture(t)
-	module, err := cpconfig.NewBlackhole(memory.owner, "a")
-	require.NoError(t, err)
-	require.NoError(t, updateModules(t, memory, module))
-	published := memory.Instance().Cp.CpConfigGen.Get()
-	root := unsafe.Slice(published.ConfigGenEctxs.Get(), published.ConfigGenEctxCount)[0].Get()
+	require.NoError(t, updateModules(t, memory, newBlackhole(t, memory, "a")))
+	root := firstWorkerRoot(memory)
 
 	devices := map[string]*layout.DeviceEctx{}
 	pointers := unsafe.Slice(root.DevicePtrs.Get(), root.DeviceCount)
@@ -200,8 +206,7 @@ func Test_UpdateModules_LinksObjectsAndDevices(t *testing.T) {
 	drop := unsafe.Slice(input.PipelinePtrs.Get(), input.PipelineCount)[0].Get()
 	function := unsafe.Slice(drop.FunctionPtrs.Get(), drop.Length)[0].Get()
 	require.Equal(t, uint64(4), function.ChainMapSize, "heavy at weight 3 and light at weight 1")
-	heavy := unsafe.Slice(function.ChainPtrs.Get(), function.ChainCount)[0].Get()
-	linked := unsafe.Slice(heavy.ModulePtrs.Get(), heavy.Length)[1].Get()
+	linked := linkedModuleContext(t, memory)
 	require.Equal(t, "linked", shm.String(linked.CpModule.Get().Name[:]))
 
 	require.Equal(t, uint64(1), linked.ObjectLinkCount)
@@ -225,15 +230,11 @@ func Test_UpdateModules_LinksObjectsAndDevices(t *testing.T) {
 // superseded agent is refused, publishing nothing and taking nothing.
 func Test_UpdateModules_RefusesSupersededOwner(t *testing.T) {
 	memory := newPublishedFixture(t)
-	config, err := cblackhole.NewModuleConfig(memory.cAgent, "late")
-	require.NoError(t, err)
-	module := (*layout.CpModule)(config.AsFFIModule().AsRawPtr())
-	// The published configurations keep the superseded agent alive.
-	_, err = memory.Harness.SharedMemory().AgentAttach("owner", 0, 2*datasize.MB)
-	require.NoError(t, err)
-	before := sharedState(memory, module)
+	supersedeOwner(t, memory)
+	before := sharedState(memory)
+	module := newBlackhole(t, memory, "late")
 
-	err = updateModules(t, memory, module)
+	err := updateModules(t, memory, module)
 
 	require.ErrorIs(t, err, cpconfig.ErrSupersededOwner)
 	requireLeftAsFound(t, before, memory, module)
@@ -243,13 +244,11 @@ func Test_UpdateModules_RefusesSupersededOwner(t *testing.T) {
 // one module twice is refused, publishing nothing and taking nothing.
 func Test_UpdateModules_RefusesRepeatedModule(t *testing.T) {
 	memory := newPublishedFixture(t)
-	first, err := cpconfig.NewBlackhole(memory.owner, "twice")
-	require.NoError(t, err)
-	second, err := cpconfig.NewBlackhole(memory.owner, "twice")
-	require.NoError(t, err)
-	before := sharedState(memory, first, second)
+	before := sharedState(memory)
+	first := newBlackhole(t, memory, "twice")
+	second := newBlackhole(t, memory, "twice")
 
-	err = updateModules(t, memory, first, second)
+	err := updateModules(t, memory, first, second)
 
 	require.ErrorIs(t, err, cpconfig.ErrRepeated)
 	requireLeftAsFound(t, before, memory, first, second)
@@ -269,32 +268,27 @@ func Test_UpdateModules_RefusesRepeatedModule(t *testing.T) {
 func Test_UpdateModules_ExhaustedZoneFreesUpdate(t *testing.T) {
 	modules := []struct {
 		name string
+		// carried is whether a published configuration "carried" holds
+		// counters the update's configuration lacks.
+		carried bool
 		// module returns the configuration the update publishes.
 		module func(t *testing.T, memory *publishedFixture) *layout.CpModule
 	}{
-		{"configuration of a new name", func(t *testing.T, memory *publishedFixture) *layout.CpModule {
-			module, err := cpconfig.NewBlackhole(memory.owner, "fresh")
-			require.NoError(t, err)
+		{"configuration of a new name", false, func(t *testing.T, memory *publishedFixture) *layout.CpModule {
+			return newBlackhole(t, memory, "fresh")
+		}},
+		{"fresh configuration", false, func(t *testing.T, memory *publishedFixture) *layout.CpModule {
+			return newBlackhole(t, memory, "a")
+		}},
+		{"configuration carrying names", true, func(t *testing.T, memory *publishedFixture) *layout.CpModule {
+			return newBlackhole(t, memory, "carried")
+		}},
+		{"configuration with a runtime registry", false, func(t *testing.T, memory *publishedFixture) *layout.CpModule {
+			module := newBlackhole(t, memory, "a")
+			registerRuntimeCounter(t, module)
 			return module
 		}},
-		{"fresh configuration", func(t *testing.T, memory *publishedFixture) *layout.CpModule {
-			module, err := cpconfig.NewBlackhole(memory.owner, "a")
-			require.NoError(t, err)
-			return module
-		}},
-		{"configuration carrying names", func(t *testing.T, memory *publishedFixture) *layout.CpModule {
-			publishCarried(t, memory)
-			module, err := cpconfig.NewBlackhole(memory.owner, "carried")
-			require.NoError(t, err)
-			return module
-		}},
-		{"configuration with a runtime registry", func(t *testing.T, memory *publishedFixture) *layout.CpModule {
-			module, err := cpconfig.NewBlackhole(memory.owner, "a")
-			require.NoError(t, err)
-			require.NoError(t, coracle.ModuleRegisterCounter(unsafe.Pointer(module), "rules", "hits", 4))
-			return module
-		}},
-		{"published configuration", func(t *testing.T, memory *publishedFixture) *layout.CpModule {
+		{"published configuration", false, func(t *testing.T, memory *publishedFixture) *layout.CpModule {
 			return publishedModule(t, memory.Instance().Cp.CpConfigGen.Get(), "a")
 		}},
 	}
@@ -304,10 +298,12 @@ func Test_UpdateModules_ExhaustedZoneFreesUpdate(t *testing.T) {
 			for _, budget := range exhaustionBudgets {
 				t.Run(budget.name, func(t *testing.T) {
 					memory := newPublishedFixture(t)
-					instance := memory.Instance()
+					if kind.carried {
+						publishCarried(t, memory)
+					}
+					nativetest.LeaveOnly(t, &memory.Instance().Cp.BlockAllocator, requestsFor(budget.blocks)...)
+					before := sharedState(memory)
 					module := kind.module(t, memory)
-					nativetest.LeaveOnly(t, &instance.Cp.BlockAllocator, requestsFor(budget.blocks)...)
-					before := sharedState(memory, module)
 
 					err := updateModules(t, memory, module)
 
@@ -353,13 +349,12 @@ func Test_UpdateModules_CopyFailureFreesCopy(t *testing.T) {
 		t.Run(name+" registry", func(t *testing.T) {
 			memory := newRichFixture(t)
 			instance := memory.Instance()
-			module, err := cpconfig.NewBlackhole(memory.owner, "a")
-			require.NoError(t, err)
 			kept := copyRequests(instance.Cp.CpConfigGen.Get())[:2+2*failing]
 			nativetest.LeaveOnly(t, &instance.Cp.BlockAllocator, kept...)
-			before := sharedState(memory, module)
+			before := sharedState(memory)
+			module := newBlackhole(t, memory, "a")
 
-			err = updateModules(t, memory, module)
+			err := updateModules(t, memory, module)
 
 			require.ErrorIs(t, err, shmalloc.ErrNoMemory)
 			require.ErrorContains(t, err, "copy "+name+" registry")
@@ -440,7 +435,7 @@ func Test_UpdateModules_FreesFailedArraysAtTheirSize(t *testing.T) {
 			objects := uintptr(published.ObjectRegistry.EntityRegistry.Registry.Capacity)
 			kept := append(copyRequests(published), tc.kept(devices, objects)...)
 			nativetest.LeaveOnly(t, &instance.Cp.BlockAllocator, kept...)
-			before := sharedState(memory, module)
+			before := sharedState(memory)
 
 			err := updateModules(t, memory, module)
 
@@ -546,7 +541,7 @@ func Test_UpdateModules_FreesFailedContexts(t *testing.T) {
 			newWeightedFixture,
 			func(t *testing.T, memory *publishedFixture) *layout.CpModule {
 				module := newBlackhole(t, memory, "a")
-				require.NoError(t, coracle.ModuleRegisterCounter(unsafe.Pointer(module), "rules", "hits", 4))
+				registerRuntimeCounter(t, module)
 				return module
 			},
 			func(devices, objects uintptr) []uintptr {
@@ -578,13 +573,13 @@ func Test_UpdateModules_FreesFailedContexts(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			memory := tc.fixture(t)
 			instance := memory.Instance()
-			module := tc.module(t, memory)
 			published := instance.Cp.CpConfigGen.Get()
 			devices := uintptr(published.DeviceRegistry.EntityRegistry.Registry.Capacity)
 			objects := uintptr(published.ObjectRegistry.EntityRegistry.Registry.Capacity)
 			kept := append(copyRequests(published), tc.kept(devices, objects)...)
 			nativetest.LeaveOnly(t, &instance.Cp.BlockAllocator, kept...)
-			before := sharedState(memory, module)
+			before := sharedState(memory)
+			module := tc.module(t, memory)
 
 			err := updateModules(t, memory, module)
 
@@ -614,22 +609,17 @@ func Test_UpdateModules_UpsertFailureFreesCopy(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			memory := newPublishedFixture(t)
-			instance := memory.Instance()
-			cp := instance.Cp
+			cp := memory.Instance().Cp
 			for _, name := range []string{"d", "e", "f", "g", "h"} {
-				config, err := cblackhole.NewModuleConfig(memory.cAgent, name)
-				require.NoError(t, err)
-				require.NoError(t, memory.cAgent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}))
+				require.NoError(t, updateModules(t, memory, newBlackhole(t, memory, name)))
 			}
 			published := cp.CpConfigGen.Get()
-			modules := &published.ModuleRegistry.EntityRegistry.Registry
-			require.Equal(t, uint64(8), modules.Capacity)
-			module, err := cpconfig.NewBlackhole(memory.owner, "fresh")
-			require.NoError(t, err)
+			requireFull(t, &published.ModuleRegistry.EntityRegistry.Registry)
 			nativetest.LeaveOnly(t, &cp.BlockAllocator, append(copyRequests(published), tc.extra...)...)
-			before := sharedState(memory, module)
+			before := sharedState(memory)
+			module := newBlackhole(t, memory, "fresh")
 
-			err = updateModules(t, memory, module)
+			err := updateModules(t, memory, module)
 
 			require.ErrorIs(t, err, shmalloc.ErrNoMemory)
 			require.ErrorContains(t, err, "upsert module")
@@ -648,46 +638,62 @@ func Test_UpdateModules_WaitsForEveryWorker(t *testing.T) {
 	instance := memory.Instance()
 	instance.Dp.ExternalWorkerRounds = false
 	t.Cleanup(func() { instance.Dp.ExternalWorkerRounds = true })
-	module, err := cpconfig.NewBlackhole(memory.owner, "a")
-	require.NoError(t, err)
+	module := newBlackhole(t, memory, "a")
 	pinned, err := instance.Pin()
 	require.NoError(t, err)
 	t.Cleanup(pinned.Release)
 	old := pinned.Gen
 
-	done := make(chan error, 1)
-	go func() { done <- cpconfig.UpdateModules(instance, []*layout.CpModule{module}) }()
-	published := awaitGeneration(t, memory, old, done)
+	var publication errgroup.Group
+	done := make(chan struct{})
+	publication.Go(func() error {
+		defer close(done)
+		return cpconfig.UpdateModules(instance, []*layout.CpModule{module})
+	})
+	published := awaitGeneration(t, memory, old, done, &publication)
 
 	workers := unsafe.Slice(instance.Dp.Workers.Get(), instance.Dp.WorkerCount)
 	roots := unsafe.Slice(published.ConfigGenEctxs.Get(), published.ConfigGenEctxCount)
 	for idx := range workers {
 		require.Equal(t, uint64(2), atomic.LoadUint64(&old.Refcnt), "retired before worker %d acknowledged", idx)
 		select {
-		case err := <-done:
-			t.Fatalf("the publication returned before worker %d acknowledged: %v", idx, err)
+		case <-done:
+			t.Fatalf("the publication returned before worker %d acknowledged: %v", idx, publication.Wait())
 		default:
 		}
 		worker := workers[idx].Get()
 		worker.ConfigGenEctx.Store(roots[idx].Get())
 		atomic.StoreUint64(&worker.Gen, published.Gen)
 	}
-	require.NoError(t, awaitPublication(t, memory, done))
+	select {
+	case <-done:
+		require.NoError(t, publication.Wait())
+	case <-time.After(publishBound):
+		// The publication still runs on the dataplane's memory.
+		memory.Abandon()
+		t.Fatalf("the publication did not return within %s", publishBound)
+	}
 	require.Equal(t, uint64(1), atomic.LoadUint64(&old.Refcnt))
 }
 
 // awaitGeneration returns the generation a running publication publishes
 // in place of the replaced one, failing the test otherwise.
 //
-// The test fails if the publication returns first or publishes nothing
-// within the bound.
-func awaitGeneration(t *testing.T, memory *publishedFixture, old *layout.CpConfigGen, done <-chan error) *layout.CpConfigGen {
+// The test fails if the publication, which closes done when it returns,
+// returns first or publishes nothing within the bound.
+func awaitGeneration(
+	t *testing.T,
+	memory *publishedFixture,
+	old *layout.CpConfigGen,
+	done <-chan struct{},
+	publication *errgroup.Group,
+) *layout.CpConfigGen {
 	t.Helper()
 	deadline := time.Now().Add(publishBound)
 	for {
 		select {
-		case err := <-done:
-			t.Fatalf("the publication returned before publishing: %v", err)
+		case <-done:
+			t.Fatalf("the publication returned before publishing: %v", publication.Wait())
 		default:
 		}
 		if published := memory.Instance().Cp.CpConfigGen.Load(); published != old {
@@ -705,11 +711,10 @@ func awaitGeneration(t *testing.T, memory *publishedFixture, old *layout.CpConfi
 // an unpublished object is refused after the copy, which is freed.
 func Test_UpdateModules_RefusesMissingObject(t *testing.T) {
 	memory := newPublishedFixture(t)
-	module, err := cpconfig.NewBlackhole(memory.owner, "a")
+	before := sharedState(memory)
+	module := newBlackhole(t, memory, "a")
+	_, err := cpconfig.LinkObject(module, "ring", "absent")
 	require.NoError(t, err)
-	_, err = cpconfig.LinkObject(module, "ring", "absent")
-	require.NoError(t, err)
-	before := sharedState(memory, module)
 
 	err = updateModules(t, memory, module)
 
@@ -717,21 +722,18 @@ func Test_UpdateModules_RefusesMissingObject(t *testing.T) {
 	requireLeftAsFound(t, before, memory, module)
 }
 
-// publishCarried publishes through C a blackhole configuration "carried"
-// whose extra counters a replacement lacks.
+// publishCarried publishes a blackhole configuration "carried" whose
+// extra counters a replacement lacks.
 //
 // The replacement carries their names and grows its counter registry on
 // its agent.
 func publishCarried(t *testing.T, memory *publishedFixture) {
 	t.Helper()
-	config, err := cblackhole.NewModuleConfig(memory.cAgent, "carried")
-	require.NoError(t, err)
+	var extra []string
 	for idx := range 12 {
-		require.NoError(t, coracle.ModuleRegisterCounter(
-			config.AsFFIModule().AsRawPtr(), "", "extra"+strconv.Itoa(idx), 1,
-		))
+		extra = append(extra, "extra"+strconv.Itoa(idx))
 	}
-	require.NoError(t, memory.cAgent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}))
+	require.NoError(t, updateModules(t, memory, newBlackhole(t, memory, "carried", extra...)))
 }
 
 // Test_UpdateModules_AgentMemoryFailureFreesCopy verifies that an update
@@ -741,8 +743,8 @@ func publishCarried(t *testing.T, memory *publishedFixture) {
 // names and their index grow twice. The agent keeps no block, or enough
 // for the first growths only, so the link fails at its first block or
 // after it took some. The zone's blocks and every reference go back, the
-// module keeps what its link grew until it is destroyed, and the
-// exhaustion is reported.
+// module keeps what its link grew until it is freed, and the exhaustion
+// is reported.
 func Test_UpdateModules_AgentMemoryFailureFreesCopy(t *testing.T) {
 	budgets := []struct {
 		name   string
@@ -756,12 +758,12 @@ func Test_UpdateModules_AgentMemoryFailureFreesCopy(t *testing.T) {
 		t.Run(budget.name, func(t *testing.T) {
 			memory := newPublishedFixture(t)
 			publishCarried(t, memory)
-			module, err := cpconfig.NewBlackhole(memory.owner, "carried")
-			require.NoError(t, err)
-			nativetest.LeaveOnly(t, &memory.owner.Agent.BlockAllocator, requestsFor(budget.blocks)...)
-			before := sharedState(memory, module)
+			before := sharedState(memory)
+			module := newBlackhole(t, memory, "carried")
+			restore := nativetest.LeaveOnly(t, &memory.owner.Agent.BlockAllocator, requestsFor(budget.blocks)...)
 
-			err = updateModules(t, memory, module)
+			err := updateModules(t, memory, module)
+			restore()
 
 			require.ErrorIs(t, err, shmalloc.ErrNoMemory)
 			require.ErrorContains(t, err, "link counter registry")
@@ -772,41 +774,42 @@ func Test_UpdateModules_AgentMemoryFailureFreesCopy(t *testing.T) {
 
 // newBlackhole returns a blackhole configuration of the name with extra
 // own counters of one value each.
-func newBlackhole(t *testing.T, memory *publishedFixture, name string, extra ...string) *layout.CpModule {
+func newBlackhole(t testing.TB, memory *publishedFixture, name string, extra ...string) *layout.CpModule {
 	t.Helper()
 	module, err := cpconfig.NewBlackhole(memory.owner, name)
 	require.NoError(t, err)
 	for _, counter := range extra {
-		require.NoError(t, coracle.ModuleRegisterCounter(unsafe.Pointer(module), "", counter, 1))
+		_, err = cpconfig.RegisterCounter(&module.CounterRegistry, counter, 1)
+		require.NoError(t, err)
 	}
 	return module
 }
 
-// deleteModule deletes the blackhole configuration natively, delivering
-// the contexts to the in-process workers, within the publication bound.
+// deleteModule deletes the blackhole configuration, delivering the
+// contexts to the workers.
 func deleteModule(t *testing.T, memory *publishedFixture, name string) error {
 	t.Helper()
-	done := make(chan error, 1)
-	go func() {
-		done <- cpconfig.DeleteModule(memory.Instance(), "blackhole", name, cpconfig.WithDelivery(nativetest.Deliver))
-	}()
-	return awaitPublication(t, memory, done)
+	return cpconfig.DeleteModule(memory.Instance(), "blackhole", name, memory.deliver())
 }
 
-// Test_DeleteModule_MatchesC verifies that deleting a published module
-// configuration no chain runs from Go leaves the storage as
-// cp_config_delete_module does.
-//
-// Its registry slot is emptied, its owner's loaded count dropped and every
-// worker's contexts rebuilt without it.
-func Test_DeleteModule_MatchesC(t *testing.T) {
+// Test_DeleteModule_RemovesModule verifies that deleting a published
+// module configuration no chain runs empties its registry slot, drops its
+// owner's loaded count and releases it for its free, and that the workers
+// run the generation published without it.
+func Test_DeleteModule_RemovesModule(t *testing.T) {
 	memory := newPublishedFixture(t)
+	module := publishedModule(t, memory.Instance().Cp.CpConfigGen.Get(), "b")
+	loaded := atomic.LoadUint64(&memory.owner.Agent.LoadedEntityCount)
 
-	memory.CompareWithC(
-		t,
-		func() { require.NoError(t, memory.cAgent.DeleteModuleConfig("blackhole", "b")) },
-		func() { require.NoError(t, deleteModule(t, memory, "b")) },
-	)
+	require.NoError(t, deleteModule(t, memory, "b"))
+
+	require.ElementsMatch(t, []zone.Module{
+		{Type: "blackhole", Name: "a", Agent: "owner"},
+		{Type: "blackhole", Name: "c", Agent: "owner"},
+	}, publishedModules(t, memory))
+	require.Equal(t, loaded-1, atomic.LoadUint64(&memory.owner.Agent.LoadedEntityCount))
+	require.Zero(t, atomic.LoadUint64(&module.Entity.ConfigItem.Refcnt))
+	requireWorkersRunPublished(t, memory)
 }
 
 // Test_DeleteModule_FailureFreesCopy verifies that a delete of a module
@@ -838,7 +841,7 @@ func Test_DeleteModule_FailureFreesCopy(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			memory := newPublishedFixture(t)
-			before := sharedState[*layout.CpModule](memory)
+			before := sharedState(memory)
 
 			err := deleteModule(t, memory, tc.module)
 
@@ -863,8 +866,7 @@ func Test_DeleteModule_FreeRepublishAndDeleteAgain(t *testing.T) {
 	free := shmalloc.FreeSize(&owner.BlockAllocator)
 	loaded := atomic.LoadUint64(&owner.LoadedEntityCount)
 
-	replacement, err := cpconfig.NewBlackhole(memory.owner, "b")
-	require.NoError(t, err)
+	replacement := newBlackhole(t, memory, "b")
 	require.NoError(t, updateModules(t, memory, replacement))
 	require.NoError(t, deleteModule(t, memory, "b"))
 	require.NoError(t, cpconfig.FreeBlackhole(replacement))
@@ -875,35 +877,19 @@ func Test_DeleteModule_FreeRepublishAndDeleteAgain(t *testing.T) {
 }
 
 // Benchmark_UpdateModules_Blackhole measures building a blackhole
-// configuration and publishing it, through cgo and natively.
+// configuration and publishing it.
 //
-// Both deliver the workers' contexts on the publishing thread, and each
-// iteration frees through C the configuration its publication replaced,
-// so the agent's memory lasts the run.
+// The dataplane helper delivers the workers' contexts, and each iteration
+// frees the configuration its publication replaced, so the agent's memory
+// lasts the run.
 func Benchmark_UpdateModules_Blackhole(b *testing.B) {
-	b.Run("cgo", func(b *testing.B) {
-		b.ReportAllocs()
-		memory := newPublishedFixture(b)
-		replaced := publishedModule(b, memory.Instance().Cp.CpConfigGen.Get(), "a")
-		for b.Loop() {
-			config, err := cblackhole.NewModuleConfig(memory.cAgent, "a")
-			require.NoError(b, err)
-			require.NoError(b, memory.cAgent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}))
-			coracle.ModuleDestroy(unsafe.Pointer(replaced))
-			replaced = (*layout.CpModule)(config.AsFFIModule().AsRawPtr())
-		}
-	})
-	b.Run("native", func(b *testing.B) {
-		b.ReportAllocs()
-		memory := newPublishedFixture(b)
-		replaced := publishedModule(b, memory.Instance().Cp.CpConfigGen.Get(), "a")
-		deliver := cpconfig.WithDelivery(nativetest.Deliver)
-		for b.Loop() {
-			module, err := cpconfig.NewBlackhole(memory.owner, "a")
-			require.NoError(b, err)
-			require.NoError(b, cpconfig.UpdateModules(memory.Instance(), []*layout.CpModule{module}, deliver))
-			coracle.ModuleDestroy(unsafe.Pointer(replaced))
-			replaced = module
-		}
-	})
+	b.ReportAllocs()
+	memory := newPublishedFixture(b)
+	replaced := publishedModule(b, memory.Instance().Cp.CpConfigGen.Get(), "a")
+	for b.Loop() {
+		module := newBlackhole(b, memory, "a")
+		require.NoError(b, updateModules(b, memory, module))
+		require.NoError(b, cpconfig.FreeBlackhole(replaced))
+		replaced = module
+	}
 }

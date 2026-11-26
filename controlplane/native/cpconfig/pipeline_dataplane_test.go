@@ -1,4 +1,4 @@
-//go:build linux && (amd64 || arm64) && cgo
+//go:build linux && (amd64 || arm64)
 
 package cpconfig_test
 
@@ -13,17 +13,15 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/native/cpconfig"
 	"github.com/yanet-platform/yanet2/controlplane/native/internal/registry"
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
-	"github.com/yanet-platform/yanet2/controlplane/native/nativetest"
 	"github.com/yanet-platform/yanet2/controlplane/native/shm"
 	"github.com/yanet-platform/yanet2/controlplane/native/zone"
 )
 
-// updatePipelines publishes the pipelines natively on the fixture.
-func updatePipelines(t *testing.T, memory *publishedFixture, pipelines ...cpconfig.PipelineConfig) error {
+// updatePipelines publishes the pipelines, delivering the contexts to
+// the workers.
+func updatePipelines(t testing.TB, memory *publishedFixture, pipelines ...cpconfig.PipelineConfig) error {
 	t.Helper()
-	return publishNatively(t, memory, func(options ...cpconfig.UpdateOption) error {
-		return cpconfig.UpdatePipelines(memory.Instance(), pipelines, options...)
-	})
+	return cpconfig.UpdatePipelines(memory.Instance(), pipelines, memory.deliver())
 }
 
 // publishedPipeline returns the pipeline of a name the published
@@ -52,7 +50,7 @@ func registeredCounters(counters *layout.CounterRegistry) map[string]uint64 {
 }
 
 // Test_UpdatePipelines_DataplaneRunsGoPipelines verifies that the
-// dataplane runs pipelines Go published in place of those C published,
+// dataplane runs pipelines Go published in place of published ones,
 // their functions in the given order and an empty one with none.
 //
 // The first function drops every packet, so the second sees none, and the
@@ -63,13 +61,12 @@ func Test_UpdatePipelines_DataplaneRunsGoPipelines(t *testing.T) {
 		Name:   "second",
 		Chains: []cpconfig.FunctionChainConfig{chainOf("second_chain", 1, "c")},
 	}))
-	_, err := memory.Harness.HandlePackets(icmpPackets(t, 3)...)
-	require.NoError(t, err)
+	handlePackets(t, memory, icmpPackets(t, 3))
 	pipelineTags := []zone.CounterTag{{Key: "pipeline", Value: "drop"}, {Key: "kind", Value: "pipeline"}}
 	before := counterTotal(t, memory, "input", pipelineTags...)
 	require.Equal(t, uint64(3), before)
 
-	err = updatePipelines(t, memory,
+	err := updatePipelines(t, memory,
 		cpconfig.PipelineConfig{Name: "drop", Functions: []string{"drop", "second"}},
 		cpconfig.PipelineConfig{Name: "dummy"},
 	)
@@ -99,9 +96,7 @@ func Test_UpdatePipelines_DataplaneRunsGoPipelines(t *testing.T) {
 	}
 	require.Equal(t, []string{"drop", "second"}, order, "port0's input runs the functions in order")
 
-	result, err := memory.Harness.HandlePackets(icmpPackets(t, 5)...)
-	require.NoError(t, err)
-	require.Len(t, result.Drop, 5)
+	require.Len(t, handlePackets(t, memory, icmpPackets(t, 5)), 5)
 	require.Equal(t, before+5, counterTotal(t, memory, "input", pipelineTags...), "pipeline counters continue")
 	secondTags := []zone.CounterTag{{Key: "function", Value: "second"}, {Key: "kind", Value: "function"}}
 	require.Zero(t, counterTotal(t, memory, "input", secondTags...), "the second function sees no packet")
@@ -112,7 +107,7 @@ func Test_UpdatePipelines_DataplaneRunsGoPipelines(t *testing.T) {
 // publishing nothing and taking nothing.
 func Test_UpdatePipelines_RefusesMissingFunction(t *testing.T) {
 	memory := newPublishedFixture(t)
-	before := sharedState[*layout.CpModule](memory)
+	before := sharedState(memory)
 
 	err := updatePipelines(t, memory, cpconfig.PipelineConfig{Name: "drop", Functions: []string{"absent"}})
 
@@ -125,7 +120,7 @@ func Test_UpdatePipelines_RefusesMissingFunction(t *testing.T) {
 // nothing.
 func Test_UpdatePipelines_RefusesRepeatedPipeline(t *testing.T) {
 	memory := newPublishedFixture(t)
-	before := sharedState[*layout.CpModule](memory)
+	before := sharedState(memory)
 	pipeline := cpconfig.PipelineConfig{Name: "twice"}
 
 	err := updatePipelines(t, memory, pipeline, pipeline)
@@ -189,7 +184,7 @@ func newFullPipelinesFixture(t testing.TB) *publishedFixture {
 	for idx := range 6 {
 		pipelines = append(pipelines, cpconfig.PipelineConfig{Name: fmt.Sprintf("idle%d", idx)})
 	}
-	require.NoError(t, cpconfig.UpdatePipelines(memory.Instance(), pipelines, cpconfig.WithDelivery(nativetest.Deliver)))
+	require.NoError(t, updatePipelines(t, memory, pipelines...))
 	requireFull(t, &memory.Instance().Cp.CpConfigGen.Get().PipelineRegistry.Registry)
 	return memory
 }
@@ -203,12 +198,8 @@ func newFullPipelinesFixture(t testing.TB) *publishedFixture {
 // the device's count them by their tags.
 func Test_UpdatePipelines_DataplaneRunsGoTopology(t *testing.T) {
 	memory := newPublishedFixture(t)
-	module, err := cpconfig.NewBlackhole(memory.owner, "native")
-	require.NoError(t, err)
-	rules, _, err := cpconfig.ModuleCounterRegistry(module, "rules")
-	require.NoError(t, err)
-	_, err = cpconfig.RegisterCounter(rules, "hits", 4)
-	require.NoError(t, err)
+	module := newBlackhole(t, memory, "native")
+	registerRuntimeCounter(t, module)
 	require.NoError(t, updateModules(t, memory, module))
 	require.NoError(t, updateFunctions(t, memory, cpconfig.FunctionConfig{
 		Name:   "native",
@@ -218,10 +209,9 @@ func Test_UpdatePipelines_DataplaneRunsGoTopology(t *testing.T) {
 	deviceTags := []zone.CounterTag{{Key: "device", Value: "port0"}, {Key: "kind", Value: "device"}}
 	received := counterTotal(t, memory, "input_rx", deviceTags...)
 
-	result, err := memory.Harness.HandlePackets(icmpPackets(t, 4)...)
+	dropped := handlePackets(t, memory, icmpPackets(t, 4))
 
-	require.NoError(t, err)
-	require.Len(t, result.Drop, 4, "the Go module drops every packet")
+	require.Len(t, dropped, 4, "the Go module drops every packet")
 	moduleTags := []zone.CounterTag{{Key: "module_name", Value: "native"}, {Key: "kind", Value: "module"}}
 	require.Equal(t, uint64(4), counterTotal(t, memory, "drop", moduleTags...))
 	require.Equal(t, received+4, counterTotal(t, memory, "input_rx", deviceTags...))
