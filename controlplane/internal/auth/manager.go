@@ -245,7 +245,7 @@ func (m *Manager) configureAuthenticators(cfg *Config) error {
 func (m *Manager) RunPolicyRefresh(ctx context.Context) error {
 	var group errgroup.Group
 	for _, task := range m.policyRefresh {
-		group.Go(func() error { return task.run(ctx) })
+		group.Go(func() error { return task.Run(ctx) })
 	}
 	return group.Wait()
 }
@@ -261,7 +261,7 @@ type policyRefreshTask struct {
 	log      *zap.Logger
 }
 
-func (m policyRefreshTask) run(ctx context.Context) error {
+func (m policyRefreshTask) Run(ctx context.Context) error {
 	ticker := time.NewTicker(m.Interval)
 	defer ticker.Stop()
 	var prevError error
