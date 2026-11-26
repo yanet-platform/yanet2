@@ -97,9 +97,16 @@ nat64s_insert_unlock(rwlock_t *lock) {
 }
 
 // The client's transport identity of a lan key: protocol, address and
-// source port, without the destination. RFC 6146 5.2 requires the
-// external mapping to be endpoint-independent: the same client endpoint
-// reaches every destination through the same external address and port.
+// source port, without the destination.
+//
+// The external address and port of a new session derive from it alone,
+// so one client endpoint starts from the same external identity towards
+// every destination. That identity is reserved per session, not per
+// endpoint: a port of it taken towards one remote moves that session to a
+// neighbouring port, while the endpoint's sessions towards other remotes
+// keep the derived one. RFC 6146 5.2 asks for a mapping that stays
+// endpoint-independent in this case too, which needs a binding kept per
+// endpoint.
 struct nat64s_client_tuple {
 	uint16_t proto;
 	uint16_t src_port;
@@ -108,8 +115,8 @@ struct nat64s_client_tuple {
 
 // The translated port of a new session: its own source port when it
 // already lies in the window, else a hash-derived port of the window,
-// both keyed by the client tuple alone so every destination of the same
-// client endpoint shares one external port.
+// both keyed by the client tuple alone, so every destination of the same
+// client endpoint starts from one external port.
 static inline uint16_t
 nat64s_alloc_port(
 	const struct nat64s_module_config *config,
@@ -279,20 +286,16 @@ nat64s_tcp_flags(struct packet *packet) {
 	return tcp->tcp_flags;
 }
 
-// Whether a client-to-remote packet establishes its TCP session: the
-// client's own ACK does. Its SYN alone does not — that is the init.
-static inline bool
-nat64s_tcp_establishes_lan(struct packet *packet) {
-	return (nat64s_tcp_flags(packet) & RTE_TCP_ACK_FLAG) != 0;
-}
-
 // Whether a remote-to-client packet establishes the session: the
-// remote's SYN answering the client's init — the simultaneous open
-// RFC 6146 3.5.2.2 counts as established — or any ACK.
+// remote's SYN answering the client's init, with or without its ACK —
+// the simultaneous open RFC 6146 3.5.2.2 counts as established.
+//
+// Nothing else does (RFC 6146 3.5.2.2): a session the remote has not
+// answered ages on the general timeout, whatever else either side sends,
+// so a half-open session never lives the established lifetime.
 static inline bool
 nat64s_tcp_establishes_wan(struct packet *packet) {
-	return (nat64s_tcp_flags(packet) & (RTE_TCP_ACK_FLAG | RTE_TCP_SYN_FLAG)
-	       ) != 0;
+	return (nat64s_tcp_flags(packet) & RTE_TCP_SYN_FLAG) != 0;
 }
 
 // The configured NAT64 prefix a destination embeds under, or NULL when
@@ -808,21 +811,27 @@ nat64s_probe_wan_port(
 }
 
 // Whether the entry an insert just stored in the given table layer
-// belongs to the given client.
+// belongs to the given session.
 //
-// The identity the value ops keep on a merge is read back before the
-// insert's write lock goes, so a concurrent refresh cannot swap it
-// underneath.
+// The session is the client endpoint — address and port — together with
+// the prefix of its outbound packets. The identity the value ops keep on
+// a merge is read back before the insert's write lock goes, so a
+// concurrent refresh cannot swap it underneath.
 static inline bool
 nat64s_wan_entry_owned(
-	fwmap_t *layer, int64_t idx, const uint8_t src6[16], uint16_t cli_port
+	fwmap_t *layer,
+	int64_t idx,
+	const uint8_t src6[16],
+	const uint8_t prefix[NAT64S_PREFIX_LEN],
+	uint16_t cli_port
 ) {
 	const struct nat64state_value *stored =
 		(const struct nat64state_value *)fwmap_get_value(
 			layer, (uint32_t)idx
 		);
 	return stored != NULL && stored->cli_port == cli_port &&
-	       memcmp(stored->src6, src6, 16) == 0;
+	       memcmp(stored->src6, src6, 16) == 0 &&
+	       memcmp(stored->prefix, prefix, NAT64S_PREFIX_LEN) == 0;
 }
 
 // The lan side: translate an IPv6 flow to IPv4, creating or refreshing its
@@ -889,8 +898,6 @@ nat64s_handle_v6(
 	rwlock_t *lock = NULL;
 	void *found = NULL;
 	bool from_stale = false;
-	bool established =
-		proto == IPPROTO_TCP && nat64s_tcp_establishes_lan(packet);
 	bool created = fwtable_lookup(
 			       prepared->lan.table,
 			       now,
@@ -899,13 +906,15 @@ nat64s_handle_v6(
 			       &lock,
 			       &from_stale
 		       ) < 0;
+	bool established = false;
 	if (!created) {
 		const struct nat64state_value *existing = found;
 		value.ip4 = existing->ip4;
 		value.port = existing->port;
-		// Establishment latches: a session that has carried an ACK
-		// stays on the established timeout.
-		established = established || existing->tcp_established;
+		// Establishment latches, and only the remote's answer latches
+		// it: until then the session ages on the general timeout,
+		// whatever its client sends.
+		established = existing->tcp_established;
 		memcpy(value.prefix, existing->prefix, NAT64S_PREFIX_LEN);
 		nat64s_lookup_unlock(lock);
 	} else {
@@ -1009,12 +1018,17 @@ nat64s_handle_v6(
 		nat64s_stats_bump(stats, NAT64S_INSERT_FAILED);
 		return -1;
 	}
-	// Two first packets can race onto a tuple both found free; the loser
-	// merged into the winner's entry and must not publish its own lan
+	// Two first packets can race onto a tuple both found free, and the
+	// loser merged into the winner's entry must not publish its own lan
 	// entry on top of it.
+	//
+	// Between two client endpoints that entry would send the second
+	// client's packets under the first one's external tuple; between two
+	// prefixes of one endpoint its replies would return under the
+	// winner's prefix, to a flow that never opened.
 	bool owned = ATOMIC_ADDR_OF(&prepared->wan.table->head) == wan_layer &&
 		     nat64s_wan_entry_owned(
-			     wan_layer, wan_idx, ipv6->src_addr, sport
+			     wan_layer, wan_idx, ipv6->src_addr, prefix, sport
 		     );
 	rwlock_write_unlock(lock);
 	if (!owned) {
@@ -1118,7 +1132,7 @@ nat64s_handle_v4(
 	struct nat64state_value refresh = {0};
 	refresh.updated_at = now;
 	refresh.cli_port = cli_port;
-	// Establishment latches here too: a return ACK of an establishing
+	// Establishment latches here too: the remote's SYN answering the
 	// handshake moves the session onto the established timeout.
 	established = established || nat64s_tcp_establishes_wan(packet);
 	refresh.tcp_established = established;
@@ -1205,8 +1219,10 @@ nat64s_handle_v4(
 		rwlock_write_unlock(lock);
 	}
 
-	if (cli_port != 0 && cli_port != dport &&
-	    nat64s_patch_dest_port(packet, cli_port)) {
+	// The client's own port is restored even when it is zero: an echo
+	// leaves with a translated identifier like any other outside the
+	// window, and its reply must come back under the client's own.
+	if (cli_port != dport && nat64s_patch_dest_port(packet, cli_port)) {
 		nat64s_stats_bump(stats, NAT64S_MALFORMED);
 		return -1;
 	}

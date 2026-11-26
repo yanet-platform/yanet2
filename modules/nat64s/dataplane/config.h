@@ -48,11 +48,11 @@ enum nat64s_stat {
  *
  * Ports translate inside the configured window: a source port already
  * inside it is kept, any other is rewritten to a hash-derived port of the
- * window (deterministic in the lan key, so every worker picks the same
- * one). Return traffic restores the client's original port from the wan
- * entry. Towards one remote an external tuple belongs to one client: a new
- * session whose tuple is already taken moves to a neighboring port of the
- * window.
+ * window, derived from the client's address, protocol and port alone so
+ * every worker picks the same one. Return traffic restores the client's
+ * original port from the wan entry, zero included. Towards one remote an
+ * external tuple belongs to one client: a new session whose tuple is
+ * already taken moves to a neighboring port of the window.
  */
 struct nat64s_module_config {
 	struct cp_module cp_module;

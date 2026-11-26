@@ -32,8 +32,10 @@ import (
 const MapObjectType = C.FWSTATE_MAP_NAT64_OBJECT_TYPE
 
 // MapConfig carries the sizing of the session tables' layers and their
-// shared stash, mirroring struct fwstate_map_create_config. Zero values
-// select their C defaults.
+// shared stash, mirroring struct fwstate_map_create_config.
+//
+// Zero values select their C defaults, the worker count excepted: it
+// must be set.
 type MapConfig struct {
 	IndexSize        uint32
 	ExtraBucketCount uint32
@@ -94,11 +96,13 @@ func (m *MapObjectConfig) CreateMap(config MapConfig) error {
 		return fmt.Errorf("nat64state map object is nil")
 	}
 	cConfig := config.toC()
-	rc := C.fwstate_map_nat64_object_create(
+	// The failure's cause is the libc errno: a size the agent cannot
+	// allocate, or a count the tables refuse.
+	rc, errno := C.fwstate_map_nat64_object_create(
 		C.cnat64s_from_cp_object(m.ptr), &cConfig,
 	)
 	if rc != 0 {
-		return fmt.Errorf("failed to create the nat64state tables: error code=%d", rc)
+		return fmt.Errorf("failed to create the nat64state tables: %w", errno)
 	}
 	return nil
 }
@@ -109,13 +113,13 @@ func (m *MapObjectConfig) InsertLayer(config MapConfig) error {
 		return fmt.Errorf("nat64state map object is nil")
 	}
 	cConfig := config.toC()
-	rc := C.fwstate_map_nat64_object_insert_layer(
+	rc, errno := C.fwstate_map_nat64_object_insert_layer(
 		C.cnat64s_from_cp_object(m.ptr),
 		cConfig.index_size, cConfig.extra_bucket_count,
 		cConfig.worker_count,
 	)
 	if rc != 0 {
-		return fmt.Errorf("failed to insert the nat64state layers: error code=%d", rc)
+		return fmt.Errorf("failed to insert the nat64state layers: %w", errno)
 	}
 	return nil
 }

@@ -3,8 +3,10 @@ package nat64spb
 import (
 	"errors"
 	"fmt"
+	"math"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	fwstatemappb "github.com/yanet-platform/yanet2/objects/fwstate/controlplane/fwstatemappb/v1"
 )
 
 // The smallest MTU limit the translator works with, in bytes: every IPv4
@@ -14,6 +16,10 @@ const (
 	minIPv4MTU = 68
 	minIPv6MTU = 1280
 )
+
+// MaxTimeout is the largest session timeout in seconds: the dataplane's
+// knob is 16 bits wide.
+const MaxTimeout = math.MaxUint16
 
 // Validate checks that a show request names a configuration.
 func (m *ShowConfigRequest) Validate() error {
@@ -44,8 +50,34 @@ func (m *DeleteConfigRequest) Validate() error {
 // Validate checks the limits only the request can judge; the rest is
 // judged when the config is decoded into its stored form.
 func (m *Config) Validate() error {
+	// The map name must survive its copy into the dataplane.
+	//
+	// It travels as a C string in a fixed-size buffer: one carrying a
+	// NUL byte, or as long as the buffer, names another object there
+	// than the one the module reserved for it.
+	if err := fwstatemappb.ValidateMapNameField("map", m.GetMap()); err != nil {
+		return err
+	}
 	if err := m.GetMtu().Validate(); err != nil {
 		return fmt.Errorf("mtu: %w", err)
+	}
+	if err := ValidateTimeout("timeout", m.GetTimeout()); err != nil {
+		return err
+	}
+
+	return ValidateTimeout("tcp_established_timeout", m.GetTcpEstablishedTimeout())
+}
+
+// ValidateTimeout checks that one session timeout in seconds fits what
+// the dataplane holds.
+func ValidateTimeout(field string, value uint32) error {
+	if value > MaxTimeout {
+		return fmt.Errorf(
+			"%s %d exceeds the maximum of %d seconds",
+			field,
+			value,
+			MaxTimeout,
+		)
 	}
 
 	return nil

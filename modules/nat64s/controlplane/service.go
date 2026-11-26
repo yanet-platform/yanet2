@@ -14,6 +14,7 @@ import (
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/crud"
 	nat64spb "github.com/yanet-platform/yanet2/modules/nat64s/controlplane/nat64spb/v1"
+	fwstatemappb "github.com/yanet-platform/yanet2/objects/fwstate/controlplane/fwstatemappb/v1"
 )
 
 // ServiceOption configures the NAT64sService constructor.
@@ -186,10 +187,16 @@ func decodeConfig(wire *nat64spb.Config) (*NAT64sConfig, error) {
 		config.Pool = append(config.Pool, addr)
 	}
 
-	config.Timeout.Timeout = uint16(clampTimeout(wire.GetTimeout()))
-	config.Timeout.TCPEstablished = uint16(
-		clampTimeout(wire.GetTcpEstablishedTimeout()),
-	)
+	if err := nat64spb.ValidateTimeout("timeout", wire.GetTimeout()); err != nil {
+		return nil, err
+	}
+	if err := nat64spb.ValidateTimeout(
+		"tcp_established_timeout", wire.GetTcpEstablishedTimeout(),
+	); err != nil {
+		return nil, err
+	}
+	config.Timeout.Timeout = uint16(wire.GetTimeout())
+	config.Timeout.TCPEstablished = uint16(wire.GetTcpEstablishedTimeout())
 
 	if wireMTU := wire.GetMtu(); wireMTU != nil {
 		if wireMTU.GetIpv4Mtu() > math.MaxUint16 || wireMTU.GetIpv6Mtu() > math.MaxUint16 {
@@ -221,11 +228,10 @@ func decodeConfig(wire *nat64spb.Config) (*NAT64sConfig, error) {
 	}
 
 	config.MapName = wire.GetMap()
-
-	if config.MapName == "" {
-		return nil, fmt.Errorf(
-			"a stateful config must link its nat64state_map session tables",
-		)
+	// The request boundary applies the same rule; a config decoded for
+	// an in-process caller gets it here.
+	if err := fwstatemappb.ValidateMapNameField("map", config.MapName); err != nil {
+		return nil, err
 	}
 
 	return config, nil
@@ -280,16 +286,4 @@ func wireIPv4Address(address uint32) *commonpb.IPv4Address {
 	var raw [4]byte
 	binary.NativeEndian.PutUint32(raw[:], address)
 	return commonpb.NewIPv4Address(raw)
-}
-
-// clampTimeout bounds one timeout in seconds: zero keeps zero (the C side
-// applies its default), the rest saturate at the C maximum.
-func clampTimeout(value uint32) uint32 {
-	// The C knob is uint16_t; the cap is the largest representable
-	// value.
-	const max = 65535
-	if value > max {
-		return max
-	}
-	return value
 }

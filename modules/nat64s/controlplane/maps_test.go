@@ -1,10 +1,13 @@
 package nat64s_test
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -83,6 +86,83 @@ func Test_MapRegistry_DefaultSizing_CreatesTheProductionMap(t *testing.T) {
 	)
 
 	releaseMap(t, registry, "t0", "sessions")
+}
+
+// Test_MapRegistry_Acquire_ReplacesUnreferencedMap verifies that a map no
+// config references anymore is never handed to the next one, while a
+// config referencing the map it already holds keeps it.
+//
+// The tables of the released map hold the sessions of the config that
+// used it, so the next config must get a map of its own.
+func Test_MapRegistry_Acquire_ReplacesUnreferencedMap(t *testing.T) {
+	_, registry := newTestRegistry(t)
+	require.NoError(t, registry.Acquire("t0", "sessions"))
+	used, err := registry.Ensure("sessions", 0)
+	require.NoError(t, err)
+
+	// The holder referencing the map again keeps the very same object.
+	require.NoError(t, registry.Acquire("t0", "sessions"))
+	kept, err := registry.Ensure("sessions", 0)
+	require.NoError(t, err)
+	require.Same(t, used, kept)
+
+	registry.Release("t0", "sessions")
+
+	require.NoError(t, registry.Acquire("t1", "sessions"))
+	fresh, err := registry.Ensure("sessions", 0)
+	require.NoError(t, err)
+	require.NotSame(
+		t,
+		used,
+		fresh,
+		"a map another config used must be replaced",
+	)
+
+	releaseMap(t, registry, "t1", "sessions")
+}
+
+// Test_MapRegistry_RunSweeper_LeavesReplacedMapsAlone verifies that maps
+// replaced while the sweeper runs are never touched by it.
+//
+// The sweeper and a replacing reference reach one map from two goroutines;
+// without the registry's lock between them the race detector reports it.
+func Test_MapRegistry_RunSweeper_LeavesReplacedMapsAlone(t *testing.T) {
+	_, registry := newTestRegistry(t)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	var sweeper errgroup.Group
+	sweeper.Go(func() error {
+		registry.RunSweeper(ctx, time.Millisecond)
+		return nil
+	})
+	stopped := make(chan struct{})
+	var waitErr error
+	go func() {
+		waitErr = sweeper.Wait()
+		close(stopped)
+	}()
+	join := func() {
+		cancel()
+		select {
+		case <-stopped:
+		case <-time.After(10 * time.Second):
+			t.Fatal("the sweeper did not join before the shared memory goes away")
+		}
+		require.NoError(t, waitErr)
+	}
+	// Registered after the harness's own cleanups, so it runs ahead of
+	// them: the sweeper is joined before the shared memory goes away,
+	// on a failed assertion too.
+	t.Cleanup(join)
+
+	for range 300 {
+		require.NoError(t, registry.Acquire("t0", "sessions"))
+		registry.Release("t0", "sessions")
+	}
+	join()
+
+	require.Empty(t, registry.MapOf("t0"))
+	registry.ReclaimUnreferenced()
 }
 
 // releaseMap lets the config give its map back and frees the object at

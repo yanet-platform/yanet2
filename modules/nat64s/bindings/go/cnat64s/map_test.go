@@ -2,6 +2,7 @@ package cnat64s_test
 
 import (
 	"runtime"
+	"syscall"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/modules/nat64s/bindings/go/cnat64s"
+	nat64spb "github.com/yanet-platform/yanet2/modules/nat64s/controlplane/nat64spb/v1"
 )
 
 // finalizerSentinel is large enough that the allocator never shares its
@@ -34,6 +36,49 @@ func collectFinalizers(t *testing.T) {
 			t.Fatal("the finalizers did not run")
 		}
 	}
+}
+
+// Test_TimeoutMax_MatchesTheRequestBound verifies that the request
+// boundary refuses exactly the timeouts the session state cannot hold.
+func Test_TimeoutMax_MatchesTheRequestBound(t *testing.T) {
+	require.Equal(t, uint32(nat64spb.MaxTimeout), uint32(cnat64s.TimeoutMax))
+}
+
+// Test_MapObjectConfig_CreateMap_ReportsTheCauseOfARefusal verifies that
+// a refused creation says why.
+//
+// A second creation finds the tables already there, and a worker count
+// of zero is an argument the tables refuse.
+func Test_MapObjectConfig_CreateMap_ReportsTheCauseOfARefusal(t *testing.T) {
+	harness, err := dataplaneut.NewHarness(dataplaneut.Config{
+		CPMemory:      uint64(64 * datasize.MB),
+		DPMemory:      uint64(4 * datasize.MB),
+		WorkerCount:   1,
+		ObjectsToLoad: []string{cnat64s.MapObjectType},
+	})
+	require.NoError(t, err)
+	t.Cleanup(harness.Free)
+
+	agent, err := harness.SharedMemory().AgentAttach(
+		"nat64s-binding-cause-test",
+		0,
+		16*datasize.MB,
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = agent.CleanUp() })
+
+	sizing := cnat64s.MapConfig{IndexSize: 1024, ExtraBucketCount: 64, WorkerCount: 1}
+	created, err := cnat64s.NewMapObjectConfig(agent, "created")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = created.Free() })
+	require.NoError(t, created.CreateMap(sizing))
+	require.ErrorIs(t, created.CreateMap(sizing), syscall.EEXIST)
+
+	zeroWorkers := cnat64s.MapConfig{IndexSize: 1024, ExtraBucketCount: 64}
+	unworked, err := cnat64s.NewMapObjectConfig(agent, "unworked")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = unworked.Free() })
+	require.ErrorIs(t, unworked.CreateMap(zeroWorkers), syscall.EINVAL)
 }
 
 // Test_MapObjectConfig_DroppedUnreleasedCollectsQuietly verifies that a

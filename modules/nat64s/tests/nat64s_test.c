@@ -1219,11 +1219,13 @@ test_error_unknown_tuple_dropped(struct nat64s_env *env) {
 	return TEST_SUCCESS;
 }
 
-// RFC 6146 5.2 endpoint-independent mapping: the same client endpoint
-// reaching a second destination reuses the external identity the first
-// session allocated.
+// The same client endpoint starts from one external identity towards
+// every destination.
+//
+// A second destination's SYN leaves with the first session's address and
+// port, as long as that identity is free towards it.
 static int
-test_endpoint_independent_mapping(struct nat64s_env *env) {
+test_external_identity_derives_from_client_endpoint(struct nat64s_env *env) {
 	// Two fresh destinations, so the main session is left alone.
 	const uint8_t remote2[4] = {192, 0, 2, 99};
 	const uint8_t remote3[4] = {192, 0, 2, 100};
@@ -1404,7 +1406,7 @@ test_established_latch(struct nat64s_env *env) {
 	TEST_ASSERT(!dropped, "the SYN must not be dropped");
 	rte_pktmbuf_free(packet_to_mbuf(out));
 
-	// The SYN-ACK return carries an ACK: the session latches.
+	// The SYN-ACK return carries the remote's SYN: the session latches.
 	TEST_ASSERT_SUCCESS(
 		nat64s_make_v4_reply(env, env->allocated_port, &in),
 		"build failed"
@@ -1413,8 +1415,8 @@ test_established_latch(struct nat64s_env *env) {
 	TEST_ASSERT(!dropped, "the SYN-ACK must not be dropped");
 	rte_pktmbuf_free(packet_to_mbuf(out));
 
-	// Past the general timeout the session must still answer: the ACK
-	// latched it onto the established one.
+	// Past the general timeout the session must still answer: the
+	// remote's SYN latched it onto the established one.
 	dataplane_ut_set_time_ns(
 		env->ut, 3000000000000ull + 60ull * 1000000000ull
 	);
@@ -1491,11 +1493,124 @@ nat64s_test_set_tcp_flags(struct packet *packet, uint8_t flags) {
 	tcp->tcp_flags = flags;
 }
 
+// A client's own ACK does not establish its session (RFC 6146 3.5.2.2).
+//
+// Until the remote answers, the session ages on the general timeout
+// whatever its client sends after the SYN.
+static int
+test_client_ack_keeps_init_lifetime(struct nat64s_env *env) {
+	// Short general timeout, long established one.
+	env->config->timeouts.timeout = 30;
+	env->config->timeouts.tcp_established = 300;
+
+	dataplane_ut_set_time_ns(env->ut, 3500000000000ull);
+	struct packet *in = NULL;
+	struct packet *out = NULL;
+	bool dropped = false;
+	TEST_ASSERT_SUCCESS(nat64s_make_v6_syn(env, 2016, &in), "build failed");
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the SYN must not be dropped");
+	struct rte_tcp_hdr *tcp = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(out),
+		struct rte_tcp_hdr *,
+		out->transport_header.offset
+	);
+	uint16_t allocated_port = rte_be_to_cpu_16(tcp->src_port);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	// The client's ACK, the remote having answered nothing: forwarded
+	// like any other packet of the session.
+	TEST_ASSERT_SUCCESS(nat64s_make_v6_syn(env, 2016, &in), "build failed");
+	nat64s_test_set_tcp_flags(in, RTE_TCP_ACK_FLAG);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the client's ACK must be translated");
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	// Past the general timeout the session is gone, as one the remote
+	// never answered.
+	dataplane_ut_set_time_ns(
+		env->ut, 3500000000000ull + 60ull * 1000000000ull
+	);
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_reply(env, allocated_port, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT_NULL(
+		out,
+		"a session the remote never answered must keep the general "
+		"timeout"
+	);
+	TEST_ASSERT(dropped, "the reply to an expired session must be dropped");
+
+	// Restore the suite's timeouts.
+	env->config->timeouts.timeout = 300;
+	env->config->timeouts.tcp_established = 300;
+	return TEST_SUCCESS;
+}
+
+// Only the remote's SYN establishes a session (RFC 6146 3.5.2.2).
+//
+// The remote's refusal of the connection, a reset carrying an ACK, is
+// forwarded but leaves the session on the general timeout.
+static int
+test_remote_reset_does_not_establish(struct nat64s_env *env) {
+	// Short general timeout, long established one.
+	env->config->timeouts.timeout = 30;
+	env->config->timeouts.tcp_established = 300;
+
+	dataplane_ut_set_time_ns(env->ut, 3600000000000ull);
+	struct packet *in = NULL;
+	struct packet *out = NULL;
+	bool dropped = false;
+	TEST_ASSERT_SUCCESS(nat64s_make_v6_syn(env, 2019, &in), "build failed");
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the SYN must not be dropped");
+	struct rte_tcp_hdr *tcp = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(out),
+		struct rte_tcp_hdr *,
+		out->transport_header.offset
+	);
+	uint16_t allocated_port = rte_be_to_cpu_16(tcp->src_port);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	// The remote's reset of the connection: forwarded like any other
+	// packet of the session.
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_reply(env, allocated_port, &in), "build failed"
+	);
+	nat64s_test_set_tcp_flags(in, RTE_TCP_RST_FLAG | RTE_TCP_ACK_FLAG);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the remote's reset must be translated");
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	// Past the general timeout the session is gone, as one the remote
+	// never answered with a SYN.
+	dataplane_ut_set_time_ns(
+		env->ut, 3600000000000ull + 60ull * 1000000000ull
+	);
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_reply(env, allocated_port, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT_NULL(
+		out,
+		"a session the remote answered without a SYN must keep the "
+		"general timeout"
+	);
+	TEST_ASSERT(dropped, "the reply to an expired session must be dropped");
+
+	// Restore the suite's timeouts.
+	env->config->timeouts.timeout = 300;
+	env->config->timeouts.tcp_established = 300;
+	return TEST_SUCCESS;
+}
+
 // A session outlives the client's silence: return traffic alone keeps
-// the client's entry alive. Before the fix only the client's packets
-// refreshed it, so after the client went quiet past the general timeout
-// its entry expired, and its next packet was treated as a new flow and
-// dropped by the SYN-only rule.
+// the client's entry alive.
+//
+// A client that stayed quiet past the general timeout still finds its
+// session, instead of being taken for a new flow and dropped by the
+// SYN-only rule.
 static int
 test_return_traffic_keeps_lan_entry(struct nat64s_env *env) {
 	// A short general timeout, so the lan entry would expire inside
@@ -1930,6 +2045,35 @@ test_echo_probe_skips_identifiers_others_hold(struct nat64s_env *env) {
 		"the first client's answer must find the first client"
 	);
 	return TEST_SUCCESS;
+}
+
+// An identifier of zero is the client's own like any other.
+//
+// The request leaves with a translated one, as zero lies outside the
+// port window, and the reply comes back under the client's zero.
+static int
+test_echo_identifier_zero_round_trips(struct nat64s_env *env) {
+	dataplane_ut_set_time_ns(env->ut, 20750000000000ull);
+	struct packet *in = NULL;
+	struct packet *out = NULL;
+	bool dropped = false;
+	TEST_ASSERT_SUCCESS(nat64s_make_v6_echo(env, 0, &in), "build failed");
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the echo request must not be dropped");
+	TEST_ASSERT_NOT_NULL(out, "the echo request must be translated");
+	struct rte_icmp_hdr *icmp4 = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(out),
+		struct rte_icmp_hdr *,
+		out->transport_header.offset
+	);
+	uint16_t translated = rte_be_to_cpu_16(icmp4->icmp_ident);
+	TEST_ASSERT(
+		translated != 0,
+		"an identifier outside the window must be translated"
+	);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	return nat64s_test_echo_answered(env, translated, client_addr, 0);
 }
 
 // Towards one remote an external tuple belongs to one client: a second
@@ -2510,8 +2654,8 @@ test_full_table_refuses_without_wedging(struct nat64s_env *env) {
 }
 
 // Timeouts left unset reach the dataplane unset, and each resolves to its
-// own default there: a TCP session that has carried an ACK lives for
-// hours, one that has not lives for a minute.
+// own default there: a TCP session the remote has answered lives for
+// hours, one that it has not lives for a minute.
 static int
 test_default_timeouts_follow_each_knob(struct nat64s_env *env) {
 	const struct nat64s_env_settings defaults = {
@@ -2596,6 +2740,94 @@ test_default_timeouts_follow_each_knob(struct nat64s_env *env) {
 	return TEST_SUCCESS;
 }
 
+// The largest timeout a knob represents reaches the session whole.
+//
+// One configured with it still answers half a second short of it, on
+// either knob.
+static int
+test_largest_timeout_kept_whole(struct nat64s_env *env) {
+	const struct nat64s_env_settings largest = {
+		.port_lo = 1024,
+		.port_hi = 4096,
+		.timeouts = {.timeout = 65535, .tcp_established = 65535},
+	};
+	TEST_ASSERT_SUCCESS(
+		nat64s_env_reconfigure(env, &largest), "reconfigure failed"
+	);
+
+	const uint64_t base = 26000000000000ull;
+	const uint64_t sec = 1000000000ull;
+	struct packet *in = NULL;
+	struct packet *out = NULL;
+	bool dropped = false;
+
+	// Flow A is opened and answered with a SYN-ACK; flow B only opens.
+	dataplane_ut_set_time_ns(env->ut, base);
+	TEST_ASSERT_SUCCESS(nat64s_make_v6_syn(env, 2017, &in), "build failed");
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the established flow's SYN must not be dropped");
+	TEST_ASSERT_NOT_NULL(out, "the established flow's SYN must translate");
+	struct rte_tcp_hdr *tcp = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(out),
+		struct rte_tcp_hdr *,
+		out->transport_header.offset
+	);
+	uint16_t established_port = rte_be_to_cpu_16(tcp->src_port);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_reply(env, established_port, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the SYN-ACK must not be dropped");
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	TEST_ASSERT_SUCCESS(nat64s_make_v6_syn(env, 2018, &in), "build failed");
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		!dropped, "the unestablished flow's SYN must not be dropped"
+	);
+	TEST_ASSERT_NOT_NULL(
+		out, "the unestablished flow's SYN must translate"
+	);
+	tcp = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(out),
+		struct rte_tcp_hdr *,
+		out->transport_header.offset
+	);
+	uint16_t unestablished_port = rte_be_to_cpu_16(tcp->src_port);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	// Half a second short of the largest timeout, both still answer.
+	dataplane_ut_set_time_ns(env->ut, base + 65534 * sec + sec / 2);
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_reply(env, established_port, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		!dropped,
+		"an established session must live for the largest timeout"
+	);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_reply(env, unestablished_port, &in),
+		"build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		!dropped,
+		"an unestablished session must live for the largest timeout"
+	);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	TEST_ASSERT_SUCCESS(
+		nat64s_env_reconfigure(env, &nat64s_suite_settings),
+		"restoring the suite's settings failed"
+	);
+	return TEST_SUCCESS;
+}
+
 int
 main(void) {
 	log_enable_name("debug");
@@ -2628,7 +2860,7 @@ main(void) {
 		res = test_error_unknown_tuple_dropped(&env);
 	}
 	if (res == TEST_SUCCESS) {
-		res = test_endpoint_independent_mapping(&env);
+		res = test_external_identity_derives_from_client_endpoint(&env);
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_in_window_port_kept(&env);
@@ -2649,6 +2881,12 @@ main(void) {
 		res = test_session_expires(&env);
 	}
 	if (res == TEST_SUCCESS) {
+		res = test_client_ack_keeps_init_lifetime(&env);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_remote_reset_does_not_establish(&env);
+	}
+	if (res == TEST_SUCCESS) {
 		res = test_return_traffic_keeps_lan_entry(&env);
 	}
 	if (res == TEST_SUCCESS) {
@@ -2659,6 +2897,9 @@ main(void) {
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_echo_probe_skips_identifiers_others_hold(&env);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_echo_identifier_zero_round_trips(&env);
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_taken_tuple_moves_to_free_port(&env);
@@ -2686,6 +2927,9 @@ main(void) {
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_default_timeouts_follow_each_knob(&env);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_largest_timeout_kept_whole(&env);
 	}
 
 	nat64s_env_fini(&env);

@@ -49,12 +49,16 @@ type ModuleUpdate struct {
 }
 
 // SessionTimeout carries the two session timeouts in seconds: one for
-// every session, and a longer one for a TCP session that has carried an
-// ACK.
+// every session, and a longer one for a TCP session the remote has
+// answered.
 type SessionTimeout struct {
 	Timeout        uint16
 	TCPEstablished uint16
 }
+
+// TimeoutMax is the largest session timeout in seconds the session state
+// holds, the bound of its 16-bit knobs.
+const TimeoutMax = C.NAT64STATE_TIMEOUT_MAX
 
 // NewModuleConfig allocates a new, empty nat64s module configuration.
 //

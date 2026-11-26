@@ -5,8 +5,6 @@
 
 #include <netinet/in.h>
 
-#include <netinet/in.h>
-
 #include "types.h"
 
 /**
@@ -55,8 +53,8 @@ struct nat64state_wan_key {
  * @brief The session timeouts of a stateful NAT64 instance
  *
  * Two knobs in seconds: one for every session whatever its protocol,
- * and a longer one for a TCP session once it has carried an ACK — the
- * idle established connection RFC 6146 3.5.2.2 gives its two-hour
+ * and a longer one for a TCP session once the remote has answered it —
+ * the idle established connection RFC 6146 3.5.2.2 gives its two-hour
  * timer. Zero selects each knob's default.
  */
 struct nat64state_timeouts {
@@ -68,8 +66,8 @@ struct nat64state_timeouts {
 // RFC 6146 3.5.2.2: the two-hour TCP_est timer plus the four-minute
 // transitory one.
 #define NAT64STATE_TCP_ESTABLISHED_DEFAULT 7440
-// The largest timeout the uint16_t knob can represent; values above it
-// are refused at the config boundary instead of silently narrowing.
+// The largest timeout the uint16_t knob can represent; the config
+// boundary refuses larger values instead of silently narrowing them.
 #define NAT64STATE_TIMEOUT_MAX 65535
 
 _Static_assert(
@@ -97,8 +95,8 @@ struct nat64state_value {
 	uint64_t _pad0 : 16;
 	/** Whether the TCP session is established: once set, stays set,
 	 * and the session ages on the established timeout. The module
-	 * sets it on an ACK in either direction and on a SYN answering
-	 * the initial one (RFC 6146 3.5.2.2). */
+	 * sets it when the remote's SYN answers the session (RFC 6146
+	 * 3.5.2.2), and on no other packet. */
 	bool tcp_established;
 	/** Pool IPv4 address (network order) of the lan-side allocation */
 	uint32_t ip4;
@@ -116,12 +114,12 @@ struct nat64state_value {
 /**
  * @brief The session TTL of a stateful NAT64 instance
  *
- * A TCP session that has carried an ACK ages on the established knob,
+ * A TCP session the remote has answered ages on the established knob,
  * everything else on the general one; a zero knob selects its default
  * rather than an already-expired session.
  *
  * @param proto IP protocol number of the session
- * @param tcp_established whether the TCP session has carried an ACK
+ * @param tcp_established whether the remote has answered the TCP session
  * @param timeouts the timeout knobs
  *
  * @return TTL in nanoseconds

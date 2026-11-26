@@ -257,8 +257,8 @@ fwmap_update_value_nat64state(
 	d->cli_port = old.cli_port;
 	memcpy(d->src6, old.src6, sizeof(d->src6));
 	memcpy(d->prefix, old.prefix, sizeof(d->prefix));
-	// Establishment latches: an ACK seen by any refresh keeps the
-	// session on the established timeout.
+	// Establishment latches: an establishment seen by any refresh keeps
+	// the session on the established timeout.
 	d->tcp_established = d->tcp_established || old.tcp_established;
 }
 

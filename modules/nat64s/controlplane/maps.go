@@ -2,7 +2,9 @@ package nat64s
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"maps"
 	"sync"
 	"time"
 
@@ -30,7 +32,9 @@ var ErrMapReserved = fmt.Errorf(
 //
 // Every operation that changes the registry or a map publishes a new
 // object generation, which waits for every dataplane worker to advance —
-// the RCU grace period layer reclamation requires.
+// the RCU grace period layer reclamation requires — and runs under the
+// registry's lock, the sweeper's rounds included: no map is released
+// underneath a hand that still holds it.
 //
 // The registry creates each map with its first layer only. That layer
 // admits a fixed number of sessions in total, expired ones keeping their
@@ -40,6 +44,12 @@ type MapRegistry struct {
 	agent *ffi.Agent
 	mu    sync.Mutex
 	maps  map[string]*cnat64s.MapObjectConfig
+	// Maps the dataplane no longer lists but whose memory it still
+	// holds, a retired generation listing them.
+	//
+	// Their release is retried every round, until the generations
+	// holding them drain.
+	deferred []*cnat64s.MapObjectConfig
 	// The sizing of the maps the registry creates, its zero fields
 	// selecting the defaults of the shared memory layout.
 	sizing cnat64s.MapConfig
@@ -92,7 +102,10 @@ func NewMapRegistry(agent *ffi.Agent, options ...RegistryOption) *MapRegistry {
 }
 
 // Ensure returns the named map, creating and publishing it on first
-// reference. A worker count of zero derives it from the dataplane.
+// reference and replacing one no config references.
+//
+// The handle stays valid for as long as a config holds the map. A worker
+// count of zero derives it from the dataplane.
 func (m *MapRegistry) Ensure(name string, workerCount uint16) (*cnat64s.MapObjectConfig, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -101,9 +114,28 @@ func (m *MapRegistry) Ensure(name string, workerCount uint16) (*cnat64s.MapObjec
 }
 
 // ensureLocked is Ensure for a caller holding the lock.
+//
+// A map no config references is never handed out again. Its tables hold
+// the sessions of the config that used it, created under that config's
+// prefix and pool, and they would answer the next one: the map is deleted
+// first and created anew. A deletion the dataplane refuses fails the call,
+// and a later sweep retries it.
 func (m *MapRegistry) ensureLocked(name string, workerCount uint16) (*cnat64s.MapObjectConfig, error) {
-	if object, ok := m.maps[name]; ok {
+	object, known := m.maps[name]
+	if known && len(m.users[name]) != 0 {
 		return object, nil
+	}
+	if known {
+		if err := m.reclaimLocked(name); err != nil {
+			return nil, fmt.Errorf(
+				"failed to replace the unreferenced session map %q: %w",
+				name,
+				err,
+			)
+		}
+		// The replacement allocates right after this: a release the
+		// dataplane refused a moment ago gets another chance first.
+		m.releaseDeferredLocked()
 	}
 
 	if workerCount == 0 {
@@ -132,28 +164,35 @@ func (m *MapRegistry) ensureLocked(name string, workerCount uint16) (*cnat64s.Ma
 // sweep reclaims one map's parked layers: a barrier, the unlink, a second
 // barrier, then the release. A map with nothing to reclaim answers from
 // its own pointers and skips the barriers.
-func (m *MapRegistry) sweep(object *cnat64s.MapObjectConfig, now uint64) {
-	if !object.HasReclaimable(now) {
+//
+// The lock is held from the check that the registry still lists the map
+// to the end: a reference frees a replaced map under the same lock, and
+// without it this sweep could keep reading a freed map.
+func (m *MapRegistry) sweep(name string, object *cnat64s.MapObjectConfig, now uint64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.maps[name] != object || !object.HasReclaimable(now) {
 		return
 	}
 
 	if err := object.Publish(m.agent); err != nil {
 		m.log.Error("generation barrier failed before stale-layer unlink",
-			zap.String("map", "nat64state_map"),
+			zap.String("map", name),
 			zap.Error(err),
 		)
 		return
 	}
 	if err := object.UnlinkStaleLayers(now); err != nil {
 		m.log.Error("failed to unlink stale layers",
-			zap.String("map", "nat64state_map"),
+			zap.String("map", name),
 			zap.Error(err),
 		)
 		return
 	}
 	if err := object.Publish(m.agent); err != nil {
 		m.log.Error("generation barrier failed after stale-layer unlink; parked layers retained",
-			zap.String("map", "nat64state_map"),
+			zap.String("map", name),
 			zap.Error(err),
 		)
 		return
@@ -164,18 +203,15 @@ func (m *MapRegistry) sweep(object *cnat64s.MapObjectConfig, now uint64) {
 // sweepAll reclaims every registered map at the dataplane's clock.
 func (m *MapRegistry) sweepAll() {
 	m.mu.Lock()
-	objects := make([]*cnat64s.MapObjectConfig, 0, len(m.maps))
-	for _, object := range m.maps {
-		objects = append(objects, object)
-	}
+	registered := maps.Clone(m.maps)
 	m.mu.Unlock()
 
-	now, ok := m.agent.DPConfig().CurrentTime()
-	if !ok {
-		return
-	}
-	for _, object := range objects {
-		m.sweep(object, now)
+	// Without the dataplane's clock no layer can be judged stale; the
+	// maps no config references are reclaimed all the same.
+	if now, ok := m.agent.DPConfig().CurrentTime(); ok {
+		for name, object := range registered {
+			m.sweep(name, object, now)
+		}
 	}
 
 	m.ReclaimUnreferenced()
@@ -202,17 +238,19 @@ func (m *MapRegistry) RunSweeper(ctx context.Context, interval time.Duration) {
 }
 
 // Release drops a config's reference to the named map; the object stays
-// parked for the sweeper, which reclaims it once no published config
-// references it anymore.
+// parked until a sweep deletes it, unless a config references the map
+// again first, which replaces it with a fresh one.
 func (m *MapRegistry) Release(config, name string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.users[name], config)
 }
 
-// ReclaimUnreferenced deletes the objects no config references anymore. A map
-// still referenced by a published module config refuses deletion; the
-// next sweep retries.
+// ReclaimUnreferenced deletes the maps no config references anymore and
+// retries the releases the dataplane refused earlier.
+//
+// A map still referenced by a published module config refuses deletion;
+// the next sweep retries.
 //
 // The whole round runs under the lock: a map reads as unreferenced only
 // while no config can begin referencing it, so an object is never deleted
@@ -221,20 +259,65 @@ func (m *MapRegistry) ReclaimUnreferenced() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	m.releaseDeferredLocked()
 	for name, object := range m.maps {
 		if object == nil || len(m.users[name]) != 0 {
 			continue
 		}
-		if err := cnat64s.DeleteMapObject(m.agent, name); err != nil {
+		if err := m.reclaimLocked(name); err != nil {
 			m.log.Warn("map deletion refused; retrying on later sweeps",
 				zap.String("map", name),
 				zap.Error(err))
-			continue
 		}
-		_ = object.Free()
-		delete(m.maps, name)
-		delete(m.users, name)
 	}
+}
+
+// reclaimLocked deletes one unreferenced map from the dataplane and from
+// the registry.
+//
+// A map the dataplane no longer knows counts as deleted. Its memory is
+// released once the generations listing it have drained; until then its
+// handle stays deferred.
+func (m *MapRegistry) reclaimLocked(name string) error {
+	if err := cnat64s.DeleteMapObject(m.agent, name); err != nil &&
+		!errors.Is(err, ffi.ErrNotFound) {
+		return err
+	}
+	if object := m.maps[name]; object != nil {
+		m.releaseLocked(object)
+	}
+	delete(m.maps, name)
+	delete(m.users, name)
+	return nil
+}
+
+// releaseLocked frees a map the dataplane no longer lists, and defers the
+// handle when the free is refused.
+func (m *MapRegistry) releaseLocked(object *cnat64s.MapObjectConfig) {
+	err := object.Free()
+	switch {
+	case err == nil:
+	case errors.Is(err, ffi.ErrStillReferenced):
+		m.deferred = append(m.deferred, object)
+	default:
+		m.log.Error("failed to free a session map", zap.Error(err))
+	}
+}
+
+// releaseDeferredLocked retries the deferred releases; the handles still
+// refused stay deferred for the next round.
+func (m *MapRegistry) releaseDeferredLocked() {
+	kept := m.deferred[:0]
+	for _, object := range m.deferred {
+		switch err := object.Free(); {
+		case errors.Is(err, ffi.ErrStillReferenced):
+			kept = append(kept, object)
+		case err != nil:
+			m.log.Error("failed to free a session map", zap.Error(err))
+		}
+	}
+	clear(m.deferred[len(kept):])
+	m.deferred = kept
 }
 
 // MapOf returns the map name the config last acquired, or "".
@@ -250,8 +333,9 @@ func (m *MapRegistry) MapOf(config string) string {
 }
 
 // Acquire reserves the named map for the config, creating the map on
-// first reference. It fails with ErrMapReserved while another config
-// holds the map.
+// first reference, and anew when a map no config references is parked
+// under the name: its sessions belong to the config that used it. It
+// fails with ErrMapReserved while another config holds the map.
 //
 // A map holds the tables of exactly one instance: its session keys name
 // no instance, so two configs on one map would translate through each

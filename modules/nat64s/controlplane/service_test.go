@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"net/netip"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -17,6 +18,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/nat64s/controlplane"
 	nat64spb "github.com/yanet-platform/yanet2/modules/nat64s/controlplane/nat64spb/v1"
+	fwstatemappb "github.com/yanet-platform/yanet2/objects/fwstate/controlplane/fwstatemappb/v1"
 )
 
 // mockHandle is a shared-memory handle whose release always succeeds.
@@ -130,6 +132,23 @@ func Test_NAT64sService_UpdateConfig_AcceptsWholeConfig(t *testing.T) {
 	require.Equal(t, []string{"t0"}, listed.GetConfigs())
 }
 
+// Test_NAT64sService_UpdateConfig_KeepsLargestTimeoutsWhole verifies that
+// the largest timeouts a knob represents pass the request boundary and
+// reach the stored config as they were sent.
+func Test_NAT64sService_UpdateConfig_KeepsLargestTimeoutsWhole(t *testing.T) {
+	backend := &mockBackend{}
+	service := nat64s.NewNAT64sService(backend)
+
+	request := validUpdate("t0")
+	request.Config.Timeout = nat64spb.MaxTimeout
+	request.Config.TcpEstablishedTimeout = nat64spb.MaxTimeout
+
+	require.NoError(t, updateConfig(t, service, request))
+	require.Len(t, backend.Configs, 1)
+	require.Equal(t, uint16(nat64spb.MaxTimeout), backend.Configs[0].Timeout.Timeout)
+	require.Equal(t, uint16(nat64spb.MaxTimeout), backend.Configs[0].Timeout.TCPEstablished)
+}
+
 // Test_NAT64sService_UpdateConfig_StoresPoolInNetworkOrder verifies that a
 // pool address reaches the dataplane as its own network-order bytes, the
 // form packets are compared against, and reads back as the address sent.
@@ -235,7 +254,33 @@ func Test_NAT64sService_UpdateConfig_RejectsBadConfigs(t *testing.T) {
 		{
 			name:    "no session map",
 			mutate:  func(r *nat64spb.UpdateConfigRequest) { r.Config.Map = "" },
-			message: "must link its nat64state_map session tables",
+			message: "map is required",
+		},
+		{
+			name: "session map name with a NUL byte",
+			mutate: func(r *nat64spb.UpdateConfigRequest) {
+				r.Config.Map = "sessions\x00elsewhere"
+			},
+			message: "map must not contain NUL",
+		},
+		{
+			name: "session map name as long as the object name buffer",
+			mutate: func(r *nat64spb.UpdateConfigRequest) {
+				r.Config.Map = strings.Repeat("s", fwstatemappb.MaxMapNameLen)
+			},
+			message: "map must be shorter than",
+		},
+		{
+			name:    "timeout above the largest one",
+			mutate:  func(r *nat64spb.UpdateConfigRequest) { r.Config.Timeout = nat64spb.MaxTimeout + 1 },
+			message: "timeout 65536 exceeds the maximum of 65535 seconds",
+		},
+		{
+			name: "established timeout above the largest one",
+			mutate: func(r *nat64spb.UpdateConfigRequest) {
+				r.Config.TcpEstablishedTimeout = nat64spb.MaxTimeout + 1
+			},
+			message: "tcp_established_timeout 65536 exceeds the maximum",
 		},
 		{
 			name:    "no config name",
@@ -272,6 +317,36 @@ func Test_NAT64sService_UpdateConfig_RejectsBadConfigs(t *testing.T) {
 			require.Empty(t, backend.Configs)
 		})
 	}
+}
+
+// Test_NAT64sService_UpdateConfig_DecodeJudgesMapName verifies that a
+// config decoded without the request boundary ahead of it is held to the
+// map-name rule all the same.
+func Test_NAT64sService_UpdateConfig_DecodeJudgesMapName(t *testing.T) {
+	backend := &mockBackend{}
+	service := nat64s.NewNAT64sService(backend)
+
+	request := validUpdate("t0")
+	request.Config.Map = "sessions\x00elsewhere"
+	_, err := service.UpdateConfig(t.Context(), request)
+	require.Error(t, err)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Empty(t, backend.Configs)
+}
+
+// Test_NAT64sService_UpdateConfig_DecodeRefusesLargeTimeouts verifies
+// that a config decoded without the request boundary ahead of it refuses
+// a timeout the dataplane cannot hold, instead of narrowing it.
+func Test_NAT64sService_UpdateConfig_DecodeRefusesLargeTimeouts(t *testing.T) {
+	backend := &mockBackend{}
+	service := nat64s.NewNAT64sService(backend)
+
+	request := validUpdate("t0")
+	request.Config.Timeout = nat64spb.MaxTimeout + 1
+	_, err := service.UpdateConfig(t.Context(), request)
+	require.Error(t, err)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Empty(t, backend.Configs)
 }
 
 // Test_NAT64sService_Requests_RefuseMissingName verifies that a show,

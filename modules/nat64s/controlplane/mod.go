@@ -76,12 +76,12 @@ type Config struct {
 
 func DefaultConfig() *Config {
 	return &Config{
-		// The nat64state map objects this module creates allocate in
-		// its agent zone, so the default must hold at least the
-		// default map dimensions: a zero-sizing CreateMap picks a
-		// 1,048,576-entry index per side of the object, and two such
-		// layers need well over 100 MB before module configs and
-		// allocator overhead.
+		// The session maps this module creates allocate in its agent
+		// zone.
+		//
+		// A map left unsized takes close to 272 MiB for its tables, so
+		// the default holds three of them next to the module's own
+		// configs.
 		BaseConfig:              modulebase.NewBaseConfig(1024 * datasize.MB),
 		StaleLayerSweepInterval: DefaultStaleLayerSweepInterval,
 	}

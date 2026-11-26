@@ -53,16 +53,16 @@ message Config {
   // Public IPv4 pool the lan-side flows translate to.
   repeated common.commonpb.v1.IPv4Address pool = 2;
   // The session timeout in seconds, shared by every session; zero
-  // selects the default.
+  // selects the default, and 65535 is the largest value.
   uint32 timeout = 3;
-  // The timeout in seconds of a TCP session that has carried an ACK —
+  // The timeout in seconds of a TCP session the remote has answered —
   // the idle established connection's longer lifetime; zero selects the
-  // default.
+  // default, and 65535 is the largest value.
   uint32 tcp_established_timeout = 8;
   MTUConfig mtu = 4;
   PortRange port_range = 5;
   // Name of the linked nat64state_map object, the instance's session
-  // tables; empty links none.
+  // tables; required, with no NUL byte and shorter than 80 bytes.
   string map = 7;
 }
 

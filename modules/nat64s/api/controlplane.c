@@ -111,16 +111,6 @@ nat64s_module_config_free(struct cp_module *cp_module, yanet_error **err) {
 	return 0;
 }
 
-// Saturate one timeout knob at NAT64STATE_TIMEOUT_MAX. Zero stays zero: the
-// dataplane resolves each knob's zero to that knob's own default.
-static uint16_t
-nat64s_timeout_clamp(uint16_t value) {
-	if (value >= NAT64STATE_TIMEOUT_MAX) {
-		return NAT64STATE_TIMEOUT_MAX - 1;
-	}
-	return value;
-}
-
 int
 nat64s_module_config_update(
 	struct cp_module *cp_module,
@@ -190,10 +180,11 @@ nat64s_module_config_update(
 	config->port_hi =
 		(update->port_hi > update->port_lo) ? update->port_hi : 65535;
 
-	config->timeouts.timeout =
-		nat64s_timeout_clamp(update->timeouts.timeout);
-	config->timeouts.tcp_established =
-		nat64s_timeout_clamp(update->timeouts.tcp_established);
+	// The timeouts arrive narrowed to their knob already, the largest
+	// value it represents included. Zero stays zero: the dataplane
+	// resolves each knob's zero to that knob's own default.
+	config->timeouts.timeout = update->timeouts.timeout;
+	config->timeouts.tcp_established = update->timeouts.tcp_established;
 
 	// Zero selects the defaults; the translation core's length
 	// arithmetic assumes a nonzero limit.

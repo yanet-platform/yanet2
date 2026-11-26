@@ -27,16 +27,18 @@ import (
 	nat64spb "github.com/yanet-platform/yanet2/modules/nat64s/controlplane/nat64spb/v1"
 )
 
-// The endpoints of the scenarios: the client, the public address its flows
-// are translated to, and the remote, as IPv4 and as embedded under the
-// NAT64 prefix. The public address is also given in the wire form, a
-// big-endian integer.
+// The endpoints of the scenarios: the client, the public addresses its
+// flows are translated to, and the remote, as IPv4 and as embedded under
+// the NAT64 prefix. The public addresses are also given in the wire form,
+// big-endian integers.
 const (
-	clientAddress   = "2001:db8::1"
-	poolAddress     = "198.51.100.1"
-	poolAddressWire = 0xc6336401
-	remoteAddress4  = "192.0.2.34"
-	remoteAddress6  = "64:ff9b::c000:222"
+	clientAddress        = "2001:db8::1"
+	poolAddress          = "198.51.100.1"
+	poolAddressWire      = 0xc6336401
+	otherPoolAddress     = "198.51.100.2"
+	otherPoolAddressWire = 0xc6336402
+	remoteAddress4       = "192.0.2.34"
+	remoteAddress6       = "64:ff9b::c000:222"
 )
 
 var (
@@ -57,9 +59,15 @@ func mustIPv6Prefix(value string) *commonpb.IPv6Prefix {
 // sessionConfig is a whole config under the well-known prefix, translated
 // to the public address of the scenarios.
 func sessionConfig(mapName string) *nat64spb.Config {
+	return sessionConfigFromPool(mapName, poolAddressWire)
+}
+
+// sessionConfigFromPool is sessionConfig, translated to the given public
+// address in its wire form.
+func sessionConfigFromPool(mapName string, pool uint32) *nat64spb.Config {
 	return &nat64spb.Config{
 		Prefixes: []*commonpb.IPv6Prefix{mustIPv6Prefix("64:ff9b::/96")},
-		Pool:     []*commonpb.IPv4Address{{Addr: poolAddressWire}},
+		Pool:     []*commonpb.IPv4Address{{Addr: pool}},
 		Map:      mapName,
 	}
 }
@@ -348,6 +356,142 @@ func Test_Backend_Update_FailedPublishGivesMapReferenceBack(t *testing.T) {
 
 	registry.ReclaimUnreferenced()
 	require.True(t, sessionMapGone(agent, "sessions"))
+}
+
+// Test_NAT64sService_ReleasedSessionMapStartsEmptyForItsNextConfig
+// verifies that a session map a config lets go of carries none of its
+// sessions to the config that references the map next.
+//
+// The same client flow opens a session of its own, translated from the
+// new config's pool, and the former session's external tuple answers
+// nobody.
+func Test_NAT64sService_ReleasedSessionMapStartsEmptyForItsNextConfig(t *testing.T) {
+	harness, agent, _, service := setupNAT64sHarness(t)
+	ctx := t.Context()
+	clientSyn := func() gopacket.Packet {
+		return frame6(
+			t,
+			clientAddress,
+			remoteAddress6,
+			tcpSegment{SrcPort: 80, DstPort: 443, SYN: true},
+		)
+	}
+
+	_, err := service.UpdateConfig(ctx, &nat64spb.UpdateConfigRequest{
+		Name:   "t0",
+		Config: sessionConfig("sessions"),
+	})
+	require.NoError(t, err)
+	wireNAT64sPipeline(t, agent, "t0")
+
+	result, err := harness.HandlePackets(clientSyn())
+	require.NoError(t, err)
+	first := soleOutput(t, result)
+	require.Equal(
+		t,
+		poolAddress,
+		first.Layer(layers.LayerTypeIPv4).(*layers.IPv4).SrcIP.String(),
+	)
+	firstPort := first.Layer(layers.LayerTypeTCP).(*layers.TCP).SrcPort
+
+	// The config moves to another map, which lets the first one go, and
+	// back to it, translating from another address of the pool.
+	for _, config := range []*nat64spb.Config{
+		sessionConfig("other"),
+		sessionConfigFromPool("sessions", otherPoolAddressWire),
+	} {
+		_, err = service.UpdateConfig(ctx, &nat64spb.UpdateConfigRequest{
+			Name:   "t0",
+			Config: config,
+		})
+		require.NoError(t, err)
+	}
+
+	result, err = harness.HandlePackets(clientSyn())
+	require.NoError(t, err)
+	second := soleOutput(t, result)
+	require.Equal(
+		t,
+		otherPoolAddress,
+		second.Layer(layers.LayerTypeIPv4).(*layers.IPv4).SrcIP.String(),
+		"the flow must open a session of the new config",
+	)
+	secondPort := second.Layer(layers.LayerTypeTCP).(*layers.TCP).SrcPort
+
+	// The new session's own reply still reaches the client.
+	result, err = harness.HandlePackets(frame4(
+		t,
+		remoteAddress4,
+		otherPoolAddress,
+		tcpSegment{SrcPort: 443, DstPort: secondPort, SYN: true, ACK: true},
+	))
+	require.NoError(t, err)
+	returned := soleOutput(t, result)
+	require.Equal(
+		t,
+		clientAddress,
+		returned.Layer(layers.LayerTypeIPv6).(*layers.IPv6).DstIP.String(),
+		"the new session must answer its own reply",
+	)
+
+	// The former session's external tuple answers nobody.
+	result, err = harness.HandlePackets(frame4(
+		t,
+		remoteAddress4,
+		poolAddress,
+		tcpSegment{SrcPort: 443, DstPort: firstPort, SYN: true, ACK: true},
+	))
+	require.NoError(t, err)
+	require.Empty(
+		t,
+		result.Output,
+		"a reply to the former session must not be translated",
+	)
+	require.Len(t, result.Drop, 1)
+}
+
+// Test_MapRegistry_Acquire_KeepsMapWhoseReplacementWasRefused verifies
+// that a reference fails, and the parked map stays, when the dataplane
+// still lists that map.
+//
+// A published config that links a map the registry holds no reference to
+// is the state in which the dataplane refuses the map's deletion; handing
+// the map out then would hand out that config's sessions. Once nothing
+// links it, the reference replaces it.
+func Test_MapRegistry_Acquire_KeepsMapWhoseReplacementWasRefused(t *testing.T) {
+	_, _, registry, service := setupNAT64sHarness(t)
+	ctx := t.Context()
+
+	_, err := service.UpdateConfig(ctx, &nat64spb.UpdateConfigRequest{
+		Name:   "t0",
+		Config: sessionConfig("sessions"),
+	})
+	require.NoError(t, err)
+	used, err := registry.Ensure("sessions", 0)
+	require.NoError(t, err)
+
+	// The registry forgets the reference while the config stays
+	// published.
+	registry.Release("t0", "sessions")
+
+	require.ErrorIs(t, registry.Acquire("t1", "sessions"), ffi.ErrBusy)
+	require.Empty(t, registry.MapOf("t1"))
+	// The refused map stays registered: a further reference is refused
+	// the same way rather than finding its name already taken.
+	require.ErrorIs(t, registry.Acquire("t1", "sessions"), ffi.ErrBusy)
+
+	_, err = service.DeleteConfig(ctx, &nat64spb.DeleteConfigRequest{
+		Name: "t0",
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, registry.Acquire("t1", "sessions"))
+	fresh, err := registry.Ensure("sessions", 0)
+	require.NoError(t, err)
+	require.NotSame(t, used, fresh)
+
+	registry.Release("t1", "sessions")
+	registry.ReclaimUnreferenced()
 }
 
 // Test_NAT64sService_DeleteConfig_ReleasesSessionMap verifies that deleting
