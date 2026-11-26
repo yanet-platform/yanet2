@@ -8,8 +8,8 @@
 // against the same DWARF, as the protobuf packages are generated. The views
 // apply only to the architecture built: arm64 builds align to 128-byte
 // cache lines where amd64 builds align to 64. The same compilation gives
-// the dataplane ready magic and the module ABI version the headers define,
-// as typed constants.
+// the dataplane ready magic, the module ABI version and the block
+// allocator's geometry the headers define, as typed constants.
 //
 // The structures reach DPDK through pointers only, which the views keep
 // opaque, so DPDK's headers take no part in the layouts.

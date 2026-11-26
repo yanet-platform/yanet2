@@ -93,8 +93,8 @@ func Unaddressable(address unsafe.Pointer) bool {
 	return C.__asan_address_is_poisoned(address) != 0
 }
 
-// unpoison marks memory addressable to AddressSanitizer again.
-func unpoison(memory []byte) {
+// Unpoison marks memory addressable to AddressSanitizer again.
+func Unpoison(memory []byte) {
 	C.__asan_unpoison_memory_region(unsafe.Pointer(&memory[0]), C.size_t(len(memory)))
 }
 

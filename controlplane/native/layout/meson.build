@@ -87,8 +87,8 @@ if native_layout_archs.has_key(host_machine.cpu_family()) and import('fs').is_sa
     'decap_module_config',
   ]
   # The enumerations of c/types.c that carry the values a native attach
-  # expects.
-  native_layout_constants = ['native_layout_u64', 'native_layout_u32']
+  # expects and the block allocator's geometry.
+  native_layout_constants = ['native_layout_u64', 'native_layout_u32', 'native_layout_allocator']
   native_layout_dir = meson.current_source_dir()
 
   # Always stale: shmgen's own sources and the generated files are outside

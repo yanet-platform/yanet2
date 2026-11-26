@@ -3,6 +3,10 @@
 package shm_test
 
 import (
+	"fmt"
+	"os"
+	"runtime"
+	"runtime/pprof"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -108,4 +112,59 @@ func Test_LockPid_RefusesPidZero(t *testing.T) {
 	var word int32
 	require.Panics(t, func() { shm.LockPid(&word, 0) })
 	require.Zero(t, word)
+}
+
+// lockWaiters is how many goroutines wait for the configuration lock in
+// the thread test.
+const lockWaiters = 1000
+
+// foreignPid stands for a writer in another process holding the lock.
+const foreignPid = 1 << 30
+
+// waitBound caps the wait for the thread test's waiters to park, so a
+// waiter that never parks fails the test instead of hanging it.
+const waitBound = 10 * time.Second
+
+// threadsCreated returns how many OS threads the Go runtime holds: those
+// it created less those that ended with a goroutine locked to them.
+func threadsCreated() int {
+	return pprof.Lookup("threadcreate").Count()
+}
+
+// Test_LockPid_WaitersHoldNoThreads verifies that goroutines waiting for
+// a control-plane zone's configuration lock park without OS threads.
+//
+// A writer holds the lock, as one did for tens of milliseconds per update
+// in incident GH-1913, where readers blocked in cgo calls grew the
+// control plane to thousands of threads. The waiters run in a bubble,
+// whose wait returns only once each of them is parked; one blocked in a
+// system call would keep it waiting, so a watchdog bounds the test.
+func Test_LockPid_WaitersHoldNoThreads(t *testing.T) {
+	lockWord := new(int32)
+	pid := int32(os.Getpid())
+	watchdog := time.AfterFunc(waitBound, func() {
+		panic(fmt.Sprintf("%s: lock waiters did not park within %v", t.Name(), waitBound))
+	})
+	defer watchdog.Stop()
+
+	synctest.Test(t, func(t *testing.T) {
+		baseline := threadsCreated()
+		holder := shm.LockPid(lockWord, foreignPid)
+		var waiters errgroup.Group
+		for range lockWaiters {
+			waiters.Go(func() error {
+				shm.LockPid(lockWord, pid).Unlock()
+				return nil
+			})
+		}
+		time.Sleep(blockedFor)
+		synctest.Wait()
+		created := threadsCreated() - baseline
+		holder.Unlock()
+		require.NoError(t, waiters.Wait())
+
+		t.Logf("%d waiters, GOMAXPROCS %d: %d threads created", lockWaiters, runtime.GOMAXPROCS(0), created)
+		require.Less(t, created, runtime.GOMAXPROCS(0)+16, "lock waiters must not take an OS thread each")
+		require.Zero(t, atomic.LoadInt32(lockWord), "every waiter released the lock")
+	})
 }

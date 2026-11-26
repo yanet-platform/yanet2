@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
+	"github.com/yanet-platform/yanet2/controlplane/native/nativetest"
 	"github.com/yanet-platform/yanet2/controlplane/native/zone"
 )
 
@@ -170,6 +171,35 @@ func Test_Storage_RefusesMalformedInstances(t *testing.T) {
 	}
 }
 
+// Test_Storage_ReadsEveryInstance verifies that a storage of three
+// instances laid out back to back exposes each one at its own offset, with
+// its own control-plane zone.
+func Test_Storage_ReadsEveryInstance(t *testing.T) {
+	const count = 3
+	single, _ := craftedStorage(0)
+	instanceSize := len(single)
+	data, first := craftedStorage(uintptr((count - 1) * instanceSize))
+	first.InstanceCount = count
+	// Relative pointers keep each copy's control-plane zone its own.
+	for idx := 1; idx < count; idx++ {
+		copy(data[idx*instanceSize:], data[:instanceSize])
+	}
+
+	storage, err := zone.FromMemory(data)
+	require.NoError(t, err)
+
+	require.Len(t, storage.Instances, count)
+	for idx, instance := range storage.Instances {
+		dp := unsafe.Pointer(&data[idx*instanceSize])
+		require.Equal(t, idx, instance.Index)
+		require.Equal(t, dp, unsafe.Pointer(instance.Dp), "instance %d dataplane zone", idx)
+		cp := uintptr(unsafe.Pointer(instance.Cp))
+		require.True(t, cp > uintptr(dp) && cp < uintptr(dp)+uintptr(instanceSize),
+			"instance %d control-plane zone outside the instance", idx,
+		)
+	}
+}
+
 // Test_Storage_Attach verifies that a storage file is mapped and read as
 // the memory it holds, that a file too short for a dataplane zone is
 // refused, and that closing twice is harmless.
@@ -199,4 +229,20 @@ func Test_Storage_Attach(t *testing.T) {
 			require.NoError(t, storage.Close())
 		})
 	}
+}
+
+// Test_Storage_ProducersKeepPlacement verifies that the storage the
+// dataplane test harness lays out keeps the zone placement the reader
+// assumes instead of checking: the control-plane zone after the dataplane
+// zone and inside the instance, both aligned for their structures.
+func Test_Storage_ProducersKeepPlacement(t *testing.T) {
+	instance := nativetest.NewDataplane(t, nativetest.Config{Modules: []string{"blackhole"}}).Instance()
+
+	dp := uintptr(unsafe.Pointer(instance.Dp))
+	cp := uintptr(unsafe.Pointer(instance.Cp))
+	end := dp + uintptr(instance.Dp.StorageSize)
+	require.Zero(t, dp%unsafe.Alignof(layout.DpConfig{}), "dataplane zone misaligned")
+	require.Zero(t, cp%unsafe.Alignof(layout.CpConfig{}), "control-plane zone misaligned")
+	require.GreaterOrEqual(t, cp, dp+unsafe.Sizeof(layout.DpConfig{}), "zones overlap")
+	require.LessOrEqual(t, cp+unsafe.Sizeof(layout.CpConfig{}), end, "control-plane zone past the instance")
 }
