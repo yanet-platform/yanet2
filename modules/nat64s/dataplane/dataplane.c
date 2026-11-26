@@ -403,8 +403,12 @@ nat64s_ctx(struct nat64s_module_config *config) {
 // The transport identity of a packet: protocol number and the two 16-bit
 // ports (source and destination; echo identifiers for ICMP).
 //
-// Of the ICMP messages only echoes reach this far: every other one is
-// dropped beforehand, as the translation could not carry it.
+// The whole fixed header has to lie in the first segment, or -1 is
+// returned: the translation reads and rewrites the header's checksum
+// there, so a header that continues in a later segment is refused, its
+// ports present or not. Of the ICMP messages only echoes reach this far:
+// every other one is dropped beforehand, as the translation could not
+// carry it.
 static inline int
 nat64s_transport_of(
 	struct packet *packet,
@@ -418,12 +422,7 @@ nat64s_transport_of(
 	*proto = packet->transport_header.type;
 	switch (*proto) {
 	case IPPROTO_TCP: {
-		// The parser validates the declared header against the
-		// packet's lengths, but a truncated segment still reaches
-		// here: check every accessed byte against the first
-		// segment's length.
-		if (off + offsetof(struct rte_tcp_hdr, dst_port) + 2 >
-		    data_len) {
+		if (off + sizeof(struct rte_tcp_hdr) > data_len) {
 			return -1;
 		}
 		struct rte_tcp_hdr *tcp = rte_pktmbuf_mtod_offset(
@@ -436,8 +435,7 @@ nat64s_transport_of(
 		return 0;
 	}
 	case IPPROTO_UDP: {
-		if (off + offsetof(struct rte_udp_hdr, dst_port) + 2 >
-		    data_len) {
+		if (off + sizeof(struct rte_udp_hdr) > data_len) {
 			return -1;
 		}
 		struct rte_udp_hdr *udp = rte_pktmbuf_mtod_offset(
@@ -451,9 +449,7 @@ nat64s_transport_of(
 	}
 	case IPPROTO_ICMPV6:
 	case IPPROTO_ICMP: {
-		// The identifier sits four bytes into the ICMP header; a
-		// short informational message never reaches that far.
-		if (off + NAT64S_OFF_ICMP_ID + sizeof(rte_be16_t) > data_len) {
+		if (off + sizeof(struct rte_icmp_hdr) > data_len) {
 			return -1;
 		}
 		struct yanet_icmp6_hdr *icmp = rte_pktmbuf_mtod_offset(
@@ -1063,7 +1059,9 @@ nat64s_handle_v6(
 	uint16_t sport;
 	uint16_t dport;
 	if (nat64s_transport_of(packet, &proto, &sport, &dport)) {
-		LOG_DBG(NAT64, "nat64s: no keyable transport header\n");
+		LOG_DBG(NAT64,
+			"nat64s: transport header not whole in the head\n");
+		nat64s_stats_bump(stats, NAT64S_MALFORMED);
 		return -1;
 	}
 
@@ -1319,7 +1317,9 @@ nat64s_handle_v4(
 	uint16_t sport;
 	uint16_t dport;
 	if (nat64s_transport_of(packet, &proto, &sport, &dport)) {
-		LOG_DBG(NAT64, "nat64s: no keyable transport header\n");
+		LOG_DBG(NAT64,
+			"nat64s: transport header not whole in the head\n");
+		nat64s_stats_bump(stats, NAT64S_MALFORMED);
 		return -1;
 	}
 

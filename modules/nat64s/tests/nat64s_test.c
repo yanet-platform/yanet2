@@ -1507,6 +1507,50 @@ nat64s_test_set_tcp_flags(struct packet *packet, uint8_t flags) {
 	tcp->tcp_flags = flags;
 }
 
+// Move the tail of a built TCP packet's header into a second segment,
+// keeping the given number of its leading bytes in the first.
+//
+// The first segment's tailroom past them is dirtied: a header field the
+// module or the translation read or wrote there instead of in the second
+// segment shows.
+static int
+nat64s_test_split_tcp_header(
+	struct nat64s_env *env, struct packet *packet, size_t kept
+) {
+	struct rte_mbuf *head = packet_to_mbuf(packet);
+	const size_t moved = sizeof(struct rte_tcp_hdr) - kept;
+	struct rte_mbuf *rest = dataplane_ut_alloc_mbuf(env->ut);
+	TEST_ASSERT_NOT_NULL(rest, "dataplane_ut_alloc_mbuf returned NULL");
+
+	uint8_t *rest_data = (uint8_t *)rte_pktmbuf_append(rest, moved);
+	TEST_ASSERT_NOT_NULL(rest_data, "packet payload allocation failed");
+	memcpy(rest_data,
+	       rte_pktmbuf_mtod_offset(
+		       head, uint8_t *, packet->transport_header.offset
+	       ) + kept,
+	       moved);
+	TEST_ASSERT_EQUAL(
+		rte_pktmbuf_trim(head, (uint16_t)moved),
+		0,
+		"trimming the head segment failed"
+	);
+
+	TEST_ASSERT(
+		rte_pktmbuf_tailroom(head) >= 32,
+		"the head segment has no tailroom to dirty"
+	);
+	memset(rte_pktmbuf_mtod_offset(
+		       head, uint8_t *, rte_pktmbuf_data_len(head)
+	       ),
+	       0xff,
+	       32);
+	TEST_ASSERT_EQUAL(
+		rte_pktmbuf_chain(head, rest), 0, "chaining the segments failed"
+	);
+	TEST_ASSERT_SUCCESS(parse_packet(packet), "parse_packet failed");
+	return TEST_SUCCESS;
+}
+
 // A client's own ACK does not establish its session (RFC 6146 3.5.2.2).
 //
 // Until the remote answers, the session ages on the general timeout
@@ -2698,38 +2742,10 @@ test_truncated_syn_leaves_no_session(struct nat64s_env *env) {
 
 	struct packet *in = NULL;
 	TEST_ASSERT_SUCCESS(nat64s_make_v6_syn(env, port, &in), "build failed");
-	struct rte_mbuf *head = packet_to_mbuf(in);
-	struct rte_mbuf *rest = dataplane_ut_alloc_mbuf(env->ut);
-	TEST_ASSERT_NOT_NULL(rest, "dataplane_ut_alloc_mbuf returned NULL");
-
 	// The TCP header past its two ports moves into the second segment.
-	const size_t moved = sizeof(struct rte_tcp_hdr) - 4;
-	uint8_t *rest_data = (uint8_t *)rte_pktmbuf_append(rest, moved);
-	TEST_ASSERT_NOT_NULL(rest_data, "packet payload allocation failed");
-	memcpy(rest_data,
-	       rte_pktmbuf_mtod_offset(
-		       head, uint8_t *, in->transport_header.offset
-	       ) + 4,
-	       moved);
-	TEST_ASSERT_EQUAL(
-		rte_pktmbuf_trim(head, (uint16_t)moved),
-		0,
-		"trimming the head segment failed"
+	TEST_ASSERT_SUCCESS(
+		nat64s_test_split_tcp_header(env, in, 4), "split failed"
 	);
-
-	TEST_ASSERT(
-		rte_pktmbuf_tailroom(head) >= 32,
-		"the head segment has no tailroom to dirty"
-	);
-	memset(rte_pktmbuf_mtod_offset(
-		       head, uint8_t *, rte_pktmbuf_data_len(head)
-	       ),
-	       0xff,
-	       32);
-	TEST_ASSERT_EQUAL(
-		rte_pktmbuf_chain(head, rest), 0, "chaining the segments failed"
-	);
-	TEST_ASSERT_SUCCESS(parse_packet(in), "parse_packet failed");
 
 	struct packet *out = NULL;
 	bool dropped = false;
@@ -2751,6 +2767,76 @@ test_truncated_syn_leaves_no_session(struct nat64s_env *env) {
 		dropped,
 		"a session must not survive a SYN whose flags could not be read"
 	);
+	return TEST_SUCCESS;
+}
+
+// A transport header that continues past the first segment is refused
+// even when both its ports sit in it and no port is to be rewritten.
+//
+// The translation rewrites the header's checksum where it expects the
+// header, in the first segment: such a packet of a live session would go
+// out with the checksum written beside the header, in either direction.
+static int
+test_split_transport_header_refused(struct nat64s_env *env) {
+	dataplane_ut_set_time_ns(env->ut, 23200000000000ull);
+	// A port inside the window stays the session's own.
+	const uint16_t port = 2108;
+	struct packet *in = NULL;
+	struct packet *out = NULL;
+	bool dropped = false;
+	TEST_ASSERT_SUCCESS(nat64s_make_v6_syn(env, port, &in), "build failed");
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the SYN must not be dropped");
+	rte_pktmbuf_free(packet_to_mbuf(out));
+	uint64_t malformed = env->config->stats[NAT64S_MALFORMED];
+
+	// The client's ACK.
+	TEST_ASSERT_SUCCESS(nat64s_make_v6_syn(env, port, &in), "build failed");
+	nat64s_test_set_tcp_flags(in, RTE_TCP_ACK_FLAG);
+	TEST_ASSERT_SUCCESS(
+		nat64s_test_split_tcp_header(env, in, 4), "split failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT_NULL(
+		out, "a client packet whose header is split must not translate"
+	);
+	TEST_ASSERT(
+		dropped, "a client packet whose header is split must be dropped"
+	);
+
+	// The remote's ACK, answered under the port the client kept.
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_reply(env, port, &in), "build failed"
+	);
+	nat64s_test_set_tcp_flags(in, RTE_TCP_ACK_FLAG);
+	TEST_ASSERT_SUCCESS(
+		nat64s_test_split_tcp_header(env, in, 4), "split failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT_NULL(
+		out, "a return packet whose header is split must not translate"
+	);
+	TEST_ASSERT(
+		dropped, "a return packet whose header is split must be dropped"
+	);
+	TEST_ASSERT_EQUAL(
+		env->config->stats[NAT64S_MALFORMED],
+		malformed + 2,
+		"the refused packets must be counted"
+	);
+
+	// Whole packets of the session still translate.
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_reply(env, port, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the session must survive the refused packets");
+	rte_pktmbuf_free(packet_to_mbuf(out));
+	TEST_ASSERT_SUCCESS(nat64s_make_v6_syn(env, port, &in), "build failed");
+	nat64s_test_set_tcp_flags(in, RTE_TCP_ACK_FLAG);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the client's whole packet must still translate");
+	rte_pktmbuf_free(packet_to_mbuf(out));
 	return TEST_SUCCESS;
 }
 
@@ -3349,6 +3435,9 @@ main(void) {
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_truncated_syn_leaves_no_session(&env);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_split_transport_header_refused(&env);
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_exhausted_window_drops_new_flow(&env);
