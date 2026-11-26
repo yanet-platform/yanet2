@@ -31,6 +31,10 @@ type Memory struct {
 	Context   layout.MemoryContext
 	Line      layout.ClassifyAttrLine
 	Net4      layout.ClassifyAttrNet4
+	// OtherLine and OtherNet4 hold a second attribute of each kind, for
+	// several compiles committed under the one root context.
+	OtherLine layout.ClassifyAttrLine
+	OtherNet4 layout.ClassifyAttrNet4
 }
 
 // LayOut lays out a memory at the start of the block, its root context

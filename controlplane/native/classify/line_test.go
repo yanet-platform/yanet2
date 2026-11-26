@@ -29,8 +29,9 @@ func requireZeroed[T any](t *testing.T, value *T, what string) {
 }
 
 // lineSizes are the domain sizes consumers compile lines over: a byte,
-// a VLAN identifier and a port.
-var lineSizes = []uint32{0x100, 0x1000, 0x10000}
+// a byte and one more as the C smoke test's layer 4 line, a VLAN
+// identifier and a port.
+var lineSizes = []uint32{0x100, 0x101, 0x1000, 0x10000}
 
 // randomLineRules returns count reproducible rules over a domain of size
 // points: absent, empty, whole-domain and repeated rules, and intervals
