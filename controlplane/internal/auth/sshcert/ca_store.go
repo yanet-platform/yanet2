@@ -3,11 +3,14 @@ package sshcert
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
+	"slices"
 	"sync/atomic"
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/loader"
 )
 
@@ -39,6 +42,47 @@ type CAStore struct {
 	source   loader.Loader
 }
 
+type policyCAKey struct{}
+
+type signerAssertion struct {
+	Key ssh.PublicKey
+}
+
+func (m signerAssertion) AssertionType() string { return "sshcert-signer" }
+
+// WithPolicyCA selects the immutable SSH trust of one RPC admission.
+func WithPolicyCA(ctx context.Context, store *CAStore) context.Context {
+	return context.WithValue(ctx, policyCAKey{}, store)
+}
+
+// ParsePolicyCA loads the complete managed CA bundle from verified bytes.
+//
+// An absent bundle deliberately trusts nobody. A present malformed bundle
+// must not activate a partially trusted set.
+func ParsePolicyCA(data []byte) (*CAStore, error) {
+	entries, err := parseCAData(data, true)
+	if err != nil {
+		return nil, err
+	}
+	return NewCAStore(entries), nil
+}
+
+// TrustsSigner reports whether the verified signer remains trusted.
+func (m *CAStore) TrustsSigner(assertion core.VerifiedAssertion) bool {
+	signer, ok := assertion.(signerAssertion)
+	return ok && m.trusts(signer.Key)
+}
+
+func (m *CAStore) trusts(key ssh.PublicKey) bool {
+	if key == nil {
+		return false
+	}
+	encoded := key.Marshal()
+	return slices.ContainsFunc(*m.snapshot.Load(), func(entry CAEntry) bool {
+		return bytes.Equal(encoded, entry.PublicKey.Marshal())
+	})
+}
+
 // NewCAStore creates a CAStore from an in-memory slice.
 func NewCAStore(entries []CAEntry) *CAStore {
 	m := &CAStore{}
@@ -55,7 +99,7 @@ func NewCAStoreFromLoader(source loader.Loader) (*CAStore, error) {
 		return nil, fmt.Errorf("failed to load CA data: %w", err)
 	}
 
-	entries, err := parseCAData(data)
+	entries, err := parseCAData(data, false)
 	if err != nil {
 		return nil, err
 	}
@@ -69,26 +113,10 @@ func NewCAStoreFromLoader(source loader.Loader) (*CAStore, error) {
 // VerifyCA cryptographically verifies that the certificate was signed by a
 // trusted CA.
 func (m *CAStore) VerifyCA(cert *ssh.Certificate) error {
-	entries := m.snapshot.Load()
-
-	checker := &ssh.CertChecker{
-		IsUserAuthority: func(auth ssh.PublicKey) bool {
-			authData := auth.Marshal()
-
-			for _, ca := range *entries {
-				if bytes.Equal(authData, ca.PublicKey.Marshal()) {
-					return true
-				}
-			}
-
-			return false
-		},
-	}
-
-	if !checker.IsUserAuthority(cert.SignatureKey) {
+	if !m.trusts(cert.SignatureKey) {
 		return ErrUntrustedCA
 	}
-
+	checker := ssh.CertChecker{}
 	principal, err := extractPrincipal(cert)
 	if err != nil {
 		return err
@@ -114,7 +142,7 @@ func (m *CAStore) Reload() error {
 		return fmt.Errorf("failed to reload CA data: %w", err)
 	}
 
-	entries, err := parseCAData(data)
+	entries, err := parseCAData(data, false)
 	if err != nil {
 		return fmt.Errorf("failed to parse CA data: %w", err)
 	}
@@ -124,41 +152,33 @@ func (m *CAStore) Reload() error {
 	return nil
 }
 
-// parseCAData parses CA data in OpenSSH authorized_keys format.
-//
-// Expected format, one key per line:
-//
-//	ecdsa-sha2-nistp256 AAAAE2...
-//	ecdsa-sha2-nistp256 AAAAE2... secure_20260107
-//
-// Empty lines and comments (starting with #) are skipped. Keys with
-// unsupported types are skipped.
-func parseCAData(data []byte) ([]CAEntry, error) {
+// parseCAData rejects malformed entries in managed bundles only.
+func parseCAData(data []byte, strict bool) ([]CAEntry, error) {
+	if strict && data == nil {
+		return nil, nil
+	}
 	var entries []CAEntry
-
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	for scanner.Scan() {
-		line := scanner.Bytes()
-
-		pubKey, _, _, _, err := ssh.ParseAuthorizedKey(line)
-		if err != nil {
-			// Skip blank lines, comments, and unparseable lines.
-			// TODO: log?
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 || line[0] == '#' {
 			continue
 		}
-		if !isKeySupported(pubKey) {
+		key, _, options, _, err := ssh.ParseAuthorizedKey(line)
+		if err != nil || !isKeySupported(key) || (strict && len(options) != 0) {
+			if strict {
+				return nil, fmt.Errorf("managed SSH CA bundle requires bare ECDSA P-256 keys")
+			}
 			continue
 		}
-
-		entries = append(entries, CAEntry{
-			PublicKey: pubKey,
-		})
+		entries = append(entries, CAEntry{PublicKey: key})
 	}
-
+	if err := scanner.Err(); strict && err != nil {
+		return nil, err
+	}
 	if len(entries) == 0 {
 		return nil, fmt.Errorf("no valid keys found")
 	}
-
 	return entries, nil
 }
 

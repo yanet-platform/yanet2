@@ -2,6 +2,7 @@ package sshcert_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -16,10 +17,17 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stripe/krl"
 	"golang.org/x/crypto/ssh"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
+	"google.golang.org/grpc/tap"
 	"gopkg.in/yaml.v3"
 
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/sshcert"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/testpolicy"
 )
 
 // decodeConfigNode parses text as the "config: ..." wrapper production uses,
@@ -72,6 +80,86 @@ func generateUserCert(t *testing.T, caSigner ssh.Signer, username string, serial
 	require.NoError(t, cert.SignCert(rand.Reader, caSigner))
 
 	return cert, userSigner
+}
+
+// policyServerStream carries credentials and a cancellable transport context.
+type policyServerStream struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (m *policyServerStream) Context() context.Context { return m.ctx }
+
+// Test_ManagedPolicy_SSHTrustRotation verifies that CA replacement and removal
+// revoke new admissions and active streams with unchanged accounts and grants.
+func Test_ManagedPolicy_SSHTrustRotation(t *testing.T) {
+	t.Parallel()
+	const method = "/test.Service/Read"
+	directory := t.TempDir()
+	config := auth.Config{
+		Mode: auth.ModeEnabled,
+		Authenticators: []auth.AuthenticatorConfig{
+			{Type: "sshcert", Config: *decodeConfigNode(t, "config: {}")},
+		},
+		ManagedPolicy: testpolicy.Config(directory),
+	}
+	config.ManagedPolicy.SSHTrust = true
+	authority, replacement := generateECDSASigner(t), generateECDSASigner(t)
+	oldCert, oldSigner := generateUserCert(t, authority, "alice", 1)
+	newCert, newSigner := generateUserCert(t, replacement, "alice", 2)
+	generation := testpolicy.ForAccount(1, "alice", method)
+	generation.SSHTrust = ssh.MarshalAuthorizedKey(authority.PublicKey())
+	generation.Publish(t, directory)
+	manager := testpolicy.Start(t, &config)
+
+	admit := func(cert *ssh.Certificate, signer ssh.Signer, nonce string, update func()) error {
+		t.Helper()
+		token := signCertToken(t, signer, cert, method, time.Now().UnixNano(), nonce)
+		ctx := metadata.NewIncomingContext(t.Context(), metadata.Pairs(auth.TokenMetadataKey, token))
+		ctx, err := auth.PolicyStreamTap(ctx, &tap.Info{FullMethodName: method})
+		require.NoError(t, err)
+		entered := false
+		err = manager.StreamServerInterceptor()(
+			nil, &policyServerStream{ctx: ctx}, &grpc.StreamServerInfo{FullMethod: method},
+			func(service any, stream grpc.ServerStream) error {
+				entered = true
+				require.NoError(t, stream.Context().Err())
+				if update != nil {
+					update()
+					require.ErrorIs(t, stream.Context().Err(), context.Canceled, "revoked CA left its stream active")
+				}
+				return nil
+			},
+		)
+		if update != nil {
+			require.True(t, entered, "trusted certificate did not reach the stream handler")
+		}
+		return err
+	}
+	publish := func(trust []byte) {
+		t.Helper()
+		generation.Sequence++
+		generation.SSHTrust = trust
+		generation.Publish(t, directory)
+		require.Eventually(t, func() bool {
+			return testpolicy.Metric(manager.Collect(), "auth_policy_active_revision").GetGauge() == float64(generation.Sequence)
+		}, time.Second, 5*time.Millisecond)
+	}
+	requireDenied := func(err error) {
+		t.Helper()
+		require.Equal(t, codes.Unauthenticated, status.Code(err), "%v", err)
+		require.ErrorContains(t, err, "CA verification failed")
+	}
+
+	requireDenied(admit(newCert, newSigner, "1", nil))
+	err := admit(oldCert, oldSigner, "2", func() {
+		publish(ssh.MarshalAuthorizedKey(replacement.PublicKey()))
+	})
+	require.Equal(t, codes.PermissionDenied, status.Code(err))
+	requireDenied(admit(oldCert, oldSigner, "3", nil))
+	err = admit(newCert, newSigner, "4", func() { publish(nil) })
+	require.Equal(t, codes.PermissionDenied, status.Code(err))
+	requireDenied(admit(newCert, newSigner, "5", nil))
 }
 
 // writeCAFile writes an authorized_keys-format CA file containing the

@@ -15,12 +15,31 @@ func NewFromConfig(
 	rawCfg *yaml.Node,
 	options ...Option,
 ) (core.Authenticator, error) {
+	return newFromConfig(rawCfg, false, options...)
+}
+
+// NewManagedFromConfig requires each request to carry its policy's CA store.
+func NewManagedFromConfig(
+	rawCfg *yaml.Node,
+	options ...Option,
+) (core.Authenticator, error) {
+	return newFromConfig(rawCfg, true, options...)
+}
+
+func newFromConfig(
+	rawCfg *yaml.Node,
+	managed bool,
+	options ...Option,
+) (core.Authenticator, error) {
 	var cfg Config
 	if err := rawCfg.Decode(&cfg); err != nil {
 		return nil, fmt.Errorf("decode sshcert config: %w", err)
 	}
 
-	if len(cfg.CASources) == 0 {
+	if managed && len(cfg.CASources) != 0 {
+		return nil, fmt.Errorf("ca_sources cannot be combined with managed SSH trust")
+	}
+	if !managed && len(cfg.CASources) == 0 {
 		return nil, fmt.Errorf("ca_sources is required")
 	}
 
@@ -36,7 +55,10 @@ func NewFromConfig(
 		caStores[idx] = store
 	}
 
-	caStore := NewCompositeCAStore(caStores)
+	var caStore CAVerifier
+	if !managed {
+		caStore = NewCompositeCAStore(caStores)
+	}
 
 	var revChecker RevocationChecker = NewNopRevocationChecker()
 	if cfg.KRLSource != "" {

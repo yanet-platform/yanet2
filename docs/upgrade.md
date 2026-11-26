@@ -333,6 +333,50 @@ Each entry is a bare `scheme://host[:port]`; anything else fails the config
 load. The deprecated `server.http_endpoint` has no place for origins, so a
 gateway still on it moves to the `server.http` section to trust one.
 
+## Gateway authorization can follow a local policy generation
+
+Online policy requires a compatible publisher and a fresh installation.
+Retire old readers and their offline startup definitions before recreating
+an installation. Mount the node-local store read-only; TLS rotation is
+independent. Direct backend listeners are outside the gateway ACL.
+
+```yaml
+gateway:
+  auth:
+    mode: enabled
+    managed_policy:
+      directory: /var/lib/yanet2/gateway-policy
+      expected_scope:
+        epoch: installation-uid
+        node_uid: node-uid
+        server_uri: spiffe://example.test/ns/edge/installation/installation-uid/node/node-uid/role/gateway
+      refresh_interval: 2s
+```
+
+Set the expected scope independently of the published bundle. Do not set
+`identity_providers` or `permissions_path` together with `managed_policy`.
+Keep the credential authenticators configured. To read an SSH CA from the
+same snapshot, set `managed_policy.ssh_trust: true`, use an `sshcert`
+authenticator without `ca_sources`, and keep any external KRL configuration.
+Removing the managed CA means its certificates are no longer accepted.
+
+Cold start requires a valid local `current` generation but no Kubernetes API
+access. A failed update leaves the last validated snapshot in use. The
+`auth_policy_active_revision`, `auth_policy_activated_timestamp_seconds`, and
+`auth_policy_reload_errors_total` metrics report activation in each process,
+not publication. New calls use the active policy on open TLS connections.
+Admitted local unary calls may finish; transparent proxy calls follow the
+stream rules. Revocation cancels affected streams at the gateway and
+backend, not their gRPC connection. The revision advances after signaling
+cancellation, not after handlers exit. A send that passed the revocation
+check can still queue data. gRPC can drain those and other queued messages
+before delivering `Canceled` or `PermissionDenied`.
+
+The gateway attempts an SSE error instead of `end`. Each event gets a
+five-second write deadline. With HTTP/2, a stalled socket can delay the
+stream reset and handler exit; revocation does not close the shared
+connection to force the reset or guarantee delivery.
+
 ## TLS key pairs move into `key_pairs` and rotate without a restart
 
 Every certificate and private key is now given as a `key_pairs` list

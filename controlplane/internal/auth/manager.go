@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/x509"
 	"fmt"
+	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -60,11 +62,15 @@ func WithLog(log *zap.Logger) ManagerOption {
 
 // Manager orchestrates authentication and authorization.
 type Manager struct {
-	authenticators   []core.Authenticator
-	identityProvider identity.Provider
-	authorizer       Authorizer
-	clientCAs        func() *x509.CertPool
-	mode             Mode
+	authenticators     []core.Authenticator
+	closeOnce          sync.Once
+	active             atomic.Pointer[policySnapshot]
+	managedPolicy      *ManagedPolicyConfig
+	policyReloadErrors atomic.Uint64
+	clientCAs          func() *x509.CertPool
+	mode               Mode
+	streamsMutex       sync.Mutex
+	streams            map[*streamControl]admittedStream
 	// admissions holds, by id, the calls Admit let in that no server has
 	// taken yet.
 	admissions sync.Map
@@ -82,13 +88,7 @@ func NewManager(cfg *Config, options ...ManagerOption) (*Manager, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid authentication policy: %w", err)
 	}
-	mode := cfg.Mode
-	if mode == "" {
-		mode = ModeDisabled
-		if cfg.Disabled != nil && !*cfg.Disabled {
-			mode = ModeEnabled
-		}
-	}
+	mode := cfg.EffectiveMode()
 	if cfg.Disabled != nil {
 		log.Warn("gateway.auth.disabled is deprecated; use gateway.auth.mode",
 			zap.String("mode", string(mode)),
@@ -117,12 +117,44 @@ func NewManager(cfg *Config, options ...ManagerOption) (*Manager, error) {
 	}
 
 	if err := m.configureAuthenticators(cfg); err != nil {
+		m.Close()
 		return nil, err
 	}
 	return m, nil
 }
 
+// Close stops background refresh owned by the manager's authenticators.
+//
+// The gateway separately stops RunPolicyReload using its run context.
+func (m *Manager) Close() {
+	m.closeOnce.Do(func() {
+		for _, authenticator := range m.authenticators {
+			if refresher, ok := authenticator.(interface{ Close() }); ok {
+				refresher.Close()
+			}
+		}
+	})
+}
+
 func (m *Manager) configureAuthorization(cfg *Config) error {
+	if cfg.ManagedPolicy != nil {
+		configuration := *cfg.ManagedPolicy
+		if configuration.SSHTrust && !slices.ContainsFunc(cfg.Authenticators, func(entry AuthenticatorConfig) bool {
+			return entry.Type == "sshcert"
+		}) {
+			return fmt.Errorf("managed SSH trust requires the sshcert authenticator")
+		}
+		m.managedPolicy = &configuration
+		m.streams = map[*streamControl]admittedStream{}
+		initial, err := readInitialPolicy(configuration)
+		if err != nil {
+			return fmt.Errorf("load initial gateway policy: %w", err)
+		}
+		initial.Activated = time.Now()
+		m.active.Store(initial)
+		return nil
+	}
+
 	var identityProviders []identity.Provider
 	for _, providerCfg := range cfg.IdentityProviders {
 		switch providerCfg.Type {
@@ -151,7 +183,7 @@ func (m *Manager) configureAuthorization(cfg *Config) error {
 		return fmt.Errorf("no identity providers configured")
 	}
 
-	m.identityProvider = identity.NewCompositeIdentityProvider(
+	identityProvider := identity.NewCompositeIdentityProvider(
 		identityProviders,
 		identity.WithLog(m.log),
 	)
@@ -170,9 +202,10 @@ func (m *Manager) configureAuthorization(cfg *Config) error {
 	)
 
 	// Create RBACAuthorizer.
-	m.authorizer = rbac.NewRBACAuthorizer(
-		permissionStore, rbac.WithLog(m.log),
-	)
+	m.active.Store(&policySnapshot{
+		IdentityProvider: identityProvider,
+		Authorizer:       rbac.NewRBACAuthorizer(permissionStore, rbac.WithLog(m.log)),
+	})
 	return nil
 }
 
@@ -184,6 +217,9 @@ func (m *Manager) configureAuthenticators(cfg *Config) error {
 			return sshkey.NewFromConfig(rawCfg, sshkey.WithLog(log))
 		},
 		"sshcert": func(rawCfg *yaml.Node) (core.Authenticator, error) {
+			if m.managedPolicy != nil && m.managedPolicy.SSHTrust {
+				return sshcert.NewManagedFromConfig(rawCfg, sshcert.WithLog(log))
+			}
 			return sshcert.NewFromConfig(rawCfg, sshcert.WithLog(log))
 		},
 		"x509": func(rawCfg *yaml.Node) (core.Authenticator, error) {
@@ -238,6 +274,19 @@ func (m *Manager) Authenticate(
 	credential core.Credential,
 	reqInfo *core.RequestInfo,
 ) (*core.Principal, error) {
+	principal, _, err := m.authenticate(ctx, m.policyFor(ctx), credential, reqInfo)
+	return principal, err
+}
+
+func (m *Manager) authenticate(
+	ctx context.Context,
+	policy *policySnapshot,
+	credential core.Credential,
+	reqInfo *core.RequestInfo,
+) (*core.Principal, *core.AuthInfo, error) {
+	if policy != nil && policy.SSHTrust != nil {
+		ctx = sshcert.WithPolicyCA(ctx, policy.SSHTrust)
+	}
 	// Iterate through authenticators, first match wins.
 	for _, auth := range m.authenticators {
 		if !auth.Supports(credential) {
@@ -250,24 +299,26 @@ func (m *Manager) Authenticate(
 
 		authInfo, err := auth.Authenticate(ctx, credential, reqInfo)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if m.mode == ModeAudit && authInfo.AuthMethod == "none" && credential.Token != "" {
-			return nil, status.Error(codes.Unauthenticated, "unsupported credential")
+			return nil, nil, status.Error(codes.Unauthenticated, "unsupported credential")
 		}
 
-		return m.buildPrincipal(ctx, authInfo)
+		principal, err := m.buildPrincipal(ctx, policy, authInfo)
+		return principal, authInfo, err
 	}
 
 	// This shouldn't happen with NoneAuthenticator registered, because it
 	// accepts everything.
-	return nil, fmt.Errorf("no authenticator supports the given credential")
+	return nil, nil, fmt.Errorf("no authenticator supports the given credential")
 }
 
 // buildPrincipal resolves an authenticated subject into its authorization
 // context.
 func (m *Manager) buildPrincipal(
 	ctx context.Context,
+	policy *policySnapshot,
 	authInfo *core.AuthInfo,
 ) (*core.Principal, error) {
 	// Anonymous callers and audit subjects need no account lookup.
@@ -281,11 +332,11 @@ func (m *Manager) buildPrincipal(
 		}, nil
 	}
 
-	if m.identityProvider == nil {
+	if policy == nil {
 		return nil, fmt.Errorf("no identity provider configured")
 	}
 
-	ident, err := m.identityProvider.ResolveIdentity(ctx, authInfo.Subject)
+	ident, err := policy.IdentityProvider.ResolveIdentity(ctx, authInfo.Subject)
 	if err != nil {
 		return nil, status.Errorf(
 			codes.Unauthenticated,
@@ -307,37 +358,6 @@ func (m *Manager) buildPrincipal(
 		AuthMethod:  authInfo.AuthMethod,
 		AuthTime:    time.Now(),
 		IsAnonymous: false,
-	}, nil
-}
-
-// AuthenticateRequest applies the admission policy to strict verification.
-//
-// Audit admits failed credentials as anonymous; introspection must use strict
-// verification instead.
-func (m *Manager) AuthenticateRequest(
-	ctx context.Context,
-	credential core.Credential,
-	requestInfo *core.RequestInfo,
-) (*core.Principal, error) {
-	principal, err := m.Authenticate(ctx, credential, requestInfo)
-	if err == nil || m.mode != ModeAudit {
-		return principal, err
-	}
-
-	method := ""
-	if requestInfo != nil {
-		method = requestInfo.FullMethod
-	}
-	m.log.Warn("authentication failed in audit mode",
-		zap.String("method", method),
-		zap.String("reason", "invalid_credentials"),
-	)
-	return &core.Principal{
-		User:        "anonymous",
-		Groups:      []string{},
-		AuthMethod:  "none",
-		AuthTime:    time.Now(),
-		IsAnonymous: true,
 	}, nil
 }
 
@@ -365,9 +385,9 @@ type metricsCollector interface {
 	Collect() []*commonpb.Metric
 }
 
-// Collect gathers the metrics of every authenticator that reports any.
+// Collect reports policy activation and authenticator metrics.
 func (m *Manager) Collect() []*commonpb.Metric {
-	var out []*commonpb.Metric
+	out := m.collectPolicy()
 	for _, authenticator := range m.authenticators {
 		if collector, ok := authenticator.(metricsCollector); ok {
 			out = append(out, collector.Collect()...)
@@ -384,8 +404,14 @@ func (m *Manager) Authorize(
 	principal *core.Principal,
 	fullMethod string,
 ) error {
-	if m.authorizer == nil {
-		return nil // No authorizer configured, allow all.
+	return m.policyFor(ctx).Authorize(ctx, principal, fullMethod)
+}
+
+type policyContextKey struct{}
+
+func (m *Manager) policyFor(ctx context.Context) *policySnapshot {
+	if snapshot, ok := ctx.Value(policyContextKey{}).(*policySnapshot); ok {
+		return snapshot
 	}
-	return m.authorizer.Authorize(ctx, principal, fullMethod)
+	return m.active.Load()
 }
