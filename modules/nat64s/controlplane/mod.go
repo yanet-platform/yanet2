@@ -31,7 +31,7 @@ type NAT64sModule struct {
 	*modulebase.Base
 
 	cfg  *Config
-	maps *mapRegistry
+	maps *MapRegistry
 }
 
 func NewNAT64sModule(cfg *Config, options ...Option) (*NAT64sModule, error) {
@@ -40,7 +40,7 @@ func NewNAT64sModule(cfg *Config, options ...Option) (*NAT64sModule, error) {
 		return nil, err
 	}
 
-	maps := newMapRegistry(base.Agent(), withRegistryLog(base.Log()))
+	maps := NewMapRegistry(base.Agent(), WithRegistryLog(base.Log()))
 
 	backend := NewBackend(base.Agent(), maps)
 	service := NewNAT64sService(backend, WithServiceLog(base.Log()))

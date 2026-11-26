@@ -111,17 +111,14 @@ nat64s_module_config_free(struct cp_module *cp_module, yanet_error **err) {
 	return 0;
 }
 
-// Clamp one timeout knob into (0, NAT64STATE_TIMEOUT_MAX], zero selecting
-// the default.
+// Saturate one timeout knob at NAT64STATE_TIMEOUT_MAX. Zero stays zero: the
+// dataplane resolves each knob's zero to that knob's own default.
 static uint16_t
-nat64s_timeout_clamp(uint32_t value) {
-	if (value == 0) {
-		return NAT64STATE_TIMEOUT_DEFAULT;
+nat64s_timeout_clamp(uint16_t value) {
+	if (value >= NAT64STATE_TIMEOUT_MAX) {
+		return NAT64STATE_TIMEOUT_MAX - 1;
 	}
-	if (value >= (uint32_t)NAT64STATE_TIMEOUT_MAX) {
-		return (uint16_t)(NAT64STATE_TIMEOUT_MAX - 1);
-	}
-	return (uint16_t)value;
+	return value;
 }
 
 int

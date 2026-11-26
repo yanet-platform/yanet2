@@ -2,6 +2,7 @@ package nat64s_test
 
 import (
 	"context"
+	"encoding/binary"
 	"net/netip"
 	"testing"
 
@@ -81,6 +82,18 @@ func validUpdate(name string) *nat64spb.UpdateConfigRequest {
 	}
 }
 
+// poolAddresses renders a stored pool the way shared memory holds it: the
+// network-order bytes of each address.
+func poolAddresses(pool []uint32) [][4]byte {
+	addresses := make([][4]byte, 0, len(pool))
+	for _, address := range pool {
+		var raw [4]byte
+		binary.NativeEndian.PutUint32(raw[:], address)
+		addresses = append(addresses, raw)
+	}
+	return addresses
+}
+
 // Test_NAT64sService_UpdateConfig_AcceptsWholeConfig verifies the happy
 // path: a whole config publishes and reads back through ShowConfig.
 func Test_NAT64sService_UpdateConfig_AcceptsWholeConfig(t *testing.T) {
@@ -99,7 +112,7 @@ func Test_NAT64sService_UpdateConfig_AcceptsWholeConfig(t *testing.T) {
 
 	published := backend.Configs[0]
 	require.Equal(t, [][]byte{{0x00, 0x64, 0xff, 0x9b, 0, 0, 0, 0, 0, 0, 0, 0}}, published.Prefixes)
-	require.Equal(t, []uint32{0xc6336401}, published.Pool)
+	require.Equal(t, [][4]byte{{198, 51, 100, 1}}, poolAddresses(published.Pool))
 	require.Equal(t, uint16(300), published.Timeout.Timeout)
 	require.Equal(t, uint16(7440), published.Timeout.TCPEstablished)
 	require.Equal(t, "sessions", published.MapName)
@@ -115,6 +128,64 @@ func Test_NAT64sService_UpdateConfig_AcceptsWholeConfig(t *testing.T) {
 	listed, err := service.ListConfigs(ctx, &nat64spb.ListConfigsRequest{})
 	require.NoError(t, err)
 	require.Equal(t, []string{"t0"}, listed.GetConfigs())
+}
+
+// Test_NAT64sService_UpdateConfig_StoresPoolInNetworkOrder verifies that a
+// pool address reaches the dataplane as its own network-order bytes, the
+// form packets are compared against, and reads back as the address sent.
+func Test_NAT64sService_UpdateConfig_StoresPoolInNetworkOrder(t *testing.T) {
+	backend := &mockBackend{}
+	service := nat64s.NewNAT64sService(backend)
+
+	request := validUpdate("t0")
+	request.Config.Pool = []*commonpb.IPv4Address{
+		{Addr: 0xc6336401},
+		{Addr: 0x010203ff},
+	}
+
+	err := updateConfig(t, service, request)
+	require.NoError(t, err)
+	require.Equal(
+		t,
+		[][4]byte{{198, 51, 100, 1}, {1, 2, 3, 255}},
+		poolAddresses(backend.Configs[0].Pool),
+	)
+
+	shown, err := service.ShowConfig(t.Context(), &nat64spb.ShowConfigRequest{Name: "t0"})
+	require.NoError(t, err)
+	require.Equal(
+		t,
+		[]uint32{0xc6336401, 0x010203ff},
+		[]uint32{
+			shown.GetConfig().GetPool()[0].GetAddr(),
+			shown.GetConfig().GetPool()[1].GetAddr(),
+		},
+	)
+}
+
+// Test_NAT64sService_UpdateConfig_AcceptsShownConfig verifies that what a
+// config left at its defaults shows is a valid update: the zero port
+// window a shown default carries selects the default again instead of
+// being refused.
+func Test_NAT64sService_UpdateConfig_AcceptsShownConfig(t *testing.T) {
+	backend := &mockBackend{}
+	service := nat64s.NewNAT64sService(backend)
+	ctx := t.Context()
+
+	_, err := service.UpdateConfig(ctx, validUpdate("t0"))
+	require.NoError(t, err)
+
+	shown, err := service.ShowConfig(ctx, &nat64spb.ShowConfigRequest{Name: "t0"})
+	require.NoError(t, err)
+	require.NotNil(t, shown.GetConfig().GetPortRange())
+
+	err = updateConfig(
+		t,
+		service,
+		&nat64spb.UpdateConfigRequest{Name: "t0", Config: shown.GetConfig()},
+	)
+	require.NoError(t, err)
+	require.Equal(t, backend.Configs[0], backend.Configs[1])
 }
 
 // Test_NAT64sService_UpdateConfig_RejectsBadConfigs verifies that nothing
@@ -166,6 +237,25 @@ func Test_NAT64sService_UpdateConfig_RejectsBadConfigs(t *testing.T) {
 			mutate:  func(r *nat64spb.UpdateConfigRequest) { r.Config.Map = "" },
 			message: "must link its nat64state_map session tables",
 		},
+		{
+			name:    "no config name",
+			mutate:  func(r *nat64spb.UpdateConfigRequest) { r.Name = "" },
+			message: "name is required",
+		},
+		{
+			name: "ipv4 mtu below the minimum",
+			mutate: func(r *nat64spb.UpdateConfigRequest) {
+				r.Config.Mtu = &nat64spb.MTUConfig{Ipv4Mtu: 67}
+			},
+			message: "ipv4_mtu 67 is below the IPv4 minimum",
+		},
+		{
+			name: "ipv6 mtu below the minimum",
+			mutate: func(r *nat64spb.UpdateConfigRequest) {
+				r.Config.Mtu = &nat64spb.MTUConfig{Ipv6Mtu: 1279}
+			},
+			message: "ipv6_mtu 1279 is below the IPv6 minimum",
+		},
 	}
 
 	for _, tc := range tests {
@@ -180,6 +270,43 @@ func Test_NAT64sService_UpdateConfig_RejectsBadConfigs(t *testing.T) {
 			require.Equal(t, codes.InvalidArgument, status.Code(err))
 			require.Contains(t, err.Error(), tc.message)
 			require.Empty(t, backend.Configs)
+		})
+	}
+}
+
+// Test_NAT64sService_Requests_RefuseMissingName verifies that a show,
+// update or delete request that names no config is refused before it
+// reaches the service.
+func Test_NAT64sService_Requests_RefuseMissingName(t *testing.T) {
+	validate := xgrpc.ValidateUnaryInterceptor()
+
+	cases := []struct {
+		name    string
+		request interface{ Validate() error }
+	}{
+		{name: "show", request: &nat64spb.ShowConfigRequest{}},
+		{name: "update", request: validUpdate("")},
+		{name: "delete", request: &nat64spb.DeleteConfigRequest{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reached := false
+			_, err := validate(
+				t.Context(),
+				tc.request,
+				&grpc.UnaryServerInfo{},
+				func(ctx context.Context, message any) (any, error) {
+					reached = true
+					return nil, nil
+				},
+			)
+			require.Error(t, err)
+			require.Equal(t, codes.InvalidArgument, status.Code(err))
+			require.False(
+				t,
+				reached,
+				"a request naming no config must not reach the service",
+			)
 		})
 	}
 }

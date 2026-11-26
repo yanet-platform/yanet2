@@ -75,6 +75,27 @@ nat64s_stats_bump(uint64_t *stats, enum nat64s_stat stat) {
 	__atomic_add_fetch(&stats[stat], 1, __ATOMIC_RELAXED);
 }
 
+// Release the bucket lock a table lookup returned: a hit in a layer past
+// the second carries none.
+static inline void
+nat64s_lookup_unlock(rwlock_t *lock) {
+	if (lock != NULL) {
+		rwlock_read_unlock(lock);
+	}
+}
+
+// Release the bucket lock an insert returned. One that found no room
+// leaves its bucket write-locked just the same, so the release is not
+// optional: a bucket kept locked hangs every later packet that hashes to
+// it. The pointer is cleared before every insert, as one that failed
+// before taking its lock leaves whatever it was given untouched.
+static inline void
+nat64s_insert_unlock(rwlock_t *lock) {
+	if (lock != NULL) {
+		rwlock_write_unlock(lock);
+	}
+}
+
 // The client's transport identity of a lan key: protocol, address and
 // source port, without the destination. RFC 6146 5.2 requires the
 // external mapping to be endpoint-independent: the same client endpoint
@@ -138,50 +159,77 @@ enum nat64s_field_off {
 	NAT64S_OFF_ICMP_CKSUM = 2,
 };
 
+// Which port of a transport header is addressed: its source or its
+// destination.
+enum nat64s_port_kind {
+	NAT64S_PORT_SOURCE = 0,
+	NAT64S_PORT_DEST = 1,
+};
+
+// Whether the first bytes of the transport header lie in the mbuf's first
+// segment, where every transport field this module touches is read.
+static inline bool
+nat64s_transport_fits(struct packet *packet, size_t len) {
+	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+	return (size_t)packet->transport_header.offset + len <=
+	       rte_pktmbuf_data_len(mbuf);
+}
+
 // The header base, the offset of the requested port field and of the
-// checksum, by protocol.
+// checksum, by protocol; false when the protocol carries none or a field
+// lies outside the first segment.
 static inline bool
 nat64s_transport_fields(
 	struct packet *packet,
-	uint8_t port_kind, // 0 source, 1 destination
+	enum nat64s_port_kind port_kind,
 	uint8_t **hdr,
 	size_t *port_off,
 	size_t *cksum_off
 ) {
-	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-	*hdr = (uint8_t *)rte_pktmbuf_mtod_offset(
-		mbuf, void *, packet->transport_header.offset
-	);
 	switch (packet->transport_header.type) {
 	case IPPROTO_TCP:
-		*port_off = (port_kind == 0) ? NAT64S_OFF_TCP_SRC_PORT
-					     : NAT64S_OFF_TCP_DST_PORT;
+		*port_off = (port_kind == NAT64S_PORT_SOURCE)
+				    ? NAT64S_OFF_TCP_SRC_PORT
+				    : NAT64S_OFF_TCP_DST_PORT;
 		*cksum_off = NAT64S_OFF_TCP_CKSUM;
-		return true;
+		break;
 	case IPPROTO_UDP:
-		*port_off = (port_kind == 0) ? NAT64S_OFF_UDP_SRC_PORT
-					     : NAT64S_OFF_UDP_DST_PORT;
+		*port_off = (port_kind == NAT64S_PORT_SOURCE)
+				    ? NAT64S_OFF_UDP_SRC_PORT
+				    : NAT64S_OFF_UDP_DST_PORT;
 		*cksum_off = NAT64S_OFF_UDP_CKSUM;
-		return true;
+		break;
 	case IPPROTO_ICMPV6:
 	case IPPROTO_ICMP:
 		*port_off = NAT64S_OFF_ICMP_ID;
 		*cksum_off = NAT64S_OFF_ICMP_CKSUM;
-		return true;
+		break;
 	default:
 		return false;
 	}
+	size_t last = *port_off > *cksum_off ? *port_off : *cksum_off;
+	if (!nat64s_transport_fits(packet, last + sizeof(rte_be16_t))) {
+		return false;
+	}
+	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+	*hdr = (uint8_t *)rte_pktmbuf_mtod_offset(
+		mbuf, void *, packet->transport_header.offset
+	);
+	return true;
 }
 
 // Rewrite the packet's source port (or echo identifier) to the allocated
 // port before translation; the shared core then computes the translated
-// checksums over the rewritten value.
+// checksums over the rewritten value. A header too short for the port and
+// its checksum is refused untouched.
 static inline int
 nat64s_patch_source_port(struct packet *packet, uint16_t port) {
 	uint8_t *hdr = NULL;
 	size_t port_off = 0;
 	size_t cksum_off = 0;
-	if (!nat64s_transport_fields(packet, 0, &hdr, &port_off, &cksum_off)) {
+	if (!nat64s_transport_fields(
+		    packet, NAT64S_PORT_SOURCE, &hdr, &port_off, &cksum_off
+	    )) {
 		return -1;
 	}
 	nat64s_patch_be16(
@@ -199,7 +247,9 @@ nat64s_patch_dest_port(struct packet *packet, uint16_t port) {
 	uint8_t *hdr = NULL;
 	size_t port_off = 0;
 	size_t cksum_off = 0;
-	if (!nat64s_transport_fields(packet, 1, &hdr, &port_off, &cksum_off)) {
+	if (!nat64s_transport_fields(
+		    packet, NAT64S_PORT_DEST, &hdr, &port_off, &cksum_off
+	    )) {
 		return -1;
 	}
 	nat64s_patch_be16(
@@ -210,9 +260,16 @@ nat64s_patch_dest_port(struct packet *packet, uint16_t port) {
 	return 0;
 }
 
+// The TCP flags of the packet; a header cut short of its flag byte reads
+// as carrying none.
 static inline uint8_t
 nat64s_tcp_flags(struct packet *packet) {
 	if (packet->transport_header.type != IPPROTO_TCP) {
+		return 0;
+	}
+	if (!nat64s_transport_fits(
+		    packet, offsetof(struct rte_tcp_hdr, tcp_flags) + 1
+	    )) {
 		return 0;
 	}
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
@@ -339,28 +396,25 @@ nat64s_transport_of(
 
 // Rewrite one port of the transport header quoted inside an ICMP error,
 // before the shared core translates the quote: the receiver must see the
-// tuple that existed on its own side of the translator. Returns -1 when
-// the quote carries no usable transport header of the given protocol.
+// tuple that existed on its own side of the translator. The identifier of
+// an echo serves as either port. A protocol that carries no port is left
+// untouched; -1 is returned when the port lies outside the first
+// segment.
 static inline int
 nat64s_patch_quoted_port(
 	struct rte_mbuf *mbuf,
 	size_t quote_transport_off,
 	uint16_t proto,
-	uint8_t port_kind, // 0 source, 1 destination
+	enum nat64s_port_kind port_kind,
 	uint16_t port
 ) {
-	size_t off = port_kind ? 2 : 0;
+	size_t off = port_kind == NAT64S_PORT_DEST ? 2 : 0;
 	switch (proto) {
 	case IPPROTO_TCP:
 	case IPPROTO_UDP:
 		break;
 	case IPPROTO_ICMPV6:
 	case IPPROTO_ICMP:
-		// The identifier doubles as both ports; only a source patch
-		// makes sense.
-		if (port_kind != 0) {
-			return 0;
-		}
 		off = NAT64S_OFF_ICMP_ID;
 		break;
 	default:
@@ -384,15 +438,28 @@ nat64s_session_proto(uint16_t proto) {
 	return proto == IPPROTO_ICMPV6 ? IPPROTO_ICMP : proto;
 }
 
+// Whether the protocol is an ICMP family: an echo keys on its identifier
+// and has no remote port of its own.
+static inline bool
+nat64s_is_icmp(uint16_t proto) {
+	return proto == IPPROTO_ICMPV6 || proto == IPPROTO_ICMP;
+}
+
 // Whether the packet is an ICMP error: an ICMPv6 message below type 128
 // or an ICMPv4 Destination Unreachable / Time Exceeded / Parameter
 // Problem. Errors carry no flow identity of their own; the session is
 // found through the packet they quote.
+//
+// A header cut short of its type byte counts as one: the error handler
+// checks the quote against the packet's length and drops it as malformed.
 static inline bool
 nat64s_is_icmp_error(struct packet *packet) {
 	uint16_t proto = packet->transport_header.type;
 	if (proto != IPPROTO_ICMPV6 && proto != IPPROTO_ICMP) {
 		return false;
+	}
+	if (!nat64s_transport_fits(packet, sizeof(struct rte_icmp_hdr))) {
+		return true;
 	}
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 	struct yanet_icmp6_hdr *icmp = rte_pktmbuf_mtod_offset(
@@ -443,6 +510,45 @@ nat64s_embedded_ports(
 	}
 }
 
+// The most extension headers walked in the packet an error quotes; the
+// shared core walks no more when it translates that packet.
+#define NAT64S_MAX_QUOTED_EXTENSIONS 4
+
+// Whether the header is one whose length the quote walker can step over.
+static inline bool
+nat64s_is_quoted_extension(uint16_t next_header) {
+	return next_header == IPPROTO_HOPOPTS ||
+	       next_header == IPPROTO_ROUTING || next_header == IPPROTO_DSTOPTS;
+}
+
+// The transport header of the IPv6 packet quoted in an error, found past
+// its extension headers. Returns false when the chain is cut short or too
+// long, or ends in a fragment: none of them carries a session's transport
+// identity where this module can read it.
+static inline bool
+nat64s_quoted_transport(
+	const uint8_t *base,
+	size_t ip_off,
+	size_t data_len,
+	uint16_t *next_header,
+	size_t *offset
+) {
+	*offset = ip_off + sizeof(struct rte_ipv6_hdr);
+	*next_header = base[ip_off + offsetof(struct rte_ipv6_hdr, proto)];
+	for (size_t count = 0; nat64s_is_quoted_extension(*next_header);
+	     ++count) {
+		if (count == NAT64S_MAX_QUOTED_EXTENSIONS ||
+		    *offset + sizeof(struct yanet_ipv6_ext_2byte) > data_len) {
+			return false;
+		}
+		const struct yanet_ipv6_ext_2byte *extension =
+			(const struct yanet_ipv6_ext_2byte *)(base + *offset);
+		*next_header = extension->next_header;
+		*offset += ((size_t)extension->extension_length + 1) * 8;
+	}
+	return *next_header != IPPROTO_FRAGMENT && *offset <= data_len;
+}
+
 // The lan side of an ICMPv6 error: find the session of the IPv6 packet
 // the error quotes, then rewrite the quoted client address to
 // prefix + pool-address so the shared core's embedded translation (which
@@ -450,11 +556,11 @@ nat64s_embedded_ports(
 // the session's public address. The outer packet translates with the same
 // session's address as its source.
 //
-// An error can quote either direction of the session — the client's own
-// outbound packet, or an inbound one a client-side router could not
-// deliver — so the lookup tries the quoted tuple in both orientations.
-// Errors never create or refresh sessions: an error about an expired flow
-// is dropped, not resurrected.
+// An error reaching the translator through its lan side was sent to the
+// remote, so the packet it quotes is inbound — from the remote under the
+// session's prefix to the client — and the remote sent it to the
+// allocated port, not the client's own. Errors never create or refresh
+// sessions: an error about an expired flow is dropped, not resurrected.
 static int
 nat64s_handle_v6_error(
 	struct nat64s_module_config *config,
@@ -467,51 +573,57 @@ nat64s_handle_v6_error(
 	size_t data_len = rte_pktmbuf_data_len(mbuf);
 	size_t emb_off =
 		packet->transport_header.offset + sizeof(struct rte_icmp_hdr);
+	// An error is addressed to the sender of the packet it quotes: the
+	// remote, under one of the configured prefixes. The shared core takes
+	// the translated destination from the address's last four bytes, so
+	// an error addressed anywhere else is not handed to it.
+	struct rte_ipv6_hdr *outer = rte_pktmbuf_mtod_offset(
+		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
+	);
+	if (nat64s_dst_prefix(config, outer->dst_addr) == NULL) {
+		nat64s_stats_bump(stats, NAT64S_NO_PREFIX);
+		return -1;
+	}
 	if (emb_off + sizeof(struct rte_ipv6_hdr) > data_len) {
 		nat64s_stats_bump(stats, NAT64S_MALFORMED);
 		return -1;
 	}
 	struct rte_ipv6_hdr *emb =
 		rte_pktmbuf_mtod_offset(mbuf, struct rte_ipv6_hdr *, emb_off);
-
-	uint16_t proto = nat64s_session_proto(emb->proto);
-	uint16_t sport;
-	uint16_t dport;
-	if (!nat64s_embedded_ports(
-		    (const uint8_t *)mbuf->buf_addr + mbuf->data_off,
-		    emb_off + sizeof(struct rte_ipv6_hdr),
-		    proto,
-		    data_len,
-		    &sport,
-		    &dport
-	    )) {
+	if (memcmp(outer->dst_addr, emb->src_addr, 16) != 0) {
 		nat64s_stats_bump(stats, NAT64S_MALFORMED);
 		return -1;
 	}
 
-	// The client side of the quoted packet: the address that embeds
-	// under none of the configured NAT64 prefixes.
-	uint8_t *client_addr = emb->dst_addr;
-	uint16_t client_port = dport;
-	uint16_t remote_port = sport;
-	if (nat64s_dst_prefix(config, emb->src_addr) == NULL) {
-		client_addr = emb->src_addr;
-		client_port = sport;
-		remote_port = dport;
+	const uint8_t *base = (const uint8_t *)mbuf->buf_addr + mbuf->data_off;
+	uint16_t proto;
+	size_t l4_off;
+	if (!nat64s_quoted_transport(
+		    base, emb_off, data_len, &proto, &l4_off
+	    )) {
+		nat64s_stats_bump(stats, NAT64S_MALFORMED);
+		return -1;
+	}
+	proto = nat64s_session_proto(proto);
+	uint16_t sport;
+	uint16_t dport;
+	if (!nat64s_embedded_ports(
+		    base, l4_off, proto, data_len, &sport, &dport
+	    )) {
+		nat64s_stats_bump(stats, NAT64S_MALFORMED);
+		return -1;
 	}
 
 	struct nat64state_lan_key key = {
 		.hdr =
 			{
 				.proto = proto,
-				.src_port = client_port,
-				.dst_port = remote_port,
+				.src_port = dport,
+				.dst_port = sport,
 			},
 	};
-	memcpy(key.src_addr, client_addr, 16);
-	memcpy(key.dst_addr,
-	       emb->src_addr == client_addr ? emb->dst_addr : emb->src_addr,
-	       16);
+	memcpy(key.src_addr, emb->dst_addr, 16);
+	memcpy(key.dst_addr, emb->src_addr, 16);
 
 	void *found = NULL;
 	rwlock_t *lock = NULL;
@@ -527,19 +639,15 @@ nat64s_handle_v6_error(
 	uint16_t alloc_port = session->port;
 	uint8_t prefix[NAT64S_PREFIX_LEN];
 	memcpy(prefix, session->prefix, NAT64S_PREFIX_LEN);
-	rwlock_read_unlock(lock);
+	nat64s_lookup_unlock(lock);
 
 	// Point the quoted client address at the session's public address,
 	// under the session's own prefix, and its port at the allocated
-	// port: the quote must show the tuple the remote actually saw.
-	memcpy(client_addr, prefix, NAT64S_PREFIX_LEN);
-	memcpy(client_addr + NAT64S_PREFIX_LEN, &pool_ip4, sizeof(pool_ip4));
+	// port: the quote must show the tuple the remote actually sent.
+	memcpy(emb->dst_addr, prefix, NAT64S_PREFIX_LEN);
+	memcpy(emb->dst_addr + NAT64S_PREFIX_LEN, &pool_ip4, sizeof(pool_ip4));
 	if (nat64s_patch_quoted_port(
-		    mbuf,
-		    emb_off + sizeof(struct rte_ipv6_hdr),
-		    proto,
-		    emb->src_addr == client_addr,
-		    alloc_port
+		    mbuf, l4_off, proto, NAT64S_PORT_DEST, alloc_port
 	    )) {
 		nat64s_stats_bump(stats, NAT64S_MALFORMED);
 		return -1;
@@ -553,12 +661,16 @@ nat64s_handle_v6_error(
 	return rc;
 }
 
-// The wan side of an ICMPv4 error: find the session of the IPv4 packet
+// The wan side of an ICMPv4 error: find the session of the outbound packet
 // the error quotes. The shared core maps both the quoted pool-side
 // address and the outer destination to the client, so passing the
-// session's address suffices. The quoted tuple is tried in both
-// orientations: an error from the internet quotes the client's outbound
-// packet, one generated on the pool side quotes the return traffic.
+// session's address suffices.
+//
+// An error reaching the translator through its wan side was sent to the
+// session's public address, so the packet it quotes is the client's
+// outbound one — source address and port the public ones — and the client
+// must see its own port back in it. Errors never create or refresh
+// sessions.
 static int
 nat64s_handle_v4_error(
 	struct nat64s_module_config *config,
@@ -577,6 +689,16 @@ nat64s_handle_v4_error(
 	}
 	struct rte_ipv4_hdr *emb =
 		rte_pktmbuf_mtod_offset(mbuf, struct rte_ipv4_hdr *, emb_off);
+	// An error is addressed to the sender of the packet it quotes, the
+	// session's public address: the shared core maps the outer
+	// destination to the client whatever its value.
+	struct rte_ipv4_hdr *outer = rte_pktmbuf_mtod_offset(
+		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
+	);
+	if (outer->dst_addr != emb->src_addr) {
+		nat64s_stats_bump(stats, NAT64S_MALFORMED);
+		return -1;
+	}
 	size_t emb_ihl = (emb->version_ihl & RTE_IPV4_HDR_IHL_MASK) *
 			 RTE_IPV4_IHL_MULTIPLIER;
 
@@ -595,68 +717,119 @@ nat64s_handle_v4_error(
 		return -1;
 	}
 
-	uint8_t src6[16];
-	for (int orientation = 0; orientation < 2; ++orientation) {
-		struct nat64state_wan_key key = {
-			.hdr =
-				{
-					.proto = proto,
-					.src_port = orientation ? dport : sport,
-					.dst_port = orientation ? sport : dport,
-				},
-			.local_addr =
-				orientation ? emb->dst_addr : emb->src_addr,
-			.remote_addr =
-				orientation ? emb->src_addr : emb->dst_addr,
-		};
+	struct nat64state_wan_key key = {
+		.hdr =
+			{
+				.proto = proto,
+				.src_port = sport,
+				.dst_port = dport,
+			},
+		.local_addr = emb->src_addr,
+		.remote_addr = emb->dst_addr,
+	};
 
+	void *found = NULL;
+	rwlock_t *lock = NULL;
+	bool from_stale = false;
+	if (fwtable_lookup(
+		    prepared->wan.table, now, &key, &found, &lock, &from_stale
+	    ) < 0) {
+		nat64s_stats_bump(stats, NAT64S_WAN_STATE_MISS);
+		return -1;
+	}
+	const struct nat64state_value *session = found;
+	uint8_t src6[16];
+	uint8_t prefix[NAT64S_PREFIX_LEN];
+	uint16_t cli_port = session->cli_port;
+	memcpy(src6, session->src6, 16);
+	memcpy(prefix, session->prefix, NAT64S_PREFIX_LEN);
+	nat64s_lookup_unlock(lock);
+
+	if (nat64s_patch_quoted_port(
+		    mbuf, emb_off + emb_ihl, proto, NAT64S_PORT_SOURCE, cli_port
+	    )) {
+		nat64s_stats_bump(stats, NAT64S_MALFORMED);
+		return -1;
+	}
+
+	struct nat64_ctx ctx = nat64s_ctx(config);
+	int rc = nat64_translate_v4_to_v6(&ctx, packet, prefix, src6);
+	if (rc == 0) {
+		nat64s_stats_bump(stats, NAT64S_TRANSLATED_V4_TO_V6);
+	}
+	return rc;
+}
+
+// Find a free external port for a new session, stepping from the allocated
+// one through the window, wrapping, for a bounded number of probes; the
+// port found is stored back and written into the key.
+//
+// Returns false when every probed port is taken towards the remote.
+static inline bool
+nat64s_probe_wan_port(
+	struct nat64s_prepared *prepared,
+	const struct nat64s_module_config *config,
+	uint64_t now,
+	struct nat64state_wan_key *wan_key,
+	uint16_t *port
+) {
+	uint32_t tries = config->port_hi - config->port_lo;
+	if (tries > NAT64S_MAX_PORT_PROBES) {
+		tries = NAT64S_MAX_PORT_PROBES;
+	}
+	for (; tries-- > 0;) {
 		void *found = NULL;
 		rwlock_t *lock = NULL;
 		bool from_stale = false;
-		if (fwtable_lookup(
-			    prepared->wan.table,
-			    now,
-			    &key,
-			    &found,
-			    &lock,
-			    &from_stale
-		    ) < 0) {
-			continue;
+		int64_t taken = fwtable_lookup(
+			prepared->wan.table,
+			now,
+			wan_key,
+			&found,
+			&lock,
+			&from_stale
+		);
+		nat64s_lookup_unlock(lock);
+		if (taken < 0) {
+			return true;
 		}
-		const struct nat64state_value *session = found;
-		uint16_t cli_port = session->cli_port;
-		memcpy(src6, session->src6, 16);
-		uint8_t prefix[NAT64S_PREFIX_LEN];
-		memcpy(prefix, session->prefix, NAT64S_PREFIX_LEN);
-		rwlock_read_unlock(lock);
-
-		// The quote shows the outbound tuple as the remote saw it; its
-		// source port is the allocated one, which the client must see
-		// back as its own.
-		if (nat64s_patch_quoted_port(
-			    mbuf, emb_off + emb_ihl, proto, 0, cli_port
-		    )) {
-			nat64s_stats_bump(stats, NAT64S_MALFORMED);
-			return -1;
+		if (++*port >= config->port_hi) {
+			*port = config->port_lo;
 		}
-
-		struct nat64_ctx ctx = nat64s_ctx(config);
-		int rc = nat64_translate_v4_to_v6(&ctx, packet, prefix, src6);
-		if (rc == 0) {
-			nat64s_stats_bump(stats, NAT64S_TRANSLATED_V4_TO_V6);
+		wan_key->hdr.src_port = *port;
+		// An echo's remote port is the same identifier as its local
+		// one, so its key moves on both: the tuple probed is the
+		// tuple the session holds.
+		if (nat64s_is_icmp(wan_key->hdr.proto)) {
+			wan_key->hdr.dst_port = *port;
 		}
-		return rc;
 	}
+	return false;
+}
 
-	nat64s_stats_bump(stats, NAT64S_WAN_STATE_MISS);
-	return -1;
+// Whether the entry an insert just stored in the given table layer
+// belongs to the given client.
+//
+// The identity the value ops keep on a merge is read back before the
+// insert's write lock goes, so a concurrent refresh cannot swap it
+// underneath.
+static inline bool
+nat64s_wan_entry_owned(
+	fwmap_t *layer, int64_t idx, const uint8_t src6[16], uint16_t cli_port
+) {
+	const struct nat64state_value *stored =
+		(const struct nat64state_value *)fwmap_get_value(
+			layer, (uint32_t)idx
+		);
+	return stored != NULL && stored->cli_port == cli_port &&
+	       memcmp(stored->src6, src6, 16) == 0;
 }
 
 // The lan side: translate an IPv6 flow to IPv4, creating or refreshing its
 // session in both tables. A new session picks its public address from the
-// pool by a hash of the lan key; an existing one keeps its allocation (the
-// value ops enforce first-writer-wins on refresh). The flow keeps its own
-// ports.
+// pool by a hash of the client endpoint, and its port inside the
+// configured window; an existing one keeps its allocation (the value ops
+// enforce first-writer-wins on refresh).
 static int
 nat64s_handle_v6(
 	struct nat64s_module_config *config,
@@ -675,6 +848,14 @@ nat64s_handle_v6(
 	struct rte_ipv6_hdr *ipv6 = rte_pktmbuf_mtod_offset(
 		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
 	);
+
+	// RFC 6146 3.5: a source inside a configured prefix is hairpinned
+	// traffic, not a client flow — translating it again loops. Errors
+	// are held to it before anything is looked up on their behalf.
+	if (nat64s_dst_prefix(config, ipv6->src_addr) != NULL) {
+		nat64s_stats_bump(stats, NAT64S_HAIRPIN);
+		return -1;
+	}
 
 	if (nat64s_is_icmp_error(packet)) {
 		return nat64s_handle_v6_error(config, prepared, now, packet);
@@ -695,13 +876,6 @@ nat64s_handle_v6(
 	};
 	rte_memcpy(key.src_addr, ipv6->src_addr, 16);
 	rte_memcpy(key.dst_addr, ipv6->dst_addr, 16);
-
-	// RFC 6146 3.5: a source inside a configured prefix is hairpinned
-	// traffic, not a client flow — translating it again loops.
-	if (nat64s_dst_prefix(config, ipv6->src_addr) != NULL) {
-		nat64s_stats_bump(stats, NAT64S_HAIRPIN);
-		return -1;
-	}
 
 	const uint8_t *prefix = nat64s_dst_prefix(config, ipv6->dst_addr);
 	if (prefix == NULL) {
@@ -733,7 +907,7 @@ nat64s_handle_v6(
 		// stays on the established timeout.
 		established = established || existing->tcp_established;
 		memcpy(value.prefix, existing->prefix, NAT64S_PREFIX_LEN);
-		rwlock_read_unlock(lock);
+		nat64s_lookup_unlock(lock);
 	} else {
 		// RFC 6146 3.5.2.2: IPv6-initiated TCP state is created by a
 		// SYN alone; any other first packet would let a spoofed
@@ -777,44 +951,36 @@ nat64s_handle_v6(
 	// answered until it expires.
 	uint32_t remote_addr = 0;
 	memcpy(&remote_addr, &ipv6->dst_addr[12], sizeof(remote_addr));
+	uint16_t remote_port = dport;
+	if (nat64s_is_icmp(proto)) {
+		// An echo is answered under the identifier it left with, so
+		// both ports of its wan key are the allocated one.
+		remote_port = value.port;
+	}
 	struct nat64state_wan_key wan_key = {
 		.hdr =
 			{
 				.proto = nat64s_session_proto(proto),
 				.src_port = value.port,
-				.dst_port = dport,
+				.dst_port = remote_port,
 			},
 		.local_addr = value.ip4,
 		.remote_addr = remote_addr,
 	};
 
-	// The external tuple is unique per client: when the allocated
-	// address and port are already taken towards this remote by
-	// another flow — the same in-window source port, or a hash
-	// collision — probe neighboring ports of the window before
-	// recording anything.
-	if (created) {
-		void *probe = NULL;
-		rwlock_t *probe_lock = NULL;
-		bool probe_stale = false;
-		uint32_t tries = config->port_hi - config->port_lo;
-		if (tries > NAT64S_MAX_PORT_PROBES) {
-			tries = NAT64S_MAX_PORT_PROBES;
-		}
-		while (tries-- > 0 && fwtable_lookup(
-					      prepared->wan.table,
-					      now,
-					      &wan_key,
-					      &probe,
-					      &probe_lock,
-					      &probe_stale
-				      ) >= 0) {
-			rwlock_read_unlock(probe_lock);
-			if (++value.port >= config->port_hi) {
-				value.port = config->port_lo;
-			}
-			wan_key.hdr.src_port = value.port;
-		}
+	// The external tuple is unique per client: when the allocated address
+	// and port are already taken towards this remote by another flow —
+	// the same in-window source port, or a hash collision — the
+	// neighboring ports of the window are probed before anything is
+	// recorded.
+	//
+	// A flow that finds every probed port taken gives up: a shared tuple
+	// would hand its return traffic to another client.
+	if (created && !nat64s_probe_wan_port(
+			       prepared, config, now, &wan_key, &value.port
+		       )) {
+		nat64s_stats_bump(stats, NAT64S_INSERT_FAILED);
+		return -1;
 	}
 	struct nat64state_value wan_value = {0};
 	wan_value.updated_at = now;
@@ -824,20 +990,39 @@ nat64s_handle_v6(
 	wan_value.cli_port = sport;
 	memcpy(wan_value.src6, ipv6->src_addr, 16);
 
-	if (fwtable_insert(
-		    prepared->wan.table,
-		    worker_idx,
-		    now,
-		    ttl,
-		    &wan_key,
-		    &wan_value,
-		    &lock
-	    ) < 0) {
+	// The entry is read back from the layer it lands in; a layer
+	// prepended meanwhile answers with another entry, so the insert is
+	// not trusted.
+	fwmap_t *wan_layer = ATOMIC_ADDR_OF(&prepared->wan.table->head);
+	lock = NULL;
+	int64_t wan_idx = fwtable_insert(
+		prepared->wan.table,
+		worker_idx,
+		now,
+		ttl,
+		&wan_key,
+		&wan_value,
+		&lock
+	);
+	if (wan_idx < 0) {
+		nat64s_insert_unlock(lock);
 		nat64s_stats_bump(stats, NAT64S_INSERT_FAILED);
 		return -1;
 	}
+	// Two first packets can race onto a tuple both found free; the loser
+	// merged into the winner's entry and must not publish its own lan
+	// entry on top of it.
+	bool owned = ATOMIC_ADDR_OF(&prepared->wan.table->head) == wan_layer &&
+		     nat64s_wan_entry_owned(
+			     wan_layer, wan_idx, ipv6->src_addr, sport
+		     );
 	rwlock_write_unlock(lock);
+	if (!owned) {
+		nat64s_stats_bump(stats, NAT64S_INSERT_FAILED);
+		return -1;
+	}
 
+	lock = NULL;
 	if (fwtable_insert(
 		    prepared->lan.table,
 		    worker_idx,
@@ -847,6 +1032,7 @@ nat64s_handle_v6(
 		    &value,
 		    &lock
 	    ) < 0) {
+		nat64s_insert_unlock(lock);
 		nat64s_stats_bump(stats, NAT64S_INSERT_FAILED);
 		return -1;
 	}
@@ -854,6 +1040,7 @@ nat64s_handle_v6(
 
 	if (value.port != sport &&
 	    nat64s_patch_source_port(packet, value.port)) {
+		nat64s_stats_bump(stats, NAT64S_MALFORMED);
 		return -1;
 	}
 
@@ -923,7 +1110,7 @@ nat64s_handle_v4(
 	bool established = session->tcp_established;
 	rte_memcpy(src6, session->src6, sizeof(src6));
 	rte_memcpy(prefix, session->prefix, sizeof(prefix));
-	rwlock_read_unlock(lock);
+	nat64s_lookup_unlock(lock);
 
 	// Return traffic keeps its own entry alive: a flow whose client is
 	// silent for a while must not lose its reverse mapping while the
@@ -939,6 +1126,7 @@ nat64s_handle_v4(
 		nat64state_entry_ttl(proto, established, &config->timeouts);
 	refresh.last_ttl = ttl;
 	rte_memcpy(refresh.src6, src6, sizeof(src6));
+	lock = NULL;
 	if (fwtable_insert(
 		    prepared->wan.table,
 		    worker_idx,
@@ -948,6 +1136,7 @@ nat64s_handle_v4(
 		    &refresh,
 		    &lock
 	    ) < 0) {
+		nat64s_insert_unlock(lock);
 		nat64s_stats_bump(stats, NAT64S_INSERT_FAILED);
 		return -1;
 	}
@@ -970,12 +1159,16 @@ nat64s_handle_v4(
 	// session does not apply to it: the wan lookup this path already
 	// made is what proves the session exists.
 	if (prepared->lan.table != NULL) {
+		// An echo's original flow carried its own identifier as both
+		// ports.
+		uint16_t lan_remote_port =
+			nat64s_is_icmp(proto) ? cli_port : sport;
 		struct nat64state_lan_key lan_key = {
 			.hdr =
 				{
 					.proto = nat64s_session_proto(proto),
 					.src_port = cli_port,
-					.dst_port = sport,
+					.dst_port = lan_remote_port,
 				},
 		};
 		memcpy(lan_key.src_addr, src6, sizeof(lan_key.src_addr));
@@ -995,6 +1188,7 @@ nat64s_handle_v4(
 		rte_memcpy(
 			lan_refresh.prefix, prefix, sizeof(lan_refresh.prefix)
 		);
+		lock = NULL;
 		if (fwtable_insert(
 			    prepared->lan.table,
 			    worker_idx,
@@ -1004,6 +1198,7 @@ nat64s_handle_v4(
 			    &lan_refresh,
 			    &lock
 		    ) < 0) {
+			nat64s_insert_unlock(lock);
 			nat64s_stats_bump(stats, NAT64S_INSERT_FAILED);
 			return -1;
 		}
@@ -1012,6 +1207,7 @@ nat64s_handle_v4(
 
 	if (cli_port != 0 && cli_port != dport &&
 	    nat64s_patch_dest_port(packet, cli_port)) {
+		nat64s_stats_bump(stats, NAT64S_MALFORMED);
 		return -1;
 	}
 

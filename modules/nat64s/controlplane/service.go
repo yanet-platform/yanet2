@@ -2,6 +2,7 @@ package nat64s
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"math"
 	"slices"
@@ -48,7 +49,8 @@ type NAT64sConfig struct {
 	// Prefixes are the 12-byte NAT64 prefixes for v4->v6
 	// destinations.
 	Prefixes [][]byte
-	// Pool is the public IPv4 pool in network byte order.
+	// Pool is the public IPv4 pool, each address the integer whose bytes
+	// in memory are its network-order ones.
 	Pool []uint32
 	// Timeout is the single session timeout in seconds.
 	Timeout   SessionTimeout
@@ -176,7 +178,7 @@ func decodeConfig(wire *nat64spb.Config) (*NAT64sConfig, error) {
 		if wireAddr == nil {
 			return nil, fmt.Errorf("pool[%d]: address is required", idx)
 		}
-		addr := wireAddr.GetAddr()
+		addr := networkOrderIPv4(wireAddr)
 		if _, ok := seen[addr]; ok {
 			return nil, fmt.Errorf("pool[%d]: address is listed twice", idx)
 		}
@@ -202,7 +204,7 @@ func decodeConfig(wire *nat64spb.Config) (*NAT64sConfig, error) {
 		}
 	}
 
-	if wireRange := wire.GetPortRange(); wireRange != nil {
+	if wireRange := wire.GetPortRange(); !isDefaultPortRange(wireRange) {
 		if wireRange.GetLo() > math.MaxUint16 || wireRange.GetHi() > math.MaxUint16 {
 			return nil, fmt.Errorf(
 				"port range bounds must fit 16 bits, got [%d, %d)",
@@ -251,10 +253,33 @@ func encodeConfig(config *NAT64sConfig) *nat64spb.Config {
 		})
 	}
 	for _, addr := range config.Pool {
-		wire.Pool = append(wire.Pool, &commonpb.IPv4Address{Addr: addr})
+		wire.Pool = append(wire.Pool, wireIPv4Address(addr))
 	}
 
 	return wire
+}
+
+// isDefaultPortRange reports a window that selects the default one: an
+// absent message, or a message left at zeroes as a shown default carries
+// it.
+func isDefaultPortRange(wireRange *nat64spb.PortRange) bool {
+	return wireRange == nil ||
+		(wireRange.GetLo() == 0 && wireRange.GetHi() == 0)
+}
+
+// networkOrderIPv4 is the integer the shared memory carries for a wire IPv4
+// address: the one whose bytes in memory are the address's own, in network
+// order, whatever the host's byte order.
+func networkOrderIPv4(address *commonpb.IPv4Address) uint32 {
+	raw := address.ToAddr().As4()
+	return binary.NativeEndian.Uint32(raw[:])
+}
+
+// wireIPv4Address is networkOrderIPv4's inverse.
+func wireIPv4Address(address uint32) *commonpb.IPv4Address {
+	var raw [4]byte
+	binary.NativeEndian.PutUint32(raw[:], address)
+	return commonpb.NewIPv4Address(raw)
 }
 
 // clampTimeout bounds one timeout in seconds: zero keeps zero (the C side

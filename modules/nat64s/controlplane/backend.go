@@ -21,12 +21,12 @@ type Backend interface {
 
 type backend struct {
 	agent *ffi.Agent
-	maps  *mapRegistry
+	maps  *MapRegistry
 }
 
 // NewBackend creates a Backend that operates on real shared memory,
 // creating the session tables the config names on first reference.
-func NewBackend(agent *ffi.Agent, maps *mapRegistry) Backend {
+func NewBackend(agent *ffi.Agent, maps *MapRegistry) Backend {
 	return &backend{
 		agent: agent,
 		maps:  maps,
@@ -34,21 +34,39 @@ func NewBackend(agent *ffi.Agent, maps *mapRegistry) Backend {
 }
 
 func (m *backend) Update(name string, config *NAT64sConfig) (crud.Handle, error) {
-	// The linked map must exist before the module config that links it
-	// publishes, or building its execution context would fail.
-	// Acquire the new map reference before publishing, and release the
-	// config's previous one afterwards: the object is reclaimed when
-	// its last user goes away.
+	// A config references its session map before the config linking it
+	// publishes, and for as long as it stays published.
+	//
+	// The map must exist when the publish builds the config's execution
+	// context, so the new reference is taken first. The previous one
+	// outlives the publish, since a config still published keeps its map,
+	// and a failed publish gives the new reference back: no map is
+	// reclaimed while a published config links it, and none is kept after
+	// the last one does.
 	oldMap := m.maps.MapOf(name)
 	if config.MapName != "" {
 		if err := m.maps.Acquire(name, config.MapName); err != nil {
 			return nil, fmt.Errorf("failed to ensure the session map: %w", err)
 		}
 	}
+
+	module, err := m.publish(name, config)
+	if err != nil {
+		if config.MapName != "" && config.MapName != oldMap {
+			m.maps.Release(name, config.MapName)
+		}
+		return nil, err
+	}
+
 	if oldMap != "" && oldMap != config.MapName {
 		m.maps.Release(name, oldMap)
 	}
+	return module, nil
+}
 
+// publish builds a module config from the decoded one and publishes it to
+// the dataplane.
+func (m *backend) publish(name string, config *NAT64sConfig) (crud.Handle, error) {
 	module, err := cnat64s.NewModuleConfig(m.agent, name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create module config: %w", err)
@@ -63,7 +81,6 @@ func (m *backend) Update(name string, config *NAT64sConfig) (crud.Handle, error)
 		PortHi:   config.PortRange.Hi,
 		MapName:  config.MapName,
 	}
-	// The wire pool addresses are already network-order uint32 values.
 	update.Pool = config.Pool[:]
 
 	build := func(module *cnat64s.ModuleConfig) error {

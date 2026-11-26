@@ -55,6 +55,8 @@ static const uint8_t client_addr[16] = {
 	0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01
 };
 static const uint32_t remote_addr = RTE_BE32(RTE_IPV4(192, 0, 2, 34));
+// Another address of the pool, one no session is ever translated to.
+static const uint32_t other_pool_addr = RTE_BE32(RTE_IPV4(198, 51, 100, 9));
 // The same remote as bytes, for the parameterized SYN builder.
 static const uint8_t remote4[4] = {192, 0, 2, 34};
 #define CLIENT_PORT 50000
@@ -73,8 +75,41 @@ struct nat64s_env {
 	struct nat64s_module_config *config;
 };
 
+// The session knobs one harness round is configured with.
+struct nat64s_env_settings {
+	uint16_t port_lo;
+	uint16_t port_hi;
+	struct nat64state_timeouts timeouts;
+};
+
+// The suite's own settings. The client's port (50000) falls outside the
+// window, so its session is rewritten into it.
+static const struct nat64s_env_settings nat64s_suite_settings = {
+	.port_lo = 1024,
+	.port_hi = 4096,
+	.timeouts = {.timeout = 300, .tcp_established = 300},
+};
+
+// The module update carrying one settings block over the suite's fixed
+// prefixes, pool and map link.
+static struct nat64s_module_update
+nat64s_env_update(const struct nat64s_env_settings *settings) {
+	return (struct nat64s_module_update){
+		.prefixes = prefixes[0],
+		.prefix_count = 2,
+		.pool = pool_addrs,
+		.pool_count = 1,
+		.port_lo = settings->port_lo,
+		.port_hi = settings->port_hi,
+		.timeouts = settings->timeouts,
+		.map_name = "sessions",
+	};
+}
+
 static int
-nat64s_env_init(struct nat64s_env *env) {
+nat64s_env_init(
+	struct nat64s_env *env, const struct nat64s_env_settings *settings
+) {
 	memset(env, 0, sizeof(*env));
 
 	const char *port_names[] = {"dev0"};
@@ -128,7 +163,8 @@ nat64s_env_init(struct nat64s_env *env) {
 		"agent_update_objects failed"
 	);
 
-	// The module: prefix, pool, links and a 30s syn timeout.
+	// The module: prefixes, pool, the map link, and the settings' window
+	// and timeouts.
 	struct cp_module *module =
 		nat64s_module_config_create(env->agent, "t0", &err);
 	TEST_ASSERT_NOT_NULL(module, "nat64s_module_config_create failed");
@@ -136,18 +172,7 @@ nat64s_env_init(struct nat64s_env *env) {
 		module, struct nat64s_module_config, cp_module
 	);
 
-	struct nat64s_module_update update = {
-		.prefixes = prefixes[0],
-		.prefix_count = 2,
-		.pool = pool_addrs,
-		.pool_count = 1,
-		// The client's port (50000) falls outside: its session must be
-		// rewritten into this window.
-		.port_lo = 1024,
-		.port_hi = 4096,
-		.timeouts = {.timeout = 300, .tcp_established = 300},
-		.map_name = "sessions",
-	};
+	struct nat64s_module_update update = nat64s_env_update(settings);
 	TEST_ASSERT_SUCCESS(
 		nat64s_module_config_update(module, &update, &err),
 		"nat64s_module_config_update failed"
@@ -250,11 +275,34 @@ nat64s_env_fini(struct nat64s_env *env) {
 	dataplane_ut_free(env->ut);
 }
 
-// Build a parsed IPv6 TCP SYN from the client to the remote under the
-// NAT64 prefix.
+// Reconfigure the suite's live module in place through the module's API
+// with the settings' window and timeouts.
+//
+// Only the single-threaded harness allows a published config to change
+// underneath the dataplane: an operator's update publishes a fresh one.
 static int
-nat64s_make_v6_syn_to(
+nat64s_env_reconfigure(
+	struct nat64s_env *env, const struct nat64s_env_settings *settings
+) {
+	struct nat64s_module_update update = nat64s_env_update(settings);
+	yanet_error *err = NULL;
+	TEST_ASSERT_SUCCESS(
+		nat64s_module_config_update(
+			&env->config->cp_module, &update, &err
+		),
+		"nat64s_module_config_update failed: %s",
+		err ? yanet_error_message(err) : "?"
+	);
+	yanet_error_free(err);
+	return TEST_SUCCESS;
+}
+
+// Build a parsed IPv6 TCP SYN from the given client to the remote under
+// the NAT64 prefix.
+static int
+nat64s_make_v6_syn_from(
 	struct nat64s_env *env,
+	const uint8_t client6[16],
 	uint16_t client_port,
 	const uint8_t remote[4],
 	struct packet **out
@@ -274,7 +322,7 @@ nat64s_make_v6_syn_to(
 	ether->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6);
 
 	struct rte_ipv6_hdr *ipv6 = (struct rte_ipv6_hdr *)(ether + 1);
-	memcpy(ipv6->src_addr, client_addr, 16);
+	memcpy(ipv6->src_addr, client6, 16);
 	memcpy(ipv6->dst_addr, nat64_prefix, 12);
 	memcpy(&ipv6->dst_addr[12], remote, 4);
 	ipv6->proto = IPPROTO_TCP;
@@ -292,6 +340,18 @@ nat64s_make_v6_syn_to(
 	TEST_ASSERT_SUCCESS(parse_packet(packet), "parse_packet failed");
 	*out = packet;
 	return TEST_SUCCESS;
+}
+
+static int
+nat64s_make_v6_syn_to(
+	struct nat64s_env *env,
+	uint16_t client_port,
+	const uint8_t remote[4],
+	struct packet **out
+) {
+	return nat64s_make_v6_syn_from(
+		env, client_addr, client_port, remote, out
+	);
 }
 
 static int
@@ -362,10 +422,14 @@ nat64s_make_v4_reply(
 	return TEST_SUCCESS;
 }
 
-// Build a parsed ICMPv6 echo request from the client.
+// Build a parsed ICMPv6 echo request with the given identifier from the
+// given client.
 static int
-nat64s_make_v6_echo(
-	struct nat64s_env *env, uint16_t ident, struct packet **out
+nat64s_make_v6_echo_from(
+	struct nat64s_env *env,
+	const uint8_t client6[16],
+	uint16_t ident,
+	struct packet **out
 ) {
 	struct rte_mbuf *mbuf = dataplane_ut_alloc_mbuf(env->ut);
 	TEST_ASSERT_NOT_NULL(mbuf, "dataplane_ut_alloc_mbuf returned NULL");
@@ -378,7 +442,7 @@ nat64s_make_v6_echo(
 	struct rte_ether_hdr *ether = (struct rte_ether_hdr *)data;
 	ether->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6);
 	struct rte_ipv6_hdr *ipv6 = (struct rte_ipv6_hdr *)(ether + 1);
-	memcpy(ipv6->src_addr, client_addr, 16);
+	memcpy(ipv6->src_addr, client6, 16);
 	memcpy(ipv6->dst_addr, nat64_prefix, 12);
 	memcpy(&ipv6->dst_addr[12], remote4, 4);
 	ipv6->proto = IPPROTO_ICMPV6;
@@ -394,6 +458,14 @@ nat64s_make_v6_echo(
 	*idp = rte_cpu_to_be_16(ident);
 	*out = packet;
 	return TEST_SUCCESS;
+}
+
+// Build a parsed ICMPv6 echo request from the client.
+static int
+nat64s_make_v6_echo(
+	struct nat64s_env *env, uint16_t ident, struct packet **out
+) {
+	return nat64s_make_v6_echo_from(env, client_addr, ident, out);
 }
 
 // Build a parsed ICMPv4 echo reply from the remote towards the pool.
@@ -488,6 +560,60 @@ nat64s_make_v4_frag_needed(
 	return TEST_SUCCESS;
 }
 
+// Build a parsed ICMPv4 Destination Unreachable error from the remote,
+// quoting the translated outbound echo request of an echo session.
+static int
+nat64s_make_v4_error_quoting_echo(
+	struct nat64s_env *env, uint16_t translated_ident, struct packet **out
+) {
+	struct rte_mbuf *mbuf = dataplane_ut_alloc_mbuf(env->ut);
+	TEST_ASSERT_NOT_NULL(mbuf, "dataplane_ut_alloc_mbuf returned NULL");
+
+	size_t icmp_len = 8 + sizeof(struct rte_ipv4_hdr) + 8;
+	uint8_t *data = (uint8_t *)rte_pktmbuf_append(
+		mbuf,
+		sizeof(struct rte_ether_hdr) + sizeof(struct rte_ipv4_hdr) +
+			icmp_len +
+			// Tailroom for the embedded header growth of the
+			// translation.
+			sizeof(struct rte_ipv6_hdr)
+	);
+	TEST_ASSERT_NOT_NULL(data, "packet payload allocation failed");
+	memset(data, 0, rte_pktmbuf_data_len(mbuf));
+
+	struct rte_ether_hdr *ether = (struct rte_ether_hdr *)data;
+	ether->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
+
+	struct rte_ipv4_hdr *ipv4 = (struct rte_ipv4_hdr *)(ether + 1);
+	ipv4->version_ihl = RTE_IPV4_VHL_DEF;
+	ipv4->total_length =
+		rte_cpu_to_be_16(sizeof(struct rte_ipv4_hdr) + icmp_len);
+	ipv4->next_proto_id = IPPROTO_ICMP;
+	ipv4->src_addr = remote_addr;
+	ipv4->dst_addr = pool_addrs[0];
+
+	uint8_t *icmp = (uint8_t *)(ipv4 + 1);
+	icmp[0] = ICMP_DEST_UNREACH;
+
+	struct rte_ipv4_hdr *emb = (struct rte_ipv4_hdr *)(icmp + 8);
+	emb->version_ihl = RTE_IPV4_VHL_DEF;
+	emb->total_length = rte_cpu_to_be_16(sizeof(struct rte_ipv4_hdr) + 8);
+	emb->next_proto_id = IPPROTO_ICMP;
+	emb->src_addr = pool_addrs[0];
+	emb->dst_addr = remote_addr;
+
+	uint8_t *emb_icmp = (uint8_t *)(emb + 1);
+	emb_icmp[0] = ICMP_ECHO;
+	*(rte_be16_t *)(emb_icmp + 4) = rte_cpu_to_be_16(translated_ident);
+
+	struct packet *packet = mbuf_to_packet(mbuf);
+	memset(packet, 0, sizeof(*packet));
+	packet->mbuf = mbuf;
+	TEST_ASSERT_SUCCESS(parse_packet(packet), "parse_packet failed");
+	*out = packet;
+	return TEST_SUCCESS;
+}
+
 // Build a parsed ICMPv6 Packet Too Big error from the client, quoting the
 // inbound packet of the session (remote -> client): the reversed
 // orientation of the stored session.
@@ -541,6 +667,91 @@ nat64s_make_v6_packet_too_big(
 	return TEST_SUCCESS;
 }
 
+// Build the client-side error of the suite's session with a Hop-by-Hop
+// header ahead of the quoted TCP header, as the remote may have sent it.
+static int
+nat64s_make_v6_packet_too_big_with_options(
+	struct nat64s_env *env, uint16_t client_port, struct packet **out
+) {
+	struct packet *packet = NULL;
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v6_packet_too_big(env, client_port, &packet),
+		"build failed"
+	);
+	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+	TEST_ASSERT_NOT_NULL(
+		rte_pktmbuf_append(mbuf, 8), "packet payload allocation failed"
+	);
+	uint8_t *icmp = rte_pktmbuf_mtod_offset(
+		mbuf, uint8_t *, packet->transport_header.offset
+	);
+	struct rte_ipv6_hdr *emb = (struct rte_ipv6_hdr *)(icmp + 8);
+	uint8_t *options = (uint8_t *)(emb + 1);
+	memmove(options + 8, options, sizeof(struct rte_tcp_hdr));
+	options[0] = IPPROTO_TCP; // the header that follows
+	options[1] = 0;		  // its length in eight-octet units, less one
+	memset(options + 2, 0, 6);
+	emb->proto = IPPROTO_HOPOPTS;
+
+	struct rte_ipv6_hdr *outer = rte_pktmbuf_mtod_offset(
+		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
+	);
+	outer->payload_len =
+		rte_cpu_to_be_16(rte_be_to_cpu_16(outer->payload_len) + 8);
+	TEST_ASSERT_SUCCESS(parse_packet(packet), "parse_packet failed");
+	*out = packet;
+	return TEST_SUCCESS;
+}
+
+// Build a parsed ICMPv6 Packet Too Big error from the client, quoting the
+// inbound echo reply of an echo session as the client received it, under
+// its own identifier.
+static int
+nat64s_make_v6_packet_too_big_quoting_echo(
+	struct nat64s_env *env, uint16_t ident, struct packet **out
+) {
+	struct rte_mbuf *mbuf = dataplane_ut_alloc_mbuf(env->ut);
+	TEST_ASSERT_NOT_NULL(mbuf, "dataplane_ut_alloc_mbuf returned NULL");
+	size_t icmp_len = 8 + sizeof(struct rte_ipv6_hdr) + 8;
+	uint8_t *data = (uint8_t *)rte_pktmbuf_append(
+		mbuf,
+		sizeof(struct rte_ether_hdr) + sizeof(struct rte_ipv6_hdr) +
+			icmp_len
+	);
+	TEST_ASSERT_NOT_NULL(data, "packet payload allocation failed");
+	memset(data, 0, rte_pktmbuf_data_len(mbuf));
+
+	struct rte_ether_hdr *ether = (struct rte_ether_hdr *)data;
+	ether->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6);
+	struct rte_ipv6_hdr *ipv6 = (struct rte_ipv6_hdr *)(ether + 1);
+	memcpy(ipv6->src_addr, client_addr, 16);
+	memcpy(ipv6->dst_addr, nat64_prefix, 12);
+	memcpy(&ipv6->dst_addr[12], remote4, 4);
+	ipv6->proto = IPPROTO_ICMPV6;
+	ipv6->payload_len = rte_cpu_to_be_16(icmp_len);
+
+	uint8_t *icmp = (uint8_t *)(ipv6 + 1);
+	icmp[0] = 2; // ICMP6_PACKET_TOO_BIG
+
+	struct rte_ipv6_hdr *emb = (struct rte_ipv6_hdr *)(icmp + 8);
+	memcpy(emb->src_addr, nat64_prefix, 12);
+	memcpy(&emb->src_addr[12], remote4, 4);
+	memcpy(emb->dst_addr, client_addr, 16);
+	emb->proto = IPPROTO_ICMPV6;
+	emb->payload_len = rte_cpu_to_be_16(8);
+
+	uint8_t *emb_icmp = (uint8_t *)(emb + 1);
+	emb_icmp[0] = 129; // echo reply
+	*(rte_be16_t *)(emb_icmp + 4) = rte_cpu_to_be_16(ident);
+
+	struct packet *packet = mbuf_to_packet(mbuf);
+	memset(packet, 0, sizeof(*packet));
+	packet->mbuf = mbuf;
+	TEST_ASSERT_SUCCESS(parse_packet(packet), "parse_packet failed");
+	*out = packet;
+	return TEST_SUCCESS;
+}
+
 // Run one packet through the pipeline. On return *out holds the emitted
 // packet and *dropped tells whether it was dropped instead; a dropped
 // packet is freed here.
@@ -575,8 +786,25 @@ nat64s_run(
 	return TEST_SUCCESS;
 }
 
+// Refresh the suite's own session at the current time, so that an error
+// about it is not dropped as one about an expired flow.
+static int
+nat64s_test_warm_session(struct nat64s_env *env) {
+	struct packet *in = NULL;
+	struct packet *out = NULL;
+	bool dropped = false;
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v6_syn(env, CLIENT_PORT, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the session refresh SYN must not be dropped");
+	rte_pktmbuf_free(packet_to_mbuf(out));
+	return TEST_SUCCESS;
+}
+
 // Outbound translation: the SYN leaves as IPv4 with the pool address as
-// its source and the remote as its destination, ports untouched.
+// its source, the remote as its destination, and its out-of-window source
+// port translated into the window.
 static int
 test_outbound_creates_session(struct nat64s_env *env) {
 	dataplane_ut_set_time_ns(env->ut, 1000000000000ull);
@@ -887,6 +1115,19 @@ test_pmtud_error_translated(struct nat64s_env *env) {
 			memcmp(&emb->dst_addr[12], &remote_addr, 4) == 0,
 		"the quoted remote address must be prefix + remote"
 	);
+	// The client must recognize the quoted packet as its own: its source
+	// port is the client's, not the translated one the remote saw.
+	struct rte_tcp_hdr *emb_tcp = (struct rte_tcp_hdr *)(emb + 1);
+	TEST_ASSERT_EQUAL(
+		rte_be_to_cpu_16(emb_tcp->src_port),
+		CLIENT_PORT,
+		"the quoted source port must be the client's own"
+	);
+	TEST_ASSERT_EQUAL(
+		rte_be_to_cpu_16(emb_tcp->dst_port),
+		REMOTE_PORT,
+		"the quoted destination port must stay the remote's"
+	);
 	rte_pktmbuf_free(mbuf);
 	return TEST_SUCCESS;
 }
@@ -925,6 +1166,38 @@ test_client_error_translated(struct nat64s_env *env) {
 		ipv4->src_addr,
 		pool_addrs[0],
 		"the error must come from the pool address"
+	);
+	// The remote must recognize the quoted packet as the one it sent: it
+	// came from the remote to the session's public address, its source
+	// port is the remote's and its destination port the allocated one,
+	// not the client's own. The quote left as IPv4, its header shrunk to
+	// the IPv4 size.
+	struct rte_ipv4_hdr *emb = rte_pktmbuf_mtod_offset(
+		mbuf,
+		struct rte_ipv4_hdr *,
+		out->transport_header.offset + sizeof(struct rte_icmp_hdr)
+	);
+	TEST_ASSERT_EQUAL(
+		emb->src_addr,
+		remote_addr,
+		"the quoted source address must be the remote"
+	);
+	TEST_ASSERT_EQUAL(
+		emb->dst_addr,
+		pool_addrs[0],
+		"the quoted destination address must be the session's public "
+		"one"
+	);
+	struct rte_tcp_hdr *emb_tcp = (struct rte_tcp_hdr *)(emb + 1);
+	TEST_ASSERT_EQUAL(
+		rte_be_to_cpu_16(emb_tcp->src_port),
+		REMOTE_PORT,
+		"the quoted source port must stay the remote's"
+	);
+	TEST_ASSERT_EQUAL(
+		rte_be_to_cpu_16(emb_tcp->dst_port),
+		env->allocated_port,
+		"the quoted destination port must be the allocated one"
 	);
 	rte_pktmbuf_free(mbuf);
 	return TEST_SUCCESS;
@@ -1316,12 +1589,1019 @@ test_return_traffic_keeps_lan_entry(struct nat64s_env *env) {
 	return TEST_SUCCESS;
 }
 
+// The client's address with another final byte: a second client of the
+// lan.
+static void
+nat64s_test_other_client(uint8_t out[16], uint8_t last_byte) {
+	memcpy(out, client_addr, 16);
+	out[15] = last_byte;
+}
+
+// Check that a translated return packet carries the given client as its
+// IPv6 destination, port included, and release it.
+static int
+nat64s_test_assert_reply_to(
+	struct packet *out, const uint8_t client6[16], uint16_t client_port
+) {
+	TEST_ASSERT_NOT_NULL(out, "the reply must be translated");
+	TEST_ASSERT(
+		out->network_header.type ==
+			rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6),
+		"the reply must be IPv6"
+	);
+	struct rte_mbuf *mbuf = packet_to_mbuf(out);
+	struct rte_ipv6_hdr *ipv6 = rte_pktmbuf_mtod_offset(
+		mbuf, struct rte_ipv6_hdr *, out->network_header.offset
+	);
+	TEST_ASSERT(
+		memcmp(ipv6->dst_addr, client6, 16) == 0,
+		"the reply must reach its own client"
+	);
+	struct rte_tcp_hdr *tcp = rte_pktmbuf_mtod_offset(
+		mbuf, struct rte_tcp_hdr *, out->transport_header.offset
+	);
+	TEST_ASSERT_EQUAL(
+		rte_be_to_cpu_16(tcp->dst_port),
+		client_port,
+		"the reply must restore the client's port"
+	);
+	rte_pktmbuf_free(mbuf);
+	return TEST_SUCCESS;
+}
+
+// Send one client's echo request through the pipeline and return the
+// identifier it left with.
+static int
+nat64s_test_echo_request(
+	struct nat64s_env *env,
+	const uint8_t client6[16],
+	uint16_t ident,
+	uint16_t *translated
+) {
+	struct packet *in = NULL;
+	struct packet *out = NULL;
+	bool dropped = false;
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v6_echo_from(env, client6, ident, &in),
+		"build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the echo request must not be dropped");
+	TEST_ASSERT_NOT_NULL(out, "the echo request must be translated");
+	struct rte_icmp_hdr *icmp4 = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(out),
+		struct rte_icmp_hdr *,
+		out->transport_header.offset
+	);
+	*translated = rte_be_to_cpu_16(icmp4->icmp_ident);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+	return TEST_SUCCESS;
+}
+
+// Check that a translated echo reply carries the given client as its
+// IPv6 destination and the client's own identifier, and release it.
+static int
+nat64s_test_assert_echo_reply_to(
+	struct packet *out, const uint8_t client6[16], uint16_t ident
+) {
+	TEST_ASSERT_NOT_NULL(out, "the echo reply must be translated");
+	TEST_ASSERT(
+		out->network_header.type ==
+			rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6),
+		"the echo reply must be IPv6"
+	);
+	struct rte_mbuf *mbuf = packet_to_mbuf(out);
+	struct rte_ipv6_hdr *ipv6 = rte_pktmbuf_mtod_offset(
+		mbuf, struct rte_ipv6_hdr *, out->network_header.offset
+	);
+	TEST_ASSERT(
+		memcmp(ipv6->dst_addr, client6, 16) == 0,
+		"the echo reply must reach its own client"
+	);
+	struct yanet_icmp6_hdr *icmp6 = rte_pktmbuf_mtod_offset(
+		mbuf, struct yanet_icmp6_hdr *, out->transport_header.offset
+	);
+	TEST_ASSERT_EQUAL(
+		rte_be_to_cpu_16(icmp6->yanet_icmp6_id),
+		ident,
+		"the echo reply must restore the client's identifier"
+	);
+	rte_pktmbuf_free(mbuf);
+	return TEST_SUCCESS;
+}
+
+// Send the remote's echo reply, which carries the identifier the request
+// left with, and check which client it reaches.
+static int
+nat64s_test_echo_answered(
+	struct nat64s_env *env,
+	uint16_t translated,
+	const uint8_t client6[16],
+	uint16_t ident
+) {
+	struct packet *in = NULL;
+	struct packet *out = NULL;
+	bool dropped = false;
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_echo_reply(env, translated, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the echo reply must not be dropped");
+	return nat64s_test_assert_echo_reply_to(out, client6, ident);
+}
+
+// An echo identifier outside the port window is translated like a port:
+// the request leaves with an in-window identifier, and the reply, which
+// carries that one, finds the session and restores the client's own.
+static int
+test_echo_identifier_outside_window_round_trips(struct nat64s_env *env) {
+	dataplane_ut_set_time_ns(env->ut, 20000000000000ull);
+	const uint16_t ident = 7;
+
+	struct packet *in = NULL;
+	struct packet *out = NULL;
+	bool dropped = false;
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v6_echo(env, ident, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the echo request must not be dropped");
+	TEST_ASSERT_NOT_NULL(out, "the echo request must be translated");
+	struct rte_icmp_hdr *icmp4 = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(out),
+		struct rte_icmp_hdr *,
+		out->transport_header.offset
+	);
+	uint16_t translated = rte_be_to_cpu_16(icmp4->icmp_ident);
+	TEST_ASSERT(
+		translated >= 1024 && translated < 4096,
+		"an out-of-window identifier must be translated into the window"
+	);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_echo_reply(env, translated, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		!dropped,
+		"the echo reply carrying the translated identifier must find "
+		"the "
+		"session"
+	);
+	TEST_ASSERT_NOT_NULL(out, "the echo reply must be translated");
+	struct yanet_icmp6_hdr *icmp6 = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(out),
+		struct yanet_icmp6_hdr *,
+		out->transport_header.offset
+	);
+	TEST_ASSERT_EQUAL(
+		icmp6->icmp6_type,
+		129,
+		"the reply must become an ICMPv6 echo reply"
+	);
+	TEST_ASSERT_EQUAL(
+		rte_be_to_cpu_16(icmp6->yanet_icmp6_id),
+		ident,
+		"the client's identifier must be restored"
+	);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	// An error from the remote quoting that request is found through the
+	// same session, and the client sees its own identifier in the quote.
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_error_quoting_echo(env, translated, &in),
+		"build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		!dropped,
+		"an error quoting the echo request must not be dropped"
+	);
+	TEST_ASSERT_NOT_NULL(
+		out, "an error quoting the echo request must be translated"
+	);
+	struct rte_mbuf *mbuf = packet_to_mbuf(out);
+	struct rte_ipv6_hdr *ipv6 = rte_pktmbuf_mtod_offset(
+		mbuf, struct rte_ipv6_hdr *, out->network_header.offset
+	);
+	TEST_ASSERT(
+		memcmp(ipv6->dst_addr, client_addr, 16) == 0,
+		"the error must reach the client"
+	);
+	struct yanet_icmp6_hdr *quoted = rte_pktmbuf_mtod_offset(
+		mbuf,
+		struct yanet_icmp6_hdr *,
+		out->transport_header.offset + sizeof(struct yanet_icmp6_hdr) +
+			sizeof(struct rte_ipv6_hdr)
+	);
+	TEST_ASSERT_EQUAL(
+		rte_be_to_cpu_16(quoted->yanet_icmp6_id),
+		ident,
+		"the quoted identifier must be the client's own"
+	);
+	rte_pktmbuf_free(mbuf);
+
+	// A client-side error quoting the inbound echo reply, under the
+	// client's own identifier, finds the session as well: the remote
+	// sees in the quote the identifier it answered under.
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v6_packet_too_big_quoting_echo(env, ident, &in),
+		"build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		!dropped, "an error quoting the echo reply must not be dropped"
+	);
+	TEST_ASSERT_NOT_NULL(
+		out, "an error quoting the echo reply must be translated"
+	);
+	mbuf = packet_to_mbuf(out);
+	struct rte_icmp_hdr *quoted_reply = rte_pktmbuf_mtod_offset(
+		mbuf,
+		struct rte_icmp_hdr *,
+		out->transport_header.offset + sizeof(struct rte_icmp_hdr) +
+			sizeof(struct rte_ipv4_hdr)
+	);
+	TEST_ASSERT_EQUAL(
+		quoted_reply->icmp_type,
+		ICMP_ECHOREPLY,
+		"the quoted echo reply must leave as an ICMP echo reply"
+	);
+	TEST_ASSERT_EQUAL(
+		rte_be_to_cpu_16(quoted_reply->icmp_ident),
+		translated,
+		"the quoted identifier must be the one the remote answered "
+		"under"
+	);
+	rte_pktmbuf_free(mbuf);
+	return TEST_SUCCESS;
+}
+
+// Two clients pinging one remote with the same in-window identifier: the
+// second is moved to a free identifier on both ports of its session key,
+// so the remote's answer, which carries the moved identifier, reaches the
+// second client.
+static int
+test_echo_on_taken_identifier_moves_whole_key(struct nat64s_env *env) {
+	dataplane_ut_set_time_ns(env->ut, 20500000000000ull);
+
+	uint8_t first_client[16];
+	uint8_t second_client[16];
+	nat64s_test_other_client(first_client, 0x61);
+	nat64s_test_other_client(second_client, 0x62);
+
+	uint16_t kept = 0;
+	TEST_ASSERT_SUCCESS(
+		nat64s_test_echo_request(env, first_client, 2000, &kept),
+		"the first client's request failed"
+	);
+	TEST_ASSERT_EQUAL(kept, 2000, "an in-window identifier must be kept");
+
+	uint16_t moved = 0;
+	TEST_ASSERT_SUCCESS(
+		nat64s_test_echo_request(env, second_client, 2000, &moved),
+		"the second client's request failed"
+	);
+	TEST_ASSERT(
+		moved >= 1024 && moved < 4096 && moved != 2000,
+		"an identifier another client holds towards this remote must "
+		"be "
+		"moved inside the window"
+	);
+
+	TEST_ASSERT_SUCCESS(
+		nat64s_test_echo_answered(env, moved, second_client, 2000),
+		"the second client's answer must find the second client"
+	);
+	TEST_ASSERT_SUCCESS(
+		nat64s_test_echo_answered(env, 2000, first_client, 2000),
+		"the first client's answer must still find the first client"
+	);
+	return TEST_SUCCESS;
+}
+
+// A moved echo lands on no identifier another echo holds towards the same
+// remote: with identifiers 2100 and 2101 taken, a third client's 2100
+// moves to 2102, and every answer reaches its own client. The identifiers are
+// not those of the scenario before, whose sessions are still alive.
+static int
+test_echo_probe_skips_identifiers_others_hold(struct nat64s_env *env) {
+	dataplane_ut_set_time_ns(env->ut, 20650000000000ull);
+
+	uint8_t first_client[16];
+	uint8_t holder_client[16];
+	uint8_t moved_client[16];
+	nat64s_test_other_client(first_client, 0x71);
+	nat64s_test_other_client(holder_client, 0x72);
+	nat64s_test_other_client(moved_client, 0x73);
+
+	uint16_t ident = 0;
+	TEST_ASSERT_SUCCESS(
+		nat64s_test_echo_request(env, first_client, 2100, &ident),
+		"the first client's request failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		nat64s_test_echo_request(env, holder_client, 2101, &ident),
+		"the holder's request failed"
+	);
+	TEST_ASSERT_EQUAL(ident, 2101, "an in-window identifier must be kept");
+
+	TEST_ASSERT_SUCCESS(
+		nat64s_test_echo_request(env, moved_client, 2100, &ident),
+		"the moved client's request failed"
+	);
+	TEST_ASSERT_EQUAL(
+		ident,
+		2102,
+		"an echo must move past an identifier another echo holds"
+	);
+
+	TEST_ASSERT_SUCCESS(
+		nat64s_test_echo_answered(env, 2102, moved_client, 2100),
+		"the moved client's answer must find the moved client"
+	);
+	TEST_ASSERT_SUCCESS(
+		nat64s_test_echo_answered(env, 2101, holder_client, 2101),
+		"the holder's answer must find the holder"
+	);
+	TEST_ASSERT_SUCCESS(
+		nat64s_test_echo_answered(env, 2100, first_client, 2100),
+		"the first client's answer must find the first client"
+	);
+	return TEST_SUCCESS;
+}
+
+// Towards one remote an external tuple belongs to one client: a second
+// client arriving with the same in-window source port is moved to a free
+// port, and each client's return traffic still reaches its own client.
+static int
+test_taken_tuple_moves_to_free_port(struct nat64s_env *env) {
+	dataplane_ut_set_time_ns(env->ut, 21000000000000ull);
+
+	// The first client keeps its in-window port 2000: that is the tuple
+	// the second client derives.
+	struct packet *in = NULL;
+	struct packet *out = NULL;
+	bool dropped = false;
+	TEST_ASSERT_SUCCESS(nat64s_make_v6_syn(env, 2000, &in), "build failed");
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the first client's SYN must not be dropped");
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	uint8_t second_client[16];
+	nat64s_test_other_client(second_client, 0x02);
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v6_syn_from(env, second_client, 2000, remote4, &in),
+		"build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the second client's SYN must not be dropped");
+	TEST_ASSERT_NOT_NULL(out, "the second client's SYN must be translated");
+	struct rte_tcp_hdr *tcp = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(out),
+		struct rte_tcp_hdr *,
+		out->transport_header.offset
+	);
+	uint16_t moved_port = rte_be_to_cpu_16(tcp->src_port);
+	TEST_ASSERT(
+		moved_port >= 1024 && moved_port < 4096,
+		"the moved port must stay inside the window"
+	);
+	TEST_ASSERT(
+		moved_port != 2000,
+		"a port another client holds towards this remote must not be "
+		"shared"
+	);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_reply(env, moved_port, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the second client's reply must not be dropped");
+	TEST_ASSERT_SUCCESS(
+		nat64s_test_assert_reply_to(out, second_client, 2000),
+		"the second client's reply must reach the second client"
+	);
+
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_reply(env, 2000, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the first client's reply must not be dropped");
+	TEST_ASSERT_SUCCESS(
+		nat64s_test_assert_reply_to(out, client_addr, 2000),
+		"the first client's reply must still reach the first client"
+	);
+	return TEST_SUCCESS;
+}
+
+// A client moved off a taken port walks the window upwards and past its
+// end back to its first port: no port outside the window is ever used.
+static int
+test_taken_top_port_wraps_to_window_start(struct nat64s_env *env) {
+	// Three ports, so the top one has no neighbor inside the window.
+	const struct nat64s_env_settings narrow = {
+		.port_lo = 2000,
+		.port_hi = 2003,
+		.timeouts = {.timeout = 300, .tcp_established = 300},
+	};
+	TEST_ASSERT_SUCCESS(
+		nat64s_env_reconfigure(env, &narrow), "reconfigure failed"
+	);
+	dataplane_ut_set_time_ns(env->ut, 21500000000000ull);
+
+	// The first client holds the window's top port.
+	uint8_t top_client[16];
+	nat64s_test_other_client(top_client, 0x51);
+	struct packet *in = NULL;
+	struct packet *out = NULL;
+	bool dropped = false;
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v6_syn_from(env, top_client, 2002, remote4, &in),
+		"build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the first client's SYN must not be dropped");
+	TEST_ASSERT_NOT_NULL(out, "the first client's SYN must be translated");
+	struct rte_tcp_hdr *tcp = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(out),
+		struct rte_tcp_hdr *,
+		out->transport_header.offset
+	);
+	TEST_ASSERT_EQUAL(
+		rte_be_to_cpu_16(tcp->src_port),
+		2002,
+		"an in-window source port must be kept"
+	);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	// The second client derives the same top port and must move: with no
+	// port above it inside the window, the search wraps to the start.
+	uint8_t second_client[16];
+	nat64s_test_other_client(second_client, 0x52);
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v6_syn_from(env, second_client, 2002, remote4, &in),
+		"build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the second client's SYN must not be dropped");
+	TEST_ASSERT_NOT_NULL(out, "the second client's SYN must be translated");
+	tcp = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(out),
+		struct rte_tcp_hdr *,
+		out->transport_header.offset
+	);
+	TEST_ASSERT_EQUAL(
+		rte_be_to_cpu_16(tcp->src_port),
+		2000,
+		"a port moved past the window's end must wrap to its start"
+	);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_reply(env, 2000, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the second client's reply must not be dropped");
+	TEST_ASSERT_SUCCESS(
+		nat64s_test_assert_reply_to(out, second_client, 2002),
+		"the wrapped port's reply must reach the second client"
+	);
+
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_reply(env, 2002, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the first client's reply must not be dropped");
+	TEST_ASSERT_SUCCESS(
+		nat64s_test_assert_reply_to(out, top_client, 2002),
+		"the top port's reply must still reach the first client"
+	);
+
+	TEST_ASSERT_SUCCESS(
+		nat64s_env_reconfigure(env, &nat64s_suite_settings),
+		"restoring the suite's settings failed"
+	);
+	return TEST_SUCCESS;
+}
+
+// An ICMPv6 error whose source lies under a NAT64 prefix is hairpinned
+// traffic like any other packet: it is dropped before the session its
+// quote would match is ever looked up.
+static int
+test_hairpinned_error_dropped(struct nat64s_env *env) {
+	dataplane_ut_set_time_ns(env->ut, 22000000000000ull);
+
+	// The quoted session must be alive at this test's timestamp for the
+	// drop to be the hairpin rule's doing rather than a missed session.
+	struct packet *in = NULL;
+	struct packet *out = NULL;
+	bool dropped = false;
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v6_syn(env, CLIENT_PORT, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the session refresh SYN must not be dropped");
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v6_packet_too_big(env, CLIENT_PORT, &in),
+		"build failed"
+	);
+	struct rte_ipv6_hdr *ipv6 = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(in),
+		struct rte_ipv6_hdr *,
+		in->network_header.offset
+	);
+	memcpy(ipv6->src_addr, nat64_prefix, 12);
+	memcpy(&ipv6->src_addr[12], remote4, 4);
+
+	uint64_t hairpin_before = env->config->stats[NAT64S_HAIRPIN];
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		dropped,
+		"an error sourced from under a NAT64 prefix must be dropped"
+	);
+	TEST_ASSERT_NULL(out, "a hairpinned error must not be translated");
+	TEST_ASSERT_EQUAL(
+		env->config->stats[NAT64S_HAIRPIN],
+		hairpin_before + 1,
+		"the hairpin counter must count the error"
+	);
+	return TEST_SUCCESS;
+}
+
+// A client-side error whose quote carries a Hop-by-Hop header ahead of
+// the TCP header still finds the session and translates: the quoted
+// transport header is looked for past the quote's extension headers, not
+// right behind its IPv6 header.
+static int
+test_client_error_quoting_options_translated(struct nat64s_env *env) {
+	dataplane_ut_set_time_ns(env->ut, 22200000000000ull);
+	TEST_ASSERT_SUCCESS(nat64s_test_warm_session(env), "warm-up failed");
+
+	struct packet *in = NULL;
+	struct packet *out = NULL;
+	bool dropped = false;
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v6_packet_too_big_with_options(
+			env, CLIENT_PORT, &in
+		),
+		"build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		!dropped,
+		"an error quoting a packet with extension headers must not be "
+		"dropped"
+	);
+	TEST_ASSERT_NOT_NULL(out, "the error must be translated");
+	// The quote leaves without its extension header, as IPv4.
+	struct rte_mbuf *mbuf = packet_to_mbuf(out);
+	struct rte_tcp_hdr *emb_tcp = rte_pktmbuf_mtod_offset(
+		mbuf,
+		struct rte_tcp_hdr *,
+		out->transport_header.offset + sizeof(struct rte_icmp_hdr) +
+			sizeof(struct rte_ipv4_hdr)
+	);
+	TEST_ASSERT_EQUAL(
+		rte_be_to_cpu_16(emb_tcp->src_port),
+		REMOTE_PORT,
+		"the quoted source port must stay the remote's"
+	);
+	TEST_ASSERT_EQUAL(
+		rte_be_to_cpu_16(emb_tcp->dst_port),
+		env->allocated_port,
+		"the quoted destination port must be the allocated one"
+	);
+	rte_pktmbuf_free(mbuf);
+	return TEST_SUCCESS;
+}
+
+// An error is translated only when it is addressed to the sender of the
+// packet it quotes: one addressed anywhere else is dropped, whatever
+// session its quote names.
+static int
+test_error_addressed_elsewhere_dropped(struct nat64s_env *env) {
+	dataplane_ut_set_time_ns(env->ut, 22400000000000ull);
+	TEST_ASSERT_SUCCESS(nat64s_test_warm_session(env), "warm-up failed");
+
+	struct packet *in = NULL;
+	struct packet *out = NULL;
+	bool dropped = false;
+	size_t dst_off = offsetof(struct rte_ipv6_hdr, dst_addr);
+
+	// A client-side error addressed outside every configured prefix.
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v6_packet_too_big(env, CLIENT_PORT, &in),
+		"build failed"
+	);
+	memcpy(rte_pktmbuf_mtod_offset(
+		       packet_to_mbuf(in),
+		       uint8_t *,
+		       in->network_header.offset + dst_off
+	       ),
+	       client_addr,
+	       16);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		dropped,
+		"an error addressed outside the prefixes must be dropped"
+	);
+
+	// A client-side error addressed to another remote under the prefix.
+	const uint8_t other_remote[4] = {192, 0, 2, 35};
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v6_packet_too_big(env, CLIENT_PORT, &in),
+		"build failed"
+	);
+	memcpy(rte_pktmbuf_mtod_offset(
+		       packet_to_mbuf(in),
+		       uint8_t *,
+		       in->network_header.offset + dst_off + 12
+	       ),
+	       other_remote,
+	       4);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		dropped, "an error addressed to another remote must be dropped"
+	);
+
+	// A remote's error addressed to another address of the pool.
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_frag_needed(env, env->allocated_port, &in),
+		"build failed"
+	);
+	struct rte_ipv4_hdr *ipv4 = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(in),
+		struct rte_ipv4_hdr *,
+		in->network_header.offset
+	);
+	ipv4->dst_addr = other_pool_addr;
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		dropped,
+		"an error addressed to another pool address must be dropped"
+	);
+
+	// The same remote's error, addressed to the session's public
+	// address, is translated.
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_frag_needed(env, env->allocated_port, &in),
+		"build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		!dropped,
+		"the error addressed to the session must be translated"
+	);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+	return TEST_SUCCESS;
+}
+
+// A SYN whose first segment ends inside its TCP header, the rest riding
+// in a second segment, is dropped and leaves no session behind. The flag
+// byte the module must not read sits in the head segment's tailroom, here
+// deliberately holding a SYN.
+static int
+test_truncated_syn_leaves_no_session(struct nat64s_env *env) {
+	dataplane_ut_set_time_ns(env->ut, 23000000000000ull);
+	const uint16_t port = 2012;
+
+	struct packet *in = NULL;
+	TEST_ASSERT_SUCCESS(nat64s_make_v6_syn(env, port, &in), "build failed");
+	struct rte_mbuf *head = packet_to_mbuf(in);
+	struct rte_mbuf *rest = dataplane_ut_alloc_mbuf(env->ut);
+	TEST_ASSERT_NOT_NULL(rest, "dataplane_ut_alloc_mbuf returned NULL");
+
+	// The TCP header past its two ports moves into the second segment.
+	const size_t moved = sizeof(struct rte_tcp_hdr) - 4;
+	uint8_t *rest_data = (uint8_t *)rte_pktmbuf_append(rest, moved);
+	TEST_ASSERT_NOT_NULL(rest_data, "packet payload allocation failed");
+	memcpy(rest_data,
+	       rte_pktmbuf_mtod_offset(
+		       head, uint8_t *, in->transport_header.offset
+	       ) + 4,
+	       moved);
+	TEST_ASSERT_EQUAL(
+		rte_pktmbuf_trim(head, (uint16_t)moved),
+		0,
+		"trimming the head segment failed"
+	);
+
+	TEST_ASSERT(
+		rte_pktmbuf_tailroom(head) >= 32,
+		"the head segment has no tailroom to dirty"
+	);
+	memset(rte_pktmbuf_mtod_offset(
+		       head, uint8_t *, rte_pktmbuf_data_len(head)
+	       ),
+	       0xff,
+	       32);
+	TEST_ASSERT_EQUAL(
+		rte_pktmbuf_chain(head, rest), 0, "chaining the segments failed"
+	);
+	TEST_ASSERT_SUCCESS(parse_packet(in), "parse_packet failed");
+
+	struct packet *out = NULL;
+	bool dropped = false;
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		dropped,
+		"a SYN whose flags lie outside the first segment must be "
+		"dropped"
+	);
+	TEST_ASSERT_NULL(out, "a SYN cut inside its header must not translate");
+
+	// No session survived it: the flow's next packet, a plain ACK, has
+	// nothing to find and is refused like any TCP packet that did not
+	// open with a SYN.
+	TEST_ASSERT_SUCCESS(nat64s_make_v6_syn(env, port, &in), "build failed");
+	nat64s_test_set_tcp_flags(in, RTE_TCP_ACK_FLAG);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		dropped,
+		"a session must not survive a SYN whose flags could not be read"
+	);
+	return TEST_SUCCESS;
+}
+
+// A new flow finding every candidate port taken towards its remote gives
+// up instead of sharing one: its SYN is dropped, and the sessions holding
+// the ports keep answering their own clients.
+static int
+test_exhausted_window_drops_new_flow(struct nat64s_env *env) {
+	// Four ports, so four clients fill the window completely.
+	const struct nat64s_env_settings narrow = {
+		.port_lo = 2000,
+		.port_hi = 2004,
+		.timeouts = {.timeout = 300, .tcp_established = 300},
+	};
+	TEST_ASSERT_SUCCESS(
+		nat64s_env_reconfigure(env, &narrow), "reconfigure failed"
+	);
+	dataplane_ut_set_time_ns(env->ut, 24000000000000ull);
+
+	// Each client's in-window source port is kept, so the four of them
+	// hold the whole window towards the test remote.
+	uint16_t held[4];
+	for (size_t idx = 0; idx < 4; ++idx) {
+		uint8_t client6[16];
+		nat64s_test_other_client(client6, (uint8_t)(0x21 + idx));
+		const uint16_t client_port = (uint16_t)(2000 + idx);
+
+		struct packet *in = NULL;
+		struct packet *out = NULL;
+		bool dropped = false;
+		TEST_ASSERT_SUCCESS(
+			nat64s_make_v6_syn_from(
+				env, client6, client_port, remote4, &in
+			),
+			"build failed"
+		);
+		TEST_ASSERT_SUCCESS(
+			nat64s_run(env, in, &out, &dropped), "run failed"
+		);
+		TEST_ASSERT(
+			!dropped, "an in-window client must not be dropped"
+		);
+		TEST_ASSERT_NOT_NULL(
+			out, "an in-window client must be translated"
+		);
+		struct rte_tcp_hdr *tcp = rte_pktmbuf_mtod_offset(
+			packet_to_mbuf(out),
+			struct rte_tcp_hdr *,
+			out->transport_header.offset
+		);
+		held[idx] = rte_be_to_cpu_16(tcp->src_port);
+		TEST_ASSERT_EQUAL(
+			held[idx],
+			client_port,
+			"an in-window source port must be kept"
+		);
+		rte_pktmbuf_free(packet_to_mbuf(out));
+	}
+
+	// A fifth client derives one of the four ports as well: all of them
+	// are taken.
+	uint8_t fifth_client[16];
+	nat64s_test_other_client(fifth_client, 0x31);
+	struct packet *in = NULL;
+	struct packet *out = NULL;
+	bool dropped = false;
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v6_syn_from(env, fifth_client, 3000, remote4, &in),
+		"build failed"
+	);
+	uint64_t failed_before = env->config->stats[NAT64S_INSERT_FAILED];
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		dropped,
+		"a flow with no free port towards its remote must be dropped"
+	);
+	TEST_ASSERT_NULL(out, "an unplaceable flow must not be translated");
+	TEST_ASSERT_EQUAL(
+		env->config->stats[NAT64S_INSERT_FAILED],
+		failed_before + 1,
+		"the insert-failed counter must count the unplaceable flow"
+	);
+
+	for (size_t idx = 0; idx < 4; ++idx) {
+		uint8_t client6[16];
+		nat64s_test_other_client(client6, (uint8_t)(0x21 + idx));
+
+		TEST_ASSERT_SUCCESS(
+			nat64s_make_v4_reply(env, held[idx], &in),
+			"build failed"
+		);
+		TEST_ASSERT_SUCCESS(
+			nat64s_run(env, in, &out, &dropped), "run failed"
+		);
+		TEST_ASSERT(!dropped, "a held port must keep answering");
+		TEST_ASSERT_SUCCESS(
+			nat64s_test_assert_reply_to(
+				out, client6, (uint16_t)(2000 + idx)
+			),
+			"a held port must keep answering its own client"
+		);
+	}
+
+	TEST_ASSERT_SUCCESS(
+		nat64s_env_reconfigure(env, &nat64s_suite_settings),
+		"restoring the suite's settings failed"
+	);
+	return TEST_SUCCESS;
+}
+
+// A full session table refuses new flows without wedging their buckets:
+// the insert that finds no room releases its bucket, so the same flow is
+// refused again instead of hanging its worker on it.
+static int
+test_full_table_refuses_without_wedging(struct nat64s_env *env) {
+	dataplane_ut_set_time_ns(env->ut, 24500000000000ull);
+
+	// In-window source ports are kept, so every flow takes a port of its
+	// own and none is refused for a taken tuple.
+	const uint64_t refused_before =
+		env->config->stats[NAT64S_INSERT_FAILED];
+	uint64_t refused = refused_before;
+	uint16_t port = 1024;
+	size_t opened = 0;
+	struct packet *in = NULL;
+	struct packet *out = NULL;
+	bool dropped = false;
+	while (refused == refused_before && opened < 3000) {
+		TEST_ASSERT_SUCCESS(
+			nat64s_make_v6_syn(env, port, &in), "build failed"
+		);
+		TEST_ASSERT_SUCCESS(
+			nat64s_run(env, in, &out, &dropped), "run failed"
+		);
+		refused = env->config->stats[NAT64S_INSERT_FAILED];
+		if (refused == refused_before) {
+			TEST_ASSERT(
+				!dropped,
+				"a flow must be opened while the table has room"
+			);
+			rte_pktmbuf_free(packet_to_mbuf(out));
+		}
+		++opened;
+		++port;
+	}
+	TEST_ASSERT_EQUAL(
+		refused, refused_before + 1, "the session table must fill up"
+	);
+	// The scenarios before this one keep the key slots of their expired
+	// sessions, so a little less than a whole index of flows fits.
+	TEST_ASSERT(
+		opened >= 900,
+		"nearly an index of flows must fit before one is refused: %zu",
+		opened
+	);
+	TEST_ASSERT(
+		dropped, "a flow beyond the table's capacity must be refused"
+	);
+
+	// The refused flow hashes to the bucket of the failed insert: it is
+	// refused again, not stuck on a lock that insert left held.
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v6_syn(env, port - 1, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT_EQUAL(
+		env->config->stats[NAT64S_INSERT_FAILED],
+		refused_before + 2,
+		"the refused flow must be refused again"
+	);
+	TEST_ASSERT(dropped, "the refused flow must be dropped again");
+
+	// A flow opened before the table filled still translates.
+	TEST_ASSERT_SUCCESS(nat64s_make_v6_syn(env, 1024, &in), "build failed");
+	nat64s_test_set_tcp_flags(in, RTE_TCP_ACK_FLAG);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		!dropped,
+		"a flow opened before the table filled must still translate"
+	);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+	return TEST_SUCCESS;
+}
+
+// Timeouts left unset reach the dataplane unset, and each resolves to its
+// own default there: a TCP session that has carried an ACK lives for
+// hours, one that has not lives for a minute.
+static int
+test_default_timeouts_follow_each_knob(struct nat64s_env *env) {
+	const struct nat64s_env_settings defaults = {
+		.port_lo = 1024,
+		.port_hi = 4096,
+		.timeouts = {.timeout = 0, .tcp_established = 0},
+	};
+	TEST_ASSERT_SUCCESS(
+		nat64s_env_reconfigure(env, &defaults), "reconfigure failed"
+	);
+
+	const uint64_t base = 25000000000000ull;
+	const uint64_t sec = 1000000000ull;
+	struct packet *in = NULL;
+	struct packet *out = NULL;
+	bool dropped = false;
+
+	// Flow A is opened and answered with a SYN-ACK; flow B only opens.
+	dataplane_ut_set_time_ns(env->ut, base);
+	TEST_ASSERT_SUCCESS(nat64s_make_v6_syn(env, 2013, &in), "build failed");
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the established flow's SYN must not be dropped");
+	TEST_ASSERT_NOT_NULL(out, "the established flow's SYN must translate");
+	struct rte_tcp_hdr *tcp = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(out),
+		struct rte_tcp_hdr *,
+		out->transport_header.offset
+	);
+	uint16_t established_port = rte_be_to_cpu_16(tcp->src_port);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_reply(env, established_port, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the SYN-ACK must not be dropped");
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	TEST_ASSERT_SUCCESS(nat64s_make_v6_syn(env, 2014, &in), "build failed");
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		!dropped, "the unestablished flow's SYN must not be dropped"
+	);
+	TEST_ASSERT_NOT_NULL(
+		out, "the unestablished flow's SYN must translate"
+	);
+	tcp = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(out),
+		struct rte_tcp_hdr *,
+		out->transport_header.offset
+	);
+	uint16_t unestablished_port = rte_be_to_cpu_16(tcp->src_port);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	// A minute in, the unestablished flow is gone.
+	dataplane_ut_set_time_ns(env->ut, base + 61 * sec);
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_reply(env, unestablished_port, &in),
+		"build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT_NULL(
+		out, "an unestablished flow must expire after a minute"
+	);
+	TEST_ASSERT(dropped, "an unestablished flow's reply must be dropped");
+
+	// Two minutes in, the established one still answers.
+	dataplane_ut_set_time_ns(env->ut, base + 120 * sec);
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_reply(env, established_port, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		!dropped,
+		"an established flow must outlive the unestablished default"
+	);
+
+	TEST_ASSERT_SUCCESS(
+		nat64s_env_reconfigure(env, &nat64s_suite_settings),
+		"restoring the suite's settings failed"
+	);
+	return TEST_SUCCESS;
+}
+
 int
 main(void) {
 	log_enable_name("debug");
 
 	struct nat64s_env env;
-	if (nat64s_env_init(&env) != TEST_SUCCESS) {
+	if (nat64s_env_init(&env, &nat64s_suite_settings) != TEST_SUCCESS) {
 		return 1;
 	}
 
@@ -1370,6 +2650,42 @@ main(void) {
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_return_traffic_keeps_lan_entry(&env);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_echo_identifier_outside_window_round_trips(&env);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_echo_on_taken_identifier_moves_whole_key(&env);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_echo_probe_skips_identifiers_others_hold(&env);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_taken_tuple_moves_to_free_port(&env);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_taken_top_port_wraps_to_window_start(&env);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_hairpinned_error_dropped(&env);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_client_error_quoting_options_translated(&env);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_error_addressed_elsewhere_dropped(&env);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_truncated_syn_leaves_no_session(&env);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_exhausted_window_drops_new_flow(&env);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_full_table_refuses_without_wedging(&env);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_default_timeouts_follow_each_knob(&env);
 	}
 
 	nat64s_env_fini(&env);

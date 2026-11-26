@@ -31,7 +31,7 @@ type ModuleConfig struct {
 // config, mapping 1:1 to struct nat64s_module_update.
 type ModuleUpdate struct {
 	// Prefixes are the 12-byte NAT64 prefixes for v4->v6 destinations;
-	// nil leaves the config's prefixes unchanged.
+	// nil leaves the config with none.
 	Prefixes [][]byte
 	// Pool is the public IPv4 pool in network byte order.
 	Pool []uint32
@@ -57,6 +57,10 @@ type SessionTimeout struct {
 }
 
 // NewModuleConfig allocates a new, empty nat64s module configuration.
+//
+// The caller owns it and releases it with Free while its agent is alive:
+// the config lives in shared memory, which nothing releases on the
+// owner's behalf once the handle is dropped.
 func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
 	if agent == nil {
 		return nil, fmt.Errorf("agent cannot be nil")
@@ -77,7 +81,6 @@ func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
 	}
 
 	config := &ModuleConfig{ptr: ffi.NewModuleConfig(unsafe.Pointer(ptr))}
-	runtime.SetFinalizer(config, func(c *ModuleConfig) { _ = c.Free() })
 	return config, nil
 }
 
@@ -101,10 +104,17 @@ func (m *ModuleConfig) Update(update ModuleUpdate) error {
 		}
 	}
 
+	// The C side reads the name and the two arrays during its call, so
+	// their storage is pinned for exactly that long: the update struct
+	// carries Go pointers into C.
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+
 	cMapName := C.CString(update.MapName)
 	defer C.free(unsafe.Pointer(cMapName))
 
 	cUpdate := C.struct_nat64s_module_update{
+		map_name: cMapName,
 		timeouts: C.struct_nat64state_timeouts{
 			timeout:         C.uint16_t(update.Timeout.Timeout),
 			tcp_established: C.uint16_t(update.Timeout.TCPEstablished),
@@ -120,10 +130,12 @@ func (m *ModuleConfig) Update(update ModuleUpdate) error {
 		for _, prefix := range update.Prefixes {
 			packed = append(packed, prefix...)
 		}
+		pinner.Pin(&packed[0])
 		cUpdate.prefixes = (*C.uint8_t)(unsafe.Pointer(&packed[0]))
 		cUpdate.prefix_count = C.uint64_t(len(update.Prefixes))
 	}
 	if len(update.Pool) != 0 {
+		pinner.Pin(&update.Pool[0])
 		cUpdate.pool = (*C.uint32_t)(unsafe.Pointer(&update.Pool[0]))
 		cUpdate.pool_count = C.uint64_t(len(update.Pool))
 	}

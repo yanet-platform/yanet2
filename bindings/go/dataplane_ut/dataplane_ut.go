@@ -130,6 +130,7 @@ keep_refs(void **ptrs) {
 	extern struct module *new_module_route(void);
 	extern struct module *new_module_route_mpls(void);
 	extern struct module *new_module_nat64(void);
+	extern struct module *new_module_nat64s(void);
 	extern struct module *new_module_pdump(void);
 	extern struct module *new_module_unrdup(void);
 
@@ -156,6 +157,7 @@ keep_refs(void **ptrs) {
 		new_module_route,
 		new_module_route_mpls,
 		new_module_nat64,
+		new_module_nat64s,
 		new_module_pdump,
 		new_module_unrdup,
 

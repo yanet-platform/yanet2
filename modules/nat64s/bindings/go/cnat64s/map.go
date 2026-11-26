@@ -20,7 +20,6 @@ import "C"
 import (
 	"errors"
 	"fmt"
-	"runtime"
 	"syscall"
 	"unsafe"
 
@@ -59,6 +58,10 @@ type MapObjectConfig struct {
 }
 
 // NewMapObjectConfig allocates an unpublished map object.
+//
+// The caller owns it and releases it with Free while its agent is alive:
+// the object lives in shared memory, which nothing releases on the
+// owner's behalf once the handle is dropped.
 func NewMapObjectConfig(agent *ffi.Agent, name string) (*MapObjectConfig, error) {
 	if agent == nil {
 		return nil, fmt.Errorf("agent cannot be nil")
@@ -79,7 +82,6 @@ func NewMapObjectConfig(agent *ffi.Agent, name string) (*MapObjectConfig, error)
 	}
 
 	object := &MapObjectConfig{ptr: ptr}
-	runtime.SetFinalizer(object, func(o *MapObjectConfig) { _ = o.Free() })
 	return object, nil
 }
 

@@ -108,6 +108,7 @@ cgo_packages += {
       lib_route_dp,
       lib_route_mpls_dp,
       lib_nat64_dp,
+      lib_nat64s_dp,
       lib_pdump_dp,
       lib_unrdup_dp,
       lib_dev_plain_dp,
@@ -149,6 +150,9 @@ cgo_packages += {
   },
   'modules/l3b/tests/internal/probe': {
     'libraries': [lib_l3b_objects, lib_l3state],
+  },
+  'modules/nat64s/tests/functional': {
+    'libraries': [lib_config_cp],
   },
   'modules/pdump/internal/testutils': {
     'libraries': [lib_pdump_dp, lib_forward_dp],
