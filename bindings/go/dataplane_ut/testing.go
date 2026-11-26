@@ -2,11 +2,45 @@ package dataplaneut
 
 import (
 	"testing"
+	"unsafe"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/native/agent"
+	"github.com/yanet-platform/yanet2/controlplane/native/layout"
+	"github.com/yanet-platform/yanet2/controlplane/native/shm"
+	"github.com/yanet-platform/yanet2/controlplane/native/zone"
 )
+
+// NativeAgent returns the native view of an agent the cgo control plane
+// attached to the harness, for the native control plane to build and
+// publish through.
+func (m *Harness) NativeAgent(t testing.TB, attached *ffi.Agent) *agent.Agent {
+	t.Helper()
+	storage, err := zone.FromMemory(m.storage())
+	require.NoError(t, err)
+	view := (*layout.Agent)(attached.AsRawPtr())
+	for _, instance := range storage.Instances {
+		if instance.Dp == view.DpConfig.Get() {
+			return &agent.Agent{Instance: instance, Agent: view}
+		}
+	}
+	t.Fatalf("agent %q serves no instance of the harness", shm.String(view.Name[:]))
+	return nil
+}
+
+// NativeDelivery returns the delivery that hands the harness's workers a
+// generation the native control plane published, for its update option;
+// a failed delivery fails the test.
+func (m *Harness) NativeDelivery(t testing.TB) func(*layout.DpConfig, *layout.CpConfigGen) {
+	return func(_ *layout.DpConfig, gen *layout.CpConfigGen) {
+		offset := uintptr(unsafe.Pointer(gen)) - uintptr(unsafe.Pointer(unsafe.SliceData(m.storage())))
+		if err := m.Deliver(uint64(offset)); err != nil {
+			t.Errorf("deliver generation %d: %v", gen.Gen, err)
+		}
+	}
+}
 
 // CounterPath identifies a per-module counter inside the dataplane
 // configuration tree.

@@ -180,7 +180,8 @@ func Test_ContextRealloc_MovesBlock(t *testing.T) {
 			if kept != 0 {
 				want = bytes.Clone(unsafe.Slice((*byte)(data), kept))
 			}
-			before := *context
+			allocCount, allocSize := context.BallocCount, context.BallocSize
+			freeCount, freeSize := context.BfreeCount, context.BfreeSize
 
 			moved := shmalloc.ContextRealloc(context, data, tc.oldSize, tc.newSize)
 
@@ -188,10 +189,10 @@ func Test_ContextRealloc_MovesBlock(t *testing.T) {
 			if kept != 0 {
 				require.Equal(t, want, unsafe.Slice((*byte)(moved), kept), "the kept bytes")
 			}
-			require.Equal(t, before.BallocCount+tc.allocCount, context.BallocCount)
-			require.Equal(t, before.BallocSize+tc.allocCount*uint64(tc.newSize), context.BallocSize)
-			require.Equal(t, before.BfreeCount+tc.freeCount, context.BfreeCount)
-			require.Equal(t, before.BfreeSize+tc.freeCount*uint64(tc.oldSize), context.BfreeSize)
+			require.Equal(t, allocCount+tc.allocCount, context.BallocCount)
+			require.Equal(t, allocSize+tc.allocCount*uint64(tc.newSize), context.BallocSize)
+			require.Equal(t, freeCount+tc.freeCount, context.BfreeCount)
+			require.Equal(t, freeSize+tc.freeCount*uint64(tc.oldSize), context.BfreeSize)
 
 			shmalloc.ContextFree(context, moved, tc.newSize)
 			require.Equal(t, free, shmalloc.FreeSize(allocator), "free bytes after the final free")

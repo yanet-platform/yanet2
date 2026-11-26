@@ -1,4 +1,4 @@
-//go:build linux && (amd64 || arm64) && cgo
+//go:build linux && (amd64 || arm64)
 
 package cpconfig_test
 
@@ -9,10 +9,8 @@ import (
 	"testing"
 	"unsafe"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
-	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/controlplane/native/agent"
 	"github.com/yanet-platform/yanet2/controlplane/native/cpconfig"
 	"github.com/yanet-platform/yanet2/controlplane/native/internal/registry"
@@ -23,17 +21,16 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/native/zone"
 )
 
-// updateDevices publishes the devices natively on the fixture.
-func updateDevices(t *testing.T, memory *publishedFixture, devices ...*layout.CpDevice) error {
+// updateDevices publishes the devices, delivering the contexts to the
+// workers.
+func updateDevices(t testing.TB, memory *publishedFixture, devices ...*layout.CpDevice) error {
 	t.Helper()
-	return publishNatively(t, memory, func(options ...cpconfig.UpdateOption) error {
-		return cpconfig.UpdateDevices(memory.Instance(), devices, options...)
-	})
+	return cpconfig.UpdateDevices(memory.Instance(), devices, memory.deliver())
 }
 
 // newPlainDevice returns a plain device of the agent whose input runs the
 // pipeline drop at that weight and whose output runs dummy.
-func newPlainDevice(t *testing.T, owner *agent.Agent, name string, weight uint64) *layout.CpDevice {
+func newPlainDevice(t testing.TB, owner *agent.Agent, name string, weight uint64) *layout.CpDevice {
 	t.Helper()
 	device, err := cpconfig.NewPlainDevice(owner, cpconfig.DeviceConfig{
 		Name:   name,
@@ -56,8 +53,7 @@ func destroyDevice(device *layout.CpDevice) {
 // worker's tree of the published generation.
 func deviceContext(t *testing.T, memory *publishedFixture, name string) *layout.DeviceEctx {
 	t.Helper()
-	published := memory.Instance().Cp.CpConfigGen.Get()
-	root := unsafe.Slice(published.ConfigGenEctxs.Get(), published.ConfigGenEctxCount)[0].Get()
+	root := firstWorkerRoot(memory)
 	for device := range registry.Pointees(registry.Slice(root.DevicePtrs.Get(), root.DeviceCount)) {
 		if shm.String(device.CpDevice.Get().Name[:]) == name {
 			return device
@@ -68,16 +64,15 @@ func deviceContext(t *testing.T, memory *publishedFixture, name string) *layout.
 }
 
 // Test_UpdateDevices_DataplaneRunsGoDevice verifies that the dataplane
-// runs packets through a plain device Go published in place of the one C
-// published.
+// runs packets through a plain device Go published in place of a
+// published one.
 //
 // The device's entries hold their weighted pipelines, the input entry's
 // context spreads packets over the forty weights of its pipeline, and the
 // device's counters continue from the replaced device's.
 func Test_UpdateDevices_DataplaneRunsGoDevice(t *testing.T) {
 	memory := newPublishedFixture(t)
-	_, err := memory.Harness.HandlePackets(icmpPackets(t, 3)...)
-	require.NoError(t, err)
+	handlePackets(t, memory, icmpPackets(t, 3))
 	deviceTags := []zone.CounterTag{{Key: "device", Value: "port0"}, {Key: "kind", Value: "device"}}
 	before := counterTotal(t, memory, "input_rx", deviceTags...)
 	require.Equal(t, uint64(3), before)
@@ -94,9 +89,7 @@ func Test_UpdateDevices_DataplaneRunsGoDevice(t *testing.T) {
 	require.Same(t, device, deviceContext(t, memory, "port0").CpDevice.Get())
 	require.Equal(t, uint64(40), deviceContext(t, memory, "port0").InputPipelines.Get().PipelineMapSize)
 
-	result, err := memory.Harness.HandlePackets(icmpPackets(t, 5)...)
-	require.NoError(t, err)
-	require.Len(t, result.Drop, 5, "the device's input pipeline drops every packet")
+	require.Len(t, handlePackets(t, memory, icmpPackets(t, 5)), 5, "the device's input pipeline drops every packet")
 	require.Equal(t, before+5, counterTotal(t, memory, "input_rx", deviceTags...), "device counters continue")
 }
 
@@ -132,12 +125,12 @@ func Test_NewPlainDevice_AcceptsWeightBound(t *testing.T) {
 // publishing nothing and taking nothing.
 func Test_UpdateDevices_RefusesMissingPipeline(t *testing.T) {
 	memory := newPublishedFixture(t)
+	before := sharedState(memory)
 	device, err := cpconfig.NewPlainDevice(memory.owner, cpconfig.DeviceConfig{
 		Name:  "port0",
 		Input: []cpconfig.DevicePipelineConfig{{Name: "absent", Weight: 1}},
 	})
 	require.NoError(t, err)
-	before := sharedState(memory, device)
 
 	err = updateDevices(t, memory, device)
 
@@ -149,13 +142,11 @@ func Test_UpdateDevices_RefusesMissingPipeline(t *testing.T) {
 // superseded agent is refused, publishing nothing and taking nothing.
 func Test_UpdateDevices_RefusesSupersededOwner(t *testing.T) {
 	memory := newPublishedFixture(t)
+	supersedeOwner(t, memory)
+	before := sharedState(memory)
 	device := newPlainDevice(t, memory.owner, "port0", 1)
-	// The published configurations keep the superseded agent alive.
-	_, err := memory.Harness.SharedMemory().AgentAttach("owner", 0, 2*datasize.MB)
-	require.NoError(t, err)
-	before := sharedState(memory, device)
 
-	err = updateDevices(t, memory, device)
+	err := updateDevices(t, memory, device)
 
 	require.ErrorIs(t, err, cpconfig.ErrSupersededOwner)
 	requireLeftAsFound(t, before, memory, device)
@@ -166,10 +157,10 @@ func Test_UpdateDevices_RefusesSupersededOwner(t *testing.T) {
 // taking nothing.
 func Test_UpdateDevices_RefusesRepeatedDevice(t *testing.T) {
 	memory := newPublishedFixture(t)
+	before := sharedState(memory)
 	first := newPlainDevice(t, memory.owner, "twice", 1)
 	second := newPlainDevice(t, memory.owner, "twice", 1)
 	shm.CopyString(second.Type[:], "vlan")
-	before := sharedState(memory, first, second)
 
 	err := updateDevices(t, memory, first, second)
 
@@ -187,9 +178,9 @@ func Test_UpdateDevices_ExhaustedZoneFreesUpdate(t *testing.T) {
 	for _, budget := range exhaustionBudgets {
 		t.Run(budget.name, func(t *testing.T) {
 			memory := newPublishedFixture(t)
-			device := newPlainDevice(t, memory.owner, "port0", 40)
 			nativetest.LeaveOnly(t, &memory.Instance().Cp.BlockAllocator, requestsFor(budget.blocks)...)
-			before := sharedState(memory, device)
+			before := sharedState(memory)
+			device := newPlainDevice(t, memory.owner, "port0", 40)
 
 			err := updateDevices(t, memory, device)
 
@@ -226,9 +217,9 @@ func Test_UpdateDevices_UpsertFailureFreesCopy(t *testing.T) {
 			require.NoError(t, updateDevices(t, memory, idle...))
 			published := memory.Instance().Cp.CpConfigGen.Get()
 			requireFull(t, &published.DeviceRegistry.EntityRegistry.Registry)
-			device := newPlainDevice(t, memory.owner, "ninth", 1)
 			nativetest.LeaveOnly(t, &memory.Instance().Cp.BlockAllocator, append(copyRequests(published), tc.extra...)...)
-			before := sharedState(memory, device)
+			before := sharedState(memory)
+			device := newPlainDevice(t, memory.owner, "ninth", 1)
 
 			err := updateDevices(t, memory, device)
 
@@ -315,7 +306,7 @@ func Test_FreePlainDevice_GivesAgentBackEveryByte(t *testing.T) {
 func Test_FreePlainDevice_RefusesHeldDevice(t *testing.T) {
 	memory := newPublishedFixture(t)
 	instance := memory.Instance()
-	restarting := &agent.Agent{Instance: instance, Agent: attachRestarting(t, memory)}
+	restarting := attachRestarting(t, memory)
 	free := shmalloc.FreeSize(&restarting.Agent.BlockAllocator)
 	device := newPlainDevice(t, restarting, "port0", 1)
 	require.NoError(t, updateDevices(t, memory, device))
@@ -340,39 +331,31 @@ func Test_FreePlainDevice_RefusesHeldDevice(t *testing.T) {
 func Test_TryDestroyDevice_FreeReclaimsSupersededAgent(t *testing.T) {
 	memory := newPublishedFixture(t)
 	owner := attachRestarting(t, memory)
-	device := newPlainDevice(t, &agent.Agent{Instance: memory.Instance(), Agent: owner}, "port0", 1)
+	device := newPlainDevice(t, owner, "port0", 1)
 	require.NoError(t, cpconfig.TryDestroyDevice(device))
 
 	attachRestarting(t, memory)
 	destroyDevice(device)
-	cpconfig.DestroyReleased(owner)
+	cpconfig.DestroyReleased(owner.Agent)
 
 	require.Zero(t, supersededCount(memory, "restarting"))
 }
 
 // Test_UpdateDevices_DataplaneRunsGoTopology verifies that a topology Go
-// published alone, through an agent Go attached, carries packets through
-// the dataplane.
+// published alone carries packets through the dataplane.
 //
 // The device's input pipeline runs a function whose chain runs a
 // blackhole with a runtime registry; the blackhole drops every packet,
 // and the module's and the device's counters count them by their tags.
 func Test_UpdateDevices_DataplaneRunsGoTopology(t *testing.T) {
-	fixture := nativetest.NewFixture(t, dataplaneut.Config{
-		WorkerCount:   2,
-		Devices:       []string{"port0"},
-		Modules:       []string{"blackhole"},
-		DevicesToLoad: []string{"plain"},
+	memory := newFixture(t, nativetest.Config{
+		Workers:     2,
+		Devices:     []string{"port0"},
+		Modules:     []string{"blackhole"},
+		DeviceTypes: []string{"plain"},
 	})
-	owner, err := agent.Attach(fixture.Instance(), "native", uint64(8*datasize.MB))
-	require.NoError(t, err)
-	memory := &publishedFixture{Fixture: fixture, owner: owner}
-	module, err := cpconfig.NewBlackhole(owner, "sink")
-	require.NoError(t, err)
-	rules, _, err := cpconfig.ModuleCounterRegistry(module, "rules")
-	require.NoError(t, err)
-	_, err = cpconfig.RegisterCounter(rules, "hits", 4)
-	require.NoError(t, err)
+	module := newBlackhole(t, memory, "sink")
+	registerRuntimeCounter(t, module)
 	require.NoError(t, updateModules(t, memory, module))
 	require.NoError(t, updateFunctions(t, memory, cpconfig.FunctionConfig{
 		Name:   "drop",
@@ -382,12 +365,11 @@ func Test_UpdateDevices_DataplaneRunsGoTopology(t *testing.T) {
 		cpconfig.PipelineConfig{Name: "drop", Functions: []string{"drop"}},
 		cpconfig.PipelineConfig{Name: "dummy"},
 	))
-	require.NoError(t, updateDevices(t, memory, newPlainDevice(t, owner, "port0", 40)))
+	require.NoError(t, updateDevices(t, memory, newPlainDevice(t, memory.owner, "port0", 40)))
 
-	result, err := memory.Harness.HandlePackets(icmpPackets(t, 4)...)
+	dropped := handlePackets(t, memory, icmpPackets(t, 4))
 
-	require.NoError(t, err)
-	require.Len(t, result.Drop, 4, "the Go module drops every packet")
+	require.Len(t, dropped, 4, "the Go module drops every packet")
 	moduleTags := []zone.CounterTag{{Key: "module_name", Value: "sink"}, {Key: "kind", Value: "module"}}
 	require.Equal(t, uint64(4), counterTotal(t, memory, "drop", moduleTags...))
 	deviceTags := []zone.CounterTag{{Key: "device", Value: "port0"}, {Key: "kind", Value: "device"}}

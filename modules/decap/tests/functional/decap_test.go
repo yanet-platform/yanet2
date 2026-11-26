@@ -22,7 +22,6 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/native/cpconfig"
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
-	"github.com/yanet-platform/yanet2/controlplane/native/nativetest"
 	cplain "github.com/yanet-platform/yanet2/devices/plain/bindings/go/cplain"
 	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
@@ -69,7 +68,7 @@ func setupDecapHarnessWithLimit(
 // workers their contexts as the harness needs.
 func newBackend(t *testing.T, h *dataplaneut.Harness, agent *ffi.Agent) decap.Backend {
 	t.Helper()
-	return decap.NewBackend(nativetest.AgentOf(t, h, agent), cpconfig.WithDelivery(nativetest.Deliver))
+	return decap.NewBackend(h.NativeAgent(t, agent), cpconfig.WithDelivery(h.NativeDelivery(t)))
 }
 
 func wireDecapPipeline(t *testing.T, agent *ffi.Agent, configName string) {
