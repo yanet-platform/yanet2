@@ -81,7 +81,7 @@ func requireNet4MatchesReference(t *testing.T, rules []classify.Net4Rule) *class
 
 	classes := classifytest.ReadNet4(&memory.Net4)
 	err = classifytest.CheckStage(
-		&nets.Stage,
+		nets.Stage(),
 		classifytest.Net4Keys(rules),
 		classes.Class,
 		func(rule int, addr uint32) bool { return classifytest.Net4Matches(rules[rule], addr) },
@@ -116,7 +116,7 @@ func Test_CompileNet4_GroupsEqualListsByContent(t *testing.T) {
 		{Prefixes: copied[:1]},
 	}
 	nets := requireNet4MatchesReference(t, rules)
-	require.Equal(t, []uint32{0, 0, 0, 1, 1}, nets.Stage.RuleGroups)
+	require.Equal(t, []uint32{0, 0, 0, 1, 1}, nets.Stage().RuleGroups())
 }
 
 // Test_CompileNet4_RefusesOtherThanIPv4 verifies that a network that is

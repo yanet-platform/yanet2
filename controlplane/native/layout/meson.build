@@ -85,8 +85,11 @@ if native_layout_archs.has_key(host_machine.cpu_family()) and import('fs').is_sa
     'dp_worker',
     'lpm',
     'vline',
+    'value_table',
     'classify_attr_line',
     'classify_attr_net4',
+    'classify_attr_net6',
+    'classify_attr_device',
     'decap_module_config',
   ]
   # The enumerations of c/types.c that carry the values a native attach
