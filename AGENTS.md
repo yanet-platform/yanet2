@@ -71,7 +71,7 @@ Language rules: `.agents/conventions/{go,rust,c,ts}.md` — read the one for you
 
 ## Worktrees
 
-Use linked worktrees at `.claude/worktrees/` (Claude Code) or `.agent-state/worktrees/` (Codex), on task branches from confirmed `origin/main`. Confirm root and branch first. Keep primary on `main`; write only ignored trees there, by absolute path. Gates using `build/` need their own build and initialized submodules; cargo/npm-only gates may link primary `build/` and `*.pb.go`. Go changes need this checkout's own configured `build/` (`lint-go` and the gate write native layouts into its tree).
+Default to worktrees in `.claude/worktrees/` (Claude) or `.agent-state/worktrees/` (Codex), from confirmed `origin/main`. Explicit user requests permit a task branch in the current checkout instead. Confirm root/branch; preserve existing changes. Otherwise keep primary on `main`, writing only ignored absolute paths there. Never edit tracked files on `main`. Go/build gates need their own configured `build/` and initialized submodules; only cargo/npm gates may link primary `build/` and `*.pb.go`.
 
 ## Commits & PRs
 
