@@ -483,7 +483,10 @@ func (m *build) chain(device *layout.DeviceEctx, path pathNames, chain *layout.C
 		moduleType, moduleName := shm.String(named.Type[:]), shm.String(named.Name[:])
 		module := lookupModule(&m.gen.ModuleRegistry, moduleType, moduleName)
 		if module == nil {
-			return nil, fmt.Errorf("chain %q: %w: %s:%s", path.Chain, ErrMissingModule, moduleType, moduleName)
+			return nil, fmt.Errorf(
+				"%w: module %s:%s in chain %q of function %q in pipeline %q",
+				ErrMissingModule, moduleType, moduleName, path.Chain, path.Function, path.Pipeline,
+			)
 		}
 		context, err := m.module(device, path, module, moduleType, moduleName)
 		if err != nil {
