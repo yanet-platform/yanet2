@@ -18,6 +18,7 @@
 #include "lib/dataplane_ut/dataplane_ut.h"
 #include "lib/dataplane_ut/mempool.h"
 #include "lib/logging/log.h"
+#include "lib/statemap/fwtable.h"
 
 #include <errno.h>
 #include <string.h>
@@ -38,13 +39,22 @@
 #include "modules/nat64s/dataplane/config.h"
 #include "objects/fwstate/api/fwstate_map_nat64_object.h"
 
-// The NAT64 prefixes the config carries: the well-known 64:ff9b::/96
-// and a documentation prefix — a session uses the one its destination
-// embeds under.
+// The NAT64 prefixes the config carries: two network-specific
+// documentation prefixes — a session uses the one its destination embeds
+// under.
+//
+// The suite's remotes are documentation addresses, which only a
+// network-specific prefix may stand for: the Well-Known Prefix is
+// reserved for global ones (RFC 6052 3.1) and has its own scenario.
 static const uint8_t nat64_prefix[12] = {
-	0x00, 0x64, 0xff, 0x9b, 0, 0, 0, 0, 0, 0, 0, 0
+	0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0x01
 };
 static const uint8_t prefixes[2][12] = {
+	{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0x01},
+	{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0x64},
+};
+// The Well-Known Prefix, 64:ff9b::/96, in place of the suite's first one.
+static const uint8_t well_known_prefixes[2][12] = {
 	{0x00, 0x64, 0xff, 0x9b, 0, 0, 0, 0, 0, 0, 0, 0},
 	{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0x64},
 };
@@ -80,6 +90,9 @@ struct nat64s_env_settings {
 	uint16_t port_lo;
 	uint16_t port_hi;
 	struct nat64state_timeouts timeouts;
+	// Whether the config carries the Well-Known Prefix in place of the
+	// suite's first one.
+	bool well_known;
 };
 
 // The suite's own settings. The client's port (50000) falls outside the
@@ -95,7 +108,8 @@ static const struct nat64s_env_settings nat64s_suite_settings = {
 static struct nat64s_module_update
 nat64s_env_update(const struct nat64s_env_settings *settings) {
 	return (struct nat64s_module_update){
-		.prefixes = prefixes[0],
+		.prefixes = settings->well_known ? well_known_prefixes[0]
+						 : prefixes[0],
 		.prefix_count = 2,
 		.pool = pool_addrs,
 		.pool_count = 1,
@@ -1605,6 +1619,199 @@ test_remote_reset_does_not_establish(struct nat64s_env *env) {
 	return TEST_SUCCESS;
 }
 
+// Latch the entry a key names in one of the session tables as
+// established, by hand.
+//
+// That is the half-state a packet of the session's other side leaves
+// between another packet's lookup and its insert, which one worker
+// cannot produce by interleaving.
+static int
+nat64s_test_latch(fwtable_t *table, uint64_t now, const void *key) {
+	void *found = NULL;
+	rwlock_t *lock = NULL;
+	bool from_stale = false;
+	TEST_ASSERT(
+		fwtable_lookup(table, now, key, &found, &lock, &from_stale) >=
+			0,
+		"the entry to latch must exist"
+	);
+	((struct nat64state_value *)found)->tcp_established = true;
+	if (lock != NULL) {
+		rwlock_read_unlock(lock);
+	}
+	return TEST_SUCCESS;
+}
+
+// The lan key of the TCP session a client port opens towards the remote.
+static struct nat64state_lan_key
+nat64s_test_lan_key(uint16_t client_port) {
+	struct nat64state_lan_key key = {
+		.hdr = {.proto = IPPROTO_TCP,
+			.src_port = client_port,
+			.dst_port = REMOTE_PORT},
+	};
+	memcpy(key.src_addr, client_addr, sizeof(key.src_addr));
+	memcpy(key.dst_addr, nat64_prefix, NAT64S_PREFIX_LEN);
+	memcpy(key.dst_addr + NAT64S_PREFIX_LEN, remote4, sizeof(remote4));
+	return key;
+}
+
+// The wan key of that session, from the port it was translated to.
+static struct nat64state_wan_key
+nat64s_test_wan_key(uint16_t allocated_port) {
+	return (struct nat64state_wan_key){
+		.hdr = {.proto = IPPROTO_TCP,
+			.src_port = allocated_port,
+			.dst_port = REMOTE_PORT},
+		.local_addr = pool_addrs[0],
+		.remote_addr = remote_addr,
+	};
+}
+
+// A client packet that finds the wan entry latched, though it read the
+// session as not established, refreshes on the established timeout.
+//
+// Otherwise the session ages out as one the remote never answered: past
+// the general timeout neither side's packet would find it.
+static int
+test_latched_wan_entry_holds_client_refresh(struct nat64s_env *env) {
+	// Short general timeout, long established one.
+	env->config->timeouts.timeout = 30;
+	env->config->timeouts.tcp_established = 300;
+
+	const uint64_t base = 3700000000000ull;
+	const uint64_t sec = 1000000000ull;
+	dataplane_ut_set_time_ns(env->ut, base);
+	struct packet *in = NULL;
+	struct packet *out = NULL;
+	bool dropped = false;
+	TEST_ASSERT_SUCCESS(nat64s_make_v6_syn(env, 2023, &in), "build failed");
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the SYN must not be dropped");
+	struct rte_tcp_hdr *tcp = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(out),
+		struct rte_tcp_hdr *,
+		out->transport_header.offset
+	);
+	uint16_t allocated_port = rte_be_to_cpu_16(tcp->src_port);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	struct nat64state_wan_key wan_key = nat64s_test_wan_key(allocated_port);
+	TEST_ASSERT_SUCCESS(
+		nat64s_test_latch(
+			fwstate_map_nat64_object_wan_table(&env->map->cp_object
+			),
+			base,
+			&wan_key
+		),
+		"latch failed"
+	);
+
+	// The client's ACK, which read the session as not established.
+	TEST_ASSERT_SUCCESS(nat64s_make_v6_syn(env, 2023, &in), "build failed");
+	nat64s_test_set_tcp_flags(in, RTE_TCP_ACK_FLAG);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the client's ACK must be translated");
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	// Past the general timeout the client's entry still stands on its
+	// own, then the remote's on its own.
+	dataplane_ut_set_time_ns(env->ut, base + 60 * sec);
+	TEST_ASSERT_SUCCESS(nat64s_make_v6_syn(env, 2023, &in), "build failed");
+	nat64s_test_set_tcp_flags(in, RTE_TCP_ACK_FLAG);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		!dropped,
+		"the client's entry must outlive the general timeout once "
+		"established"
+	);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_reply(env, allocated_port, &in), "build failed"
+	);
+	nat64s_test_set_tcp_flags(in, RTE_TCP_ACK_FLAG);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		!dropped,
+		"the session must outlive the general timeout once established"
+	);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	// Restore the suite's timeouts.
+	env->config->timeouts.timeout = 300;
+	env->config->timeouts.tcp_established = 300;
+	return TEST_SUCCESS;
+}
+
+// A return packet that finds the lan entry latched, though it read the
+// session as not established, refreshes it on the established timeout.
+//
+// Otherwise the client's entry dies with the general timeout while the
+// session is established, and the client's next packet is dropped as a
+// new flow.
+static int
+test_latched_lan_entry_holds_return_refresh(struct nat64s_env *env) {
+	// Short general timeout, long established one.
+	env->config->timeouts.timeout = 30;
+	env->config->timeouts.tcp_established = 300;
+
+	const uint64_t base = 3800000000000ull;
+	const uint64_t sec = 1000000000ull;
+	dataplane_ut_set_time_ns(env->ut, base);
+	struct packet *in = NULL;
+	struct packet *out = NULL;
+	bool dropped = false;
+	TEST_ASSERT_SUCCESS(nat64s_make_v6_syn(env, 2024, &in), "build failed");
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the SYN must not be dropped");
+	struct rte_tcp_hdr *tcp = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(out),
+		struct rte_tcp_hdr *,
+		out->transport_header.offset
+	);
+	uint16_t allocated_port = rte_be_to_cpu_16(tcp->src_port);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	struct nat64state_lan_key lan_key = nat64s_test_lan_key(2024);
+	TEST_ASSERT_SUCCESS(
+		nat64s_test_latch(
+			fwstate_map_nat64_object_lan_table(&env->map->cp_object
+			),
+			base,
+			&lan_key
+		),
+		"latch failed"
+	);
+
+	// The remote's plain ACK, which read the session as not established
+	// and establishes nothing by itself.
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_reply(env, allocated_port, &in), "build failed"
+	);
+	nat64s_test_set_tcp_flags(in, RTE_TCP_ACK_FLAG);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the remote's ACK must be translated");
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	// Past the general timeout the client's ACK still finds its entry.
+	dataplane_ut_set_time_ns(env->ut, base + 60 * sec);
+	TEST_ASSERT_SUCCESS(nat64s_make_v6_syn(env, 2024, &in), "build failed");
+	nat64s_test_set_tcp_flags(in, RTE_TCP_ACK_FLAG);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		!dropped,
+		"the client's entry must outlive the general timeout once the "
+		"session is established"
+	);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	// Restore the suite's timeouts.
+	env->config->timeouts.timeout = 300;
+	env->config->timeouts.tcp_established = 300;
+	return TEST_SUCCESS;
+}
+
 // A session outlives the client's silence: return traffic alone keeps
 // the client's entry alive.
 //
@@ -2074,6 +2281,81 @@ test_echo_identifier_zero_round_trips(struct nat64s_env *env) {
 	rte_pktmbuf_free(packet_to_mbuf(out));
 
 	return nat64s_test_echo_answered(env, translated, client_addr, 0);
+}
+
+// Of ICMP only echoes cross besides errors.
+//
+// A message of any other type is dropped before it takes a session: the
+// remote's answer to the identifier it carried finds nothing.
+static int
+test_unsupported_icmp_type_takes_no_session(struct nat64s_env *env) {
+	dataplane_ut_set_time_ns(env->ut, 20800000000000ull);
+	// An identifier inside the window: the answer carries it unchanged.
+	const uint16_t ident = 2106;
+	struct packet *in = NULL;
+	struct packet *out = NULL;
+	bool dropped = false;
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v6_echo(env, ident, &in), "build failed"
+	);
+	uint8_t *type = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(in), uint8_t *, in->transport_header.offset
+	);
+	*type = 139; // node information query
+	uint64_t refused = env->config->stats[NAT64S_ICMP_UNSUPPORTED];
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		dropped,
+		"an ICMP message that is neither an echo nor an error must be "
+		"dropped"
+	);
+
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_echo_reply(env, ident, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT_NULL(
+		out, "a message the translation drops must leave no session"
+	);
+	TEST_ASSERT(
+		dropped, "the answer must be dropped for want of a session"
+	);
+	TEST_ASSERT_EQUAL(
+		env->config->stats[NAT64S_ICMP_UNSUPPORTED],
+		refused + 1,
+		"the dropped message must be counted"
+	);
+
+	// The same from the remote: a type the translation does not carry is
+	// dropped although it holds the identifier of a live echo session.
+	const uint16_t live_ident = 2107;
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v6_echo(env, live_ident, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the echo request must open its session");
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_echo_reply(env, live_ident, &in), "build failed"
+	);
+	uint8_t *reply_type = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(in), uint8_t *, in->transport_header.offset
+	);
+	*reply_type = 13; // timestamp request
+	refused = env->config->stats[NAT64S_ICMP_UNSUPPORTED];
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT_NULL(
+		out,
+		"an ICMPv4 message that is neither an echo nor an error must "
+		"be dropped"
+	);
+	TEST_ASSERT_EQUAL(
+		env->config->stats[NAT64S_ICMP_UNSUPPORTED],
+		refused + 1,
+		"the dropped message must be counted"
+	);
+	return TEST_SUCCESS;
 }
 
 // Towards one remote an external tuple belongs to one client: a second
@@ -2740,6 +3022,146 @@ test_default_timeouts_follow_each_knob(struct nat64s_env *env) {
 	return TEST_SUCCESS;
 }
 
+// Move a built packet's destination under the Well-Known Prefix.
+static void
+nat64s_test_under_well_known_prefix(struct packet *packet) {
+	struct rte_ipv6_hdr *ipv6 = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(packet),
+		struct rte_ipv6_hdr *,
+		packet->network_header.offset
+	);
+	memcpy(ipv6->dst_addr, well_known_prefixes[0], 12);
+}
+
+// Under the Well-Known Prefix only global IPv4 addresses cross (RFC
+// 6052 3.1).
+//
+// A source or destination standing for an address of a block no global
+// traffic uses is refused and counted, whatever the configuration
+// carries. A global address translates as under any other prefix, and a
+// network-specific prefix still carries a documentation address.
+static int
+test_well_known_prefix_refuses_non_global(struct nat64s_env *env) {
+	const struct nat64s_env_settings well_known = {
+		.port_lo = 1024,
+		.port_hi = 4096,
+		.timeouts = {.timeout = 300, .tcp_established = 300},
+		.well_known = true,
+	};
+	TEST_ASSERT_SUCCESS(
+		nat64s_env_reconfigure(env, &well_known), "reconfigure failed"
+	);
+	dataplane_ut_set_time_ns(env->ut, 25600000000000ull);
+
+	const uint8_t private_remote[4] = {10, 1, 2, 3};
+	const uint8_t public_remote[4] = {8, 8, 8, 8};
+	struct packet *in = NULL;
+	struct packet *out = NULL;
+	bool dropped = false;
+
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v6_syn_to(env, 2021, private_remote, &in),
+		"build failed"
+	);
+	nat64s_test_under_well_known_prefix(in);
+	uint64_t refused = env->config->stats[NAT64S_NON_GLOBAL];
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		dropped,
+		"a private address under the Well-Known Prefix must be refused"
+	);
+	TEST_ASSERT_EQUAL(
+		env->config->stats[NAT64S_NON_GLOBAL],
+		refused + 1,
+		"the refused destination must be counted"
+	);
+
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v6_syn_to(env, 2022, public_remote, &in),
+		"build failed"
+	);
+	nat64s_test_under_well_known_prefix(in);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		!dropped,
+		"a global address under the Well-Known Prefix must translate"
+	);
+	TEST_ASSERT_NOT_NULL(
+		out, "the global destination's SYN must translate"
+	);
+	struct rte_ipv4_hdr *ipv4 = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(out),
+		struct rte_ipv4_hdr *,
+		out->network_header.offset
+	);
+	uint32_t public_addr = 0;
+	memcpy(&public_addr, public_remote, sizeof(public_addr));
+	TEST_ASSERT_EQUAL(
+		ipv4->dst_addr,
+		public_addr,
+		"the translated destination must be the public remote"
+	);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	// The anycast addresses of a reserved block are global all the same.
+	const uint8_t anycast_remote[4] = {192, 0, 0, 10};
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v6_syn_to(env, 2025, anycast_remote, &in),
+		"build failed"
+	);
+	nat64s_test_under_well_known_prefix(in);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		!dropped,
+		"a global anycast address of a reserved block must translate"
+	);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	// A network-specific prefix beside it carries a documentation
+	// address as before.
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v6_syn_to2(env, 2026, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		!dropped,
+		"a documentation address under a network-specific prefix must "
+		"translate"
+	);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	TEST_ASSERT_SUCCESS(
+		nat64s_env_reconfigure(env, &nat64s_suite_settings),
+		"restoring the suite's settings failed"
+	);
+
+	// A source is held to the rule although no config carries the
+	// Well-Known Prefix.
+	uint8_t hidden_source[16];
+	memcpy(hidden_source, well_known_prefixes[0], NAT64S_PREFIX_LEN);
+	const uint8_t private_source[4] = {10, 9, 8, 7};
+	memcpy(hidden_source + NAT64S_PREFIX_LEN,
+	       private_source,
+	       sizeof(private_source));
+	refused = env->config->stats[NAT64S_NON_GLOBAL];
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v6_syn_from(env, hidden_source, 2027, remote4, &in),
+		"build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		dropped,
+		"a source around a private address under the Well-Known Prefix "
+		"must be refused"
+	);
+	TEST_ASSERT_EQUAL(
+		env->config->stats[NAT64S_NON_GLOBAL],
+		refused + 1,
+		"the refused source must be counted"
+	);
+	return TEST_SUCCESS;
+}
+
 // The largest timeout a knob represents reaches the session whole.
 //
 // One configured with it still answers half a second short of it, on
@@ -2887,6 +3309,12 @@ main(void) {
 		res = test_remote_reset_does_not_establish(&env);
 	}
 	if (res == TEST_SUCCESS) {
+		res = test_latched_wan_entry_holds_client_refresh(&env);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_latched_lan_entry_holds_return_refresh(&env);
+	}
+	if (res == TEST_SUCCESS) {
 		res = test_return_traffic_keeps_lan_entry(&env);
 	}
 	if (res == TEST_SUCCESS) {
@@ -2900,6 +3328,9 @@ main(void) {
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_echo_identifier_zero_round_trips(&env);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_unsupported_icmp_type_takes_no_session(&env);
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_taken_tuple_moves_to_free_port(&env);
@@ -2927,6 +3358,9 @@ main(void) {
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_default_timeouts_follow_each_knob(&env);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_well_known_prefix_refuses_non_global(&env);
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_largest_timeout_kept_whole(&env);

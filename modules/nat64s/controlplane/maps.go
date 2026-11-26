@@ -26,6 +26,16 @@ var ErrMapReserved = fmt.Errorf(
 	ffi.ErrFailedPrecondition,
 )
 
+// ErrMapLinkedByUntrackedConfig reports a session map that a config
+// published by an earlier control plane still links.
+//
+// It is a failed precondition: this control plane cannot see that config,
+// so the name is refused until the config is deleted by name.
+var ErrMapLinkedByUntrackedConfig = fmt.Errorf(
+	"%w: session map is linked by a config this control plane does not track",
+	ffi.ErrFailedPrecondition,
+)
+
 // MapRegistry owns the nat64state map objects this module created: it
 // creates them on first reference, and its sweeper reclaims the layers
 // their tables park.
@@ -104,8 +114,10 @@ func NewMapRegistry(agent *ffi.Agent, options ...RegistryOption) *MapRegistry {
 // Ensure returns the named map, creating and publishing it on first
 // reference and replacing one no config references.
 //
-// The handle stays valid for as long as a config holds the map. A worker
-// count of zero derives it from the dataplane.
+// The handle stays valid for as long as a config holds the map, and a
+// worker count of zero derives it from the dataplane. A name a config of
+// an earlier control plane still links fails with
+// ErrMapLinkedByUntrackedConfig.
 func (m *MapRegistry) Ensure(name string, workerCount uint16) (*cnat64s.MapObjectConfig, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -120,6 +132,10 @@ func (m *MapRegistry) Ensure(name string, workerCount uint16) (*cnat64s.MapObjec
 // prefix and pool, and they would answer the next one: the map is deleted
 // first and created anew. A deletion the dataplane refuses fails the call,
 // and a later sweep retries it.
+//
+// A name the dataplane already holds is cleared first, or refused with
+// ErrMapLinkedByUntrackedConfig while a config of an earlier control
+// plane still links it.
 func (m *MapRegistry) ensureLocked(name string, workerCount uint16) (*cnat64s.MapObjectConfig, error) {
 	object, known := m.maps[name]
 	if known && len(m.users[name]) != 0 {
@@ -136,6 +152,8 @@ func (m *MapRegistry) ensureLocked(name string, workerCount uint16) (*cnat64s.Ma
 		// The replacement allocates right after this: a release the
 		// dataplane refused a moment ago gets another chance first.
 		m.releaseDeferredLocked()
+	} else if err := m.clearLeftoverLocked(name); err != nil {
+		return nil, err
 	}
 
 	if workerCount == 0 {
@@ -159,6 +177,35 @@ func (m *MapRegistry) ensureLocked(name string, workerCount uint16) (*cnat64s.Ma
 
 	m.maps[name] = object
 	return object, nil
+}
+
+// clearLeftoverLocked makes sure the dataplane holds no map under a name
+// the registry does not know.
+//
+// Such a map was left by an earlier control plane, whose published
+// configs this one cannot see. One that a published config still links is
+// refused, as a replacement would be linked by that config just the
+// same; one that nothing links is deleted, since nothing reaches its
+// sessions anymore.
+func (m *MapRegistry) clearLeftoverLocked(name string) error {
+	err := cnat64s.DeleteMapObject(m.agent, name)
+	switch {
+	case err == nil, errors.Is(err, ffi.ErrNotFound):
+		return nil
+	case errors.Is(err, ffi.ErrBusy):
+		return fmt.Errorf(
+			"%w: %q, delete that config first: %w",
+			ErrMapLinkedByUntrackedConfig,
+			name,
+			err,
+		)
+	default:
+		return fmt.Errorf(
+			"failed to clear a leftover session map %q: %w",
+			name,
+			err,
+		)
+	}
 }
 
 // sweep reclaims one map's parked layers: a barrier, the unlink, a second
@@ -342,6 +389,9 @@ func (m *MapRegistry) MapOf(config string) string {
 // other's pool address and prefix. The record is taken under the lock the
 // creation holds, so no sweep can reclaim a freshly created map before
 // its first user is written down.
+//
+// A map left by an earlier control plane and still linked by one of its
+// configs fails with ErrMapLinkedByUntrackedConfig.
 func (m *MapRegistry) Acquire(config, name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -38,7 +38,10 @@ const (
 	otherPoolAddress     = "198.51.100.2"
 	otherPoolAddressWire = 0xc6336402
 	remoteAddress4       = "192.0.2.34"
-	remoteAddress6       = "64:ff9b::c000:222"
+	remoteAddress6       = "2001:db8:64::c000:222"
+	// The scenarios' prefix: the Well-Known Prefix stands for global
+	// IPv4 addresses only (RFC 6052 3.1), these remotes for documentation.
+	nat64Prefix = "2001:db8:64::/96"
 )
 
 var (
@@ -56,7 +59,7 @@ func mustIPv6Prefix(value string) *commonpb.IPv6Prefix {
 	return prefix
 }
 
-// sessionConfig is a whole config under the well-known prefix, translated
+// sessionConfig is a whole config under the scenarios' prefix, translated
 // to the public address of the scenarios.
 func sessionConfig(mapName string) *nat64spb.Config {
 	return sessionConfigFromPool(mapName, poolAddressWire)
@@ -66,7 +69,7 @@ func sessionConfig(mapName string) *nat64spb.Config {
 // address in its wire form.
 func sessionConfigFromPool(mapName string, pool uint32) *nat64spb.Config {
 	return &nat64spb.Config{
-		Prefixes: []*commonpb.IPv6Prefix{mustIPv6Prefix("64:ff9b::/96")},
+		Prefixes: []*commonpb.IPv6Prefix{mustIPv6Prefix(nat64Prefix)},
 		Pool:     []*commonpb.IPv4Address{{Addr: pool}},
 		Map:      mapName,
 	}
@@ -563,4 +566,50 @@ func Test_MapRegistry_ReclaimUnreferenced_KeepsReferenceTakenMeanwhile(t *testin
 	require.Equal(t, "sessions", registry.MapOf("t1"))
 	// The map the reference names is the one the dataplane holds.
 	require.NoError(t, agent.DeleteObject(cnat64s.MapObjectType, "sessions"))
+}
+
+// Test_MapRegistry_Acquire_RefusesMapOfAnEarlierControlPlane verifies
+// that a map a config of an earlier control plane still links is refused.
+//
+// A control plane starting over the dataplane's published configuration
+// cannot see those configs, so the name is refused until the linking
+// config is deleted; a map that nothing links anymore is replaced.
+func Test_MapRegistry_Acquire_RefusesMapOfAnEarlierControlPlane(t *testing.T) {
+	_, agent, _, earlier := setupNAT64sHarness(t)
+	ctx := t.Context()
+	_, err := earlier.UpdateConfig(ctx, &nat64spb.UpdateConfigRequest{
+		Name:   "t0",
+		Config: sessionConfig("sessions"),
+	})
+	require.NoError(t, err)
+
+	// The restarted control plane: an empty registry over the same agent.
+	registry := nat64s.NewMapRegistry(agent, nat64s.WithRegistryMapSizing(
+		cnat64s.MapConfig{IndexSize: 1024, ExtraBucketCount: 64},
+	))
+	later := nat64s.NewNAT64sService(nat64s.NewBackend(agent, registry))
+
+	err = registry.Acquire("t1", "sessions")
+	require.ErrorIs(t, err, nat64s.ErrMapLinkedByUntrackedConfig)
+	require.ErrorContains(t, err, "linked by module 'nat64s:t0'")
+	require.Empty(t, registry.MapOf("t1"))
+
+	// The published config gone, the map is nobody's anymore.
+	_, err = later.DeleteConfig(ctx, &nat64spb.DeleteConfigRequest{
+		Name: "t0",
+	})
+	require.NoError(t, err)
+
+	_, err = later.UpdateConfig(ctx, &nat64spb.UpdateConfigRequest{
+		Name:   "t1",
+		Config: sessionConfig("sessions"),
+	})
+	require.NoError(t, err)
+	require.Equal(t, "sessions", registry.MapOf("t1"))
+
+	_, err = later.DeleteConfig(ctx, &nat64spb.DeleteConfigRequest{
+		Name: "t1",
+	})
+	require.NoError(t, err)
+	registry.ReclaimUnreferenced()
 }

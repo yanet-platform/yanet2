@@ -104,9 +104,7 @@ nat64s_insert_unlock(rwlock_t *lock) {
 // every destination. That identity is reserved per session, not per
 // endpoint: a port of it taken towards one remote moves that session to a
 // neighbouring port, while the endpoint's sessions towards other remotes
-// keep the derived one. RFC 6146 5.2 asks for a mapping that stays
-// endpoint-independent in this case too, which needs a binding kept per
-// endpoint.
+// keep the derived one.
 struct nat64s_client_tuple {
 	uint16_t proto;
 	uint16_t src_port;
@@ -316,6 +314,83 @@ nat64s_dst_prefix(
 	return NULL;
 }
 
+// The Well-Known Prefix of RFC 6052, 64:ff9b::/96, in network order.
+static const uint8_t nat64s_well_known_prefix[NAT64S_PREFIX_LEN] = {
+	0x00, 0x64, 0xff, 0x9b, 0, 0, 0, 0, 0, 0, 0, 0
+};
+
+// An IPv4 address in network order, from its octets.
+#define NAT64S_IPV4(a, b, c, d)                                                \
+	RTE_BE32(                                                              \
+		((uint32_t)(a) & 0xff) << 24 | ((uint32_t)(b) & 0xff) << 16 |  \
+		((uint32_t)(c) & 0xff) << 8 | ((uint32_t)(d) & 0xff)           \
+	)
+
+// The IPv4 blocks no global traffic uses, network order.
+//
+// Those are the blocks RFC 5735 reserves without global reachability,
+// and the shared address space of RFC 6598. Two addresses of the IETF
+// protocol assignments block are global all the same and listed apart.
+static const struct nat64s_ipv4_range {
+	rte_be32_t network;
+	rte_be32_t mask;
+} nat64s_non_global[] = {
+	{NAT64S_IPV4(0, 0, 0, 0), NAT64S_IPV4(255, 0, 0, 0)},
+	{NAT64S_IPV4(10, 0, 0, 0), NAT64S_IPV4(255, 0, 0, 0)},
+	{NAT64S_IPV4(100, 64, 0, 0), NAT64S_IPV4(255, 192, 0, 0)},
+	{NAT64S_IPV4(127, 0, 0, 0), NAT64S_IPV4(255, 0, 0, 0)},
+	{NAT64S_IPV4(169, 254, 0, 0), NAT64S_IPV4(255, 255, 0, 0)},
+	{NAT64S_IPV4(172, 16, 0, 0), NAT64S_IPV4(255, 240, 0, 0)},
+	{NAT64S_IPV4(192, 0, 0, 0), NAT64S_IPV4(255, 255, 255, 0)},
+	{NAT64S_IPV4(192, 0, 2, 0), NAT64S_IPV4(255, 255, 255, 0)},
+	{NAT64S_IPV4(192, 88, 99, 0), NAT64S_IPV4(255, 255, 255, 0)},
+	{NAT64S_IPV4(192, 168, 0, 0), NAT64S_IPV4(255, 255, 0, 0)},
+	{NAT64S_IPV4(198, 18, 0, 0), NAT64S_IPV4(255, 254, 0, 0)},
+	{NAT64S_IPV4(198, 51, 100, 0), NAT64S_IPV4(255, 255, 255, 0)},
+	{NAT64S_IPV4(203, 0, 113, 0), NAT64S_IPV4(255, 255, 255, 0)},
+	{NAT64S_IPV4(224, 0, 0, 0), NAT64S_IPV4(240, 0, 0, 0)},
+	{NAT64S_IPV4(240, 0, 0, 0), NAT64S_IPV4(240, 0, 0, 0)},
+};
+
+// The anycast addresses the IETF protocol assignments block holds for the
+// whole Internet.
+static const rte_be32_t nat64s_global_anycast[] = {
+	NAT64S_IPV4(192, 0, 0, 9),
+	NAT64S_IPV4(192, 0, 0, 10),
+};
+
+// Whether an address is the Well-Known Prefix around an IPv4 address no
+// global traffic uses.
+//
+// That prefix stands for global addresses only (RFC 6052 3.1), whatever
+// the configuration carries, so such a source or destination is refused.
+// A network-specific prefix may stand for any address.
+static inline bool
+nat64s_wkp_hides_non_global(const uint8_t addr[16]) {
+	if (memcmp(addr, nat64s_well_known_prefix, NAT64S_PREFIX_LEN) != 0) {
+		return false;
+	}
+	rte_be32_t ipv4;
+	memcpy(&ipv4, addr + NAT64S_PREFIX_LEN, sizeof(ipv4));
+	for (size_t i = 0;
+	     i < sizeof(nat64s_non_global) / sizeof(nat64s_non_global[0]);
+	     ++i) {
+		if ((ipv4 & nat64s_non_global[i].mask) !=
+		    nat64s_non_global[i].network) {
+			continue;
+		}
+		for (size_t j = 0; j < sizeof(nat64s_global_anycast) /
+					       sizeof(nat64s_global_anycast[0]);
+		     ++j) {
+			if (ipv4 == nat64s_global_anycast[j]) {
+				return false;
+			}
+		}
+		return true;
+	}
+	return false;
+}
+
 static inline struct nat64_ctx
 nat64s_ctx(struct nat64s_module_config *config) {
 	return (struct nat64_ctx){
@@ -328,10 +403,8 @@ nat64s_ctx(struct nat64s_module_config *config) {
 // The transport identity of a packet: protocol number and the two 16-bit
 // ports (source and destination; echo identifiers for ICMP).
 //
-// Echo messages key on the identifier. Other ICMP messages carry no
-// stable flow identity at this layer, so they read whatever the field
-// holds: such a session is created on the lan side but never matches its
-// reply through the wan table, which drops it.
+// Of the ICMP messages only echoes reach this far: every other one is
+// dropped beforehand, as the translation could not carry it.
 static inline int
 nat64s_transport_of(
 	struct packet *packet,
@@ -446,6 +519,29 @@ nat64s_session_proto(uint16_t proto) {
 static inline bool
 nat64s_is_icmp(uint16_t proto) {
 	return proto == IPPROTO_ICMPV6 || proto == IPPROTO_ICMP;
+}
+
+// Whether an ICMP packet that is no error is an echo, request or reply:
+// the one message the translation carries besides errors.
+//
+// Any other informational message — neighbour discovery, multicast
+// listener discovery, router renumbering — is dropped before it reaches
+// the tables, since the translation would drop it with its session
+// recorded already.
+static inline bool
+nat64s_is_icmp_echo(struct packet *packet) {
+	if (!nat64s_transport_fits(packet, sizeof(struct rte_icmp_hdr))) {
+		return false;
+	}
+	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+	struct yanet_icmp6_hdr *icmp = rte_pktmbuf_mtod_offset(
+		mbuf, struct yanet_icmp6_hdr *, packet->transport_header.offset
+	);
+	uint8_t type = icmp->icmp6_type;
+	if (packet->transport_header.type == IPPROTO_ICMPV6) {
+		return type == ICMP6_ECHO_REQUEST || type == ICMP6_ECHO_REPLY;
+	}
+	return type == ICMP_ECHO || type == ICMP_ECHOREPLY;
 }
 
 // Whether the packet is an ICMP error: an ICMPv6 message below type 128
@@ -834,6 +930,90 @@ nat64s_wan_entry_owned(
 	       memcmp(stored->prefix, prefix, NAT64S_PREFIX_LEN) == 0;
 }
 
+// Whether the entry an insert just stored is latched as an established
+// TCP session.
+//
+// It is read back under the insert's write lock from the layer captured
+// before the insert; an entry that landed in a layer prepended meanwhile
+// reads as not latched.
+static inline bool
+nat64s_entry_established(fwmap_t *layer, int64_t idx) {
+	const struct nat64state_value *stored =
+		(const struct nat64state_value *)fwmap_get_value(
+			layer, (uint32_t)idx
+		);
+	return stored != NULL && stored->tcp_established;
+}
+
+// The session as the packet at hand sees it, with the lifetimes the
+// configuration gives its two states.
+struct nat64s_session_view {
+	uint64_t worker_idx;
+	uint64_t now;
+	// Turned true once an entry is found latched, for the entries
+	// refreshed after it.
+	bool established;
+	uint64_t general_ttl;
+	uint64_t established_ttl;
+};
+
+// Insert or refresh one entry of a session on the lifetime its latch
+// calls for.
+//
+// A packet of the session's other side can establish the session between
+// this packet's lookup and this insert; the merge then keeps the latch but
+// takes this packet's shorter lifetime. The entry is therefore read back
+// under the insert's lock and, latched while the packet saw the session
+// unestablished, inserted again on the established timeout. The session
+// reads as established from then on, for the entries refreshed after this
+// one. A failed insert releases its bucket's lock and reports false.
+static inline bool
+nat64s_insert_latched(
+	fwtable_t *table,
+	const void *key,
+	struct nat64state_value *entry,
+	struct nat64s_session_view *view
+) {
+	uint64_t ttl =
+		view->established ? view->established_ttl : view->general_ttl;
+	entry->tcp_established = view->established;
+	entry->last_ttl = ttl;
+	fwmap_t *layer = ATOMIC_ADDR_OF(&table->head);
+	rwlock_t *lock = NULL;
+	int64_t idx = fwtable_insert(
+		table, view->worker_idx, view->now, ttl, key, entry, &lock
+	);
+	if (idx < 0) {
+		nat64s_insert_unlock(lock);
+		return false;
+	}
+	bool latched = ATOMIC_ADDR_OF(&table->head) == layer &&
+		       nat64s_entry_established(layer, idx);
+	rwlock_write_unlock(lock);
+
+	if (!latched || view->established) {
+		return true;
+	}
+	view->established = true;
+	entry->tcp_established = true;
+	entry->last_ttl = view->established_ttl;
+	lock = NULL;
+	if (fwtable_insert(
+		    table,
+		    view->worker_idx,
+		    view->now,
+		    view->established_ttl,
+		    key,
+		    entry,
+		    &lock
+	    ) < 0) {
+		nat64s_insert_unlock(lock);
+		return false;
+	}
+	rwlock_write_unlock(lock);
+	return true;
+}
+
 // The lan side: translate an IPv6 flow to IPv4, creating or refreshing its
 // session in both tables. A new session picks its public address from the
 // pool by a hash of the client endpoint, and its port inside the
@@ -865,9 +1045,18 @@ nat64s_handle_v6(
 		nat64s_stats_bump(stats, NAT64S_HAIRPIN);
 		return -1;
 	}
+	if (nat64s_wkp_hides_non_global(ipv6->src_addr)) {
+		nat64s_stats_bump(stats, NAT64S_NON_GLOBAL);
+		return -1;
+	}
 
 	if (nat64s_is_icmp_error(packet)) {
 		return nat64s_handle_v6_error(config, prepared, now, packet);
+	}
+	if (packet->transport_header.type == IPPROTO_ICMPV6 &&
+	    !nat64s_is_icmp_echo(packet)) {
+		nat64s_stats_bump(stats, NAT64S_ICMP_UNSUPPORTED);
+		return -1;
 	}
 
 	uint16_t proto;
@@ -891,6 +1080,10 @@ nat64s_handle_v6(
 		// The destination embeds under no configured prefix: nothing
 		// to translate.
 		nat64s_stats_bump(stats, NAT64S_NO_PREFIX);
+		return -1;
+	}
+	if (nat64s_wkp_hides_non_global(ipv6->dst_addr)) {
+		nat64s_stats_bump(stats, NAT64S_NON_GLOBAL);
 		return -1;
 	}
 
@@ -949,6 +1142,15 @@ nat64s_handle_v6(
 	value.last_ttl =
 		nat64state_entry_ttl(proto, established, &config->timeouts);
 	uint64_t ttl = (uint64_t)value.last_ttl;
+	struct nat64s_session_view view = {
+		.worker_idx = worker_idx,
+		.now = now,
+		.established = established,
+		.general_ttl =
+			nat64state_entry_ttl(proto, false, &config->timeouts),
+		.established_ttl =
+			nat64state_entry_ttl(proto, true, &config->timeouts),
+	};
 
 	// Both directions are refreshed on every packet: return traffic only
 	// reads the wan entry, so the lan side is what keeps an active flow's
@@ -1026,31 +1228,47 @@ nat64s_handle_v6(
 	// client's packets under the first one's external tuple; between two
 	// prefixes of one endpoint its replies would return under the
 	// winner's prefix, to a flow that never opened.
-	bool owned = ATOMIC_ADDR_OF(&prepared->wan.table->head) == wan_layer &&
+	bool same_layer =
+		ATOMIC_ADDR_OF(&prepared->wan.table->head) == wan_layer;
+	bool owned = same_layer &&
 		     nat64s_wan_entry_owned(
 			     wan_layer, wan_idx, ipv6->src_addr, prefix, sport
 		     );
+	bool latched =
+		same_layer && nat64s_entry_established(wan_layer, wan_idx);
 	rwlock_write_unlock(lock);
 	if (!owned) {
 		nat64s_stats_bump(stats, NAT64S_INSERT_FAILED);
 		return -1;
 	}
 
-	lock = NULL;
-	if (fwtable_insert(
-		    prepared->lan.table,
-		    worker_idx,
-		    now,
-		    ttl,
-		    &key,
-		    &value,
-		    &lock
-	    ) < 0) {
-		nat64s_insert_unlock(lock);
+	if (latched && !established) {
+		// Established by the session's other side since this packet's
+		// lookup: inserted again on the established timeout.
+		view.established = true;
+		wan_value.tcp_established = true;
+		wan_value.last_ttl = view.established_ttl;
+		lock = NULL;
+		if (fwtable_insert(
+			    prepared->wan.table,
+			    worker_idx,
+			    now,
+			    view.established_ttl,
+			    &wan_key,
+			    &wan_value,
+			    &lock
+		    ) < 0) {
+			nat64s_insert_unlock(lock);
+			nat64s_stats_bump(stats, NAT64S_INSERT_FAILED);
+			return -1;
+		}
+		rwlock_write_unlock(lock);
+	}
+
+	if (!nat64s_insert_latched(prepared->lan.table, &key, &value, &view)) {
 		nat64s_stats_bump(stats, NAT64S_INSERT_FAILED);
 		return -1;
 	}
-	rwlock_write_unlock(lock);
 
 	if (value.port != sport &&
 	    nat64s_patch_source_port(packet, value.port)) {
@@ -1091,6 +1309,11 @@ nat64s_handle_v4(
 	if (nat64s_is_icmp_error(packet)) {
 		return nat64s_handle_v4_error(config, prepared, now, packet);
 	}
+	if (packet->transport_header.type == IPPROTO_ICMP &&
+	    !nat64s_is_icmp_echo(packet)) {
+		nat64s_stats_bump(stats, NAT64S_ICMP_UNSUPPORTED);
+		return -1;
+	}
 
 	uint16_t proto;
 	uint16_t sport;
@@ -1126,35 +1349,32 @@ nat64s_handle_v4(
 	rte_memcpy(prefix, session->prefix, sizeof(prefix));
 	nat64s_lookup_unlock(lock);
 
+	// Establishment latches here too: the remote's SYN answering the
+	// handshake moves the session onto the established timeout.
+	struct nat64s_session_view view = {
+		.worker_idx = worker_idx,
+		.now = now,
+		.established =
+			established || nat64s_tcp_establishes_wan(packet),
+		.general_ttl =
+			nat64state_entry_ttl(proto, false, &config->timeouts),
+		.established_ttl =
+			nat64state_entry_ttl(proto, true, &config->timeouts),
+	};
+
 	// Return traffic keeps its own entry alive: a flow whose client is
 	// silent for a while must not lose its reverse mapping while the
 	// remote still talks.
 	struct nat64state_value refresh = {0};
 	refresh.updated_at = now;
 	refresh.cli_port = cli_port;
-	// Establishment latches here too: the remote's SYN answering the
-	// handshake moves the session onto the established timeout.
-	established = established || nat64s_tcp_establishes_wan(packet);
-	refresh.tcp_established = established;
-	uint64_t ttl =
-		nat64state_entry_ttl(proto, established, &config->timeouts);
-	refresh.last_ttl = ttl;
 	rte_memcpy(refresh.src6, src6, sizeof(src6));
-	lock = NULL;
-	if (fwtable_insert(
-		    prepared->wan.table,
-		    worker_idx,
-		    now,
-		    ttl,
-		    &key,
-		    &refresh,
-		    &lock
-	    ) < 0) {
-		nat64s_insert_unlock(lock);
+	if (!nat64s_insert_latched(
+		    prepared->wan.table, &key, &refresh, &view
+	    )) {
 		nat64s_stats_bump(stats, NAT64S_INSERT_FAILED);
 		return -1;
 	}
-	rwlock_write_unlock(lock);
 
 	// Both entries of a session age together: the lan entry is what the
 	// client's next packet looks up, so return traffic alone must keep
@@ -1196,27 +1416,16 @@ nat64s_handle_v4(
 		lan_refresh.ip4 = key.local_addr;
 		lan_refresh.port = key.hdr.src_port;
 		lan_refresh.cli_port = cli_port;
-		lan_refresh.tcp_established = established;
-		lan_refresh.last_ttl = ttl;
 		rte_memcpy(lan_refresh.src6, src6, sizeof(lan_refresh.src6));
 		rte_memcpy(
 			lan_refresh.prefix, prefix, sizeof(lan_refresh.prefix)
 		);
-		lock = NULL;
-		if (fwtable_insert(
-			    prepared->lan.table,
-			    worker_idx,
-			    now,
-			    ttl,
-			    &lan_key,
-			    &lan_refresh,
-			    &lock
-		    ) < 0) {
-			nat64s_insert_unlock(lock);
+		if (!nat64s_insert_latched(
+			    prepared->lan.table, &lan_key, &lan_refresh, &view
+		    )) {
 			nat64s_stats_bump(stats, NAT64S_INSERT_FAILED);
 			return -1;
 		}
-		rwlock_write_unlock(lock);
 	}
 
 	// The client's own port is restored even when it is zero: an echo

@@ -27,6 +27,8 @@ enum nat64s_stat {
 	NAT64S_INSERT_FAILED,
 	NAT64S_FRAGMENTED,
 	NAT64S_MALFORMED,
+	NAT64S_ICMP_UNSUPPORTED,
+	NAT64S_NON_GLOBAL,
 	NAT64S_STAT_COUNT,
 };
 
@@ -38,7 +40,13 @@ enum nat64s_stat {
  * the IPv4 side's addresses may embed under (v4->v6 destinations); the
  * pool is the public IPv4 address space the lan-side flows translate to.
  * An outbound packet uses the prefix its destination sits under, and the
- * session keeps that prefix for its return traffic.
+ * session keeps that prefix for its return traffic. Under the Well-Known
+ * Prefix a source or destination standing for an address of a block no
+ * global traffic uses is refused, whatever the configuration carries
+ * (RFC 6052 3.1).
+ *
+ * Of ICMP only errors and echoes cross: any other message is dropped
+ * before it could take a session, as the translation could not carry it.
  *
  * Session state lives in one linked nat64state_map object: its lan fwtable
  * keyed by the original IPv6 flow, its wan fwtable keyed by the translated
