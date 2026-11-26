@@ -63,6 +63,37 @@ if yanet_go_binaries and native_layout_enabled
     depends: lpm_native_generator,
     suite: ['common'],
   )
+
+  # The classifiers the native control plane compiles from Go, checked
+  # from C the same way.
+  classify_native_generator = custom_target(
+    'classify-native-generator',
+    output: 'classifygen',
+    command: [
+      go,
+      'build',
+      '-buildvcs=false',
+      '-o', '@OUTPUT@',
+      meson.project_source_root() / 'controlplane/native/classify/internal/classifygen',
+    ],
+    env: yanet_go_nocgo_env,
+    build_by_default: true,
+    build_always_stale: true,
+    depends: go_proto_targets,
+  )
+  classify_native_test = executable(
+    'classify_native_test',
+    ['classify_native_test.c'],
+    c_args: yanet_test_c_args + ['-fno-sanitize=address'],
+    dependencies: lib_common_dep,
+  )
+  test(
+    'classify_native',
+    classify_native_test,
+    args: [classify_native_generator],
+    depends: classify_native_generator,
+    suite: ['common'],
+  )
 endif
 
 radix_test = executable(
