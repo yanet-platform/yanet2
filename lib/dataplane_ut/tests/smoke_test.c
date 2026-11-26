@@ -481,9 +481,113 @@ run_round_result_foreign_pool_test(void) {
 	return TEST_SUCCESS;
 }
 
+// Verifies that the harness lays its storage out in memory its caller owns
+// and leaves that memory, laid out, to the caller when it is freed.
+static int
+run_caller_storage_test(void) {
+	const size_t cp_memory = 1u << 25;
+	const size_t dp_memory = 1u << 20;
+	void *storage = aligned_alloc(64, cp_memory + dp_memory);
+	TEST_ASSERT_NOT_NULL(storage, "storage allocation failed");
+	memset(storage, 0, cp_memory + dp_memory);
+
+	struct dataplane_ut_config cfg = {
+		.cp_memory = cp_memory,
+		.dp_memory = dp_memory,
+		.worker_count = 1,
+		.storage = storage,
+	};
+	struct dataplane_ut *ut = dataplane_ut_new(&cfg);
+	TEST_ASSERT_NOT_NULL(ut, "dataplane_ut_new returned NULL");
+
+	// The instance starts with its dataplane zone.
+	const struct dp_config *dp_config = storage;
+	TEST_ASSERT_EQUAL(
+		(long)dp_config->storage_size,
+		(long)(cp_memory + dp_memory),
+		"the harness must lay its storage out in the caller's memory"
+	);
+	dataplane_ut_free(ut);
+	TEST_ASSERT_EQUAL(
+		(long)dp_config->storage_size,
+		(long)(cp_memory + dp_memory),
+		"freeing the harness must leave the caller's memory as it is"
+	);
+
+	// The caller's free is the only one, which AddressSanitizer checks.
+	free(storage);
+	return TEST_SUCCESS;
+}
+
+// Verifies that a frame becomes a parsed packet in an mbuf of the harness
+// pool whose bytes copy back whole, and that a frame the harness cannot
+// take is refused without holding an mbuf.
+static int
+run_frame_packet_test(struct dataplane_ut *ut) {
+	const uint8_t frame[] = {
+		0x02, 0,    0,	  0,	0,   0x01, 0x02, 0, 0,	 0,  0,
+		0x02, 0x08, 0x00, 0x45, 0,   0,	   28,	 0, 0,	 0,  0,
+		64,   17,   0,	  0,	192, 0,	   2,	 1, 198, 51, 100,
+		1,    0x30, 0x39, 0,	53,  0,	   8,	 0, 0,
+	};
+	size_t outstanding = dataplane_ut_mempool_outstanding(ut);
+
+	struct packet *packet = NULL;
+	TEST_ASSERT_SUCCESS(
+		dataplane_ut_frame_packet(ut, frame, sizeof(frame), &packet),
+		"a UDP frame must become a packet"
+	);
+	TEST_ASSERT_EQUAL(
+		(long)dataplane_ut_packet_copy(packet, NULL, 0),
+		(long)sizeof(frame),
+		"the copy must report the frame's length"
+	);
+	uint8_t copied[sizeof(frame)];
+	TEST_ASSERT_EQUAL(
+		(long)dataplane_ut_packet_copy(packet, copied, sizeof(copied)),
+		(long)sizeof(frame),
+		"the copy must take the whole frame"
+	);
+	TEST_ASSERT_EQUAL(
+		memcmp(copied, frame, sizeof(frame)),
+		0,
+		"the copy must hold the frame's bytes"
+	);
+	TEST_ASSERT_EQUAL(
+		(long)dataplane_ut_mempool_outstanding(ut),
+		(long)(outstanding + 1),
+		"the packet must hold an mbuf of the harness pool"
+	);
+	rte_pktmbuf_free(packet_to_mbuf(packet));
+
+	TEST_ASSERT_EQUAL(
+		dataplane_ut_frame_packet(ut, frame, 3, &packet),
+		-EINVAL,
+		"a frame that does not parse must be refused"
+	);
+	static uint8_t oversized[1 << 16];
+	TEST_ASSERT_EQUAL(
+		dataplane_ut_frame_packet(
+			ut, oversized, sizeof(oversized), &packet
+		),
+		-EMSGSIZE,
+		"a frame larger than an mbuf must be refused"
+	);
+	TEST_ASSERT_EQUAL(
+		(long)dataplane_ut_mempool_outstanding(ut),
+		(long)outstanding,
+		"a refused frame must hold no mbuf"
+	);
+	return TEST_SUCCESS;
+}
+
 int
 main(void) {
 	log_enable_name("debug");
+
+	TEST_ASSERT_SUCCESS(
+		run_caller_storage_test(), "caller storage test failed"
+	);
 
 	const char *port_names[] = {"01:00.0"};
 	const char *devs_to_load[] = {"plain"};
@@ -505,6 +609,9 @@ main(void) {
 	TEST_ASSERT_SUCCESS(
 		run_round_result_foreign_pool_test(),
 		"foreign-pool result cleanup test failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		run_frame_packet_test(ut), "frame packet test failed"
 	);
 
 	struct yanet_shm *shm = dataplane_ut_shm(ut);

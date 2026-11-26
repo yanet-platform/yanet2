@@ -54,6 +54,14 @@ struct dataplane_ut_config {
 	// must point to exactly worker_count entries, and entry idx configures
 	// worker idx.
 	const struct dataplane_ut_worker_spec *workers;
+
+	// Optional caller-owned storage of cp_memory + dp_memory bytes.
+	//
+	// NULL makes the harness allocate its own. Otherwise the harness lays
+	// its storage out in this memory and neither zeroes nor frees it: the
+	// caller hands it in zero-filled and aligned for the dataplane zone,
+	// and keeps it alive until the harness is freed.
+	void *storage;
 };
 
 // Construct an in-process dataplane harness.
@@ -89,6 +97,29 @@ dataplane_ut_get_time_ns(struct dataplane_ut *ut);
 // Returns NULL on exhaustion. The caller frees with rte_pktmbuf_free.
 struct rte_mbuf *
 dataplane_ut_alloc_mbuf(struct dataplane_ut *ut);
+
+// Build a parsed packet of a frame in an mbuf of the harness mempool.
+//
+// Returns 0 with *packet set, or -ENOMEM when the mempool is empty,
+// -EMSGSIZE when the frame does not fit an mbuf and -EINVAL when it does
+// not parse. The caller frees the packet's mbuf as a round result's.
+int
+dataplane_ut_frame_packet(
+	struct dataplane_ut *ut,
+	const uint8_t *frame,
+	size_t len,
+	struct packet **packet
+);
+
+// Copy the bytes of every segment of a packet into dst and return how many
+// its segments hold.
+//
+// Nothing is copied to a NULL dst or when they hold more than size bytes,
+// so a NULL dst asks for the length.
+size_t
+dataplane_ut_packet_copy(
+	const struct packet *packet, uint8_t *dst, size_t size
+);
 
 // Result of one pipeline round. The caller owns the mbufs in both lists
 // and must free them when done.

@@ -1,10 +1,5 @@
 //go:build linux && (amd64 || arm64) && cgo
 
-// Package nativetest gives the native control plane's tests an in-process
-// dataplane and compares what C and Go write into it.
-//
-// Only tests import it. The fixture links the dataplane harness through
-// cgo; the allocator helpers need no cgo.
 package nativetest
 
 import (

@@ -15,10 +15,13 @@ struct dataplane_ut_stage_round {
 struct dataplane_ut {
 	void *arena;
 	size_t arena_size;
+	// Whether the harness allocated the arena and frees it, rather than
+	// its caller owning it.
+	bool owns_arena;
 	// Shared-memory handle over the arena, handed out to agents.
 	//
 	// Owned by the harness: it is never detached, because the arena is
-	// heap memory that the harness frees itself.
+	// memory that the harness or its caller frees.
 	struct yanet_shm shm;
 	struct dp_config *dp_config;
 	struct cp_config *cp_config;

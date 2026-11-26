@@ -583,8 +583,10 @@ if not dataplane_only
   subdir('operators/route/operatorpb')
   subdir('controlplane')
   subdir('operators')
+  # Test-only binaries the Go tests start.
+  native_test_deps = []
   subdir('tests')
-  alias_target('go-test-prepare', go_proto_targets + cgo_test_deps)
+  alias_target('go-test-prepare', go_proto_targets + cgo_test_deps + native_test_deps)
 endif
 
 # Each project archive an executable links must be used by its own objects, by

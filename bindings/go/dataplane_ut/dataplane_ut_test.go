@@ -10,6 +10,7 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	"github.com/yanet-platform/yanet2/common/go/xerror"
@@ -418,6 +419,78 @@ func Test_NewHarness_RejectsInvalidPacketRecircLimit(t *testing.T) {
 			})
 			require.Error(t, err)
 			require.Nil(t, harness)
+		})
+	}
+}
+
+// Test_NewHarness_RefusesShortStorage verifies that storage shorter than
+// both zones is refused before it reaches C.
+func Test_NewHarness_RefusesShortStorage(t *testing.T) {
+	const cpMemory, dpMemory = uint64(datasize.MB * 8), uint64(datasize.MB)
+	mapping, err := unix.Mmap(-1, 0, int(cpMemory+dpMemory)-1, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_PRIVATE|unix.MAP_ANONYMOUS)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, unix.Munmap(mapping)) })
+
+	harness, err := NewHarness(Config{CPMemory: cpMemory, DPMemory: dpMemory, WorkerCount: 1, Storage: mapping})
+
+	require.ErrorIs(t, err, ErrInvalidArgument)
+	require.Nil(t, harness)
+}
+
+// Test_Harness_Deliver_RefusesOffsetOutsideControlPlaneZone verifies that
+// a generation offset in the dataplane zone or past the storage is refused.
+func Test_Harness_Deliver_RefusesOffsetOutsideControlPlaneZone(t *testing.T) {
+	const cpMemory, dpMemory = uint64(datasize.MB * 8), uint64(datasize.MB)
+	harness, err := NewHarness(Config{CPMemory: cpMemory, DPMemory: dpMemory, WorkerCount: 1})
+	require.NoError(t, err)
+	t.Cleanup(harness.Free)
+
+	cases := []struct {
+		name   string
+		offset uint64
+	}{
+		{name: "offset in the dataplane zone", offset: dpMemory - 1},
+		{name: "generation crossing the end", offset: cpMemory + dpMemory - 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.ErrorIs(t, harness.Deliver(tc.offset), ErrInvalidArgument)
+		})
+	}
+}
+
+// udpFrame returns an Ethernet frame of an IPv4 UDP datagram without
+// payload, which the dataplane parses.
+func udpFrame() []byte {
+	return []byte{
+		0x02, 0, 0, 0, 0, 0x01, 0x02, 0, 0, 0, 0, 0x02, 0x08, 0x00,
+		0x45, 0, 0, 28, 0, 0, 0, 0, 64, 17, 0, 0,
+		192, 0, 2, 1, 198, 51, 100, 1,
+		0x30, 0x39, 0, 53, 0, 8, 0, 0,
+	}
+}
+
+// Test_Harness_HandleFramesOnDevice_RefusesOutOfRange verifies that a
+// round on a worker or device outside the topology is refused before it
+// reaches C.
+func Test_Harness_HandleFramesOnDevice_RefusesOutOfRange(t *testing.T) {
+	harness, err := NewHarness(Config{CPMemory: uint64(datasize.MB * 8), DPMemory: uint64(datasize.MB), WorkerCount: 1})
+	require.NoError(t, err)
+	t.Cleanup(harness.Free)
+
+	cases := []struct {
+		name   string
+		worker int
+		device uint16
+	}{
+		{name: "worker out of range", worker: 1},
+		{name: "device out of range", device: 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := harness.HandleFramesOnDevice(tc.worker, tc.device, udpFrame())
+
+			require.ErrorIs(t, err, ErrInvalidArgument)
 		})
 	}
 }
