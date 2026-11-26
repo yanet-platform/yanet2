@@ -244,7 +244,7 @@ test_lock_released_during_value_copy(struct yanet_shm *shm) {
 
 #define RACE_TEST_PIPELINE_COUNT 80
 #define RACE_TEST_READ_CYCLES 40
-#define RACE_TEST_WRITE_SAFETY_DEADLINE_NS (30ull * 1000 * 1000 * 1000)
+#define RACE_TEST_SAFETY_DEADLINE_NS (30ull * 1000 * 1000 * 1000)
 
 // Shared state for the racing-swap regression test: a writer thread keeps
 // genuinely retiring "race-pipe-*" storages (a fresh pipeline object per
@@ -257,7 +257,7 @@ struct race_state {
 	atomic_bool reader_failed;
 	atomic_bool writer_failed;
 	uint64_t reader_iterations;
-	uint64_t writer_iterations;
+	_Atomic uint64_t writer_iterations;
 };
 
 static void *
@@ -271,7 +271,19 @@ race_reader_thread(void *arg) {
 	// count is deterministic even while the writer is swapping storages.
 	uint64_t expected_matches = (uint64_t)RACE_TEST_PIPELINE_COUNT *
 				    LOCK_TEST_COUNTERS_PER_PIPELINE;
-	for (uint64_t i = 0; i < RACE_TEST_READ_CYCLES; ++i) {
+	// The reads go on until the writer has swapped at least once, so a
+	// reader scheduled ahead of a slow writer still races a real swap.
+	uint64_t deadline = now_ns() + RACE_TEST_SAFETY_DEADLINE_NS;
+	for (uint64_t i = 0;
+	     (i < RACE_TEST_READ_CYCLES ||
+	      atomic_load_explicit(
+		      &state->writer_iterations, memory_order_acquire
+	      ) == 0) &&
+	     !atomic_load_explicit(
+		     &state->writer_failed, memory_order_acquire
+	     ) &&
+	     now_ns() < deadline;
+	     ++i) {
 		struct counter_worker_set_list *sets =
 			yanet_get_counters_by_tags_per_worker(
 				state->dp_config, tags, 2, NULL, NULL
@@ -299,7 +311,7 @@ race_reader_thread(void *arg) {
 static void *
 race_writer_thread(void *arg) {
 	struct race_state *state = (struct race_state *)arg;
-	uint64_t deadline = now_ns() + RACE_TEST_WRITE_SAFETY_DEADLINE_NS;
+	uint64_t deadline = now_ns() + RACE_TEST_SAFETY_DEADLINE_NS;
 	while (!atomic_load_explicit(&state->stop, memory_order_acquire) &&
 	       now_ns() < deadline) {
 		if (install_pipelines(
@@ -315,7 +327,9 @@ race_writer_thread(void *arg) {
 			);
 			break;
 		}
-		state->writer_iterations += 1;
+		atomic_fetch_add_explicit(
+			&state->writer_iterations, 1, memory_order_release
+		);
 	}
 	return NULL;
 }
@@ -388,7 +402,9 @@ test_racing_swap_no_uaf(struct yanet_shm *shm) {
 		"writer thread reported a failure"
 	);
 	TEST_ASSERT(
-		state.writer_iterations > 0,
+		atomic_load_explicit(
+			&state.writer_iterations, memory_order_acquire
+		) > 0,
 		"writer never completed a single racing pipeline reinstall"
 	);
 	TEST_ASSERT(
