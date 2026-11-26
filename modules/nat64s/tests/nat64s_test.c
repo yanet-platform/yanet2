@@ -2840,6 +2840,43 @@ test_split_transport_header_refused(struct nat64s_env *env) {
 	return TEST_SUCCESS;
 }
 
+// The first fragment of a datagram is refused like the later ones.
+//
+// It carries the transport header a session would key on, but no session
+// can serve the fragments that follow it: none is taken for it.
+static int
+test_first_fragment_refused(struct nat64s_env *env) {
+	dataplane_ut_set_time_ns(env->ut, 23400000000000ull);
+	struct packet *in = NULL;
+	struct packet *out = NULL;
+	bool dropped = false;
+	TEST_ASSERT_SUCCESS(nat64s_make_v6_syn(env, 2109, &in), "build failed");
+	// The parser's mark of a fragmented datagram, on a fragment whose
+	// offset is zero.
+	in->flags |= 1 << PACKET_FLAG_FRAGMENTED;
+	TEST_ASSERT_EQUAL(
+		in->fragment_offset, 0, "the first fragment's offset is zero"
+	);
+
+	uint64_t refused = env->config->stats[NAT64S_FRAGMENTED];
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT_NULL(out, "the first fragment must not translate");
+	TEST_ASSERT(dropped, "the first fragment must be dropped");
+	TEST_ASSERT_EQUAL(
+		env->config->stats[NAT64S_FRAGMENTED],
+		refused + 1,
+		"the refused fragment must be counted"
+	);
+
+	// Nothing was recorded for it: the datagram's whole SYN still opens
+	// the session.
+	TEST_ASSERT_SUCCESS(nat64s_make_v6_syn(env, 2109, &in), "build failed");
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the whole SYN must still open its session");
+	rte_pktmbuf_free(packet_to_mbuf(out));
+	return TEST_SUCCESS;
+}
+
 // A new flow finding every candidate port taken towards its remote gives
 // up instead of sharing one: its SYN is dropped, and the sessions holding
 // the ports keep answering their own clients.
@@ -3438,6 +3475,9 @@ main(void) {
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_split_transport_header_refused(&env);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_first_fragment_refused(&env);
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_exhausted_window_drops_new_flow(&env);

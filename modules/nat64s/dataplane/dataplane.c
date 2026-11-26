@@ -1463,10 +1463,12 @@ nat64s_handle_packets(
 	while ((packet = packet_list_pop(&packet_front->input)) != NULL) {
 		int result = -1;
 
-		// A session keys on the transport identity, so a fragment
-		// without one cannot be translated.
+		// Every fragment of a fragmented datagram is refused, the first
+		// one included: a session keys on the transport identity, which
+		// only the first fragment carries, and no session can serve the
+		// rest.
 		if (packet->fragment_offset != 0 ||
-		    (packet->flags & PACKET_FLAG_FRAGMENTED)) {
+		    (packet->flags & (1 << PACKET_FLAG_FRAGMENTED)) != 0) {
 			nat64s_stats_bump(prepared->stats, NAT64S_FRAGMENTED);
 			result = -1;
 		} else if (packet->network_header.type ==
