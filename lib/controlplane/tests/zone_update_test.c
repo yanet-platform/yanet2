@@ -81,7 +81,8 @@ zone_hog_take(struct zone_hog *hog, size_t block_size) {
 	return 0;
 }
 
-// Return the most recently taken block to the zone.
+// Gives back the block taken last, so blocks return in the reverse order
+// the hog took them.
 static void
 zone_hog_put_last(struct zone_hog *hog) {
 	--hog->count;
@@ -92,7 +93,8 @@ zone_hog_put_last(struct zone_hog *hog) {
 	);
 }
 
-// Take every free block of the given internal size and below, largest first.
+// Leaves the zone no free block of the given internal size or below, so any
+// request that small fails until a block is given back.
 static void
 zone_hog_drain(struct zone_hog *hog, size_t top_block_size) {
 	for (size_t block_size = top_block_size;
@@ -103,7 +105,7 @@ zone_hog_drain(struct zone_hog *hog, size_t top_block_size) {
 	}
 }
 
-// Return every held block to the zone.
+// Gives every held block back and leaves the hog empty for another hold.
 static void
 zone_hog_release(struct zone_hog *hog) {
 	while (hog->count > 0) {
@@ -142,7 +144,8 @@ typedef int (*zone_update_func)(
 	yanet_error **err
 );
 
-// Returns the bytes the control-plane zone's allocator holds free.
+// Returns the zone's free bytes, an exact balance because the allocator
+// never merges blocks it gets back.
 static size_t
 zone_free_size(struct cp_config *cp_config) {
 	return block_allocator_free_size(&cp_config->block_allocator);
@@ -256,7 +259,8 @@ function_config_new(const char *name) {
 	return function;
 }
 
-// Publishes the one function configuration the data points at.
+// The update a function sweep retries: one function configuration, passed
+// by the sweep.
 static int
 update_function(
 	struct dp_config *dp_config,
@@ -322,7 +326,8 @@ run_function_upsert_refusal_test(struct yanet_shm *shm) {
 	return rc;
 }
 
-// Publishes the one pipeline configuration the data points at.
+// The update a pipeline sweep retries: one pipeline configuration, passed
+// by the sweep.
 static int
 update_pipeline(
 	struct dp_config *dp_config,
