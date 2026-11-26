@@ -4,13 +4,12 @@ package lpm_test
 
 import (
 	"bytes"
-	"fmt"
-	"math/rand/v2"
 	"slices"
 	"testing"
 	"unsafe"
 
 	"github.com/stretchr/testify/require"
+	"pgregory.net/rapid"
 
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
 	"github.com/yanet-platform/yanet2/controlplane/native/lpm"
@@ -54,30 +53,37 @@ func nextKey(key []byte) ([]byte, bool) {
 	return next, false
 }
 
-// randomRanges returns one to six inserts of random values whose key
-// bytes come mostly from page edges and their neighbours, so the ranges
-// nest, overlap and meet.
-func randomRanges(random *rand.Rand, keySize int) []keyRange {
-	edges := []byte{0x00, 0x01, 0x7f, 0x80, 0xfe, 0xff}
-	randomKey := func() []byte {
-		key := make([]byte, keySize)
-		for idx := range key {
-			key[idx] = edges[random.IntN(len(edges))]
-			if random.IntN(4) == 0 {
-				key[idx] = byte(random.Uint32())
-			}
-		}
-		return key
-	}
-	ranges := make([]keyRange, 1+random.IntN(6))
-	for idx := range ranges {
-		from, to := randomKey(), randomKey()
+// drawTree draws a key size and the inserts of a tree over keys of that
+// size.
+//
+// Three in four key bytes are page edges or their neighbours, so the
+// ranges nest, overlap and meet. At least half the values reach the top
+// bit; an insert of the whole key space may come first, and one in eight
+// inserts swaps its ends, so it starts past its end unless both are one
+// key.
+func drawTree(t *rapid.T) (int, []keyRange) {
+	keySize := rapid.SampledFrom([]int{1, 2, 3, 4, 8, 16}).Draw(t, "key size")
+	edge := rapid.SampledFrom([]byte{0x00, 0x01, 0x7f, 0x80, 0xfe, 0xff})
+	key := rapid.SliceOfN(rapid.OneOf(edge, edge, edge, rapid.Byte()), keySize, keySize)
+	value := rapid.OneOf(rapid.Uint32(), rapid.Uint32Min(1<<31))
+	insert := rapid.Custom(func(t *rapid.T) keyRange {
+		from, to := key.Draw(t, "from"), key.Draw(t, "to")
 		if bytes.Compare(from, to) > 0 {
 			from, to = to, from
 		}
-		ranges[idx] = keyRange{From: from, To: to, Value: random.Uint32()}
+		if rapid.IntRange(0, 7).Draw(t, "reversed") == 7 {
+			from, to = to, from
+		}
+		return keyRange{From: from, To: to, Value: value.Draw(t, "value")}
+	})
+
+	var ranges []keyRange
+	if rapid.Bool().Draw(t, "whole key space first") {
+		whole := keyRange{From: make([]byte, keySize), To: bytes.Repeat([]byte{0xff}, keySize)}
+		whole.Value = value.Draw(t, "whole key space value")
+		ranges = append(ranges, whole)
 	}
-	return ranges
+	return keySize, append(ranges, rapid.SliceOfN(insert, 1, 6).Draw(t, "inserts")...)
 }
 
 // requireWalkMatches asserts that the walk of a tree built from the
@@ -88,7 +94,10 @@ func randomRanges(random *rand.Rand, keySize int) []keyRange {
 // last key. The value changes only at a range's start and past its end,
 // so checking it there and at each stretch's start against the stretch
 // holding the key covers every key.
-func requireWalkMatches(t *testing.T, ranges []keyRange, keySize int, valueOf func(tree *layout.Lpm, key []byte) uint32) {
+func requireWalkMatches(t interface {
+	require.TestingT
+	Helper()
+}, ranges []keyRange, keySize int, valueOf func(tree *layout.Lpm, key []byte) uint32) {
 	t.Helper()
 	memory := newTreeMemory()
 	require.NoError(t, lpm.Init(&memory.Tree, &memory.Context, "tree"))
@@ -162,12 +171,8 @@ func Test_Walk_Trees(t *testing.T) {
 // Test_Walk_RandomTrees verifies that walking random trees of keys from 1
 // to 16 bytes visits every key once, in order, with its lookup value.
 func Test_Walk_RandomTrees(t *testing.T) {
-	for _, keySize := range []int{1, 2, 3, 4, 8, 16} {
-		for seed := range uint64(8) {
-			t.Run(fmt.Sprintf("%d-byte keys, seed %d", keySize, seed), func(t *testing.T) {
-				random := rand.New(rand.NewPCG(seed, uint64(keySize)))
-				requireWalkMatches(t, randomRanges(random, keySize), keySize, lookup)
-			})
-		}
-	}
+	rapid.Check(t, func(t *rapid.T) {
+		keySize, ranges := drawTree(t)
+		requireWalkMatches(t, ranges, keySize, lookup)
+	})
 }

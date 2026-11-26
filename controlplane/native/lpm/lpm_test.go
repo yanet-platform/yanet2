@@ -5,12 +5,12 @@ package lpm_test
 import (
 	"bytes"
 	"fmt"
-	"math/rand/v2"
 	"net/netip"
 	"testing"
 	"unsafe"
 
 	"github.com/stretchr/testify/require"
+	"pgregory.net/rapid"
 
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
 	"github.com/yanet-platform/yanet2/controlplane/native/lpm"
@@ -128,40 +128,19 @@ func Test_InitAndInsert_ExhaustionLeavesFreeableTree(t *testing.T) {
 }
 
 // Test_Insert_MatchesReference verifies that a tree maps every key to the
-// value of the last insert covering it.
-//
-// The inserts overlap, half their values reach the top bit, and one
-// insert whose start lies past its end maps nothing. Even seeds insert the
-// whole key space first; odd seeds leave keys no insert covers, which
-// keep C's invalid value.
+// value of the last insert covering it, and keys no insert covers to C's
+// invalid value.
 func Test_Insert_MatchesReference(t *testing.T) {
-	for _, keySize := range []int{1, 2, 3, 4, 8, 16} {
-		for seed := range uint64(8) {
-			t.Run(fmt.Sprintf("%d-byte keys, seed %d", keySize, seed), func(t *testing.T) {
-				random := rand.New(rand.NewPCG(seed, uint64(keySize)<<8))
-				whole := keyRange{From: make([]byte, keySize), To: bytes.Repeat([]byte{0xff}, keySize), Value: random.Uint32() | 1<<31}
-				reversed := keyRange{From: bytes.Repeat([]byte{0xfe}, keySize), To: bytes.Repeat([]byte{0x01}, keySize), Value: random.Uint32()}
-				ranges := randomRanges(random, keySize)
-				if seed%2 == 0 {
-					ranges = append([]keyRange{whole}, ranges...)
+	rapid.Check(t, func(t *rapid.T) {
+		keySize, ranges := drawTree(t)
+		requireWalkMatches(t, ranges, keySize, func(_ *layout.Lpm, key []byte) uint32 {
+			value := lpm.InvalidValue
+			for _, insert := range ranges {
+				if bytes.Compare(insert.From, key) <= 0 && bytes.Compare(key, insert.To) <= 0 {
+					value = insert.Value
 				}
-				for idx := range ranges {
-					if idx%2 == 1 {
-						ranges[idx].Value |= 1 << 31
-					}
-				}
-				ranges = append(ranges, reversed)
-
-				requireWalkMatches(t, ranges, keySize, func(_ *layout.Lpm, key []byte) uint32 {
-					value := lpm.InvalidValue
-					for _, insert := range ranges {
-						if bytes.Compare(insert.From, key) <= 0 && bytes.Compare(key, insert.To) <= 0 {
-							value = insert.Value
-						}
-					}
-					return value
-				})
-			})
-		}
-	}
+			}
+			return value
+		})
+	})
 }
