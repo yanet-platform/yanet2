@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
+	"github.com/yanet-platform/yanet2/controlplane/native/nativetest"
 	"github.com/yanet-platform/yanet2/controlplane/native/zone"
 )
 
@@ -199,4 +200,20 @@ func Test_Storage_Attach(t *testing.T) {
 			require.NoError(t, storage.Close())
 		})
 	}
+}
+
+// Test_Storage_ProducersKeepPlacement verifies that the storage the
+// dataplane test harness lays out keeps the zone placement the reader
+// assumes instead of checking: the control-plane zone after the dataplane
+// zone and inside the instance, both aligned for their structures.
+func Test_Storage_ProducersKeepPlacement(t *testing.T) {
+	instance := nativetest.NewDataplane(t, nativetest.Config{Modules: []string{"blackhole"}}).Instance()
+
+	dp := uintptr(unsafe.Pointer(instance.Dp))
+	cp := uintptr(unsafe.Pointer(instance.Cp))
+	end := dp + uintptr(instance.Dp.StorageSize)
+	require.Zero(t, dp%unsafe.Alignof(layout.DpConfig{}), "dataplane zone misaligned")
+	require.Zero(t, cp%unsafe.Alignof(layout.CpConfig{}), "control-plane zone misaligned")
+	require.GreaterOrEqual(t, cp, dp+unsafe.Sizeof(layout.DpConfig{}), "zones overlap")
+	require.LessOrEqual(t, cp+unsafe.Sizeof(layout.CpConfig{}), end, "control-plane zone past the instance")
 }

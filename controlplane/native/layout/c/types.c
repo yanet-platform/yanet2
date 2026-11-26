@@ -31,6 +31,19 @@ enum native_layout_u32 {
 	native_layout_module_ABI_version = YANET_MODULE_ABI_VERSION,
 };
 
+// The block allocator's geometry, which the native allocator must share
+// with the C build it shares memory with.
+enum native_layout_allocator {
+	native_layout_memory_block_allocator_exp = MEMORY_BLOCK_ALLOCATOR_EXP,
+	native_layout_memory_block_allocator_min_bits =
+		MEMORY_BLOCK_ALLOCATOR_MIN_BITS,
+	native_layout_memory_block_allocator_max_align =
+		MEMORY_BLOCK_ALLOCATOR_MAX_ALIGN,
+	native_layout_memory_block_allocator_max_size =
+		MEMORY_BLOCK_ALLOCATOR_MAX_SIZE,
+	native_layout_asan_red_zone = ASAN_RED_ZONE,
+};
+
 int
 main(void) {
 	return 0;

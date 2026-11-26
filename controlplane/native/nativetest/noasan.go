@@ -11,8 +11,8 @@ import (
 // helper.
 const sanitized = false
 
-// unpoison does nothing without AddressSanitizer.
-func unpoison([]byte) {}
+// Unpoison does nothing without AddressSanitizer.
+func Unpoison([]byte) {}
 
 // markFreeBlocks does nothing without AddressSanitizer.
 func markFreeBlocks(*layout.CpConfig, []byte) error {

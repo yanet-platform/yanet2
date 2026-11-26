@@ -750,7 +750,7 @@ func (m *Dataplane) unmap() {
 	if m.memory != nil {
 		// The allocator of this process poisoned the free blocks it put
 		// back; a later mapping at these addresses must start clean.
-		unpoison(m.memory)
+		Unpoison(m.memory)
 		err = errors.Join(err, unix.Munmap(m.memory))
 		m.memory = nil
 	}

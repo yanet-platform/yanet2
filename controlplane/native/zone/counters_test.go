@@ -4,15 +4,23 @@ package zone_test
 
 import (
 	"fmt"
+	"net"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 	"unsafe"
 
+	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
 
+	"github.com/yanet-platform/yanet2/common/go/xerror"
+	"github.com/yanet-platform/yanet2/common/go/xpacket"
+	"github.com/yanet-platform/yanet2/controlplane/native/cpconfig"
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
 	"github.com/yanet-platform/yanet2/controlplane/native/shm"
+	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
 	"github.com/yanet-platform/yanet2/controlplane/native/zone"
 )
 
@@ -120,8 +128,8 @@ func craftedGeneration(memory *arena, itemCount int) (*layout.CpConfigGen, []lay
 
 // Test_Generation_CountersOfCraftedGeneration verifies how storages of
 // one worker are read: two of one tag set give one group whose values
-// are the later storage's, as the cgo reader's merge gives them, and
-// storages or values that cannot be reached are skipped or read as zero.
+// are the later storage's, and storages or values that cannot be reached
+// are skipped or read as zero.
 func Test_Generation_CountersOfCraftedGeneration(t *testing.T) {
 	tags := []zone.CounterTag{{Key: "module_name", Value: "first"}}
 	cases := []struct {
@@ -197,4 +205,154 @@ func Test_Generation_CountersOfCraftedGeneration(t *testing.T) {
 			runtime.KeepAlive(memory)
 		})
 	}
+}
+
+// counterGroup returns a group of two-worker counters under the tags,
+// given as key and value pairs, whose counters named as hit count one
+// frame of the size given on the second worker.
+//
+// Histograms hold eight values, every other counter two: packets and
+// bytes.
+func counterGroup(tags []string, hit []string, frameSize uint64, counters ...string) zone.CounterGroup {
+	group := zone.CounterGroup{}
+	for pair := range slices.Chunk(tags, 2) {
+		group.Tags = append(group.Tags, zone.CounterTag{Key: pair[0], Value: pair[1]})
+	}
+	for _, name := range counters {
+		size := 2
+		if strings.HasSuffix(name, "histogram") {
+			size = 8
+		}
+		values := [][]uint64{make([]uint64, size), make([]uint64, size)}
+		if slices.Contains(hit, name) {
+			values[1] = []uint64{1, frameSize}
+		}
+		group.Counters = append(group.Counters, zone.Counter{Name: name, Values: values})
+	}
+	return group
+}
+
+// publishedCounters returns, by a name of each, the counter groups of the
+// published topology after one frame of the size given ran on the second
+// worker and the first module dropped it.
+func publishedCounters(frameSize uint64) map[string]zone.CounterGroup {
+	var device []string
+	for _, direction := range []string{"input", "output"} {
+		for _, name := range []string{"rx", "entry", "tx", "drop", "recirc_drop", "pending_input", "pending_output"} {
+			device = append(device, direction+"_"+name)
+		}
+	}
+	flow := []string{"input", "output", "drop", "input histogram", "pending_input", "pending_output"}
+	return map[string]zone.CounterGroup{
+		"device": counterGroup(
+			[]string{"device", "port0", "kind", "device"},
+			[]string{"input_rx", "input_entry", "input_drop"}, frameSize, device...,
+		),
+		"input pipeline": counterGroup(
+			[]string{"device", "port0", "kind", "pipeline", "pipeline", "drop"},
+			[]string{"input", "drop"}, frameSize, flow...,
+		),
+		"output pipeline": counterGroup(
+			[]string{"device", "port0", "kind", "pipeline", "pipeline", "dummy"},
+			nil, frameSize, flow...,
+		),
+		"function": counterGroup(
+			[]string{"device", "port0", "function", "drop", "kind", "function", "pipeline", "drop"},
+			[]string{"input", "drop"}, frameSize, flow...,
+		),
+		"chain": counterGroup(
+			[]string{"chain", "drop_chain", "device", "port0", "function", "drop", "kind", "chain", "pipeline", "drop"},
+			nil, frameSize, "pending_input", "pending_output",
+		),
+		"module": counterGroup(
+			[]string{
+				"chain", "drop_chain", "device", "port0", "function", "drop", "kind", "module",
+				"module_name", "first", "module_type", "blackhole", "pipeline", "drop",
+			},
+			[]string{"rx", "drop"}, frameSize, "rx", "tx", "drop", "pending_input", "pending_output",
+		),
+	}
+}
+
+// Test_Generation_CountersSelectsByTags verifies that the counter reader
+// reports, for every tag predicate shape, the groups, counters and
+// per-worker values of the published topology, after one frame ran on
+// one worker only, with an object whose counter storages hold no
+// counters.
+func Test_Generation_CountersSelectsByTags(t *testing.T) {
+	memory := newPublished(t)
+	object := (*layout.CpObject)(shmalloc.ContextAlloc(&memory.Owner.Agent.MemoryContext, unsafe.Sizeof(layout.CpObject{})))
+	require.NotNil(t, object)
+	require.NoError(t, cpconfig.InitObject(object, memory.Owner, "ring", "state"))
+	require.NoError(t, cpconfig.UpdateObjects(memory.Instance, []*layout.CpObject{object}, memory.Deliver()))
+	eth := layers.Ethernet{
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	ip := layers.IPv4{
+		Version: 4, TTL: 64, Protocol: layers.IPProtocolICMPv4,
+		SrcIP: net.IPv4(10, 0, 0, 1), DstIP: net.IPv4(192, 168, 1, 1),
+	}
+	icmp := layers.ICMPv4{TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoRequest, 0)}
+	frame := xpacket.LayersToPacket(t, &eth, &ip, &icmp).Data()
+	result, err := memory.Dataplane.Round(1, 0, frame)
+	require.NoError(t, err)
+	require.Len(t, result.Drop, 1)
+	pinned, err := memory.Instance.Pin()
+	require.NoError(t, err)
+	t.Cleanup(pinned.Release)
+	groups := publishedCounters(uint64(len(frame)))
+	every := []string{"device", "input pipeline", "output pipeline", "function", "chain", "module"}
+
+	cases := []struct {
+		name       string
+		predicates []zone.CounterTag
+		// groups names the groups the predicates select.
+		groups []string
+	}{
+		{"every storage", nil, every},
+		{
+			"module storages of a type",
+			[]zone.CounterTag{{Key: "kind", Value: "module"}, {Key: "module_type", Value: "blackhole"}},
+			[]string{"module"},
+		},
+		{
+			"one module by its position",
+			[]zone.CounterTag{
+				{Key: "module_name", Value: "first"}, {Key: "chain", Value: "drop_chain"}, {Key: "kind", Value: "module"},
+			},
+			[]string{"module"},
+		},
+		{"storages with a key at any value", []zone.CounterTag{{Key: "chain", Value: "*"}}, []string{"chain", "module"}},
+		{"storages without a key", []zone.CounterTag{{Key: "pipeline", Value: ""}}, []string{"device"}},
+		{"a value no storage has", []zone.CounterTag{{Key: "module_name", Value: "missing"}}, nil},
+		{"an empty key absent", []zone.CounterTag{{Key: "", Value: ""}}, every},
+		{"an empty key with a value", []zone.CounterTag{{Key: "", Value: "module"}}, nil},
+		{"object storages without counters", []zone.CounterTag{{Key: "kind", Value: "object"}}, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var want []zone.CounterGroup
+			for _, name := range tc.groups {
+				want = append(want, groups[name])
+			}
+			got, err := pinned.Counters(tc.predicates)
+			require.NoError(t, err)
+			require.ElementsMatch(t, want, got)
+		})
+	}
+}
+
+// Test_Instance_CurrentTimeReadsWorkersTime verifies that the reader
+// reports the time the dataplane's workers published.
+func Test_Instance_CurrentTimeReadsWorkersTime(t *testing.T) {
+	memory := newPublished(t)
+	now := time.Unix(1_700_000_000, 5)
+	require.NoError(t, memory.Dataplane.SetTime(now))
+
+	got, ok := memory.Instance.CurrentTime()
+
+	require.True(t, ok)
+	require.Equal(t, uint64(now.UnixNano()), got)
 }
