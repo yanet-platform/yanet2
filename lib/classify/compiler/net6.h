@@ -24,13 +24,15 @@
  * Region based builder for the network attribute of the 128 bit value
  * domain.
  *
- * An address splits into the high and the low 64 bit halves; every rule
- * network is a prefix, so a network selects an interval of the high half
- * and an interval of the low one. Each half is partitioned into regions
- * on its own, the high and low regions of a network cross into the
- * combined regions of the address domain, and a dense high by low value
- * table carries the join for the query side: a packet address resolves
- * to one high and one low region value through the per half longest
+ * An address splits into the high and the low 64 bit halves. Every rule
+ * network is bi-contiguous: each half of its mask is a prefix of its own,
+ * so a network selects an interval of the high half and an interval of
+ * the low one. Masks of any other shape are outside the builder's
+ * contract; the control plane refuses them before they reach it. Each half is
+ * partitioned into regions on its own, the high and low regions of a network
+ * cross into the combined regions of the address domain, and a dense high by
+ * low value table carries the join for the query side: a packet address
+ * resolves to one high and one low region value through the per half longest
  * prefix match, and the table holds the combined region of the pair. A
  * high region row without any low half distinction carries its combined
  * region in a uniform value line over the rows instead - the query
@@ -473,7 +475,7 @@ filter_net6_sweep_move(
  */
 static inline int
 filter_net6_sweep_push(struct filter_net6_sweep *sw, uint32_t first) {
-	// Only a mask half that is not a prefix nests deeper.
+	// A deeper nest is a mask half outside the bi-contiguous contract.
 	if (sw->depth == sizeof(sw->levels) / sizeof(sw->levels[0])) {
 		return -1;
 	}

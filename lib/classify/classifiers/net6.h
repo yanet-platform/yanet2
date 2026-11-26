@@ -21,8 +21,9 @@
  * IPv6 network classifier: the two half longest prefix matches with
  * their join table.
  *
- * The struct is embedded by value in a consumer classifier; the halves
- * and the table die with the consumer through the free below.
+ * It holds bi-contiguous networks only: each 64 bit half of a mask is a
+ * prefix of its own. The struct is embedded by value in a consumer classifier;
+ * the halves and the table die with the consumer through the free below.
  */
 struct classify_attr_net6 {
 	// The high half trie value is the final result class, or the dense
