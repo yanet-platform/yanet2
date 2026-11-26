@@ -650,6 +650,8 @@ cp_config_update_functions(
 				"failed to upsert function '%s'",
 				new_cp_function->name
 			);
+			cp_function_fini(new_cp_function);
+			cp_function_free(new_cp_function);
 			goto error_free;
 		}
 	}
@@ -811,6 +813,8 @@ cp_config_update_pipelines(
 				"failed to upsert pipeline '%s'",
 				new_cp_pipeline->name
 			);
+			cp_pipeline_fini(new_cp_pipeline);
+			cp_pipeline_free(new_cp_pipeline);
 			goto error_free;
 		}
 	}
