@@ -7,6 +7,9 @@
 // views keep opaque, so DPDK's own headers take no part in the layouts.
 
 #include "common/lpm.h"
+#include "common/value.h"
+#include "lib/classify/classifiers/line.h"
+#include "lib/classify/classifiers/net4.h"
 #include "lib/controlplane/agent/agent.h"
 #include "lib/controlplane/config/cp_module.h"
 #include "lib/controlplane/config/zone.h"
