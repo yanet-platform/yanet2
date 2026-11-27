@@ -318,7 +318,7 @@ func (m *build) entry(
 	position := 0
 	for idx := range named {
 		path.Pipeline = shm.String(named[idx].Name[:])
-		pipeline := m.lookupPipeline(path.Pipeline)
+		pipeline := registry.LookupPipeline(&m.gen.PipelineRegistry, path.Pipeline)
 		if pipeline == nil {
 			return nil, fmt.Errorf("device %q: %w: %s", path.Device, ErrMissingPipeline, path.Pipeline)
 		}
@@ -370,7 +370,7 @@ func (m *build) pipeline(
 
 	for idx, named := range pipeline.Functions(int(pipeline.Length)) {
 		path.Function = shm.String(named.Name[:])
-		function := m.lookupFunction(path.Function)
+		function := registry.LookupFunction(&m.gen.FunctionRegistry, path.Function)
 		if function == nil {
 			return nil, fmt.Errorf("pipeline %q: %w: %s", path.Pipeline, ErrMissingFunction, path.Function)
 		}

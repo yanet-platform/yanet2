@@ -4,6 +4,7 @@ package zone
 
 import (
 	"fmt"
+	"iter"
 	"sync/atomic"
 	"unsafe"
 
@@ -82,4 +83,83 @@ func (m *Generation) LookupObject(objectType, name string) *layout.CpObject {
 		return nil
 	}
 	return registry.LookupObject(&m.Gen.ObjectRegistry, objectType, name)
+}
+
+// ModulePosition is a place in the topology where a chain runs a module
+// configuration.
+//
+// It names the device, the pipeline on its input or output, the function,
+// the chain and the configuration's type and name.
+type ModulePosition struct {
+	Device     string
+	Pipeline   string
+	Function   string
+	Chain      string
+	ModuleType string
+	ModuleName string
+}
+
+// ModulePositions yields every position of a module type in the
+// generation's topology.
+//
+// It is the counterpart of the cgo agent's module position walk. The walk
+// goes over devices in registry order, each device's input pipelines and
+// then its output pipelines, their functions, chains and chain modules in
+// order. A pipeline or function no registry holds is skipped. A
+// generation that publishes nothing or was released yields nothing; the
+// positions are read while iterating, so the pin must be held until the
+// iteration ends.
+func (m *Generation) ModulePositions(moduleType string) iter.Seq[ModulePosition] {
+	return func(yield func(ModulePosition) bool) {
+		if m.Gen == nil {
+			return
+		}
+		for _, item := range registry.Items(&m.Gen.DeviceRegistry.EntityRegistry.Registry) {
+			device := registry.Container[layout.CpDevice](item, 0)
+			position := ModulePosition{Device: shm.String(device.Name[:])}
+			for _, entry := range []*layout.CpDeviceEntry{device.InputPipelines.Get(), device.OutputPipelines.Get()} {
+				pipelines := entry.Pipelines(int(entry.PipelineCount))
+				for idx := range pipelines {
+					position.Pipeline = shm.String(pipelines[idx].Name[:])
+					if !m.pipelinePositions(position, moduleType, yield) {
+						return
+					}
+				}
+			}
+		}
+	}
+}
+
+// pipelinePositions yields the positions of a module type in the pipeline
+// the position names, and reports whether the walk goes on.
+func (m *Generation) pipelinePositions(position ModulePosition, moduleType string, yield func(ModulePosition) bool) bool {
+	pipeline := registry.LookupPipeline(&m.Gen.PipelineRegistry, position.Pipeline)
+	if pipeline == nil {
+		return true
+	}
+	functions := pipeline.Functions(int(pipeline.Length))
+	for idx := range functions {
+		position.Function = shm.String(functions[idx].Name[:])
+		function := registry.LookupFunction(&m.Gen.FunctionRegistry, position.Function)
+		if function == nil {
+			continue
+		}
+		chains := function.Chains(int(function.ChainCount))
+		for chainIdx := range chains {
+			chain := chains[chainIdx].CpChain.Get()
+			position.Chain = shm.String(chain.Name[:])
+			modules := chain.Modules(int(chain.Length))
+			for moduleIdx := range modules {
+				if !shm.Equal(modules[moduleIdx].Type[:], moduleType) {
+					continue
+				}
+				position.ModuleType = moduleType
+				position.ModuleName = shm.String(modules[moduleIdx].Name[:])
+				if !yield(position) {
+					return false
+				}
+			}
+		}
+	}
+	return true
 }

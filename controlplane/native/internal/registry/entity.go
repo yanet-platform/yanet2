@@ -27,6 +27,42 @@ func Owner(item *layout.RegistryItem) *layout.Agent {
 	return Container[layout.CpEntity](item, 0).Agent.Get()
 }
 
+// PipelineMatch matches the pipeline of a name already cut to its field.
+func PipelineMatch(key string) Match {
+	return func(item *layout.RegistryItem) bool {
+		return shm.Equal(Pipeline(item).Name[:], key)
+	}
+}
+
+// LookupPipeline returns the pipeline of a name in the registry, or nil,
+// as cp_pipeline_registry_lookup does.
+func LookupPipeline(pipelines *layout.CpPipelineRegistry, name string) *layout.CpPipeline {
+	key := FieldKey(name, len(layout.CpPipeline{}.Name))
+	index, found := Lookup(&pipelines.Registry, HashName(key), PipelineMatch(key))
+	if !found {
+		return nil
+	}
+	return Pipeline(Item(&pipelines.Registry, index))
+}
+
+// FunctionMatch matches the function of a name already cut to its field.
+func FunctionMatch(key string) Match {
+	return func(item *layout.RegistryItem) bool {
+		return shm.Equal(Function(item).Name[:], key)
+	}
+}
+
+// LookupFunction returns the function of a name in the registry, or nil,
+// as cp_function_registry_lookup does.
+func LookupFunction(functions *layout.CpFunctionRegistry, name string) *layout.CpFunction {
+	key := FieldKey(name, len(layout.CpFunction{}.Name))
+	index, found := Lookup(&functions.Registry, HashName(key), FunctionMatch(key))
+	if !found {
+		return nil
+	}
+	return Function(Item(&functions.Registry, index))
+}
+
 // ModuleKeyHash hashes a module's type and name as the module registry's
 // index does.
 func ModuleKeyHash(moduleType, name string) uint64 {

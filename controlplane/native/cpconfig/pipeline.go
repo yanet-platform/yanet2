@@ -125,7 +125,7 @@ func (m *build) newPipeline(config PipelineConfig) (*layout.CpPipeline, error) {
 func (m *build) upsertPipeline(pipeline *layout.CpPipeline) error {
 	name := shm.String(pipeline.Name[:])
 	var oldCounters *layout.CounterRegistry
-	if old := m.lookupPipeline(name); old != nil {
+	if old := registry.LookupPipeline(&m.gen.PipelineRegistry, name); old != nil {
 		oldCounters = &old.CounterRegistry
 	}
 	if err := linkCounters(&pipeline.CounterRegistry, oldCounters); err != nil {
@@ -134,28 +134,9 @@ func (m *build) upsertPipeline(pipeline *layout.CpPipeline) error {
 	key := registry.FieldKey(name, len(pipeline.Name))
 	if !registry.Replace(
 		&m.gen.PipelineRegistry.Registry, pipelineHash, registry.HashName(key),
-		pipelineMatch(key), &pipeline.ConfigItem, teardown.FreePipelineItem,
+		registry.PipelineMatch(key), &pipeline.ConfigItem, teardown.FreePipelineItem,
 	) {
 		return fmt.Errorf("replace pipeline in registry: %w", errZoneMemory)
 	}
 	return nil
-}
-
-// pipelineMatch matches the pipeline of a name already cut to its field.
-func pipelineMatch(key string) registry.Match {
-	return func(item *layout.RegistryItem) bool {
-		return shm.Equal(registry.Pipeline(item).Name[:], key)
-	}
-}
-
-// lookupPipeline returns the pipeline of a name the generation holds, or
-// nil.
-func (m *build) lookupPipeline(name string) *layout.CpPipeline {
-	pipelines := &m.gen.PipelineRegistry.Registry
-	key := registry.FieldKey(name, len(layout.CpPipeline{}.Name))
-	index, ok := registry.Lookup(pipelines, registry.HashName(key), pipelineMatch(key))
-	if !ok {
-		return nil
-	}
-	return registry.Pipeline(registry.Item(pipelines, index))
 }

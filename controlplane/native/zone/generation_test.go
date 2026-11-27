@@ -3,6 +3,7 @@
 package zone_test
 
 import (
+	"slices"
 	"sync/atomic"
 	"testing"
 	"unsafe"
@@ -336,4 +337,90 @@ func Test_Generation_Lookup_ReleasedGenerationFindsNothing(t *testing.T) {
 
 	require.Nil(t, generation.LookupModule("blackhole", "first"))
 	require.Nil(t, generation.LookupObject("ring", "first"))
+}
+
+// publishTwoChainTopology republishes the topology so its device runs one
+// function of two chains on its input and its output.
+//
+// The function "drop" has chain "a" running blackhole configurations first
+// and second and chain "b" running second; pipeline "dummy" runs it.
+func publishTwoChainTopology(t *testing.T, memory *published) {
+	t.Helper()
+	blackholes := func(names ...string) []cpconfig.ChainModuleConfig {
+		var modules []cpconfig.ChainModuleConfig
+		for _, name := range names {
+			modules = append(modules, cpconfig.ChainModuleConfig{Type: "blackhole", Name: name})
+		}
+		return modules
+	}
+	require.NoError(t, cpconfig.UpdateFunctions(memory.Instance, []cpconfig.FunctionConfig{{
+		Name: "drop",
+		Chains: []cpconfig.FunctionChainConfig{
+			{Weight: 1, Chain: cpconfig.ChainConfig{Name: "a", Modules: blackholes("first", "second")}},
+			{Weight: 1, Chain: cpconfig.ChainConfig{Name: "b", Modules: blackholes("second")}},
+		},
+	}}, memory.Deliver()))
+	require.NoError(t, cpconfig.UpdatePipelines(memory.Instance, []cpconfig.PipelineConfig{
+		{Name: "dummy", Functions: []string{"drop"}},
+	}, memory.Deliver()))
+}
+
+// Test_Generation_ModulePositions_WalksTopology verifies that a module
+// type's positions are yielded in topology order and only for that type.
+//
+// The order is the device's input and then output pipelines, their
+// functions, chains and chain modules; other types and released pins yield
+// none.
+func Test_Generation_ModulePositions_WalksTopology(t *testing.T) {
+	memory := newPublished(t)
+	publishTwoChainTopology(t, memory)
+	generation, err := memory.Instance.Pin()
+	require.NoError(t, err)
+	defer generation.Release()
+	position := func(pipeline, chain, module string) zone.ModulePosition {
+		return zone.ModulePosition{
+			Device:     "port0",
+			Pipeline:   pipeline,
+			Function:   "drop",
+			Chain:      chain,
+			ModuleType: "blackhole",
+			ModuleName: module,
+		}
+	}
+
+	cases := []struct {
+		name  string
+		check func(t *testing.T)
+	}{
+		{"every position in walk order", func(t *testing.T) {
+			require.Equal(t, []zone.ModulePosition{
+				position("drop", "a", "first"),
+				position("drop", "a", "second"),
+				position("drop", "b", "second"),
+				position("dummy", "a", "first"),
+				position("dummy", "a", "second"),
+				position("dummy", "b", "second"),
+			}, slices.Collect(generation.ModulePositions("blackhole")))
+		}},
+		{"type no chain runs", func(t *testing.T) {
+			require.Empty(t, slices.Collect(generation.ModulePositions("ring")))
+		}},
+		{"walk stopped by its consumer", func(t *testing.T) {
+			var seen []zone.ModulePosition
+			for found := range generation.ModulePositions("blackhole") {
+				seen = append(seen, found)
+				break
+			}
+			require.Equal(t, []zone.ModulePosition{position("drop", "a", "first")}, seen)
+		}},
+		{"released pin", func(t *testing.T) {
+			released, err := memory.Instance.Pin()
+			require.NoError(t, err)
+			released.Release()
+			require.Empty(t, slices.Collect(released.ModulePositions("blackhole")))
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, tc.check)
+	}
 }
