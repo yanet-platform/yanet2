@@ -18,8 +18,8 @@ use yanet_sdk::layout::{Field, Kind, Node};
 /// package of import path `import`.
 ///
 /// Fails, naming where it was reached, on a type without a layout
-/// description, and on two types under one Go name; a file that already
-/// holds its output is left alone.
+/// description that holds bytes, and on two types under one Go name; a file
+/// that already holds its output is left alone.
 pub fn generate(dir: &Path, import: &str, roots: &[&'static Node], constants: &[(&str, &str)]) -> Result<(), String> {
     let goarch = match ARCH {
         "x86_64" => "amd64",
@@ -187,13 +187,16 @@ impl Views {
 
 /// The Go name of a struct or of a field type's shape, and its fields or
 /// members in the order of their offsets.
+///
+/// A zero-sized field holds no data and is left out: Go pads a struct that
+/// ends in one, Rust does not.
 fn declaration(node: &Node) -> (String, Vec<&'static Field>) {
     let (name, fields) = match node.kind {
         Kind::Struct { name, fields } => (go_name(name), fields),
         Kind::Edge { kind, members, .. } => (camel(kind), members),
         _ => unreachable!("only a struct or a field type is declared"),
     };
-    let mut fields: Vec<_> = fields.iter().collect();
+    let mut fields: Vec<_> = fields.iter().filter(|field| field.ty.size != 0).collect();
     fields.sort_by_key(|field| field.offset);
     (name, fields)
 }
@@ -317,6 +320,44 @@ mod tests {
             args: &[],
         },
     };
+
+    /// A struct ending in a zero-sized field.
+    static TRAILING_EMPTY: Node = Node {
+        size: 4,
+        align: 4,
+        kind: Kind::Struct {
+            name: "test::Trailing",
+            fields: &[
+                Field {
+                    name: "number",
+                    offset: 0,
+                    ty: u32::LAYOUT,
+                },
+                Field {
+                    name: "empty",
+                    offset: 4,
+                    ty: <[u8; 0]>::LAYOUT,
+                },
+            ],
+        },
+    };
+
+    /// Verifies that a trailing zero-sized field is left out of the view, so
+    /// Go gives it Rust's size.
+    #[test]
+    fn test_generate_leaves_out_zero_sized_fields() {
+        let dir = env::temp_dir().join("yanet-layout-test-empty");
+        fs::create_dir_all(&dir).unwrap();
+        generate(&dir, "example.com/views", &[&TRAILING_EMPTY], &[]).unwrap();
+        let view = fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| !path.to_string_lossy().ends_with("_test.go"))
+            .unwrap();
+        let view = fs::read_to_string(view).unwrap();
+        assert!(view.contains("Number uint32"), "{view}");
+        assert!(!view.contains("Empty"), "{view}");
+    }
 
     /// Verifies that a field type reusing the kind of another with other
     /// members fails generation; the directory exists, so only the refusal

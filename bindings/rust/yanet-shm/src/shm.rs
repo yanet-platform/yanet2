@@ -46,7 +46,7 @@ pub unsafe trait ShmLayout: Sized + 'static {
     /// The description of the layout, for the Go views.
     ///
     /// A type that describes nothing of itself is opaque, and the generator
-    /// refuses a root that reaches it.
+    /// refuses a root that reaches it in a field holding bytes.
     const LAYOUT: &'static Node = &Node::of::<Self>(Kind::Opaque);
 }
 
