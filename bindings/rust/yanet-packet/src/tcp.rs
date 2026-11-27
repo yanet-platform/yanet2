@@ -834,6 +834,60 @@ mod tests {
         Fields { options: Vec::new(), ..fields }
     }
 
+    /// Fills the checksum of the segment built from the fields and the
+    /// payload, applies the mutations in turn and checks that the checksum
+    /// verifies over the pseudo header of the addresses they leave.
+    fn check_mutation_checksum(
+        start: Fields,
+        payload: &[u8],
+        family: Family,
+        addrs: ([u8; 16], [u8; 16]),
+        mutations: &[Vec<TcpOp>],
+    ) -> Result<(), TestCaseError> {
+        let start = Fields { checksum: 0, ..start };
+        let mut buf = start.to_bytes(payload);
+        let sum = family.l4_checksum(addrs.0, addrs.1, IPPROTO_TCP, &buf);
+        buf[16..18].copy_from_slice(&sum.to_be_bytes());
+        let mut addrs = addrs;
+        for ops in mutations {
+            let header = TcpPacketMut::parse(&mut buf).unwrap().header;
+            ops.iter()
+                .fold(header.mutate(), |mutation, op| apply(mutation, family, op, &mut addrs))
+                .finish();
+        }
+        prop_assert!(family.l4_is_valid(addrs.0, addrs.1, IPPROTO_TCP, &buf));
+        Ok(())
+    }
+
+    /// verifies that a mutation of a segment whose full checksum is zero
+    /// keeps the checksum valid.
+    #[test]
+    fn test_tcp_mutation_checksum_verifies_over_zero_full_checksum() {
+        let start = Fields {
+            src_port: 45687,
+            dst_port: 32710,
+            seq: 1236140320,
+            ack: 2071860142,
+            flags: 171,
+            window: 33001,
+            checksum: 0,
+            urgent: 29714,
+            options: vec![
+                9, 85, 181, 122, 129, 130, 26, 54, 14, 112, 124, 223, 40, 45, 140, 92, 71, 92, 3, 174, 82, 75, 16, 172,
+                40, 179, 27, 195, 10, 113, 184, 99,
+            ],
+        };
+        let payload = [
+            65, 170, 1, 199, 20, 214, 191, 142, 68, 248, 147, 63, 145, 17, 137, 111, 23, 126, 130, 132, 17,
+        ];
+        let addrs = (
+            [54, 91, 166, 69, 33, 103, 66, 182, 106, 246, 93, 0, 49, 15, 35, 138],
+            [77, 93, 195, 30, 45, 137, 246, 114, 230, 164, 32, 254, 29, 200, 113, 94],
+        );
+
+        check_mutation_checksum(start, &payload, Family::V6, addrs, &[Vec::new()]).unwrap();
+    }
+
     /// Asserts that the error carries the values the input bytes hold.
     fn assert_error(buf: &[u8], error: ParseError) {
         match error {
@@ -936,19 +990,7 @@ mod tests {
             addrs in any::<([u8; 16], [u8; 16])>(),
             mutations in tcp_mutations(),
         ) {
-            let start = Fields { checksum: 0, ..start };
-            let mut buf = start.to_bytes(&payload);
-            let sum = family.l4_checksum(addrs.0, addrs.1, IPPROTO_TCP, &buf);
-            buf[16..18].copy_from_slice(&sum.to_be_bytes());
-            let mut addrs = addrs;
-            for ops in &mutations {
-                let header = TcpPacketMut::parse(&mut buf).unwrap().header;
-                let mutation = ops
-                    .iter()
-                    .fold(header.mutate(), |mutation, op| apply(mutation, family, op, &mut addrs));
-                prop_assert_ne!(0, mutation.finish().checksum());
-            }
-            prop_assert!(family.l4_is_valid(addrs.0, addrs.1, IPPROTO_TCP, &buf));
+            check_mutation_checksum(start, &payload, family, addrs, &mutations)?;
         }
 
         /// verifies that unadjusted writes preserve the original checksum,
