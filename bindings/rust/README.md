@@ -220,7 +220,7 @@ The native Go control plane reads a configuration through Go views generated
 from the layout description of its `ShmLayout` types: the derive gives rustc's
 own offsets of every field, private ones included, and each SDK field type its
 members over placeholder type arguments. `Mutex`, `HashIndex`, `Device`,
-`TaggedCounter`, `TaggedCounters` and `Lpm` describe nothing, and a root that
+`TaggedCounter` and `TaggedCounters` describe nothing, and a root that
 reaches one fails generation. `yanet-layout` lists the fixture modules' roots;
 `make native-layout` runs it, with the plugins' profile and target, when the
 fixtures are on (see the `sdkfixture` package for what it writes). Views for
