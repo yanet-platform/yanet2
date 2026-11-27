@@ -174,11 +174,20 @@ nat64s_module_config_update(
 		config->pool.count = update->pool_count;
 	}
 
+	// The bounds are held to what a 16-bit port field carries, the upper
+	// bound excluded.
+	uint32_t port_lo = update->port_lo;
+	uint32_t port_hi = update->port_hi;
+	if (port_lo >= NAT64S_PORT_HI_MAX) {
+		port_lo = 1024;
+	}
+	if (port_hi > NAT64S_PORT_HI_MAX) {
+		port_hi = NAT64S_PORT_HI_MAX;
+	}
+
 	// A window with hi <= lo or the zeroes selects the default range.
-	config->port_lo =
-		(update->port_hi > update->port_lo) ? update->port_lo : 1024;
-	config->port_hi =
-		(update->port_hi > update->port_lo) ? update->port_hi : 65535;
+	config->port_lo = (port_hi > port_lo) ? port_lo : 1024;
+	config->port_hi = (port_hi > port_lo) ? port_hi : NAT64S_PORT_HI_MAX;
 
 	// The timeouts arrive narrowed to their knob already, the largest
 	// value it represents included. Zero stays zero: the dataplane

@@ -38,7 +38,9 @@ message MTUConfig {
 }
 
 // PortRange is the translated source-port window, inclusive lower bound,
-// exclusive upper one; an empty range selects the default of 1024..65535.
+// exclusive upper one; the upper bound reaches 65536, so that the window
+// may end with port 65535. An absent or all-zero range selects the
+// default window [1024, 65536).
 message PortRange {
   uint32 lo = 1;
   uint32 hi = 2;

@@ -76,8 +76,8 @@ type MTUConfig struct {
 
 // PortRange bounds the translated source-port window [Lo, Hi).
 type PortRange struct {
-	Lo uint16
-	Hi uint16
+	Lo uint32
+	Hi uint32
 }
 
 const nat64sPrefixBits = 96
@@ -212,13 +212,14 @@ func decodeConfig(wire *nat64spb.Config) (*NAT64sConfig, error) {
 	}
 
 	if wireRange := wire.GetPortRange(); !isDefaultPortRange(wireRange) {
-		if wireRange.GetLo() > math.MaxUint16 || wireRange.GetHi() > math.MaxUint16 {
+		if wireRange.GetLo() >= nat64spb.PortRangeHiMax ||
+			wireRange.GetHi() > nat64spb.PortRangeHiMax {
 			return nil, fmt.Errorf(
-				"port range bounds must fit 16 bits, got [%d, %d)",
-				wireRange.GetLo(), wireRange.GetHi(),
+				"port range must lie within [0, %d), got [%d, %d)",
+				nat64spb.PortRangeHiMax, wireRange.GetLo(), wireRange.GetHi(),
 			)
 		}
-		lo, hi := uint16(wireRange.GetLo()), uint16(wireRange.GetHi())
+		lo, hi := wireRange.GetLo(), wireRange.GetHi()
 		if hi <= lo {
 			return nil, fmt.Errorf(
 				"port range must be non-empty, got [%d, %d)", lo, hi,
@@ -246,8 +247,11 @@ func encodeConfig(config *NAT64sConfig) *nat64spb.Config {
 			Ipv4Mtu: config.MTU.IPv4MTU,
 			Ipv6Mtu: config.MTU.IPv6MTU,
 		},
-		PortRange: &nat64spb.PortRange{Lo: uint32(config.PortRange.Lo), Hi: uint32(config.PortRange.Hi)},
-		Map:       config.MapName,
+		PortRange: &nat64spb.PortRange{
+			Lo: config.PortRange.Lo,
+			Hi: config.PortRange.Hi,
+		},
+		Map: config.MapName,
 	}
 
 	for _, prefix := range config.Prefixes {

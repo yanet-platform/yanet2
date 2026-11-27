@@ -149,6 +149,26 @@ func Test_NAT64sService_UpdateConfig_KeepsLargestTimeoutsWhole(t *testing.T) {
 	require.Equal(t, uint16(nat64spb.MaxTimeout), backend.Configs[0].Timeout.TCPEstablished)
 }
 
+// Test_NAT64sService_UpdateConfig_KeepsWindowEndingWithLastPort verifies
+// that a translated-port window ending with port 65535, whose exclusive
+// upper bound is one past a 16-bit port, is stored and shown as it was
+// sent.
+func Test_NAT64sService_UpdateConfig_KeepsWindowEndingWithLastPort(t *testing.T) {
+	backend := &mockBackend{}
+	service := nat64s.NewNAT64sService(backend)
+
+	request := validUpdate("t0")
+	request.Config.PortRange = &nat64spb.PortRange{Lo: 1024, Hi: 65536}
+
+	require.NoError(t, updateConfig(t, service, request))
+	require.Len(t, backend.Configs, 1)
+	require.Equal(t, nat64s.PortRange{Lo: 1024, Hi: 65536}, backend.Configs[0].PortRange)
+
+	shown, err := service.ShowConfig(t.Context(), &nat64spb.ShowConfigRequest{Name: "t0"})
+	require.NoError(t, err)
+	require.Equal(t, uint32(65536), shown.GetConfig().GetPortRange().GetHi())
+}
+
 // Test_NAT64sService_UpdateConfig_StoresPoolInNetworkOrder verifies that a
 // pool address reaches the dataplane as its own network-order bytes, the
 // form packets are compared against, and reads back as the address sent.
@@ -250,6 +270,20 @@ func Test_NAT64sService_UpdateConfig_RejectsBadConfigs(t *testing.T) {
 				r.Config.PortRange = &nat64spb.PortRange{Lo: 4096, Hi: 1024}
 			},
 			message: "port range must be non-empty",
+		},
+		{
+			name: "port range upper bound past the last port",
+			mutate: func(r *nat64spb.UpdateConfigRequest) {
+				r.Config.PortRange = &nat64spb.PortRange{Lo: 1024, Hi: 65537}
+			},
+			message: "port range must lie within [0, 65536)",
+		},
+		{
+			name: "port range lower bound past the last port",
+			mutate: func(r *nat64spb.UpdateConfigRequest) {
+				r.Config.PortRange = &nat64spb.PortRange{Lo: 65536, Hi: 65536}
+			},
+			message: "port range must lie within [0, 65536)",
 		},
 		{
 			name:    "no session map",

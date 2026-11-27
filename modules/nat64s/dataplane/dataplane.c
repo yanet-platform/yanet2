@@ -522,8 +522,8 @@ nat64s_is_icmp(uint16_t proto) {
 //
 // Any other informational message — neighbour discovery, multicast
 // listener discovery, router renumbering — is dropped before it reaches
-// the tables, since the translation would drop it with its session
-// recorded already.
+// the tables and counted on its own: the translation refuses it as well,
+// without counting it.
 static inline bool
 nat64s_is_icmp_echo(struct packet *packet) {
 	if (!nat64s_transport_fits(packet, sizeof(struct rte_icmp_hdr))) {
@@ -919,8 +919,13 @@ nat64s_probe_wan_port(
 		if (taken < 0 || own) {
 			return true;
 		}
-		if (++*port >= config->port_hi) {
+		// The port is 16 bits wide while the window may end one past
+		// the last port: past the top the step starts over at the first
+		// port, instead of counting past what a port can hold.
+		if ((uint32_t)*port + 1 >= config->port_hi) {
 			*port = config->port_lo;
+		} else {
+			++*port;
 		}
 		wan_key->hdr.src_port = *port;
 		// An echo's remote port is the same identifier as its local
@@ -1211,8 +1216,13 @@ nat64s_handle_v6(
 	//
 	// A flow that finds every probed port taken gives up: a shared tuple
 	// would hand its return traffic to another client.
+
+	// The client's address is kept apart from the packet: the
+	// translation rewrites the network header it was read from.
+	uint8_t src6[16];
+	memcpy(src6, ipv6->src_addr, sizeof(src6));
 	struct nat64s_session_identity identity = {
-		.src6 = ipv6->src_addr,
+		.src6 = src6,
 		.prefix = prefix,
 		.cli_port = sport,
 	};
@@ -1229,7 +1239,24 @@ nat64s_handle_v6(
 	wan_value.tcp_established = established;
 	memcpy(wan_value.prefix, prefix, NAT64S_PREFIX_LEN);
 	wan_value.cli_port = sport;
-	memcpy(wan_value.src6, ipv6->src_addr, 16);
+	memcpy(wan_value.src6, src6, sizeof(src6));
+
+	// The packet translates before anything is recorded, under the port
+	// the session is to store.
+	//
+	// The translation refuses some packets itself — a routing header of
+	// the deprecated type 0, a header chain it rejects — and such a
+	// packet must not take session slots: a slot spent on a packet that
+	// never leaves stays spent for as long as the layer lives.
+	if (value.port != sport &&
+	    nat64s_patch_source_port(packet, value.port)) {
+		nat64s_stats_bump(stats, NAT64S_MALFORMED);
+		return -1;
+	}
+	struct nat64_ctx ctx = nat64s_ctx(config);
+	if (nat64_translate_v6_to_v4(&ctx, packet, value.ip4) != 0) {
+		return -1;
+	}
 
 	// The entry is read back from the layer it lands in; a layer
 	// prepended meanwhile answers with another entry, so the insert is
@@ -1298,18 +1325,9 @@ nat64s_handle_v6(
 		return -1;
 	}
 
-	if (value.port != sport &&
-	    nat64s_patch_source_port(packet, value.port)) {
-		nat64s_stats_bump(stats, NAT64S_MALFORMED);
-		return -1;
-	}
-
-	struct nat64_ctx ctx = nat64s_ctx(config);
-	int rc = nat64_translate_v6_to_v4(&ctx, packet, value.ip4);
-	if (rc == 0) {
-		nat64s_stats_bump(stats, NAT64S_TRANSLATED_V6_TO_V4);
-	}
-	return rc;
+	// Both entries stand behind the packet already translated.
+	nat64s_stats_bump(stats, NAT64S_TRANSLATED_V6_TO_V4);
+	return 0;
 }
 
 // The wan side: return traffic finds its client through the wan table,

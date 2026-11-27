@@ -9,6 +9,10 @@ struct agent;
 struct cp_module;
 struct yanet_shm;
 
+/* The largest exclusive upper bound of the translated source-port
+ * window: one past the last port a 16-bit field carries. */
+#define NAT64S_PORT_HI_MAX 65536
+
 /* The whole replaceable state of one nat64s module config. An update
  * applies to a freshly created config; the map names link the session
  * tables (NULL or empty links none). */
@@ -21,10 +25,12 @@ struct nat64s_module_update {
 	const uint32_t *pool;
 	uint64_t pool_count;
 	struct nat64state_timeouts timeouts;
-	/* Translated source-port window [port_lo, port_hi); 0/0 selects
-	 * 1024..65535 */
-	uint16_t port_lo;
-	uint16_t port_hi;
+	/* Translated source-port window [port_lo, port_hi). The upper bound
+	 * reaches NAT64S_PORT_HI_MAX, so that the window may end with port
+	 * 65535. An absent or all-zero window selects the default
+	 * [1024, NAT64S_PORT_HI_MAX). */
+	uint32_t port_lo;
+	uint32_t port_hi;
 	uint16_t mtu_ipv4;
 	uint16_t mtu_ipv6;
 	/* Name of the linked nat64state_map object */

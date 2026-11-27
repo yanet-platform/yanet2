@@ -44,6 +44,12 @@ func Test_TimeoutMax_MatchesTheRequestBound(t *testing.T) {
 	require.Equal(t, uint32(nat64spb.MaxTimeout), uint32(cnat64s.TimeoutMax))
 }
 
+// Test_PortHiMax_MatchesTheRequestBound verifies that the request boundary
+// refuses exactly the port windows the dataplane cannot hold.
+func Test_PortHiMax_MatchesTheRequestBound(t *testing.T) {
+	require.Equal(t, uint32(nat64spb.PortRangeHiMax), uint32(cnat64s.PortHiMax))
+}
+
 // Test_MapObjectConfig_CreateMap_ReportsTheCauseOfARefusal verifies that
 // a refused creation says why.
 //

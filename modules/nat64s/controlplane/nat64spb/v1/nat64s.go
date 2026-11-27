@@ -21,6 +21,10 @@ const (
 // knob is 16 bits wide.
 const MaxTimeout = math.MaxUint16
 
+// PortRangeHiMax is the largest exclusive upper bound of the translated
+// source-port window: one past the last port a 16-bit field carries.
+const PortRangeHiMax = 65536
+
 // Validate checks that a show request names a configuration.
 func (m *ShowConfigRequest) Validate() error {
 	return commonpb.ValidateModuleName("name", m.GetName())

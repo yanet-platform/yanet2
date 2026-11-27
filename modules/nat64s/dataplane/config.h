@@ -79,11 +79,12 @@ struct nat64s_module_config {
 		uint64_t count;
 	} pool;
 
-	/* Translated source-port window [port_lo, port_hi), host order. A
-	 * flow whose source port already lies inside keeps it; the others
-	 * are translated to a hash-derived port of the window. */
-	uint16_t port_lo;
-	uint16_t port_hi;
+	/* Translated source-port window [port_lo, port_hi), host order, the
+	 * upper bound up to 65536 so that the window may end with port
+	 * 65535. A flow whose source port already lies inside keeps it; the
+	 * others are translated to a hash-derived port of the window. */
+	uint32_t port_lo;
+	uint32_t port_hi;
 
 	struct nat64state_timeouts timeouts;
 

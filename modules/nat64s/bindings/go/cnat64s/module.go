@@ -41,9 +41,10 @@ type ModuleUpdate struct {
 	MTUv4   uint16
 	MTUv6   uint16
 	// PortLo and PortHi bound the translated source-port window
-	// [PortLo, PortHi); an empty window selects the default.
-	PortLo uint16
-	PortHi uint16
+	// [PortLo, PortHi); the upper bound reaches 65536, so that the
+	// window may end with port 65535. Both zero select the default.
+	PortLo uint32
+	PortHi uint32
 	// MapName names the linked nat64state_map object; empty links none.
 	MapName string
 }
@@ -59,6 +60,10 @@ type SessionTimeout struct {
 // TimeoutMax is the largest session timeout in seconds the session state
 // holds, the bound of its 16-bit knobs.
 const TimeoutMax = C.NAT64STATE_TIMEOUT_MAX
+
+// PortHiMax is the largest exclusive upper bound of the translated port
+// window, one past the last port a 16-bit field carries.
+const PortHiMax = C.NAT64S_PORT_HI_MAX
 
 // NewModuleConfig allocates a new, empty nat64s module configuration.
 //
@@ -125,8 +130,8 @@ func (m *ModuleConfig) Update(update ModuleUpdate) error {
 		},
 		mtu_ipv4: C.uint16_t(update.MTUv4),
 		mtu_ipv6: C.uint16_t(update.MTUv6),
-		port_lo:  C.uint16_t(update.PortLo),
-		port_hi:  C.uint16_t(update.PortHi),
+		port_lo:  C.uint32_t(update.PortLo),
+		port_hi:  C.uint32_t(update.PortHi),
 	}
 	if len(update.Prefixes) != 0 {
 		// One packed [N][12] buffer the C side reads as a list.
