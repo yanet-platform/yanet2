@@ -24,7 +24,7 @@ import (
 // refused before the header is touched. No generation references the
 // object until an update publishes it.
 func InitObject(object *layout.CpObject, owner *agent.Agent, objectType, name string) error {
-	if err := checkObjectNames(objectType, name); err != nil {
+	if err := CheckObjectNames(objectType, name); err != nil {
 		return err
 	}
 	*object = layout.CpObject{}
@@ -55,9 +55,12 @@ func FiniObject(object *layout.CpObject) {
 	shmalloc.ContextFini(&object.Entity.MemoryContext)
 }
 
-// checkObjectNames refuses an object type or name its field cannot hold
+// CheckObjectNames refuses an object type or name its field cannot hold
 // whole.
-func checkObjectNames(objectType, name string) error {
+//
+// A typed build checks them before it allocates its object, so a refused
+// name leaves the agent untouched.
+func CheckObjectNames(objectType, name string) error {
 	return checkNames(
 		"object",
 		nameField{"type", objectType, len(layout.CpObject{}.Type)},
@@ -208,7 +211,7 @@ func (m *build) upsertObject(object *layout.CpObject) error {
 // object the published generation does not hold is refused as not found,
 // and one a published module links as linked, before anything is built.
 func DeleteObject(instance *zone.Instance, objectType, name string, options ...UpdateOption) error {
-	if err := checkObjectNames(objectType, name); err != nil {
+	if err := CheckObjectNames(objectType, name); err != nil {
 		return err
 	}
 	return publish(instance, options, change{
