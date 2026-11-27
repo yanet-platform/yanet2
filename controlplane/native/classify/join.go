@@ -349,27 +349,30 @@ func (m *Stage) newJoiner(right *Stage, pairs []groupPair) *joiner {
 // true ones being at most the pair count.
 func (m *joiner) PrepareRow(row uint32) {
 	painted := m.Painted.Get(row)
-	copy(m.Left, m.LeftBase)
-	clear(m.Heads)
-	m.Nodes = m.Nodes[:0]
-	m.RowTerms = m.RowTerms[:0]
+	// The row works on local slices, stored back once: storing a slice
+	// into the joiner per item costs a write barrier check.
+	left, heads, up := m.Left, m.Heads, m.Up
+	nodes, rowTerms := m.Nodes[:0], m.RowTerms[:0]
+	copy(left, m.LeftBase)
+	clear(heads)
 	for _, pair := range painted {
 		columns := m.Columns[pair]
 		if columns.Flipped {
-			m.RowTerms = append(m.RowTerms, pair)
+			rowTerms = append(rowTerms, pair)
 		}
 		sign := uint32(1)
 		if m.Rows[pair].Flipped {
 			sign = ^uint32(0)
 		}
 		for _, column := range columns.Edges {
-			m.Left[column] += sign
+			left[column] += sign
 		}
 		for _, column := range columns.Small {
-			m.Nodes = append(m.Nodes, paintNode{Pair: pair, Next: m.Heads[column]})
-			m.Heads[column] = uint32(len(m.Nodes))
+			nodes = append(nodes, paintNode{Pair: pair, Next: heads[column]})
+			heads[column] = uint32(len(nodes))
 		}
 	}
+	m.Nodes, m.RowTerms = nodes, rowTerms
 	if row == 0 {
 		return
 	}
@@ -381,8 +384,8 @@ func (m *joiner) PrepareRow(row uint32) {
 			base++
 		}
 	}
-	for column := range m.Up {
-		m.Up[column] = base
+	for column := range up {
+		up[column] = base
 	}
 	for _, pair := range changed {
 		columns := m.Columns[pair]
@@ -391,7 +394,7 @@ func (m *joiner) PrepareRow(row uint32) {
 			sign = ^uint32(0)
 		}
 		for _, column := range columns.Small {
-			m.Up[column] += sign
+			up[column] += sign
 		}
 	}
 }
@@ -436,11 +439,16 @@ func (m *joiner) CellClass(row, column uint32) (uint32, error) {
 func (m *joiner) Paint(rows [][]uint32) error {
 	for row, cells := range rows {
 		m.PrepareRow(uint32(row))
+		left, up := m.Left[:len(cells)], m.Up[:len(cells)]
+		var above []uint32
+		if row > 0 {
+			above = rows[row-1][:len(cells)]
+		}
 		class := uint32(0)
 		for column := range cells {
-			if column == 0 || m.Left[column] != 0 {
-				if row > 0 && m.Up[column] == 0 {
-					class = rows[row-1][column]
+			if column == 0 || left[column] != 0 {
+				if row > 0 && up[column] == 0 {
+					class = above[column]
 				} else {
 					var err error
 					if class, err = m.CellClass(uint32(row), uint32(column)); err != nil {

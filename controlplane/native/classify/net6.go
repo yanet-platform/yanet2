@@ -203,7 +203,13 @@ func CompileNet6(rules []Net6Rule) (*Net6, error) {
 // rule after rule, none for an absent one, and where every rule's
 // networks begin, one more entry where the last rule's end.
 func normalizeNet6Rules(rules []Net6Rule) ([]network6, []int, error) {
-	var nets []network6
+	total := 0
+	for _, rule := range rules {
+		if !rule.Absent {
+			total += len(rule.Networks)
+		}
+	}
+	nets := make([]network6, 0, total)
 	starts := make([]int, 0, len(rules)+1)
 	for idx, rule := range rules {
 		starts = append(starts, len(nets))

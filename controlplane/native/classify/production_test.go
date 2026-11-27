@@ -163,7 +163,7 @@ func ipv6Networks(addresses []string) []classify.Net6Network {
 func Test_ProductionShaped_ResolvesFirstMatch(t *testing.T) {
 	for idx, ruleset := range loadProductionRulesets(t) {
 		t.Run(fmt.Sprintf("ruleset %d", idx), func(t *testing.T) {
-			memory := classifytest.LayOut(make([]byte, productionMemorySize))
+			memory := classifytest.Map(t, productionMemorySize)
 			free := shmalloc.FreeSize(&memory.Allocator)
 			holder := commitRatelimitShaped(t, memory, ruleset)
 
@@ -187,7 +187,7 @@ func Test_ProductionShaped_ResolvesFirstMatch(t *testing.T) {
 func Benchmark_ProductionShaped(b *testing.B) {
 	for idx, ruleset := range loadProductionRulesets(b) {
 		b.Run(fmt.Sprintf("ruleset %d", idx), func(b *testing.B) {
-			memory := classifytest.LayOut(make([]byte, productionMemorySize))
+			memory := classifytest.Map(b, productionMemorySize)
 			for b.Loop() {
 				freeRatelimitShaped(memory, commitRatelimitShaped(b, memory, ruleset))
 			}
