@@ -13,7 +13,7 @@ use std::{env::consts::ARCH, fs, path::Path};
 
 use yanet_sdk::layout::{Field, Kind, Node};
 
-/// Writes the Go views of the roots and the string constants, and their test,
+/// Writes the Go views of the roots and the typed constants, and their test,
 /// as `zz_layout_<arch>.go` and `zz_layout_<arch>_test.go` into the directory
 /// of the Go package of the given import path.
 ///
@@ -21,7 +21,12 @@ use yanet_sdk::layout::{Field, Kind, Node};
 /// description that holds bytes, on an atomic narrower than Go's, and on two
 /// types under one Go name; a file that already holds its output is left
 /// alone.
-pub fn generate(dir: &Path, import: &str, roots: &[&'static Node], constants: &[(&str, &str)]) -> Result<(), String> {
+pub fn generate(
+    dir: &Path,
+    import: &str,
+    roots: &[&'static Node],
+    constants: &[(&str, Constant)],
+) -> Result<(), String> {
     let goarch = match ARCH {
         "x86_64" => "amd64",
         "aarch64" => "arm64",
@@ -42,6 +47,16 @@ pub fn generate(dir: &Path, import: &str, roots: &[&'static Node], constants: &[
         }
     }
     Ok(())
+}
+
+/// A constant of the Go views, of the Go type its variant names.
+pub enum Constant {
+    /// A Go `uint32`.
+    U32(u32),
+    /// A Go `uint64`.
+    U64(u64),
+    /// A Go `string`.
+    Str(&'static str),
 }
 
 /// The structs and the field types the roots reach, each declared once, in
@@ -98,18 +113,18 @@ impl Views {
 
     /// The views: the constants, then the shape of each field type and each
     /// struct with its alignment.
-    fn render(&self, header: &str, package: &str, constants: &[(&str, &str)]) -> String {
+    fn render(&self, header: &str, package: &str, constants: &[(&str, Constant)]) -> String {
         let mut body = String::new();
         if !constants.is_empty() {
             body.push_str("\n// Values the crates name, from the build of the views.\n");
         }
         for (name, value) in constants {
-            let _ = writeln!(
-                body,
-                "const {} string = {}",
-                camel(&name.to_lowercase()),
-                go_string(value)
-            );
+            let (ty, value) = match value {
+                Constant::U32(value) => ("uint32", value.to_string()),
+                Constant::U64(value) => ("uint64", value.to_string()),
+                Constant::Str(value) => ("string", go_string(value)),
+            };
+            let _ = writeln!(body, "const {} {ty} = {value}", camel(&name.to_lowercase()));
         }
         for node in &self.declared {
             let name = declaration(node).0;
@@ -348,7 +363,7 @@ mod tests {
         layout::{Field, Kind, Node},
     };
 
-    use super::generate;
+    use super::{Constant, generate};
 
     /// A field type that reuses the kind of the SDK's box with other members.
     static OTHER_BOX: Node = Node {
@@ -419,6 +434,23 @@ mod tests {
         let view = fs::read_to_string(view).unwrap();
         assert!(view.contains("Number uint32"), "{view}");
         assert!(!view.contains("Empty"), "{view}");
+    }
+
+    /// Verifies that integer constants render as Go constants of their type.
+    #[test]
+    fn test_generate_renders_typed_integer_constants() {
+        let dir = env::temp_dir().join("yanet-layout-test-constants");
+        fs::create_dir_all(&dir).unwrap();
+        let constants = [("FLAGS", Constant::U32(16)), ("LIMIT", Constant::U64(u64::MAX))];
+        generate(&dir, "example.com/views", &[], &constants).unwrap();
+        let view = fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| !path.to_string_lossy().ends_with("_test.go"))
+            .unwrap();
+        let view = fs::read_to_string(view).unwrap();
+        assert!(view.contains("const Flags uint32 = 16\n"), "{view}");
+        assert!(view.contains("const Limit uint64 = 18446744073709551615\n"), "{view}");
     }
 
     /// Verifies that a field type reusing the kind of another with other

@@ -3,6 +3,7 @@
 
 use std::process::ExitCode;
 
+use yanet_layout::Constant;
 use yanet_sdk::{Object, ShmLayout};
 use yanet_sdk_fixture::{StashConfig, State, StateConfig, assign::AssignConfig};
 
@@ -15,7 +16,7 @@ fn main() -> ExitCode {
         .as_ref(),
         "github.com/yanet-platform/yanet2/controlplane/native/sdk/sdkfixture",
         &[AssignConfig::LAYOUT, StashConfig::LAYOUT, StateConfig::LAYOUT],
-        &[("STATE_TYPE", State::TYPE)],
+        &[("STATE_TYPE", Constant::Str(State::TYPE))],
     );
     match generated {
         Ok(()) => ExitCode::SUCCESS,
