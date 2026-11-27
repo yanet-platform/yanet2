@@ -10,13 +10,14 @@
 //! in debug builds.
 
 use core::{
+    array,
     convert::Infallible,
     mem::{offset_of, size_of},
 };
 
 use yanet_shm::{layout::Param, rel::ShmBox, resolve::Resolve, shm::ShmLayout};
 
-use super::{Addr4, Joint, LineAttr, Net4Attr, Net6Attr, PortAttr, Rule, RuleMap, RuleTable, lpm_value};
+use super::{Joint, LineAttr, Net4Attr, Net6Attr, PortAttr, Rule, RuleMap, RuleTable, lpm_value};
 use crate::{
     bindings,
     cp::{Build, Init, MemoryContext, Owned, Owner, Place, Refusal},
@@ -81,11 +82,11 @@ pub trait Node: Build + sealed::Sealed {
 pub const BURST: usize = 32;
 
 impl Node for Net4Attr {
-    type Key = Addr4;
+    type Key = [u8; 4];
 
     #[inline(always)]
-    fn class<'g>(&'g self, cx: &impl Resolve<'g>, Addr4(addr): Addr4) -> u32 {
-        lpm_value(&self.lpm, cx, &addr.to_ne_bytes())
+    fn class<'g>(&'g self, cx: &impl Resolve<'g>, addr: [u8; 4]) -> u32 {
+        lpm_value(&self.lpm, cx, &addr)
     }
 }
 
@@ -297,13 +298,12 @@ impl<N: Node> Decode<N> {
 
 /// The key of each item of a burst of at most [`BURST`], each taken once,
 /// and the default key past them.
+///
+/// Each slot is written once: a slot past the items gets the default key, a
+/// slot of an item only its key.
 #[inline(always)]
 fn burst_keys<T, K: Copy + Default>(items: &[T], key: impl Fn(&T) -> K) -> [K; BURST] {
-    let mut keys = [K::default(); BURST];
-    for (slot, item) in keys.iter_mut().zip(items) {
-        *slot = key(item);
-    }
-    keys
+    array::from_fn(|index| items.get(index).map_or_else(K::default, &key))
 }
 
 /// The classes of both inputs of a node over a burst of items: the whole

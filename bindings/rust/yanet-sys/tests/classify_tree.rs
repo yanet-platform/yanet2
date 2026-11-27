@@ -19,7 +19,7 @@ use classify::{
     Error, TestRule, Tree, Tree4, TreeAny, any_or, build_any, build4, build6, edges, first, in4, in6, net4, net6,
 };
 use yanet_sys::{
-    classify::{Addr4, BURST, LineRange, Lines, Net4, Net6, Nets4, PortRange, Ports, Rule},
+    classify::{BURST, LineRange, Lines, Net4, Net6, Nets4, PortRange, Ports, Rule},
     cp::{BuildError, Builder, Built, Refusal},
 };
 
@@ -148,10 +148,7 @@ fn test_rules_tree4_lookup_is_the_first_matching_rule() {
                         proto,
                         port,
                     );
-                    let key = (
-                        (Addr4::from(src.to_be_bytes()), Addr4::from(dst.to_be_bytes())),
-                        (proto, port),
-                    );
+                    let key = ((src.to_be_bytes(), dst.to_be_bytes()), (proto, port));
                     assert_eq!(
                         expected,
                         tree.lookup(&owner, key).index(),
@@ -252,10 +249,7 @@ fn test_rules_tree_of_an_empty_projection_is_no_rule() {
     .unwrap();
     let tree = owner.body(&built).get(&owner);
     for addr in edges4(&rules) {
-        let key = (
-            (Addr4::from(addr.to_be_bytes()), Addr4::from(addr.to_be_bytes())),
-            (6, 80),
-        );
+        let key = ((addr.to_be_bytes(), addr.to_be_bytes()), (6, 80));
         assert_eq!(Rule::NONE, tree.lookup(&owner, key));
     }
 }
@@ -303,10 +297,7 @@ fn test_rules_tree4_lookup_is_the_first_matching_rule_over_whole_domains() {
                 proto,
                 port,
             );
-            let key = (
-                (Addr4::from(src.to_be_bytes()), Addr4::from(dst.to_be_bytes())),
-                (proto, port),
-            );
+            let key = ((src.to_be_bytes(), dst.to_be_bytes()), (proto, port));
             assert_eq!(expected, tree.lookup(&owner, key).index(), "{proto} {port}");
         }
     }
@@ -347,10 +338,7 @@ fn test_rules_tree4_lookup_burst_is_the_lookup_of_each_key() {
     for (idx, &src) in addrs.iter().enumerate() {
         for &dst in &addrs {
             let (proto, port) = (protos[idx % protos.len()], ports[(idx * 7) % ports.len()]);
-            keys.push((
-                (Addr4::from(src.to_be_bytes()), Addr4::from(dst.to_be_bytes())),
-                (proto, port),
-            ));
+            keys.push(((src.to_be_bytes(), dst.to_be_bytes()), (proto, port)));
         }
     }
     // Not a whole number of bursts.
