@@ -25,12 +25,14 @@ const (
 )
 
 // bed is a harness with the fixture plugins loaded and one agent attached,
-// and the free size of that agent before it built anything.
+// the free size of that agent before it built anything, and the builder of
+// its state objects.
 type bed struct {
 	t        *testing.T
 	harness  *dataplaneut.Harness
 	agent    *ffi.Agent
 	baseline uint64
+	builder  stateBuilder
 }
 
 // newBed starts a harness of four workers and the device port0, which knows
@@ -62,7 +64,8 @@ func newBed(t *testing.T, adjust ...func(*dataplaneut.Config)) *bed {
 	t.Cleanup(harness.Free)
 
 	agent := attach(t, harness, "fixture", agentMemory)
-	return &bed{t: t, harness: harness, agent: agent, baseline: agent.BlockAllocatorFreeSize()}
+	baseline := agent.BlockAllocatorFreeSize()
+	return &bed{t: t, harness: harness, agent: agent, baseline: baseline, builder: rustStateBuilder}
 }
 
 // attach attaches an agent of that name and memory to the harness and destroys

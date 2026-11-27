@@ -660,11 +660,13 @@ func PublishedLinks(agent *ffi.Agent, name string) ([]LinkedObject, error) {
 // with the dataplane.
 const StateType = "fixture_state"
 
-// StateObject is a state object built by the api in the memory of an agent:
-// atomic slots that outlive the module configurations.
+// StateObject is a state object in the memory of an agent, built by the api
+// or by another builder, whose queries read it through the api: atomic slots
+// that outlive the module configurations.
 type StateObject struct {
 	ptr   ffi.ObjectConfig
 	agent *ffi.Agent
+	free  func(ptr unsafe.Pointer) (int, unsafe.Pointer, error)
 }
 
 // NewStateObject builds a state object named name of count slots, slot n
@@ -690,7 +692,18 @@ func NewStateObject(agent *ffi.Agent, name string, seed, count uint64, fault Fau
 		return nil, fmt.Errorf("failed to build state object: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 
-	return &StateObject{ptr: ffi.NewObjectConfig(unsafe.Pointer(ptr)), agent: agent}, nil
+	return &StateObject{ptr: ffi.NewObjectConfig(unsafe.Pointer(ptr)), agent: agent, free: freeState}, nil
+}
+
+// StateObjectOf returns the handle of a state object another builder made
+// in the memory of the agent, which free frees as an object handle's typed
+// free does; the queries read the object through the api.
+func StateObjectOf(
+	agent *ffi.Agent,
+	object unsafe.Pointer,
+	free func(ptr unsafe.Pointer) (int, unsafe.Pointer, error),
+) *StateObject {
+	return &StateObject{ptr: ffi.NewObjectConfig(object), agent: agent, free: free}
 }
 
 // AsFFIObject returns the handle to publish the object with.
@@ -824,7 +837,7 @@ func (m *StateObject) Shape(out *StateShape) (uint64, error) {
 // A refused free keeps the handle, so that it can be retried once no
 // generation holds the object. Safe to call multiple times.
 func (m *StateObject) Free() error {
-	return m.ptr.Free(freeState)
+	return m.ptr.Free(m.free)
 }
 
 func freeState(ptr unsafe.Pointer) (int, unsafe.Pointer, error) {

@@ -3,15 +3,22 @@
 package cfixture_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+	"unsafe"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/bindings/rust/yanet-sdk-fixture-api/bindings/go/cfixture"
+	"github.com/yanet-platform/yanet2/controlplane/crud"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/native/layout"
+	"github.com/yanet-platform/yanet2/controlplane/native/sdk/sdkfixture"
+	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
 )
 
 // stateSlots is the number of slots of a state object of the tests.
@@ -22,18 +29,70 @@ func withoutObjects(config *dataplaneut.Config) {
 	config.ObjectsToLoad = nil
 }
 
+// stateBuilder builds a state object named name of count slots from seed over
+// the bed's agent.
+type stateBuilder func(bed *bed, name string, seed, count uint64) (*cfixture.StateObject, error)
+
+// rustStateBuilder builds through the SDK's Rust builder of the fixture api.
+func rustStateBuilder(bed *bed, name string, seed, count uint64) (*cfixture.StateObject, error) {
+	return cfixture.NewStateObject(bed.agent, name, seed, count, cfixture.FaultNone)
+}
+
+// nativeStateBuilder builds through the native Go builder over the agent's
+// native view; the api's queries read what it built.
+func nativeStateBuilder(bed *bed, name string, seed, count uint64) (*cfixture.StateObject, error) {
+	object, err := sdkfixture.NewStateObject(bed.harness.NativeAgent(bed.t, bed.agent), name, seed, count)
+	if err != nil {
+		return nil, err
+	}
+	return cfixture.StateObjectOf(bed.agent, unsafe.Pointer(object), freeNativeState), nil
+}
+
+// freeNativeState frees a state object the native builder made, its refusal
+// tagged with the kind the cgo api reports.
+func freeNativeState(object unsafe.Pointer) (int, unsafe.Pointer, error) {
+	if err := sdkfixture.FreeStateObject((*layout.CpObject)(object)); err != nil {
+		return -1, nil, crud.NativeError(err)
+	}
+	return 0, nil, nil
+}
+
+// forEachStateBuilder runs a state scenario once over each builder of the
+// state object: the SDK's Rust builder through cgo and the native Go one.
+func forEachStateBuilder(t *testing.T, scenario func(t *testing.T, builder stateBuilder)) {
+	for _, tc := range []struct {
+		name    string
+		builder stateBuilder
+	}{
+		{name: "cgo", builder: rustStateBuilder},
+		{name: "native", builder: nativeStateBuilder},
+	} {
+		t.Run(tc.name, func(t *testing.T) { scenario(t, tc.builder) })
+	}
+}
+
+// newStateBed is newBed whose state objects the builder makes.
+func newStateBed(t *testing.T, builder stateBuilder, adjust ...func(*dataplaneut.Config)) *bed {
+	t.Helper()
+
+	bed := newBed(t, adjust...)
+	bed.builder = builder
+	return bed
+}
+
 // buildState builds a state object named name of stateSlots slots from seed
 // over the bed's agent, without registering it for cleanup.
 func (m *bed) buildState(name string, seed uint64, fault cfixture.Fault) (*cfixture.StateObject, error) {
 	return cfixture.NewStateObject(m.agent, name, seed, stateSlots, fault)
 }
 
-// state builds a state object named name from seed, which must succeed, and
-// frees it when the test ends, before the agent goes.
+// state builds a state object named name from seed through the bed's
+// builder, which must succeed, and frees it when the test ends, before the
+// agent goes.
 func (m *bed) state(name string, seed uint64) *cfixture.StateObject {
 	m.t.Helper()
 
-	object, err := m.buildState(name, seed, cfixture.FaultNone)
+	object, err := m.builder(m, name, seed, stateSlots)
 	require.NoError(m.t, err)
 	m.t.Cleanup(func() { _ = object.Free() })
 	return object
@@ -126,6 +185,36 @@ func Test_StateObject_Build_Failure_ReturnsMemoryToBaseline(t *testing.T) {
 	}
 }
 
+// Test_StateObject_NativeBuild_MemoryRunsOut_ReturnsMemoryToBaseline verifies
+// that a native build whose agent memory runs out refuses as exhausted and
+// gives back all it took, at every limit up to the first that fits.
+//
+// The limits step by less than the slot block of the workers, so the build
+// runs out between its allocations as well as at its first.
+func Test_StateObject_NativeBuild_MemoryRunsOut_ReturnsMemoryToBaseline(t *testing.T) {
+	bed := newBed(t)
+	refused := 0
+	for limit := 64; ; limit += 64 {
+		require.Less(t, limit, 1<<20, "the build fits a limit of a megabyte")
+		agent := attach(t, bed.harness, fmt.Sprintf("sweep-%d", limit), datasize.ByteSize(limit))
+		baseline := agent.BlockAllocatorFreeSize()
+
+		object, err := sdkfixture.NewStateObject(bed.harness.NativeAgent(t, agent), "state", 10, stateSlots)
+		if err == nil {
+			require.NoError(t, sdkfixture.FreeStateObject(object))
+		} else {
+			require.ErrorIs(t, err, shmalloc.ErrNoMemory, "a limit of %d bytes", limit)
+			refused++
+		}
+
+		require.Equal(t, baseline, agent.BlockAllocatorFreeSize(), "a limit of %d bytes", limit)
+		if err == nil {
+			break
+		}
+	}
+	require.NotZero(t, refused, "the sweep refuses a build")
+}
+
 // Test_StateObject_Build_TypeNotLoaded_NamesTheType verifies that C's refusal
 // of an object type the dataplane has not loaded reaches the caller.
 func Test_StateObject_Build_TypeNotLoaded_NamesTheType(t *testing.T) {
@@ -139,7 +228,12 @@ func Test_StateObject_Build_TypeNotLoaded_NamesTheType(t *testing.T) {
 // Test_StateObject_Slot_ReadsTheBuiltValues verifies that the control plane
 // reads a published object's body as its build wrote it.
 func Test_StateObject_Slot_ReadsTheBuiltValues(t *testing.T) {
-	bed := newBed(t)
+	forEachStateBuilder(t, stateObjectSlotReadsTheBuiltValues)
+}
+
+// stateObjectSlotReadsTheBuiltValues runs its test's scenario over a builder.
+func stateObjectSlotReadsTheBuiltValues(t *testing.T, builder stateBuilder) {
+	bed := newStateBed(t, builder)
 	object := bed.state("state", 10)
 	bed.publishObjects(object)
 
@@ -189,7 +283,13 @@ func Test_StateObject_State_OutlivesModuleUpdates(t *testing.T) {
 // Test_StateObject_Free_Unpublished_ReturnsMemoryToBaseline verifies that
 // freeing an object no generation holds gives back all it took.
 func Test_StateObject_Free_Unpublished_ReturnsMemoryToBaseline(t *testing.T) {
-	bed := newBed(t)
+	forEachStateBuilder(t, stateObjectFreeUnpublishedReturnsMemoryToBaseline)
+}
+
+// stateObjectFreeUnpublishedReturnsMemoryToBaseline runs its test's
+// scenario over a builder.
+func stateObjectFreeUnpublishedReturnsMemoryToBaseline(t *testing.T, builder stateBuilder) {
+	bed := newStateBed(t, builder)
 	object := bed.state("state", 10)
 
 	require.NoError(t, object.Free())
@@ -201,9 +301,15 @@ func Test_StateObject_Free_Unpublished_ReturnsMemoryToBaseline(t *testing.T) {
 // worker of an object takes more memory on a dataplane of more workers, and
 // that the published object gives all of it back once deleted and freed.
 func Test_StateObject_PerWorker_SizedByTheWorkers(t *testing.T) {
+	forEachStateBuilder(t, stateObjectPerWorkerSizedByTheWorkers)
+}
+
+// stateObjectPerWorkerSizedByTheWorkers runs its test's scenario over a
+// builder.
+func stateObjectPerWorkerSizedByTheWorkers(t *testing.T, builder stateBuilder) {
 	used := map[uint64]uint64{}
 	for _, workers := range []uint64{1, workerCount} {
-		bed := newBed(t, withWorkers(workers))
+		bed := newStateBed(t, builder, withWorkers(workers))
 		object := bed.state("state", 10)
 		used[workers] = bed.used()
 		bed.publishObjects(object)
@@ -219,7 +325,13 @@ func Test_StateObject_PerWorker_SizedByTheWorkers(t *testing.T) {
 // Test_StateObject_Free_Unpublished_LeavesLoadedCountUnchanged verifies that
 // the free returns the destruction hold it takes.
 func Test_StateObject_Free_Unpublished_LeavesLoadedCountUnchanged(t *testing.T) {
-	bed := newBed(t)
+	forEachStateBuilder(t, stateObjectFreeUnpublishedLeavesLoadedCountUnchanged)
+}
+
+// stateObjectFreeUnpublishedLeavesLoadedCountUnchanged runs its test's
+// scenario over a builder.
+func stateObjectFreeUnpublishedLeavesLoadedCountUnchanged(t *testing.T, builder stateBuilder) {
+	bed := newStateBed(t, builder)
 	before := dataplaneut.LoadedEntityCount(bed.agent)
 	object := bed.state("state", 10)
 
@@ -233,7 +345,14 @@ func Test_StateObject_Free_Unpublished_LeavesLoadedCountUnchanged(t *testing.T) 
 func publishedState(t *testing.T) (*bed, *cfixture.StateObject) {
 	t.Helper()
 
-	bed := newBed(t)
+	return publishedStateBy(t, rustStateBuilder)
+}
+
+// publishedStateBy is publishedState over the builder.
+func publishedStateBy(t *testing.T, builder stateBuilder) (*bed, *cfixture.StateObject) {
+	t.Helper()
+
+	bed := newStateBed(t, builder)
 	object := bed.state("state", 10)
 	bed.publishObjects(object)
 	return bed, object
@@ -242,7 +361,13 @@ func publishedState(t *testing.T) (*bed, *cfixture.StateObject) {
 // Test_StateObject_Free_Published_ReportsStillReferenced verifies that freeing
 // an object a live generation holds is refused as still referenced.
 func Test_StateObject_Free_Published_ReportsStillReferenced(t *testing.T) {
-	_, object := publishedState(t)
+	forEachStateBuilder(t, stateObjectFreePublishedReportsStillReferenced)
+}
+
+// stateObjectFreePublishedReportsStillReferenced runs its test's
+// scenario over a builder.
+func stateObjectFreePublishedReportsStillReferenced(t *testing.T, builder stateBuilder) {
+	_, object := publishedStateBy(t, builder)
 
 	require.ErrorIs(t, object.Free(), ffi.ErrStillReferenced)
 }
@@ -307,7 +432,13 @@ func Test_StateObject_Free_AfterReplace_KeepsTheReplacementPublished(t *testing.
 // object whose free was refused is freed once a delete drops it from the
 // generation, and gives back all it took.
 func Test_StateObject_Free_AfterDelete_ReturnsMemoryToBaseline(t *testing.T) {
-	bed, object := publishedState(t)
+	forEachStateBuilder(t, stateObjectFreeAfterDeleteReturnsMemoryToBaseline)
+}
+
+// stateObjectFreeAfterDeleteReturnsMemoryToBaseline runs its test's
+// scenario over a builder.
+func stateObjectFreeAfterDeleteReturnsMemoryToBaseline(t *testing.T, builder stateBuilder) {
+	bed, object := publishedStateBy(t, builder)
 	require.ErrorIs(t, object.Free(), ffi.ErrStillReferenced)
 	require.NoError(t, bed.agent.DeleteObject(cfixture.StateType, "state"))
 
@@ -454,7 +585,12 @@ func Test_StateObject_Values_NullWithLength_IsInvalidArgument(t *testing.T) {
 // Test_StateObject_Shape_FillsTheRecord verifies that a query fills every
 // field of the caller's record, whatever it held.
 func Test_StateObject_Shape_FillsTheRecord(t *testing.T) {
-	bed := newBed(t)
+	forEachStateBuilder(t, stateObjectShapeFillsTheRecord)
+}
+
+// stateObjectShapeFillsTheRecord runs its test's scenario over a builder.
+func stateObjectShapeFillsTheRecord(t *testing.T, builder stateBuilder) {
+	bed := newStateBed(t, builder)
 	object := bed.state("state", 10)
 	shape := cfixture.StateShape{Seed: 0xdead, Slots: 0xdead, Workers: 0xdead, RegionLen: 0xdead}
 

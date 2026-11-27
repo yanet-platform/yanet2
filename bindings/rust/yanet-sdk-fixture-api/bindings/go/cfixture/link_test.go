@@ -44,7 +44,14 @@ func servedStash(t *testing.T) (*bed, *cfixture.StateObject) {
 func servedStashInstance(t *testing.T) (*bed, *cfixture.StateObject, *instance) {
 	t.Helper()
 
-	bed := newBed(t)
+	return servedStashBy(t, rustStateBuilder)
+}
+
+// servedStashBy is servedStashInstance over the builder.
+func servedStashBy(t *testing.T, builder stateBuilder) (*bed, *cfixture.StateObject, *instance) {
+	t.Helper()
+
+	bed := newStateBed(t, builder)
 	object := bed.state("state", 10)
 	bed.publishObjects(object)
 	stash := bed.stashInstance("stash", "state")
@@ -165,7 +172,12 @@ func Test_Stash_DeleteObject_Unlinked_Succeeds(t *testing.T) {
 // packet, the seed the linked object prepared for the worker to the slot its
 // first byte selects.
 func Test_Stash_Run_WritesTheLinkedSlots(t *testing.T) {
-	bed, object := servedStash(t)
+	forEachStateBuilder(t, stashRunWritesTheLinkedSlots)
+}
+
+// stashRunWritesTheLinkedSlots runs its test's scenario over a builder.
+func stashRunWritesTheLinkedSlots(t *testing.T, builder stateBuilder) {
+	bed, object, _ := servedStashBy(t, builder)
 
 	bed.run(0, arpFrames(6)...)
 
@@ -175,8 +187,14 @@ func Test_Stash_Run_WritesTheLinkedSlots(t *testing.T) {
 // Test_Stash_Run_ObjectWithoutSlots_PassesEveryPacket verifies that the
 // module passes the packets on when the linked object has no slot to write.
 func Test_Stash_Run_ObjectWithoutSlots_PassesEveryPacket(t *testing.T) {
-	bed := newBed(t)
-	object, err := cfixture.NewStateObject(bed.agent, "state", 10, 0, cfixture.FaultNone)
+	forEachStateBuilder(t, stashRunObjectWithoutSlotsPassesEveryPacket)
+}
+
+// stashRunObjectWithoutSlotsPassesEveryPacket runs its test's scenario over a
+// builder.
+func stashRunObjectWithoutSlotsPassesEveryPacket(t *testing.T, builder stateBuilder) {
+	bed := newStateBed(t, builder)
+	object, err := builder(bed, "state", 10, 0)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = object.Free() })
 	bed.publishObjects(object)
@@ -216,7 +234,13 @@ func Test_Stash_Run_AfterObjectReplace_WritesTheNewObject(t *testing.T) {
 // replaced under a configuration linking it is freed, gives back what its
 // build took, and a second free does nothing.
 func Test_Stash_ObjectReplace_ReleasesTheOldObject(t *testing.T) {
-	bed, old := servedStash(t)
+	forEachStateBuilder(t, stashObjectReplaceReleasesTheOldObject)
+}
+
+// stashObjectReplaceReleasesTheOldObject runs its test's scenario over a
+// builder.
+func stashObjectReplaceReleasesTheOldObject(t *testing.T, builder stateBuilder) {
+	bed, old, _ := servedStashBy(t, builder)
 	before := bed.used()
 	replacement := bed.state("state", 20)
 	cost := bed.used() - before
@@ -248,7 +272,12 @@ func Test_Stash_ConfigReplace_KeepsTheObjectState(t *testing.T) {
 // slots start at: two packets on worker 1 add 11 and 12, one on worker 2 adds
 // 11.
 func Test_Stash_ObjectWorkerSlot_CountsPerWorker(t *testing.T) {
-	bed, _, stash := servedStashInstance(t)
+	forEachStateBuilder(t, stashObjectWorkerSlotCountsPerWorker)
+}
+
+// stashObjectWorkerSlotCountsPerWorker runs its test's scenario over a builder.
+func stashObjectWorkerSlotCountsPerWorker(t *testing.T, builder stateBuilder) {
+	bed, _, stash := servedStashBy(t, builder)
 
 	bed.run(1, arpFrames(2)...)
 	bed.run(2, arpFrames(1)...)
@@ -279,7 +308,13 @@ func Test_Stash_ObjectWorkerSlot_SurvivesConfigReplace(t *testing.T) {
 // place: each packet adds one to both values, which start at the seed 10, so
 // two packets on worker 1 sum to 22 and 24, and one on worker 2 to 22.
 func Test_Stash_ObjectWorkerSlice_FillsTheRegionOfItsWorker(t *testing.T) {
-	bed, _, stash := servedStashInstance(t)
+	forEachStateBuilder(t, stashObjectWorkerSliceFillsTheRegionOfItsWorker)
+}
+
+// stashObjectWorkerSliceFillsTheRegionOfItsWorker runs its test's
+// scenario over a builder.
+func stashObjectWorkerSliceFillsTheRegionOfItsWorker(t *testing.T, builder stateBuilder) {
+	bed, _, stash := servedStashBy(t, builder)
 
 	bed.run(1, arpFrames(2)...)
 	bed.run(2, arpFrames(1)...)
@@ -364,7 +399,13 @@ func (m *bed) stateGauge(state string) [][]uint64 {
 // three packets held on worker 1 leave 3, two held and one let go on worker 2
 // leave 1, and no other worker's value moves.
 func Test_Stash_ObjectGauge_KeepsTheLevelOfEachWorker(t *testing.T) {
-	bed, _ := servedStash(t)
+	forEachStateBuilder(t, stashObjectGaugeKeepsTheLevelOfEachWorker)
+}
+
+// stashObjectGaugeKeepsTheLevelOfEachWorker runs its test's scenario over a
+// builder.
+func stashObjectGaugeKeepsTheLevelOfEachWorker(t *testing.T, builder stateBuilder) {
+	bed, _, _ := servedStashBy(t, builder)
 
 	bed.run(1, gaugeFrames(3, 0)...)
 	bed.run(2, gaugeFrames(2, 1)...)
@@ -389,7 +430,13 @@ func Test_Stash_ObjectGauge_ReadsTheWorkersOwnValue(t *testing.T) {
 // that replaces the one that counted: two held before the replacement and one
 // after it make 3 on worker 1.
 func Test_Stash_ObjectGauge_CarriesOverToASameNameObject(t *testing.T) {
-	bed, _ := servedStash(t)
+	forEachStateBuilder(t, stashObjectGaugeCarriesOverToASameNameObject)
+}
+
+// stashObjectGaugeCarriesOverToASameNameObject runs its test's scenario over a
+// builder.
+func stashObjectGaugeCarriesOverToASameNameObject(t *testing.T, builder stateBuilder) {
+	bed, _, _ := servedStashBy(t, builder)
 	bed.run(1, gaugeFrames(2, 0)...)
 	bed.publishObjects(bed.state("state", 20))
 
