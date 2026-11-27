@@ -64,8 +64,8 @@ func FreeAgent(agent *layout.Agent) {
 	shmalloc.ContextFini(&agent.MemoryContext)
 	arenas := registry.Slice(agent.Arenas.Get(), agent.ArenaCount)
 	for idx := range arenas {
-		registry.FreeArray(&cp.MemoryContext, registry.Slice(arenas[idx].Data.Get(), arenas[idx].Size))
+		shmalloc.FreeArray(&cp.MemoryContext, registry.Slice(arenas[idx].Data.Get(), arenas[idx].Size))
 	}
-	registry.FreeArray(&cp.MemoryContext, arenas)
-	registry.FreeNode(&cp.MemoryContext, agent, 0)
+	shmalloc.FreeArray(&cp.MemoryContext, arenas)
+	shmalloc.FreeNode(&cp.MemoryContext, agent, 0)
 }

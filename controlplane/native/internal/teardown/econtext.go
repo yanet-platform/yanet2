@@ -8,6 +8,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/native/internal/registry"
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
 	"github.com/yanet-platform/yanet2/controlplane/native/shm"
+	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
 )
 
 // The frees of a worker's execution contexts, in the order of
@@ -26,20 +27,20 @@ func FreeWorkerContext(cp *layout.CpConfig, root *layout.ConfigGenEctx) {
 	for device := range registry.Pointees(devices) {
 		FreeDeviceContext(cp, device)
 	}
-	registry.FreeArray(context, devices)
-	registry.FreeArray(context, registry.Slice(root.EgressBacking.Get(), root.DeviceCount))
-	registry.FreeArray(context, registry.Slice(root.TxBuckets.Get(), uint64(root.TxBucketCount)))
-	registry.FreeArray(context, registry.Slice(root.BackingRegistry.Get(), root.BackingRegistryCount))
+	shmalloc.FreeArray(context, devices)
+	shmalloc.FreeArray(context, registry.Slice(root.EgressBacking.Get(), root.DeviceCount))
+	shmalloc.FreeArray(context, registry.Slice(root.TxBuckets.Get(), uint64(root.TxBucketCount)))
+	shmalloc.FreeArray(context, registry.Slice(root.BackingRegistry.Get(), root.BackingRegistryCount))
 	objects := registry.Slice(root.Objects.Get(), root.ObjectCount)
 	for object := range registry.Pointees(objects) {
 		FreeObjectContext(cp, object)
 	}
-	registry.FreeArray(context, objects)
+	shmalloc.FreeArray(context, objects)
 	if storages := root.CounterStorageRegistry.Get(); storages != nil {
 		finiStorageRegistry(storages)
-		registry.FreeNode(&cp.MemoryContext, storages, 0)
+		shmalloc.FreeNode(&cp.MemoryContext, storages, 0)
 	}
-	registry.FreeNode(context, root, shm.PtrSize*uintptr(root.DeviceCount))
+	shmalloc.FreeNode(context, root, shm.PtrSize*uintptr(root.DeviceCount))
 }
 
 // FreeObjectContext frees an object's context, as object_ectx_free does.
@@ -50,9 +51,9 @@ func FreeObjectContext(cp *layout.CpConfig, object *layout.ObjectEctx) {
 	if prepared := object.ObjectPrepared.Get(); prepared != nil {
 		dp := cp.DpConfig.Get()
 		descriptor := &registry.Slice(dp.DpObjects.Get(), dp.ObjectCount)[object.CpObject.Get().DpObjectIdx]
-		registry.FreeArray(&cp.EctxMemoryContext, registry.Slice(prepared, descriptor.PreparedSize))
+		shmalloc.FreeArray(&cp.EctxMemoryContext, registry.Slice(prepared, descriptor.PreparedSize))
 	}
-	registry.FreeNode(&cp.EctxMemoryContext, object, 0)
+	shmalloc.FreeNode(&cp.EctxMemoryContext, object, 0)
 }
 
 // FreeDeviceContext frees a device's context and its two entries, as
@@ -65,7 +66,7 @@ func FreeDeviceContext(cp *layout.CpConfig, device *layout.DeviceEctx) {
 		FreeDeviceEntryContext(cp, output)
 	}
 	FreeCounterStorage(device.CounterStorage.Get())
-	registry.FreeNode(&cp.EctxMemoryContext, device, 0)
+	shmalloc.FreeNode(&cp.EctxMemoryContext, device, 0)
 }
 
 // FreeDeviceEntryContext frees a device entry's context and its
@@ -76,9 +77,9 @@ func FreeDeviceEntryContext(cp *layout.CpConfig, entry *layout.DeviceEntryEctx) 
 	for pipeline := range registry.Pointees(pipelines) {
 		FreePipelineContext(cp, pipeline)
 	}
-	registry.FreeArray(context, pipelines)
-	registry.FreeArray(context, registry.Slice(entry.Pipelines.Get(), entry.PipelineCount))
-	registry.FreeNode(context, entry, shm.PtrSize*uintptr(entry.PipelineMapSize))
+	shmalloc.FreeArray(context, pipelines)
+	shmalloc.FreeArray(context, registry.Slice(entry.Pipelines.Get(), entry.PipelineCount))
+	shmalloc.FreeNode(context, entry, shm.PtrSize*uintptr(entry.PipelineMapSize))
 }
 
 // FreePipelineContext frees a pipeline's context and its functions, as
@@ -90,8 +91,8 @@ func FreePipelineContext(cp *layout.CpConfig, pipeline *layout.PipelineEctx) {
 		FreeFunctionContext(cp, function)
 	}
 	FreeCounterStorage(pipeline.CounterStorage.Get())
-	registry.FreeArray(context, functions)
-	registry.FreeNode(context, pipeline, shm.PtrSize*uintptr(pipeline.Length))
+	shmalloc.FreeArray(context, functions)
+	shmalloc.FreeNode(context, pipeline, shm.PtrSize*uintptr(pipeline.Length))
 }
 
 // FreeFunctionContext frees a function's context and its chains, as
@@ -102,10 +103,10 @@ func FreeFunctionContext(cp *layout.CpConfig, function *layout.FunctionEctx) {
 	for chain := range registry.Pointees(chains) {
 		FreeChainContext(cp, chain)
 	}
-	registry.FreeArray(context, chains)
-	registry.FreeArray(context, registry.Slice(function.Chains.Get(), function.ChainCount))
+	shmalloc.FreeArray(context, chains)
+	shmalloc.FreeArray(context, registry.Slice(function.Chains.Get(), function.ChainCount))
 	FreeCounterStorage(function.CounterStorage.Get())
-	registry.FreeNode(context, function, shm.PtrSize*uintptr(function.ChainMapSize))
+	shmalloc.FreeNode(context, function, shm.PtrSize*uintptr(function.ChainMapSize))
 }
 
 // FreeChainContext frees a chain's context and its modules, as
@@ -117,8 +118,8 @@ func FreeChainContext(cp *layout.CpConfig, chain *layout.ChainEctx) {
 		FreeModuleContext(cp, module)
 	}
 	FreeCounterStorage(chain.CounterStorage.Get())
-	registry.FreeArray(context, modules)
-	registry.FreeNode(context, chain, shm.PtrSize*uintptr(chain.Length))
+	shmalloc.FreeArray(context, modules)
+	shmalloc.FreeNode(context, chain, shm.PtrSize*uintptr(chain.Length))
 }
 
 // FreeModuleContext frees a module's context, as module_ectx_free does.
@@ -129,22 +130,22 @@ func FreeModuleContext(cp *layout.CpConfig, module *layout.ModuleEctx) {
 	for idx := range storages {
 		FreeCounterStorage(storages[idx].Get())
 	}
-	registry.FreeArray(context, storages)
-	registry.FreeArray(context, registry.Slice(module.AbsRuntimeCounterStorages.Get(), module.RuntimeCounterStorageCount))
-	registry.FreeArray(context, registry.Slice(module.DeviceTargets.Get(), module.DeviceTargetCount))
+	shmalloc.FreeArray(context, storages)
+	shmalloc.FreeArray(context, registry.Slice(module.AbsRuntimeCounterStorages.Get(), module.RuntimeCounterStorageCount))
+	shmalloc.FreeArray(context, registry.Slice(module.DeviceTargets.Get(), module.DeviceTargetCount))
 	links := registry.Slice(module.ObjectLinks.Get(), module.ObjectLinkCount)
 	for idx := range links {
 		FreeCounterStorage(links[idx].CounterStorage.Get())
 	}
-	registry.FreeArray(context, links)
+	shmalloc.FreeArray(context, links)
 	// The buffer's size is the dataplane module's, found through the
 	// module's own index as C finds it.
 	if prepared := module.ModulePrepared.Get(); prepared != nil {
 		dp := cp.DpConfig.Get()
 		descriptor := &registry.Slice(dp.DpModules.Get(), dp.ModuleCount)[module.CpModule.Get().DpModuleIdx]
-		registry.FreeArray(context, registry.Slice(prepared, descriptor.PreparedSize))
+		shmalloc.FreeArray(context, registry.Slice(prepared, descriptor.PreparedSize))
 	}
-	registry.FreeNode(context, module, 0)
+	shmalloc.FreeNode(context, module, 0)
 }
 
 // FreeCounterStorage drops a reference to a counter storage, as
@@ -160,20 +161,20 @@ func FreeCounterStorage(storage *layout.CounterStorage) {
 	// The handle table is sized by the count of the registry the storage
 	// was built for, read from the agent's memory as C reads it.
 	if handles := storage.CounterValueHandles.Get(); handles != nil {
-		registry.FreeArray(context, registry.Slice(handles, storage.Registry.Get().Count))
+		shmalloc.FreeArray(context, registry.Slice(handles, storage.Registry.Get().Count))
 	}
 	for pool := range storage.Pools {
 		entry := &storage.Pools[pool]
 		blocks := registry.Slice(entry.Blocks.Get(), entry.BlockCount)
 		for block := range registry.Pointees(blocks) {
 			if atomic.AddUint64(&block.Refcnt, ^uint64(0)) == 0 {
-				registry.FreeNode(context, block.Pages.Get(), 0)
-				registry.FreeNode(context, block, 0)
+				shmalloc.FreeNode(context, block.Pages.Get(), 0)
+				shmalloc.FreeNode(context, block, 0)
 			}
 		}
-		registry.FreeArray(context, blocks)
+		shmalloc.FreeArray(context, blocks)
 	}
-	registry.FreeNode(context, storage, 0)
+	shmalloc.FreeNode(context, storage, 0)
 }
 
 // finiStorageRegistry frees a worker's counter storage registry's index
@@ -186,6 +187,6 @@ func finiStorageRegistry(storages *layout.CpConfigCounterStorageRegistry) {
 		return
 	}
 	registry.IndexFini(&storages.TagIndex)
-	registry.FreeArray(context, registry.Slice(storages.Items.Get(), storages.Capacity))
+	shmalloc.FreeArray(context, registry.Slice(storages.Items.Get(), storages.Capacity))
 	*storages = layout.CpConfigCounterStorageRegistry{}
 }

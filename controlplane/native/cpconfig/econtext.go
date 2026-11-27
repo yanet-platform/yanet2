@@ -12,6 +12,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/native/internal/teardown"
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
 	"github.com/yanet-platform/yanet2/controlplane/native/shm"
+	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
 )
 
 // maxWeightSum bounds the weights of one function's chains and of one
@@ -49,7 +50,7 @@ func (m *build) contexts(workerCount uint64) (*shm.Ptr[layout.ConfigGenEctx], er
 			for built := range registry.Pointees(roots) {
 				teardown.FreeWorkerContext(m.cp, built)
 			}
-			registry.FreeArray(context, roots)
+			shmalloc.FreeArray(context, roots)
 			return nil, fmt.Errorf("worker %d: %w", worker, err)
 		}
 		roots[worker].Set(root)
@@ -117,7 +118,7 @@ func (m *build) root() (_ *layout.ConfigGenEctx, err error) {
 		return nil, fmt.Errorf("allocate counter storage registry: %w", errZoneMemory)
 	}
 	if err := m.initStorages(storages); err != nil {
-		registry.FreeNode(&m.cp.MemoryContext, storages, 0)
+		shmalloc.FreeNode(&m.cp.MemoryContext, storages, 0)
 		return nil, err
 	}
 	tree.CounterStorageRegistry.Set(storages)

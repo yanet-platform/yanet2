@@ -14,6 +14,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/native/internal/teardown"
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
 	"github.com/yanet-platform/yanet2/controlplane/native/shm"
+	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
 )
 
 const (
@@ -136,7 +137,7 @@ func (m *build) initStorages(storages *layout.CpConfigCounterStorageRegistry) er
 		return fmt.Errorf("allocate counter storage registry: %w", errZoneMemory)
 	}
 	if !registry.IndexInit(&storages.TagIndex, context, storageRegistryPrealloc) {
-		registry.FreeArray(context, items)
+		shmalloc.FreeArray(context, items)
 		return fmt.Errorf("allocate counter storage index: %w", errZoneMemory)
 	}
 	storages.Items.Set(&items[0])
@@ -177,7 +178,7 @@ func (m *build) registerStorage(tags *tagSet, hash uint32, storage *layout.Count
 			grown[idx].TagCount = old[idx].TagCount
 			grown[idx].Storage.Set(old[idx].Storage.Get())
 		}
-		registry.FreeArray(context, old)
+		shmalloc.FreeArray(context, old)
 		storages.Items.Set(&grown[0])
 		storages.Capacity *= 2
 	}

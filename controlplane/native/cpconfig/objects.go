@@ -99,7 +99,7 @@ func LinkObject(module *layout.CpModule, objectType, name string) (uint64, error
 		}
 	}
 	context := &module.Entity.MemoryContext
-	grown, ok := registry.AllocArray[layout.CpModuleObject](context, module.ObjectCount+1)
+	grown, ok := shmalloc.AllocArray[layout.CpModuleObject](context, module.ObjectCount+1)
 	if !ok {
 		return 0, fmt.Errorf(
 			"grow objects of module %s:%s: %w",
@@ -107,7 +107,7 @@ func LinkObject(module *layout.CpModule, objectType, name string) (uint64, error
 		)
 	}
 	copy(grown, links)
-	registry.FreeArray(context, links)
+	shmalloc.FreeArray(context, links)
 	index := module.ObjectCount
 	shm.CopyString(grown[index].Type[:], objectType)
 	shm.CopyString(grown[index].Name[:], name)

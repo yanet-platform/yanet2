@@ -22,12 +22,12 @@ func NewBlackhole(owner *agent.Agent, name string) (*layout.CpModule, error) {
 		return nil, err
 	}
 	context := &owner.Agent.MemoryContext
-	module := registry.AllocNode[layout.CpModule](context, 0)
+	module := shmalloc.AllocNode[layout.CpModule](context, 0)
 	if module == nil {
 		return nil, fmt.Errorf("allocate blackhole module %q: %w", name, errAgentMemory)
 	}
 	if err := initModule(module, owner, "blackhole", name); err != nil {
-		registry.FreeNode(context, module, 0)
+		shmalloc.FreeNode(context, module, 0)
 		return nil, err
 	}
 	return module, nil
@@ -45,7 +45,7 @@ func FreeBlackhole(module *layout.CpModule) error {
 	}
 	owner := module.Entity.Agent.Get()
 	FiniModule(module)
-	registry.FreeNode(&owner.MemoryContext, module, 0)
+	shmalloc.FreeNode(&owner.MemoryContext, module, 0)
 	DestroyReleased(owner)
 	return nil
 }
@@ -171,17 +171,17 @@ func FiniModule(module *layout.CpModule) {
 	for idx := range registries {
 		entry := registries[idx].Get()
 		teardown.FiniCounterRegistry(&entry.Registry)
-		registry.FreeNode(context, entry, 0)
+		shmalloc.FreeNode(context, entry, 0)
 	}
-	registry.FreeArray(context, registries)
+	shmalloc.FreeArray(context, registries)
 	module.RuntimeCounterRegistries.Set(nil)
 	module.RuntimeCounterRegistryCount = 0
 
-	registry.FreeArray(context, registry.Slice(module.Devices.Get(), module.DeviceCount))
+	shmalloc.FreeArray(context, registry.Slice(module.Devices.Get(), module.DeviceCount))
 	module.Devices.Set(nil)
 	module.DeviceCount = 0
 
-	registry.FreeArray(context, registry.Slice(module.Objects.Get(), module.ObjectCount))
+	shmalloc.FreeArray(context, registry.Slice(module.Objects.Get(), module.ObjectCount))
 	module.Objects.Set(nil)
 	module.ObjectCount = 0
 
@@ -221,10 +221,10 @@ func ModuleCounterRegistry(module *layout.CpModule, tag string) (*layout.Counter
 	counterRegistryInit(&entry.Registry, context)
 
 	count := module.RuntimeCounterRegistryCount
-	grown, ok := registry.AllocArray[shm.Ptr[layout.CpModuleCounterRegistry]](context, count+1)
+	grown, ok := shmalloc.AllocArray[shm.Ptr[layout.CpModuleCounterRegistry]](context, count+1)
 	if !ok {
 		teardown.FiniCounterRegistry(&entry.Registry)
-		registry.FreeNode(context, entry, 0)
+		shmalloc.FreeNode(context, entry, 0)
 		return nil, 0, fmt.Errorf(
 			"allocate counter registries of module %s:%s: %w",
 			shm.String(module.Type[:]), shm.String(module.Name[:]), errAgentMemory,
@@ -235,7 +235,7 @@ func ModuleCounterRegistry(module *layout.CpModule, tag string) (*layout.Counter
 		grown[idx].Set(registries[idx].Get())
 	}
 	grown[count].Set(entry)
-	registry.FreeArray(context, registries)
+	shmalloc.FreeArray(context, registries)
 	module.RuntimeCounterRegistries.Set(&grown[0])
 	module.RuntimeCounterRegistryCount = count + 1
 	return &entry.Registry, count, nil
@@ -274,12 +274,12 @@ func linkDevice(module *layout.CpModule, name string) (uint64, error) {
 	}
 	context := &module.Entity.MemoryContext
 	devices := registry.Slice(module.Devices.Get(), module.DeviceCount)
-	grown, ok := registry.AllocArray[layout.CpModuleDevice](context, module.DeviceCount+1)
+	grown, ok := shmalloc.AllocArray[layout.CpModuleDevice](context, module.DeviceCount+1)
 	if !ok {
 		return 0, fmt.Errorf("grow devices of module %q: %w", shm.String(module.Name[:]), errAgentMemory)
 	}
 	copy(grown, devices)
-	registry.FreeArray(context, devices)
+	shmalloc.FreeArray(context, devices)
 	index := module.DeviceCount
 	shm.CopyString(grown[index].Name[:], name)
 	module.Devices.Set(&grown[0])

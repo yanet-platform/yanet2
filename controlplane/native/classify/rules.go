@@ -39,7 +39,7 @@ func (m *Stage) JoinRules(right *Stage, members []bool, table *layout.RuleTable,
 		)
 	}
 	*table = layout.RuleTable{}
-	tableContext := registry.AllocNode[layout.MemoryContext](context, 0)
+	tableContext := shmalloc.AllocNode[layout.MemoryContext](context, 0)
 	if tableContext == nil {
 		return errRuleTableMemory
 	}
@@ -56,7 +56,7 @@ func (m *Stage) JoinRules(right *Stage, members []bool, table *layout.RuleTable,
 		// The table owns the rows once its row array is in.
 		if table.Rows.IsNil() {
 			for _, row := range rows {
-				registry.FreeArray(tableContext, row)
+				shmalloc.FreeArray(tableContext, row)
 			}
 		}
 		FreeRuleTable(table)
@@ -138,7 +138,7 @@ func (m *Stage) ruleRows(right *Stage, members []bool, context *layout.MemoryCon
 			})
 		}
 		if number == none {
-			stored, ok := registry.AllocArray[uint32](context, uint64(len(row)))
+			stored, ok := shmalloc.AllocArray[uint32](context, uint64(len(row)))
 			if !ok {
 				return rows, nil, errRuleTableMemory
 			}
@@ -170,7 +170,7 @@ func valueBytes(values []uint32) []byte {
 // A failure leaves what it wrote for the caller to free.
 func commitRuleTable(table *layout.RuleTable, rows [][]uint32, classMap []uint32) error {
 	tableContext := table.MemoryContext.Get()
-	pointers, ok := registry.AllocArray[shm.Ptr[uint32]](tableContext, uint64(len(rows)))
+	pointers, ok := shmalloc.AllocArray[shm.Ptr[uint32]](tableContext, uint64(len(rows)))
 	if !ok {
 		return errRuleTableMemory
 	}
@@ -198,12 +198,12 @@ func FreeRuleTable(table *layout.RuleTable) {
 	}
 	pointers := registry.Slice(table.Rows.Get(), uint64(table.ClassCount))
 	for idx := range pointers {
-		registry.FreeArray(context, registry.Slice(pointers[idx].Get(), uint64(table.HDim)))
+		shmalloc.FreeArray(context, registry.Slice(pointers[idx].Get(), uint64(table.HDim)))
 	}
-	registry.FreeArray(context, pointers)
+	shmalloc.FreeArray(context, pointers)
 	freeVline(&table.ClassMap)
 	parent := context.Parent.Get()
 	shmalloc.ContextFini(context)
-	registry.FreeNode(parent, context, 0)
+	shmalloc.FreeNode(parent, context, 0)
 	*table = layout.RuleTable{}
 }

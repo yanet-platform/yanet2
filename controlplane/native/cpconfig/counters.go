@@ -67,7 +67,7 @@ func counterLookup(counters *layout.CounterRegistry, name string) uint32 {
 // capacity, as counter_registry_expand does.
 func counterRegistryExpand(counters *layout.CounterRegistry, capacity uint64) error {
 	context := counters.MemoryContext.Get()
-	grown, ok := registry.AllocArray[layout.Counter](context, capacity)
+	grown, ok := shmalloc.AllocArray[layout.Counter](context, capacity)
 	if !ok {
 		return fmt.Errorf("allocate counter names: %w", shmalloc.ErrNoMemory)
 	}
@@ -75,7 +75,7 @@ func counterRegistryExpand(counters *layout.CounterRegistry, capacity uint64) er
 	copy(grown, old)
 	counters.Names.Set(&grown[0])
 	counters.Capacity = capacity
-	registry.FreeArray(context, old)
+	shmalloc.FreeArray(context, old)
 	return nil
 }
 

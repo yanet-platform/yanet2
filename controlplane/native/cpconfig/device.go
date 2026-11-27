@@ -40,12 +40,12 @@ func NewPlainDevice(owner *agent.Agent, config DeviceConfig) (*layout.CpDevice, 
 		return nil, err
 	}
 	context := &owner.Agent.MemoryContext
-	device := registry.AllocNode[layout.CpDevice](context, 0)
+	device := shmalloc.AllocNode[layout.CpDevice](context, 0)
 	if device == nil {
 		return nil, fmt.Errorf("allocate plain device %q: %w", config.Name, errAgentMemory)
 	}
 	if err := initDevice(device, owner, "plain", config); err != nil {
-		registry.FreeNode(context, device, 0)
+		shmalloc.FreeNode(context, device, 0)
 		return nil, err
 	}
 	return device, nil
@@ -63,7 +63,7 @@ func FreePlainDevice(device *layout.CpDevice) error {
 	}
 	owner := device.Entity.Agent.Get()
 	FiniDevice(device)
-	registry.FreeNode(&owner.MemoryContext, device, 0)
+	shmalloc.FreeNode(&owner.MemoryContext, device, 0)
 	DestroyReleased(owner)
 	return nil
 }
@@ -199,7 +199,7 @@ func FiniDevice(device *layout.CpDevice) {
 	teardown.FiniCounterRegistry(&device.CounterRegistry)
 	for _, entry := range []*shm.Ptr[layout.CpDeviceEntry]{&device.OutputPipelines, &device.InputPipelines} {
 		if built := entry.Get(); built != nil {
-			registry.FreeNode(context, built, unsafe.Sizeof(layout.CpDevicePipeline{})*uintptr(built.PipelineCount))
+			shmalloc.FreeNode(context, built, unsafe.Sizeof(layout.CpDevicePipeline{})*uintptr(built.PipelineCount))
 		}
 		entry.Set(nil)
 	}

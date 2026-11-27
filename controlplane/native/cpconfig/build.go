@@ -5,8 +5,8 @@ package cpconfig
 import (
 	"unsafe"
 
-	"github.com/yanet-platform/yanet2/controlplane/native/internal/registry"
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
+	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
 )
 
 // build is the state of building a generation from the one an instance
@@ -41,7 +41,7 @@ const (
 // allocArray allocates count elements of T from a context and reports
 // whether it got them; no elements take no block.
 func allocArray[T any](context *layout.MemoryContext, count uint64, contents fill) ([]T, bool) {
-	array, ok := registry.AllocArray[T](context, count)
+	array, ok := shmalloc.AllocArray[T](context, count)
 	if ok && contents == zeroed {
 		clear(array)
 	}
@@ -54,7 +54,7 @@ func allocArray[T any](context *layout.MemoryContext, count uint64, contents fil
 // A zeroed node is safe to free part-built: its arrays read as absent
 // until they are set.
 func newNode[T any](context *layout.MemoryContext, tail uintptr) *T {
-	node := registry.AllocNode[T](context, tail)
+	node := shmalloc.AllocNode[T](context, tail)
 	if node != nil {
 		clear(unsafe.Slice((*byte)(unsafe.Pointer(node)), unsafe.Sizeof(*node)+tail))
 	}
