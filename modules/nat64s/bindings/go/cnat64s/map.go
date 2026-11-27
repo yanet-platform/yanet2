@@ -206,6 +206,9 @@ func (m *MapObjectConfig) Free() error {
 		return nil
 	}
 	if errors.Is(errno, syscall.EAGAIN) {
+		// The refused attempt allocated an error chain; release it
+		// rather than leaking one per attempt. The object is intact.
+		C.yanet_error_free(cErr)
 		return ffi.ErrStillReferenced
 	}
 	return fmt.Errorf(

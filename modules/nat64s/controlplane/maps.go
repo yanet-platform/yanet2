@@ -45,11 +45,6 @@ var ErrMapLinkedByUntrackedConfig = fmt.Errorf(
 // the RCU grace period layer reclamation requires — and runs under the
 // registry's lock, the sweeper's rounds included: no map is released
 // underneath a hand that still holds it.
-//
-// The registry creates each map with its first layer only. That layer
-// admits a fixed number of sessions in total, expired ones keeping their
-// key slots, and the registry inserts no further one: once it is used up,
-// the map refuses every new session.
 type MapRegistry struct {
 	agent *ffi.Agent
 	mu    sync.Mutex
@@ -62,6 +57,11 @@ type MapRegistry struct {
 	deferred []*cnat64s.MapObjectConfig
 	// The sizing of the maps the registry creates, its zero fields
 	// selecting the defaults of the shared memory layout.
+	//
+	// A map is created with its first layer only. That layer admits a
+	// fixed number of sessions in total, expired ones keeping their key
+	// slots, and the registry inserts no further one: once it is used up,
+	// the map refuses every new session.
 	sizing cnat64s.MapConfig
 	// The config each map is reserved for, at most one, so the object is
 	// reclaimed when its config lets go: each map owns two large tables,
@@ -149,12 +149,16 @@ func (m *MapRegistry) ensureLocked(name string, workerCount uint16) (*cnat64s.Ma
 				err,
 			)
 		}
-		// The replacement allocates right after this: a release the
-		// dataplane refused a moment ago gets another chance first.
-		m.releaseDeferredLocked()
 	} else if err := m.clearLeftoverLocked(name); err != nil {
 		return nil, err
 	}
+	// The map about to be created takes the room of every map no config
+	// references anymore, whatever its name.
+	//
+	// A release the dataplane refused a moment ago gets another chance
+	// here first; a map whose memory a generation still holds stays
+	// deferred.
+	m.reclaimUnreferencedLocked()
 
 	if workerCount == 0 {
 		workerCount = uint16(m.agent.DPConfig().WorkerCount())
@@ -284,9 +288,10 @@ func (m *MapRegistry) RunSweeper(ctx context.Context, interval time.Duration) {
 	}
 }
 
-// Release drops a config's reference to the named map; the object stays
-// parked until a sweep deletes it, unless a config references the map
-// again first, which replaces it with a fresh one.
+// Release drops a config's reference to the named map. The object stays
+// until the next reclaim — a sweep's, or the allocation of a map another
+// config asks for — deletes it; a config referencing the map again first
+// replaces it with a fresh one.
 func (m *MapRegistry) Release(config, name string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -296,9 +301,6 @@ func (m *MapRegistry) Release(config, name string) {
 // ReclaimUnreferenced deletes the maps no config references anymore and
 // retries the releases the dataplane refused earlier.
 //
-// A map still referenced by a published module config refuses deletion;
-// the next sweep retries.
-//
 // The whole round runs under the lock: a map reads as unreferenced only
 // while no config can begin referencing it, so an object is never deleted
 // underneath a config about to link it.
@@ -306,13 +308,22 @@ func (m *MapRegistry) ReclaimUnreferenced() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	m.reclaimUnreferencedLocked()
+}
+
+// reclaimUnreferencedLocked deletes the maps no config references anymore
+// and retries the releases the dataplane refused earlier.
+//
+// A map still listed by the dataplane refuses deletion and stays for a
+// later round; one whose memory a generation still holds stays deferred.
+func (m *MapRegistry) reclaimUnreferencedLocked() {
 	m.releaseDeferredLocked()
 	for name, object := range m.maps {
 		if object == nil || len(m.users[name]) != 0 {
 			continue
 		}
 		if err := m.reclaimLocked(name); err != nil {
-			m.log.Warn("map deletion refused; retrying on later sweeps",
+			m.log.Warn("map deletion refused; retrying on later rounds",
 				zap.String("map", name),
 				zap.Error(err))
 		}

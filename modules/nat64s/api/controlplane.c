@@ -3,6 +3,7 @@
 
 /* System headers */
 #include <errno.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* Project headers */
@@ -20,6 +21,15 @@
 #include "objects/fwstate/api/fwstate_map_nat64_object.h"
 
 #include "modules/nat64s/dataplane/config.h"
+
+// Order of two pool addresses, whatever the host's byte order: the
+// addresses are compared as the unsigned words the shared memory holds.
+static int
+nat64s_pool_order(const void *a, const void *b) {
+	uint32_t one = *(const uint32_t *)a;
+	uint32_t other = *(const uint32_t *)b;
+	return (one > other) - (one < other);
+}
 
 // Typed destructor: frees the pool array and the module block. Runs only
 // on a dangling config, after nat64s_module_config_free wins the
@@ -76,7 +86,8 @@ nat64s_module_config_create(
 	}
 
 	// balloc does not initialize: zero the enclosing struct so the
-	// stats array starts from zero, not from shared-memory garbage.
+	// counters and the links start from zero, not from shared-memory
+	// garbage.
 	memset(config, 0, sizeof(*config));
 
 	if (cp_module_init(&config->cp_module, agent, "nat64s", name, err)) {
@@ -87,6 +98,50 @@ nat64s_module_config_create(
 			sizeof(struct nat64s_module_config)
 		);
 		return NULL;
+	}
+
+	// The module's counters, by name; the slot of each is its place in
+	// the stat enumeration.
+	static const char *const counter_names[NAT64S_STAT_COUNT] = {
+		[NAT64S_TRANSLATED_V6_TO_V4] = "nat64s_translated_v6_to_v4",
+		[NAT64S_TRANSLATED_V4_TO_V6] = "nat64s_translated_v4_to_v6",
+		[NAT64S_WAN_STATE_MISS] = "nat64s_wan_state_miss",
+		[NAT64S_NO_STATE_LINK] = "nat64s_no_state_link",
+		[NAT64S_POOL_EMPTY] = "nat64s_pool_empty",
+		[NAT64S_NO_PREFIX] = "nat64s_no_prefix",
+		[NAT64S_HAIRPIN] = "nat64s_hairpin",
+		[NAT64S_NOT_SYN] = "nat64s_not_syn",
+		[NAT64S_INSERT_FAILED] = "nat64s_insert_failed",
+		[NAT64S_FRAGMENTED] = "nat64s_fragmented",
+		[NAT64S_MALFORMED] = "nat64s_malformed",
+		[NAT64S_ICMP_UNSUPPORTED] = "nat64s_icmp_unsupported",
+		[NAT64S_NON_GLOBAL] = "nat64s_non_global",
+		[NAT64S_SESSION_GONE] = "nat64s_session_gone",
+	};
+	for (size_t slot = 0; slot < NAT64S_STAT_COUNT; ++slot) {
+		uint64_t id = counter_registry_register(
+			&config->cp_module.counter_registry,
+			counter_names[slot],
+			1,
+			err
+		);
+		if (id == (uint64_t)-1) {
+			yanet_error_add(
+				err,
+				"failed to register counter '%s'",
+				counter_names[slot]
+			);
+			// Nothing has observed the module yet, so the block is
+			// freed here rather than through the type destructor.
+			cp_module_fini(&config->cp_module);
+			memory_bfree(
+				&agent->memory_context,
+				config,
+				sizeof(struct nat64s_module_config)
+			);
+			return NULL;
+		}
+		config->counter_ids[slot] = id;
 	}
 
 	config->pool.pool = NULL;
@@ -170,6 +225,12 @@ nat64s_module_config_update(
 		}
 		memcpy(pool, update->pool, sizeof(uint32_t) * update->pool_count
 		);
+		// The pool is kept sorted: the dataplane looks an address up in
+		// it on every packet of a session.
+		qsort(pool,
+		      update->pool_count,
+		      sizeof(uint32_t),
+		      nat64s_pool_order);
 		SET_OFFSET_OF(&config->pool.pool, pool);
 		config->pool.count = update->pool_count;
 	}

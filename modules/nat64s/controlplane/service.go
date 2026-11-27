@@ -165,6 +165,17 @@ func decodeConfig(wire *nat64spb.Config) (*NAT64sConfig, error) {
 				idx, nat64sPrefixBits, prefix.Bits(),
 			)
 		}
+		// A translation prefix names unicast space: the address the
+		// packets of a flow are sent to under it is one a router
+		// forwards to.
+		if masked := prefix.Masked().Addr(); !masked.IsGlobalUnicast() ||
+			masked.Is4In6() {
+			return nil, fmt.Errorf(
+				"prefixes[%d]: %s is not a unicast prefix",
+				idx,
+				prefix.Masked(),
+			)
+		}
 		address := prefix.Masked().Addr().As16()
 		key := [12]byte(address[:nat64sPrefixBits/8])
 		if _, ok := seenPrefixes[key]; ok {

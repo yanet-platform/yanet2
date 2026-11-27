@@ -50,7 +50,8 @@ message PortRange {
 
 // Config represents the whole configuration of one named config.
 message Config {
-  // NAT64 prefixes of the instance, each of which MUST be a /96. A
+  // NAT64 prefixes of the instance, each of which MUST be a unicast /96:
+  // multicast, link-local and IPv4-mapped prefixes are refused. A
   // session uses the one its destination embeds under and keeps it for
   // its return traffic. Under the Well-Known Prefix 64:ff9b::/96 a
   // source or destination that stands for a non-global IPv4 address is

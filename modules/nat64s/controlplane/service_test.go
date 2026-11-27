@@ -400,6 +400,33 @@ func Test_NAT64sService_UpdateConfig_RejectsBadConfigs(t *testing.T) {
 			message: "name is required",
 		},
 		{
+			name: "multicast prefix",
+			mutate: func(r *nat64spb.UpdateConfigRequest) {
+				r.Config.Prefixes = []*commonpb.IPv6Prefix{
+					mustIPv6Prefix("ff0e::/96"),
+				}
+			},
+			message: "prefixes[0]: ff0e::/96 is not a unicast prefix",
+		},
+		{
+			name: "link-local prefix",
+			mutate: func(r *nat64spb.UpdateConfigRequest) {
+				r.Config.Prefixes = []*commonpb.IPv6Prefix{
+					mustIPv6Prefix("fe80::/96"),
+				}
+			},
+			message: "prefixes[0]: fe80::/96 is not a unicast prefix",
+		},
+		{
+			name: "IPv4-mapped prefix",
+			mutate: func(r *nat64spb.UpdateConfigRequest) {
+				r.Config.Prefixes = []*commonpb.IPv6Prefix{
+					mustIPv6Prefix("::ffff:0:0/96"),
+				}
+			},
+			message: "prefixes[0]: ::ffff:0.0.0.0/96 is not a unicast prefix",
+		},
+		{
 			name: "ipv4 mtu below the minimum",
 			mutate: func(r *nat64spb.UpdateConfigRequest) {
 				r.Config.Mtu = &nat64spb.MTUConfig{Ipv4Mtu: 67}

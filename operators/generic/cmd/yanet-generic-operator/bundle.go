@@ -4,11 +4,11 @@ package main
 // binary, so a target may spell any public module or device method.
 //
 // A module built outside this tree is configured through the descriptor
-// set its instance entry names, with no bundle of its own. The aclpb
-// and fwstatepb packages are left out, so their methods need a
-// descriptor set. The nat64spb package brings fwstatemappb along, whose
-// map-name validator it uses, so a fwstate-map method resolves without
-// one as well.
+// set its instance entry names, with no bundle of its own. The ACL and
+// firewall-state services are left out, so their methods need a
+// descriptor set. The stateful NAT64 service brings the firewall-state
+// map service along: it validates its map names with that service's
+// rules, so a firewall-state map method resolves without a set as well.
 import (
 	_ "github.com/yanet-platform/yanet2/devices/plain/controlplane/plainpb/v1"
 	_ "github.com/yanet-platform/yanet2/devices/trafgen/controlplane/trafgenpb/v1"

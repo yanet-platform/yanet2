@@ -36,6 +36,7 @@
 #include "yanet_build_config.h"
 
 /* Project headers */
+#include "lib/counters/counters.h"
 #include "lib/dataplane/module/module.h"
 #include "lib/dataplane/module/packet_front.h"
 #include "lib/dataplane/packet/data.h"
@@ -71,8 +72,13 @@ nat64s_key_hash(const void *data, size_t len) {
 }
 
 static inline void
-nat64s_stats_bump(uint64_t *stats, enum nat64s_stat stat) {
-	__atomic_add_fetch(&stats[stat], 1, __ATOMIC_RELAXED);
+nat64s_stats_bump(
+	const struct nat64s_prepared *prepared, enum nat64s_stat stat
+) {
+	uint64_t *value = prepared->stats[stat];
+	if (value != NULL) {
+		++*value;
+	}
 }
 
 // Release the bucket lock a table lookup returned: a hit in a layer past
@@ -409,14 +415,15 @@ nat64s_dest_forwardable(uint32_t ipv4) {
 	       (ipv4 & NAT64S_IPV4(240, 0, 0, 0)) != NAT64S_IPV4(240, 0, 0, 0);
 }
 
-// Whether an IPv6 source address is one a router forwards a packet under.
+// Whether an IPv6 address is one a router forwards a packet under, as its
+// source or its destination.
 //
-// A router forwards no packet sourced from the unspecified, the loopback,
-// a link-local or a multicast address. The translation would replace such
-// a source with a pool one and let the packet through, so it is refused
-// before it can take a session.
+// A router forwards no packet that carries the unspecified, the loopback,
+// a link-local, a multicast or an IPv4-mapped address as either. The
+// translation would give such a packet a pool source and send it on, so
+// it is refused before it can take a session.
 static inline bool
-nat64s_source_forwardable(const uint8_t addr[16]) {
+nat64s_addr_forwardable(const uint8_t addr[16]) {
 	// Multicast, then link-local unicast, whose first ten bits are
 	// 1111111010.
 	if (addr[0] == 0xff || (addr[0] == 0xfe && (addr[1] & 0xc0) == 0x80)) {
@@ -425,15 +432,61 @@ nat64s_source_forwardable(const uint8_t addr[16]) {
 	// The unspecified address and the loopback one: the first fifteen
 	// bytes zero, the last at most one.
 	static const uint8_t zero[15];
-	return memcmp(addr, zero, sizeof(zero)) != 0 || addr[15] > 1;
+	if (memcmp(addr, zero, sizeof(zero)) == 0 && addr[15] <= 1) {
+		return false;
+	}
+	// An IPv4-mapped address: ten zero bytes, then two of ones.
+	static const uint8_t zero10[10];
+	return memcmp(addr, zero10, sizeof(zero10)) != 0 || addr[10] != 0xff ||
+	       addr[11] != 0xff;
+}
+
+// Whether an address is one of the pool's.
+//
+// The pool is kept sorted, so the answer costs a binary search however
+// large the pool grows.
+static inline bool
+nat64s_pool_has(const struct nat64s_module_config *config, uint32_t address) {
+	const uint32_t *pool = ADDR_OF(&config->pool.pool);
+	size_t low = 0;
+	size_t high = config->pool.count;
+	while (low < high) {
+		size_t mid = low + (high - low) / 2;
+		if (pool[mid] < address) {
+			low = mid + 1;
+		} else {
+			high = mid;
+		}
+	}
+	return low < config->pool.count && pool[low] == address;
+}
+
+// Whether the configuration still serves a session: its public address is
+// one of the pool's, and its prefix one of the prefixes.
+//
+// An update takes either away without touching the session tables, so
+// every packet of an existing session asks this before it is served.
+static inline bool
+nat64s_session_served(
+	const struct nat64s_module_config *config,
+	uint32_t address,
+	const uint8_t prefix[NAT64S_PREFIX_LEN]
+) {
+	if (!nat64s_pool_has(config, address)) {
+		return false;
+	}
+	return nat64s_dst_prefix(config, prefix) != NULL;
 }
 
 static inline struct nat64_ctx
-nat64s_ctx(struct nat64s_module_config *config) {
+nat64s_ctx(
+	const struct nat64s_module_config *config,
+	const struct nat64s_prepared *prepared
+) {
 	return (struct nat64_ctx){
 		.mtu_ipv4 = config->mtu.ipv4,
 		.mtu_ipv6 = config->mtu.ipv6,
-		.malformed = &config->stats[NAT64S_MALFORMED],
+		.malformed = prepared->stats[NAT64S_MALFORMED],
 	};
 }
 
@@ -501,6 +554,55 @@ nat64s_transport_of(
 	default:
 		return -1;
 	}
+}
+
+// The path MTU values a path settles on (RFC 1191), ascending.
+static const uint16_t nat64s_mtu_plateaus[] = {
+	68,
+	296,
+	508,
+	1006,
+	1492,
+	2002,
+	4352,
+	8206,
+	32000,
+	65535,
+};
+
+// Give a Fragmentation Needed error the next-hop MTU its router sent
+// none of, from the length of the packet it quotes.
+//
+// A router that implements no RFC 1191 leaves the figure at zero. The
+// likely path MTU is then the greatest plateau value below the quoted
+// packet's length that is at least the minimum IPv6 MTU, and that minimum
+// where no value fits. The translation adjusts the figure for the header
+// sizes from there.
+static inline void
+nat64s_patch_legacy_mtu(
+	struct rte_mbuf *mbuf, size_t icmp_off, const struct rte_ipv4_hdr *emb
+) {
+	struct yanet_icmp_hdr *icmp = rte_pktmbuf_mtod_offset(
+		mbuf, struct yanet_icmp_hdr *, icmp_off
+	);
+	if (icmp->icmp_type != ICMP_DEST_UNREACH ||
+	    icmp->icmp_code != ICMP_FRAG_NEEDED ||
+	    icmp->yanet_icmp_nextmtu != 0) {
+		return;
+	}
+	uint32_t total_length = rte_be_to_cpu_16(emb->total_length);
+	// The minimum IPv6 MTU, less the twenty bytes the translation adds
+	// for the header sizes.
+	uint32_t mtu = 1260;
+	for (size_t i = 0;
+	     i < sizeof(nat64s_mtu_plateaus) / sizeof(nat64s_mtu_plateaus[0]);
+	     ++i) {
+		uint32_t plateau = nat64s_mtu_plateaus[i];
+		if (plateau >= 1280 && plateau < total_length) {
+			mtu = plateau;
+		}
+	}
+	icmp->yanet_icmp_nextmtu = rte_cpu_to_be_16((uint16_t)mtu);
 }
 
 // Rewrite one port of the transport header quoted inside an ICMP error,
@@ -684,7 +786,6 @@ nat64s_handle_v6_error(
 	uint64_t now,
 	struct packet *packet
 ) {
-	uint64_t *stats = prepared->stats;
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 	size_t data_len = rte_pktmbuf_data_len(mbuf);
 	size_t emb_off =
@@ -697,17 +798,17 @@ nat64s_handle_v6_error(
 		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
 	);
 	if (nat64s_dst_prefix(config, outer->dst_addr) == NULL) {
-		nat64s_stats_bump(stats, NAT64S_NO_PREFIX);
+		nat64s_stats_bump(prepared, NAT64S_NO_PREFIX);
 		return -1;
 	}
 	if (emb_off + sizeof(struct rte_ipv6_hdr) > data_len) {
-		nat64s_stats_bump(stats, NAT64S_MALFORMED);
+		nat64s_stats_bump(prepared, NAT64S_MALFORMED);
 		return -1;
 	}
 	struct rte_ipv6_hdr *emb =
 		rte_pktmbuf_mtod_offset(mbuf, struct rte_ipv6_hdr *, emb_off);
 	if (memcmp(outer->dst_addr, emb->src_addr, 16) != 0) {
-		nat64s_stats_bump(stats, NAT64S_MALFORMED);
+		nat64s_stats_bump(prepared, NAT64S_MALFORMED);
 		return -1;
 	}
 
@@ -715,7 +816,7 @@ nat64s_handle_v6_error(
 	uint16_t next;
 	size_t l4_off;
 	if (!nat64s_quoted_transport(base, emb_off, &next, &l4_off)) {
-		nat64s_stats_bump(stats, NAT64S_ICMP_UNSUPPORTED);
+		nat64s_stats_bump(prepared, NAT64S_ICMP_UNSUPPORTED);
 		return -1;
 	}
 	uint16_t proto = nat64s_session_proto(next);
@@ -724,7 +825,7 @@ nat64s_handle_v6_error(
 	if (!nat64s_embedded_ports(
 		    base, l4_off, proto, data_len, &sport, &dport
 	    )) {
-		nat64s_stats_bump(stats, NAT64S_MALFORMED);
+		nat64s_stats_bump(prepared, NAT64S_MALFORMED);
 		return -1;
 	}
 
@@ -745,7 +846,7 @@ nat64s_handle_v6_error(
 	if (fwtable_lookup(
 		    prepared->lan.table, now, &key, &found, &lock, &from_stale
 	    ) < 0) {
-		nat64s_stats_bump(stats, NAT64S_WAN_STATE_MISS);
+		nat64s_stats_bump(prepared, NAT64S_WAN_STATE_MISS);
 		return -1;
 	}
 	const struct nat64state_value *session = found;
@@ -754,6 +855,10 @@ nat64s_handle_v6_error(
 	uint8_t prefix[NAT64S_PREFIX_LEN];
 	memcpy(prefix, session->prefix, NAT64S_PREFIX_LEN);
 	nat64s_lookup_unlock(lock);
+	if (!nat64s_session_served(config, pool_ip4, prefix)) {
+		nat64s_stats_bump(prepared, NAT64S_SESSION_GONE);
+		return -1;
+	}
 
 	// Point the quoted client address at the session's public address,
 	// under the session's own prefix, and its port at the allocated
@@ -763,14 +868,14 @@ nat64s_handle_v6_error(
 	if (nat64s_patch_quoted_port(
 		    mbuf, l4_off, proto, NAT64S_PORT_DEST, alloc_port
 	    )) {
-		nat64s_stats_bump(stats, NAT64S_MALFORMED);
+		nat64s_stats_bump(prepared, NAT64S_MALFORMED);
 		return -1;
 	}
 
-	struct nat64_ctx ctx = nat64s_ctx(config);
+	struct nat64_ctx ctx = nat64s_ctx(config, prepared);
 	int rc = nat64_translate_v6_to_v4(&ctx, packet, pool_ip4);
 	if (rc == 0) {
-		nat64s_stats_bump(stats, NAT64S_TRANSLATED_V6_TO_V4);
+		nat64s_stats_bump(prepared, NAT64S_TRANSLATED_V6_TO_V4);
 	}
 	return rc;
 }
@@ -792,13 +897,12 @@ nat64s_handle_v4_error(
 	uint64_t now,
 	struct packet *packet
 ) {
-	uint64_t *stats = prepared->stats;
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 	size_t data_len = rte_pktmbuf_data_len(mbuf);
 	size_t emb_off =
 		packet->transport_header.offset + sizeof(struct rte_icmp_hdr);
 	if (emb_off + sizeof(struct rte_ipv4_hdr) > data_len) {
-		nat64s_stats_bump(stats, NAT64S_MALFORMED);
+		nat64s_stats_bump(prepared, NAT64S_MALFORMED);
 		return -1;
 	}
 	struct rte_ipv4_hdr *emb =
@@ -810,7 +914,7 @@ nat64s_handle_v4_error(
 		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
 	);
 	if (outer->dst_addr != emb->src_addr) {
-		nat64s_stats_bump(stats, NAT64S_MALFORMED);
+		nat64s_stats_bump(prepared, NAT64S_MALFORMED);
 		return -1;
 	}
 	size_t emb_ihl = (emb->version_ihl & RTE_IPV4_HDR_IHL_MASK) *
@@ -822,11 +926,11 @@ nat64s_handle_v4_error(
 	// would count the options in the translated quote's length. Such an
 	// error is refused before the lookup.
 	if (emb_ihl < sizeof(struct rte_ipv4_hdr)) {
-		nat64s_stats_bump(stats, NAT64S_MALFORMED);
+		nat64s_stats_bump(prepared, NAT64S_MALFORMED);
 		return -1;
 	}
 	if (emb_ihl > sizeof(struct rte_ipv4_hdr)) {
-		nat64s_stats_bump(stats, NAT64S_ICMP_UNSUPPORTED);
+		nat64s_stats_bump(prepared, NAT64S_ICMP_UNSUPPORTED);
 		return -1;
 	}
 
@@ -841,7 +945,7 @@ nat64s_handle_v4_error(
 		    &sport,
 		    &dport
 	    )) {
-		nat64s_stats_bump(stats, NAT64S_MALFORMED);
+		nat64s_stats_bump(prepared, NAT64S_MALFORMED);
 		return -1;
 	}
 
@@ -862,7 +966,7 @@ nat64s_handle_v4_error(
 	if (fwtable_lookup(
 		    prepared->wan.table, now, &key, &found, &lock, &from_stale
 	    ) < 0) {
-		nat64s_stats_bump(stats, NAT64S_WAN_STATE_MISS);
+		nat64s_stats_bump(prepared, NAT64S_WAN_STATE_MISS);
 		return -1;
 	}
 	const struct nat64state_value *session = found;
@@ -872,18 +976,23 @@ nat64s_handle_v4_error(
 	memcpy(src6, session->src6, 16);
 	memcpy(prefix, session->prefix, NAT64S_PREFIX_LEN);
 	nat64s_lookup_unlock(lock);
+	if (!nat64s_session_served(config, key.local_addr, prefix)) {
+		nat64s_stats_bump(prepared, NAT64S_SESSION_GONE);
+		return -1;
+	}
 
 	if (nat64s_patch_quoted_port(
 		    mbuf, emb_off + emb_ihl, proto, NAT64S_PORT_SOURCE, cli_port
 	    )) {
-		nat64s_stats_bump(stats, NAT64S_MALFORMED);
+		nat64s_stats_bump(prepared, NAT64S_MALFORMED);
 		return -1;
 	}
+	nat64s_patch_legacy_mtu(mbuf, packet->transport_header.offset, emb);
 
-	struct nat64_ctx ctx = nat64s_ctx(config);
+	struct nat64_ctx ctx = nat64s_ctx(config, prepared);
 	int rc = nat64_translate_v4_to_v6(&ctx, packet, prefix, src6);
 	if (rc == 0) {
-		nat64s_stats_bump(stats, NAT64S_TRANSLATED_V4_TO_V6);
+		nat64s_stats_bump(prepared, NAT64S_TRANSLATED_V4_TO_V6);
 	}
 	return rc;
 }
@@ -1087,9 +1196,8 @@ nat64s_handle_v6(
 	uint64_t now,
 	struct packet *packet
 ) {
-	uint64_t *stats = prepared->stats;
 	if (prepared->lan.table == NULL || prepared->wan.table == NULL) {
-		nat64s_stats_bump(stats, NAT64S_NO_STATE_LINK);
+		nat64s_stats_bump(prepared, NAT64S_NO_STATE_LINK);
 		return -1;
 	}
 
@@ -1103,14 +1211,16 @@ nat64s_handle_v6(
 	// are held to it before anything is looked up on their behalf.
 	//
 	// A source no router forwards is refused the same way, before it can
-	// take a session.
+	// take a session; so is a destination none is forwarded to, whatever
+	// prefix the configuration carries for it.
 	if (nat64s_dst_prefix(config, ipv6->src_addr) != NULL) {
-		nat64s_stats_bump(stats, NAT64S_HAIRPIN);
+		nat64s_stats_bump(prepared, NAT64S_HAIRPIN);
 		return -1;
 	}
-	if (nat64s_wkp_hides_non_global(ipv6->src_addr) ||
-	    !nat64s_source_forwardable(ipv6->src_addr)) {
-		nat64s_stats_bump(stats, NAT64S_NON_GLOBAL);
+	if (!nat64s_addr_forwardable(ipv6->src_addr) ||
+	    nat64s_wkp_hides_non_global(ipv6->src_addr) ||
+	    !nat64s_addr_forwardable(ipv6->dst_addr)) {
+		nat64s_stats_bump(prepared, NAT64S_NON_GLOBAL);
 		return -1;
 	}
 
@@ -1119,7 +1229,7 @@ nat64s_handle_v6(
 	}
 	if (packet->transport_header.type == IPPROTO_ICMPV6 &&
 	    !nat64s_is_icmp_echo(packet)) {
-		nat64s_stats_bump(stats, NAT64S_ICMP_UNSUPPORTED);
+		nat64s_stats_bump(prepared, NAT64S_ICMP_UNSUPPORTED);
 		return -1;
 	}
 
@@ -1129,7 +1239,7 @@ nat64s_handle_v6(
 	if (nat64s_transport_of(packet, &proto, &sport, &dport)) {
 		LOG_DBG(NAT64,
 			"nat64s: transport header not whole in the head\n");
-		nat64s_stats_bump(stats, NAT64S_MALFORMED);
+		nat64s_stats_bump(prepared, NAT64S_MALFORMED);
 		return -1;
 	}
 
@@ -1145,14 +1255,14 @@ nat64s_handle_v6(
 	if (prefix == NULL) {
 		// The destination embeds under no configured prefix: nothing
 		// to translate.
-		nat64s_stats_bump(stats, NAT64S_NO_PREFIX);
+		nat64s_stats_bump(prepared, NAT64S_NO_PREFIX);
 		return -1;
 	}
 	uint32_t remote_addr = 0;
 	rte_memcpy(&remote_addr, &ipv6->dst_addr[12], sizeof(remote_addr));
 	if (nat64s_wkp_hides_non_global(ipv6->dst_addr) ||
 	    !nat64s_dest_forwardable(remote_addr)) {
-		nat64s_stats_bump(stats, NAT64S_NON_GLOBAL);
+		nat64s_stats_bump(prepared, NAT64S_NON_GLOBAL);
 		return -1;
 	}
 
@@ -1179,18 +1289,22 @@ nat64s_handle_v6(
 		established = existing->tcp_established;
 		memcpy(value.prefix, existing->prefix, NAT64S_PREFIX_LEN);
 		nat64s_lookup_unlock(lock);
+		if (!nat64s_session_served(config, value.ip4, value.prefix)) {
+			nat64s_stats_bump(prepared, NAT64S_SESSION_GONE);
+			return -1;
+		}
 	} else {
 		// RFC 6146 3.5.2.2: IPv6-initiated TCP state is created by a
 		// SYN alone; any other first packet would let a spoofed
 		// sender fill the table with established-lifetime entries.
 		if (proto == IPPROTO_TCP &&
 		    !(nat64s_tcp_flags(packet) & RTE_TCP_SYN_FLAG)) {
-			nat64s_stats_bump(stats, NAT64S_NOT_SYN);
+			nat64s_stats_bump(prepared, NAT64S_NOT_SYN);
 			return -1;
 		}
 		uint32_t *pool = ADDR_OF(&config->pool.pool);
 		if (config->pool.count == 0) {
-			nat64s_stats_bump(stats, NAT64S_POOL_EMPTY);
+			nat64s_stats_bump(prepared, NAT64S_POOL_EMPTY);
 			return -1;
 		}
 		struct nat64s_client_tuple client = {
@@ -1267,7 +1381,7 @@ nat64s_handle_v6(
 	    !nat64s_probe_wan_port(
 		    prepared, config, now, &wan_key, &value.port, &identity
 	    )) {
-		nat64s_stats_bump(stats, NAT64S_INSERT_FAILED);
+		nat64s_stats_bump(prepared, NAT64S_INSERT_FAILED);
 		return -1;
 	}
 	struct nat64state_value wan_value = {0};
@@ -1287,10 +1401,10 @@ nat64s_handle_v6(
 	// never leaves stays spent for as long as the layer lives.
 	if (value.port != sport &&
 	    nat64s_patch_source_port(packet, value.port)) {
-		nat64s_stats_bump(stats, NAT64S_MALFORMED);
+		nat64s_stats_bump(prepared, NAT64S_MALFORMED);
 		return -1;
 	}
-	struct nat64_ctx ctx = nat64s_ctx(config);
+	struct nat64_ctx ctx = nat64s_ctx(config, prepared);
 	if (nat64_translate_v6_to_v4(&ctx, packet, value.ip4) != 0) {
 		return -1;
 	}
@@ -1311,7 +1425,7 @@ nat64s_handle_v6(
 	);
 	if (wan_idx < 0) {
 		nat64s_insert_unlock(lock);
-		nat64s_stats_bump(stats, NAT64S_INSERT_FAILED);
+		nat64s_stats_bump(prepared, NAT64S_INSERT_FAILED);
 		return -1;
 	}
 	// Two first packets can race onto a tuple both found free, and the
@@ -1330,7 +1444,7 @@ nat64s_handle_v6(
 		same_layer && nat64s_entry_established(wan_layer, wan_idx);
 	rwlock_write_unlock(lock);
 	if (!owned) {
-		nat64s_stats_bump(stats, NAT64S_INSERT_FAILED);
+		nat64s_stats_bump(prepared, NAT64S_INSERT_FAILED);
 		return -1;
 	}
 
@@ -1351,19 +1465,19 @@ nat64s_handle_v6(
 			    &lock
 		    ) < 0) {
 			nat64s_insert_unlock(lock);
-			nat64s_stats_bump(stats, NAT64S_INSERT_FAILED);
+			nat64s_stats_bump(prepared, NAT64S_INSERT_FAILED);
 			return -1;
 		}
 		rwlock_write_unlock(lock);
 	}
 
 	if (!nat64s_insert_latched(prepared->lan.table, &key, &value, &view)) {
-		nat64s_stats_bump(stats, NAT64S_INSERT_FAILED);
+		nat64s_stats_bump(prepared, NAT64S_INSERT_FAILED);
 		return -1;
 	}
 
 	// Both entries stand behind the packet already translated.
-	nat64s_stats_bump(stats, NAT64S_TRANSLATED_V6_TO_V4);
+	nat64s_stats_bump(prepared, NAT64S_TRANSLATED_V6_TO_V4);
 	return 0;
 }
 
@@ -1378,9 +1492,8 @@ nat64s_handle_v4(
 	uint64_t now,
 	struct packet *packet
 ) {
-	uint64_t *stats = prepared->stats;
 	if (prepared->wan.table == NULL) {
-		nat64s_stats_bump(stats, NAT64S_NO_STATE_LINK);
+		nat64s_stats_bump(prepared, NAT64S_NO_STATE_LINK);
 		return -1;
 	}
 
@@ -1394,7 +1507,7 @@ nat64s_handle_v4(
 	}
 	if (packet->transport_header.type == IPPROTO_ICMP &&
 	    !nat64s_is_icmp_echo(packet)) {
-		nat64s_stats_bump(stats, NAT64S_ICMP_UNSUPPORTED);
+		nat64s_stats_bump(prepared, NAT64S_ICMP_UNSUPPORTED);
 		return -1;
 	}
 
@@ -1404,7 +1517,7 @@ nat64s_handle_v4(
 	if (nat64s_transport_of(packet, &proto, &sport, &dport)) {
 		LOG_DBG(NAT64,
 			"nat64s: transport header not whole in the head\n");
-		nat64s_stats_bump(stats, NAT64S_MALFORMED);
+		nat64s_stats_bump(prepared, NAT64S_MALFORMED);
 		return -1;
 	}
 
@@ -1422,7 +1535,7 @@ nat64s_handle_v4(
 	if (fwtable_lookup(
 		    prepared->wan.table, now, &key, &found, &lock, &from_stale
 	    ) < 0) {
-		nat64s_stats_bump(stats, NAT64S_WAN_STATE_MISS);
+		nat64s_stats_bump(prepared, NAT64S_WAN_STATE_MISS);
 		return -1;
 	}
 	const struct nat64state_value *session = found;
@@ -1433,6 +1546,10 @@ nat64s_handle_v4(
 	rte_memcpy(src6, session->src6, sizeof(src6));
 	rte_memcpy(prefix, session->prefix, sizeof(prefix));
 	nat64s_lookup_unlock(lock);
+	if (!nat64s_session_served(config, key.local_addr, prefix)) {
+		nat64s_stats_bump(prepared, NAT64S_SESSION_GONE);
+		return -1;
+	}
 
 	// Establishment latches here too: the remote's SYN answering the
 	// handshake moves the session onto the established timeout.
@@ -1455,10 +1572,10 @@ nat64s_handle_v4(
 	// packet must not keep a session alive: a remote would else hold a
 	// half-open mapping with packets that never reach the client.
 	if (cli_port != dport && nat64s_patch_dest_port(packet, cli_port)) {
-		nat64s_stats_bump(stats, NAT64S_MALFORMED);
+		nat64s_stats_bump(prepared, NAT64S_MALFORMED);
 		return -1;
 	}
-	struct nat64_ctx ctx = nat64s_ctx(config);
+	struct nat64_ctx ctx = nat64s_ctx(config, prepared);
 	if (nat64_translate_v4_to_v6(&ctx, packet, prefix, src6) != 0) {
 		return -1;
 	}
@@ -1470,10 +1587,13 @@ nat64s_handle_v4(
 	refresh.updated_at = now;
 	refresh.cli_port = cli_port;
 	rte_memcpy(refresh.src6, src6, sizeof(src6));
+	// The prefix travels with the refresh: landing in an empty slot,
+	// the entry must still name the session's own.
+	rte_memcpy(refresh.prefix, prefix, sizeof(refresh.prefix));
 	if (!nat64s_insert_latched(
 		    prepared->wan.table, &key, &refresh, &view
 	    )) {
-		nat64s_stats_bump(stats, NAT64S_INSERT_FAILED);
+		nat64s_stats_bump(prepared, NAT64S_INSERT_FAILED);
 		return -1;
 	}
 
@@ -1526,13 +1646,13 @@ nat64s_handle_v4(
 		if (!nat64s_insert_latched(
 			    prepared->lan.table, &lan_key, &lan_refresh, &view
 		    )) {
-			nat64s_stats_bump(stats, NAT64S_INSERT_FAILED);
+			nat64s_stats_bump(prepared, NAT64S_INSERT_FAILED);
 			return -1;
 		}
 	}
 
 	// Both entries stand behind the packet already translated.
-	nat64s_stats_bump(stats, NAT64S_TRANSLATED_V4_TO_V6);
+	nat64s_stats_bump(prepared, NAT64S_TRANSLATED_V4_TO_V6);
 	return 0;
 }
 
@@ -1561,7 +1681,7 @@ nat64s_handle_packets(
 		// rest.
 		if (packet->fragment_offset != 0 ||
 		    (packet->flags & (1 << PACKET_FLAG_FRAGMENTED)) != 0) {
-			nat64s_stats_bump(prepared->stats, NAT64S_FRAGMENTED);
+			nat64s_stats_bump(prepared, NAT64S_FRAGMENTED);
 			result = -1;
 		} else if (packet->network_header.type ==
 			   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
@@ -1583,8 +1703,8 @@ nat64s_handle_packets(
 	}
 }
 
-// Resolve the linked map objects into per-worker table links and cache the
-// config's stats block.
+// Resolve the linked map objects into per-worker table links, and the
+// config's counters into the worker's own storage.
 static void
 nat64s_module_commit_ectx(
 	struct module_ectx *module_ectx, struct cp_module *cp_module
@@ -1596,7 +1716,21 @@ nat64s_module_commit_ectx(
 	if (prepared == NULL) {
 		return;
 	}
-	prepared->stats = config->stats;
+	// A counter the worker's storage does not carry counts into the
+	// block's own slot, where it is lost.
+	//
+	// The shared core increments its counter through the address it is
+	// given, so none of the addresses may stay null.
+	prepared->unset = 0;
+	for (size_t slot = 0; slot < NAT64S_STAT_COUNT; ++slot) {
+		prepared->stats[slot] = counter_get_address(
+			config->counter_ids[slot],
+			module_ectx->abs_counter_storage
+		);
+		if (prepared->stats[slot] == NULL) {
+			prepared->stats[slot] = &prepared->unset;
+		}
+	}
 
 	struct cp_object *map_object = NULL;
 	if (config->map_object_link_idx != NAT64S_OBJECT_LINK_NONE) {

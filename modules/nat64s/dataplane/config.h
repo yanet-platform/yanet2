@@ -1,6 +1,5 @@
 #pragma once
 
-#include <stdatomic.h>
 #include <stdint.h>
 
 #include "lib/controlplane/config/cp_module.h"
@@ -14,7 +13,7 @@
 // external tuple before giving up.
 #define NAT64S_MAX_PORT_PROBES 64
 
-/* Counter slots of the stats array */
+/* Slots of the module's counters, each registered by name at creation */
 enum nat64s_stat {
 	NAT64S_TRANSLATED_V6_TO_V4 = 0,
 	NAT64S_TRANSLATED_V4_TO_V6,
@@ -29,6 +28,7 @@ enum nat64s_stat {
 	NAT64S_MALFORMED,
 	NAT64S_ICMP_UNSUPPORTED,
 	NAT64S_NON_GLOBAL,
+	NAT64S_SESSION_GONE,
 	NAT64S_STAT_COUNT,
 };
 
@@ -43,10 +43,11 @@ enum nat64s_stat {
  * session keeps that prefix for its return traffic. Under the Well-Known
  * Prefix a source or destination standing for an address of a block no
  * global traffic uses is refused, whatever the configuration carries
- * (RFC 6052 3.1). A source no router forwards — the unspecified, the
- * loopback, a link-local or a multicast address — and a destination
- * standing for an address no unicast packet can be sent to are refused
- * under every prefix, before they can take a session.
+ * (RFC 6052 3.1). A source or destination no router forwards a packet
+ * under — the unspecified, the loopback, a link-local, a multicast or an
+ * IPv4-mapped address — and a destination standing for an IPv4 address
+ * no unicast packet can be sent to are refused under every prefix, before
+ * they can take a session.
  *
  * Of ICMP only errors and echoes cross: any other message is dropped
  * before it could take a session, as the translation could not carry it.
@@ -59,6 +60,11 @@ enum nat64s_stat {
  * IPv4 flow. A NULL table (no link) makes the module drop every packet,
  * counting it: without sessions stateful translation cannot answer the
  * return path.
+ *
+ * A session is served while its public address is one of the pool's and
+ * its prefix one of the configured ones. An update that takes either away
+ * leaves the session unserved on both sides, its packets dropped and
+ * counted, for as long as its entries live.
  *
  * Ports translate inside the configured window: a source port already
  * inside it is kept, any other is rewritten to a hash-derived port of the
@@ -78,8 +84,8 @@ struct nat64s_module_config {
 		uint64_t count;
 	} prefixes;
 
-	/* Public IPv4 pool in network byte order, allocated in the module's
-	 * memory context */
+	/* Public IPv4 pool in network byte order, kept sorted, allocated in
+	 * the module's memory context */
 	struct {
 		uint32_t *pool;
 		uint64_t count;
@@ -103,16 +109,20 @@ struct nat64s_module_config {
 	 * when the config declared none */
 	uint64_t map_object_link_idx;
 
-	/* Runtime statistics, updated with relaxed atomics */
-	uint64_t stats[NAT64S_STAT_COUNT];
+	/* Ids of the module's counters in its counter registry, one per slot
+	 * of enum nat64s_stat */
+	uint64_t counter_ids[NAT64S_STAT_COUNT];
 };
 
-/* Per-worker state resolved from the linked objects at ectx build time:
- * the lan and wan tables with their stash links, and the cached stats
- * block of the config. A NULL table on either side drops the packets of
- * that direction. */
+/* Per-worker state resolved at ectx build time: the lan and wan tables of
+ * the linked objects with their stash links, and the worker's own
+ * counters. A NULL table on either side drops the packets of that
+ * direction. */
 struct nat64s_prepared {
 	struct fwstate_map_link lan;
 	struct fwstate_map_link wan;
-	uint64_t *stats;
+	/* One address per slot of enum nat64s_stat */
+	uint64_t *stats[NAT64S_STAT_COUNT];
+	/* Where a counter the worker's storage does not carry is counted */
+	uint64_t unset;
 };

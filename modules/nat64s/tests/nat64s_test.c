@@ -15,6 +15,7 @@
 #include "lib/dataplane/config/zone.h"
 #include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/packet/icmp.h"
+#include "lib/dataplane/pipeline/econtext.h"
 #include "lib/dataplane_ut/dataplane_ut.h"
 #include "lib/dataplane_ut/mempool.h"
 #include "lib/logging/log.h"
@@ -58,6 +59,13 @@ static const uint8_t well_known_prefixes[2][12] = {
 	{0x00, 0x64, 0xff, 0x9b, 0, 0, 0, 0, 0, 0, 0, 0},
 	{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0x64},
 };
+// A multicast prefix, ff0e::/96, in place of the suite's first one: the
+// configuration is refused it at validation, and the dataplane refuses a
+// multicast destination under any prefix, this one included.
+static const uint8_t multicast_prefixes[2][12] = {
+	{0xff, 0x0e, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+	{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0x64},
+};
 // Pool: 198.51.100.1 (TEST-NET-2).
 static const uint32_t pool_addrs[1] = {RTE_BE32(RTE_IPV4(198, 51, 100, 1))};
 // Client 2001:db8::1 and remote 192.0.2.34 (TEST-NET-1).
@@ -67,6 +75,18 @@ static const uint8_t client_addr[16] = {
 static const uint32_t remote_addr = RTE_BE32(RTE_IPV4(192, 0, 2, 34));
 // Another address of the pool, one no session is ever translated to.
 static const uint32_t other_pool_addr = RTE_BE32(RTE_IPV4(198, 51, 100, 9));
+// A pool of that other address alone.
+static const uint32_t other_pool[1] = {other_pool_addr};
+// Both addresses of the suite's pools, the greater one first: the module
+// is given the pool as it is, and sorts it itself.
+static const uint32_t both_pools[2] = {other_pool_addr, pool_addrs[0]};
+// The suite's address and one numerically greater whose last octet is the
+// smaller: the two orders part here, and only the one the shared memory
+// holds is the module's.
+static const uint32_t wider_pool[2] = {
+	RTE_BE32(RTE_IPV4(198, 51, 101, 0)),
+	pool_addrs[0],
+};
 // The same remote as bytes, for the parameterized SYN builder.
 static const uint8_t remote4[4] = {192, 0, 2, 34};
 #define CLIENT_PORT 50000
@@ -85,16 +105,42 @@ struct nat64s_env {
 	struct nat64s_module_config *config;
 };
 
+// The quoted packet lengths the zero-MTU scenario sends, each with the
+// IPv6 MTU it must yield.
+//
+// A length one byte either side of a plateau value pins which side of it
+// each value lies on.
+static const struct {
+	uint16_t total_length;
+	uint32_t ipv6_mtu;
+} quoted_lengths[] = {
+	{1500, 1512},
+	{1492, 1280},
+	{1493, 1512},
+	{2002, 1512},
+	{2003, 2022},
+	{1400, 1280},
+};
+
 // The session knobs one harness round is configured with.
 struct nat64s_env_settings {
 	uint32_t port_lo;
 	uint32_t port_hi;
 	struct nat64state_timeouts timeouts;
-	// The IPv6 MTU limit of the round; zero leaves the default.
+	// The MTU limits of the round; zero leaves each default.
+	uint32_t mtu_ipv4;
 	uint32_t mtu_ipv6;
 	// Whether the config carries the Well-Known Prefix in place of the
 	// suite's first one.
 	bool well_known;
+	// Whether the config carries the multicast prefix in place of the
+	// suite's first one.
+	bool multicast_prefix;
+	// Whether the config carries the suite's second prefix alone.
+	bool second_prefix_only;
+	// The pool of the round; NULL leaves the suite's single address.
+	const uint32_t *pool;
+	uint64_t pool_count;
 };
 
 // The suite's own settings. The client's port (50000) falls outside the
@@ -105,22 +151,77 @@ static const struct nat64s_env_settings nat64s_suite_settings = {
 	.timeouts = {.timeout = 300, .tcp_established = 300},
 };
 
-// The module update carrying one settings block over the suite's fixed
-// prefixes, pool and map link.
+// The module update carrying one settings block over the suite's map link.
 static struct nat64s_module_update
 nat64s_env_update(const struct nat64s_env_settings *settings) {
+	const uint8_t *first = prefixes[0];
+	if (settings->well_known) {
+		first = well_known_prefixes[0];
+	} else if (settings->multicast_prefix) {
+		first = multicast_prefixes[0];
+	}
 	return (struct nat64s_module_update){
-		.prefixes = settings->well_known ? well_known_prefixes[0]
-						 : prefixes[0],
-		.prefix_count = 2,
-		.pool = pool_addrs,
-		.pool_count = 1,
+		.prefixes = settings->second_prefix_only ? prefixes[1] : first,
+		.prefix_count = settings->second_prefix_only ? 1 : 2,
+		.pool = settings->pool != NULL ? settings->pool : pool_addrs,
+		.pool_count = settings->pool != NULL ? settings->pool_count : 1,
 		.port_lo = settings->port_lo,
 		.port_hi = settings->port_hi,
 		.timeouts = settings->timeouts,
+		.mtu_ipv4 = (uint16_t)settings->mtu_ipv4,
 		.mtu_ipv6 = (uint16_t)settings->mtu_ipv6,
 		.map_name = "sessions",
 	};
+}
+// The suite's module as worker 0's published context holds it: the block
+// its counters were resolved into when that context was built.
+static struct nat64s_prepared *
+nat64s_test_prepared(struct nat64s_env *env) {
+	struct config_gen_ectx *generation = (struct config_gen_ectx *)
+		dataplane_ut_published_ectx(env->ut, 0);
+	if (generation == NULL) {
+		return NULL;
+	}
+	struct device_ectx *device = config_gen_ectx_get_device(generation, 0);
+	if (device == NULL || device->abs_input_pipelines == NULL) {
+		return NULL;
+	}
+	struct device_entry_ectx *entry = device->abs_input_pipelines;
+	for (size_t p = 0; p < entry->pipeline_count; ++p) {
+		const struct pipeline_ectx *pipeline = entry->abs_pipelines[p];
+		for (size_t f = 0; f < pipeline->length; ++f) {
+			const struct function_ectx *function =
+				pipeline->functions[f];
+			for (size_t c = 0; c < function->chain_count; ++c) {
+				const struct chain_ectx *chain =
+					function->abs_chains[c];
+				for (size_t m = 0; m < chain->length; ++m) {
+					const struct module_ectx *module =
+						chain->modules[m];
+					if (module->abs_cp_module ==
+					    &env->config->cp_module) {
+						return module
+							->abs_module_prepared;
+					}
+				}
+			}
+		}
+	}
+	return NULL;
+}
+
+// One counter of the suite's module, as worker 0 counted it.
+//
+// The worker counts in its own storage, so a scenario reads the counter
+// through the worker's block; a module the worker's context does not carry
+// reads as zero, which the scenario's own expectation then catches.
+static uint64_t
+nat64s_stat(struct nat64s_env *env, enum nat64s_stat stat) {
+	struct nat64s_prepared *prepared = nat64s_test_prepared(env);
+	if (prepared == NULL || prepared->stats[stat] == NULL) {
+		return 0;
+	}
+	return *prepared->stats[stat];
 }
 
 static int
@@ -712,6 +813,61 @@ nat64s_make_v4_frag_needed_with_ip_options(
 	return TEST_SUCCESS;
 }
 
+// Build the remote's Fragmentation Needed error around a quoted packet
+// of the given total length — its IPv4 and TCP headers, then zero payload
+// — with no next-hop MTU in it, as a router implementing no RFC 1191
+// sends the error.
+static int
+nat64s_make_v4_frag_needed_without_mtu(
+	struct nat64s_env *env,
+	uint16_t allocated_port,
+	uint16_t total_length,
+	struct packet **out
+) {
+	struct packet *packet = NULL;
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_frag_needed(env, allocated_port, &packet),
+		"build failed"
+	);
+	size_t headers =
+		sizeof(struct rte_ipv4_hdr) + sizeof(struct rte_tcp_hdr);
+	TEST_ASSERT(
+		total_length >= headers, "the quote is shorter than its headers"
+	);
+	uint8_t *payload = (uint8_t *)rte_pktmbuf_append(
+		packet_to_mbuf(packet), total_length - headers
+	);
+	TEST_ASSERT_NOT_NULL(payload, "packet payload allocation failed");
+	memset(payload, 0, total_length - headers);
+
+	struct rte_ipv4_hdr *outer = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(packet),
+		struct rte_ipv4_hdr *,
+		packet->network_header.offset
+	);
+	outer->total_length = rte_cpu_to_be_16(
+		rte_be_to_cpu_16(outer->total_length) + total_length - headers
+	);
+	struct rte_ipv4_hdr *emb = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(packet),
+		struct rte_ipv4_hdr *,
+		packet->transport_header.offset + sizeof(struct rte_icmp_hdr)
+	);
+	emb->total_length = rte_cpu_to_be_16(total_length);
+	struct yanet_icmp_hdr *icmp = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(packet),
+		struct yanet_icmp_hdr *,
+		packet->transport_header.offset
+	);
+	TEST_ASSERT_EQUAL(
+		icmp->yanet_icmp_nextmtu,
+		(rte_be16_t)0,
+		"the error must carry no next-hop MTU"
+	);
+	*out = packet;
+	return TEST_SUCCESS;
+}
+
 // Build a parsed ICMPv4 Destination Unreachable error from the remote,
 // quoting the translated outbound echo request of an echo session.
 static int
@@ -978,7 +1134,7 @@ test_refused_return_packet_refreshes_nothing(struct nat64s_env *env) {
 	// The remote's reply with a source-route option is dropped, and is
 	// no translation.
 	dataplane_ut_set_time_ns(env->ut, now + 250 * sec);
-	uint64_t translated = env->config->stats[NAT64S_TRANSLATED_V4_TO_V6];
+	uint64_t translated = nat64s_stat(env, NAT64S_TRANSLATED_V4_TO_V6);
 	TEST_ASSERT_SUCCESS(
 		nat64s_make_v4_reply_with_option(env, port, 0x83, &in),
 		"build failed"
@@ -991,7 +1147,7 @@ test_refused_return_packet_refreshes_nothing(struct nat64s_env *env) {
 		dropped, "a reply with a source-route option must be dropped"
 	);
 	TEST_ASSERT_EQUAL(
-		env->config->stats[NAT64S_TRANSLATED_V4_TO_V6],
+		nat64s_stat(env, NAT64S_TRANSLATED_V4_TO_V6),
 		translated,
 		"a refused packet is no translation"
 	);
@@ -1082,7 +1238,7 @@ test_outbound_creates_session(struct nat64s_env *env) {
 	rte_pktmbuf_free(mbuf);
 
 	TEST_ASSERT_EQUAL(
-		env->config->stats[NAT64S_TRANSLATED_V6_TO_V4],
+		nat64s_stat(env, NAT64S_TRANSLATED_V6_TO_V4),
 		1,
 		"the translation counter must count the SYN"
 	);
@@ -1132,7 +1288,7 @@ test_return_uses_session(struct nat64s_env *env) {
 	rte_pktmbuf_free(mbuf);
 
 	TEST_ASSERT_EQUAL(
-		env->config->stats[NAT64S_TRANSLATED_V4_TO_V6],
+		nat64s_stat(env, NAT64S_TRANSLATED_V4_TO_V6),
 		1,
 		"the translation counter must count the reply"
 	);
@@ -1178,7 +1334,7 @@ test_unknown_tuple_dropped(struct nat64s_env *env) {
 	TEST_ASSERT_NULL(out, "an unknown tuple must not be translated");
 	TEST_ASSERT(dropped, "an unknown tuple must be dropped");
 	TEST_ASSERT_EQUAL(
-		env->config->stats[NAT64S_WAN_STATE_MISS],
+		nat64s_stat(env, NAT64S_WAN_STATE_MISS),
 		1,
 		"the miss counter must count the unknown tuple"
 	);
@@ -2580,7 +2736,7 @@ test_unsupported_icmp_type_takes_no_session(struct nat64s_env *env) {
 		packet_to_mbuf(in), uint8_t *, in->transport_header.offset
 	);
 	*type = 139; // node information query
-	uint64_t refused = env->config->stats[NAT64S_ICMP_UNSUPPORTED];
+	uint64_t refused = nat64s_stat(env, NAT64S_ICMP_UNSUPPORTED);
 	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
 	TEST_ASSERT(
 		dropped,
@@ -2599,7 +2755,7 @@ test_unsupported_icmp_type_takes_no_session(struct nat64s_env *env) {
 		dropped, "the answer must be dropped for want of a session"
 	);
 	TEST_ASSERT_EQUAL(
-		env->config->stats[NAT64S_ICMP_UNSUPPORTED],
+		nat64s_stat(env, NAT64S_ICMP_UNSUPPORTED),
 		refused + 1,
 		"the dropped message must be counted"
 	);
@@ -2621,7 +2777,7 @@ test_unsupported_icmp_type_takes_no_session(struct nat64s_env *env) {
 		packet_to_mbuf(in), uint8_t *, in->transport_header.offset
 	);
 	*reply_type = 13; // timestamp request
-	refused = env->config->stats[NAT64S_ICMP_UNSUPPORTED];
+	refused = nat64s_stat(env, NAT64S_ICMP_UNSUPPORTED);
 	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
 	TEST_ASSERT_NULL(
 		out,
@@ -2629,7 +2785,7 @@ test_unsupported_icmp_type_takes_no_session(struct nat64s_env *env) {
 		"be dropped"
 	);
 	TEST_ASSERT_EQUAL(
-		env->config->stats[NAT64S_ICMP_UNSUPPORTED],
+		nat64s_stat(env, NAT64S_ICMP_UNSUPPORTED),
 		refused + 1,
 		"the dropped message must be counted"
 	);
@@ -2941,7 +3097,7 @@ test_hairpinned_error_dropped(struct nat64s_env *env) {
 	memcpy(ipv6->src_addr, nat64_prefix, 12);
 	memcpy(&ipv6->src_addr[12], remote4, 4);
 
-	uint64_t hairpin_before = env->config->stats[NAT64S_HAIRPIN];
+	uint64_t hairpin_before = nat64s_stat(env, NAT64S_HAIRPIN);
 	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
 	TEST_ASSERT(
 		dropped,
@@ -2949,7 +3105,7 @@ test_hairpinned_error_dropped(struct nat64s_env *env) {
 	);
 	TEST_ASSERT_NULL(out, "a hairpinned error must not be translated");
 	TEST_ASSERT_EQUAL(
-		env->config->stats[NAT64S_HAIRPIN],
+		nat64s_stat(env, NAT64S_HAIRPIN),
 		hairpin_before + 1,
 		"the hairpin counter must count the error"
 	);
@@ -2974,7 +3130,7 @@ test_client_error_quoting_options_refused(struct nat64s_env *env) {
 		),
 		"build failed"
 	);
-	uint64_t unsupported = env->config->stats[NAT64S_ICMP_UNSUPPORTED];
+	uint64_t unsupported = nat64s_stat(env, NAT64S_ICMP_UNSUPPORTED);
 	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
 	TEST_ASSERT(
 		dropped,
@@ -2983,7 +3139,7 @@ test_client_error_quoting_options_refused(struct nat64s_env *env) {
 	);
 	TEST_ASSERT_NULL(out, "the error must not be translated");
 	TEST_ASSERT_EQUAL(
-		env->config->stats[NAT64S_ICMP_UNSUPPORTED],
+		nat64s_stat(env, NAT64S_ICMP_UNSUPPORTED),
 		unsupported + 1,
 		"the error must be counted as one the translation cannot carry"
 	);
@@ -3009,7 +3165,7 @@ test_remote_error_quoting_ip_options_refused(struct nat64s_env *env) {
 		),
 		"build failed"
 	);
-	uint64_t unsupported = env->config->stats[NAT64S_ICMP_UNSUPPORTED];
+	uint64_t unsupported = nat64s_stat(env, NAT64S_ICMP_UNSUPPORTED);
 	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
 	TEST_ASSERT(
 		dropped,
@@ -3017,7 +3173,7 @@ test_remote_error_quoting_ip_options_refused(struct nat64s_env *env) {
 	);
 	TEST_ASSERT_NULL(out, "the error must not be translated");
 	TEST_ASSERT_EQUAL(
-		env->config->stats[NAT64S_ICMP_UNSUPPORTED],
+		nat64s_stat(env, NAT64S_ICMP_UNSUPPORTED),
 		unsupported + 1,
 		"the error must be counted as one the translation cannot carry"
 	);
@@ -3034,7 +3190,7 @@ test_remote_error_quoting_ip_options_refused(struct nat64s_env *env) {
 		in->transport_header.offset + sizeof(struct rte_icmp_hdr)
 	);
 	cut_short->version_ihl = RTE_IPV4_VHL_DEF - 1;
-	uint64_t malformed = env->config->stats[NAT64S_MALFORMED];
+	uint64_t malformed = nat64s_stat(env, NAT64S_MALFORMED);
 	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
 	TEST_ASSERT(
 		dropped,
@@ -3042,12 +3198,12 @@ test_remote_error_quoting_ip_options_refused(struct nat64s_env *env) {
 	);
 	TEST_ASSERT_NULL(out, "the error must not be translated");
 	TEST_ASSERT_EQUAL(
-		env->config->stats[NAT64S_MALFORMED],
+		nat64s_stat(env, NAT64S_MALFORMED),
 		malformed + 1,
 		"the error must be counted as malformed"
 	);
 	TEST_ASSERT_EQUAL(
-		env->config->stats[NAT64S_ICMP_UNSUPPORTED],
+		nat64s_stat(env, NAT64S_ICMP_UNSUPPORTED),
 		unsupported + 1,
 		"a malformed quote is not one the translation cannot carry"
 	);
@@ -3192,7 +3348,7 @@ test_split_transport_header_refused(struct nat64s_env *env) {
 	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
 	TEST_ASSERT(!dropped, "the SYN must not be dropped");
 	rte_pktmbuf_free(packet_to_mbuf(out));
-	uint64_t malformed = env->config->stats[NAT64S_MALFORMED];
+	uint64_t malformed = nat64s_stat(env, NAT64S_MALFORMED);
 
 	// The client's ACK.
 	TEST_ASSERT_SUCCESS(nat64s_make_v6_syn(env, port, &in), "build failed");
@@ -3224,7 +3380,7 @@ test_split_transport_header_refused(struct nat64s_env *env) {
 		dropped, "a return packet whose header is split must be dropped"
 	);
 	TEST_ASSERT_EQUAL(
-		env->config->stats[NAT64S_MALFORMED],
+		nat64s_stat(env, NAT64S_MALFORMED),
 		malformed + 2,
 		"the refused packets must be counted"
 	);
@@ -3262,12 +3418,12 @@ test_first_fragment_refused(struct nat64s_env *env) {
 		in->fragment_offset, 0, "the first fragment's offset is zero"
 	);
 
-	uint64_t refused = env->config->stats[NAT64S_FRAGMENTED];
+	uint64_t refused = nat64s_stat(env, NAT64S_FRAGMENTED);
 	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
 	TEST_ASSERT_NULL(out, "the first fragment must not translate");
 	TEST_ASSERT(dropped, "the first fragment must be dropped");
 	TEST_ASSERT_EQUAL(
-		env->config->stats[NAT64S_FRAGMENTED],
+		nat64s_stat(env, NAT64S_FRAGMENTED),
 		refused + 1,
 		"the refused fragment must be counted"
 	);
@@ -3567,14 +3723,14 @@ test_refused_translation_takes_no_session(struct nat64s_env *env) {
 		IPPROTO_TCP,
 		"the TCP header must be found past the routing header"
 	);
-	uint64_t translated = env->config->stats[NAT64S_TRANSLATED_V6_TO_V4];
+	uint64_t translated = nat64s_stat(env, NAT64S_TRANSLATED_V6_TO_V4);
 	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
 	TEST_ASSERT_NULL(
 		out, "a SYN the translation refuses must not be forwarded"
 	);
 	TEST_ASSERT(dropped, "a SYN the translation refuses must be dropped");
 	TEST_ASSERT_EQUAL(
-		env->config->stats[NAT64S_TRANSLATED_V6_TO_V4],
+		nat64s_stat(env, NAT64S_TRANSLATED_V6_TO_V4),
 		translated,
 		"a refused packet is no translation"
 	);
@@ -3703,7 +3859,7 @@ test_exhausted_window_drops_new_flow(struct nat64s_env *env) {
 		nat64s_make_v6_syn_from(env, fifth_client, 3000, remote4, &in),
 		"build failed"
 	);
-	uint64_t failed_before = env->config->stats[NAT64S_INSERT_FAILED];
+	uint64_t failed_before = nat64s_stat(env, NAT64S_INSERT_FAILED);
 	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
 	TEST_ASSERT(
 		dropped,
@@ -3711,7 +3867,7 @@ test_exhausted_window_drops_new_flow(struct nat64s_env *env) {
 	);
 	TEST_ASSERT_NULL(out, "an unplaceable flow must not be translated");
 	TEST_ASSERT_EQUAL(
-		env->config->stats[NAT64S_INSERT_FAILED],
+		nat64s_stat(env, NAT64S_INSERT_FAILED),
 		failed_before + 1,
 		"the insert-failed counter must count the unplaceable flow"
 	);
@@ -3752,8 +3908,7 @@ test_full_table_refuses_without_wedging(struct nat64s_env *env) {
 
 	// In-window source ports are kept, so every flow takes a port of its
 	// own and none is refused for a taken tuple.
-	const uint64_t refused_before =
-		env->config->stats[NAT64S_INSERT_FAILED];
+	const uint64_t refused_before = nat64s_stat(env, NAT64S_INSERT_FAILED);
 	uint64_t refused = refused_before;
 	uint16_t port = 1024;
 	size_t opened = 0;
@@ -3767,7 +3922,7 @@ test_full_table_refuses_without_wedging(struct nat64s_env *env) {
 		TEST_ASSERT_SUCCESS(
 			nat64s_run(env, in, &out, &dropped), "run failed"
 		);
-		refused = env->config->stats[NAT64S_INSERT_FAILED];
+		refused = nat64s_stat(env, NAT64S_INSERT_FAILED);
 		if (refused == refused_before) {
 			TEST_ASSERT(
 				!dropped,
@@ -3799,7 +3954,7 @@ test_full_table_refuses_without_wedging(struct nat64s_env *env) {
 	);
 	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
 	TEST_ASSERT_EQUAL(
-		env->config->stats[NAT64S_INSERT_FAILED],
+		nat64s_stat(env, NAT64S_INSERT_FAILED),
 		refused_before + 2,
 		"the refused flow must be refused again"
 	);
@@ -3946,14 +4101,14 @@ test_well_known_prefix_refuses_non_global(struct nat64s_env *env) {
 		"build failed"
 	);
 	nat64s_test_under_well_known_prefix(in);
-	uint64_t refused = env->config->stats[NAT64S_NON_GLOBAL];
+	uint64_t refused = nat64s_stat(env, NAT64S_NON_GLOBAL);
 	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
 	TEST_ASSERT(
 		dropped,
 		"a private address under the Well-Known Prefix must be refused"
 	);
 	TEST_ASSERT_EQUAL(
-		env->config->stats[NAT64S_NON_GLOBAL],
+		nat64s_stat(env, NAT64S_NON_GLOBAL),
 		refused + 1,
 		"the refused destination must be counted"
 	);
@@ -4025,7 +4180,7 @@ test_well_known_prefix_refuses_non_global(struct nat64s_env *env) {
 	memcpy(hidden_source + NAT64S_PREFIX_LEN,
 	       private_source,
 	       sizeof(private_source));
-	refused = env->config->stats[NAT64S_NON_GLOBAL];
+	refused = nat64s_stat(env, NAT64S_NON_GLOBAL);
 	TEST_ASSERT_SUCCESS(
 		nat64s_make_v6_syn_from(env, hidden_source, 2027, remote4, &in),
 		"build failed"
@@ -4037,16 +4192,17 @@ test_well_known_prefix_refuses_non_global(struct nat64s_env *env) {
 		"must be refused"
 	);
 	TEST_ASSERT_EQUAL(
-		env->config->stats[NAT64S_NON_GLOBAL],
+		nat64s_stat(env, NAT64S_NON_GLOBAL),
 		refused + 1,
 		"the refused source must be counted"
 	);
 	return TEST_SUCCESS;
 }
 
-// A client packet sourced from an address no router forwards, or sent to
-// one no unicast packet can be sent to, is refused before it can take a
-// session: neither table holds an entry for it.
+// A client packet sourced from an address no router forwards — the
+// unspecified, loopback, link-local, multicast or IPv4-mapped ones — or
+// sent to one no unicast packet can be sent to is refused before it can
+// take a session: neither table holds an entry for it.
 //
 // The translation would give such a packet a pool source and a routable
 // remote, letting through what must not cross a router, and every varied
@@ -4070,11 +4226,17 @@ test_unroutable_addresses_take_no_session(struct nat64s_env *env) {
 	link_local[15] = 1;
 	uint8_t multicast[16] = {0xff, 0x02};
 	multicast[15] = 1;
+	uint8_t ipv4_mapped[16] = {0};
+	ipv4_mapped[10] = 0xff;
+	ipv4_mapped[11] = 0xff;
+	ipv4_mapped[12] = 127;
+	ipv4_mapped[15] = 1;
 	const uint8_t *const sources[] = {
 		unspecified,
 		loopback,
 		link_local,
 		multicast,
+		ipv4_mapped,
 	};
 	const uint8_t this_network[4] = {0, 1, 2, 3};
 	const uint8_t host_loopback[4] = {127, 0, 0, 1};
@@ -4092,7 +4254,7 @@ test_unroutable_addresses_take_no_session(struct nat64s_env *env) {
 	struct packet *in = NULL;
 	struct packet *out = NULL;
 	bool dropped = false;
-	uint64_t refused = env->config->stats[NAT64S_NON_GLOBAL];
+	uint64_t refused = nat64s_stat(env, NAT64S_NON_GLOBAL);
 	for (size_t i = 0; i < sizeof(sources) / sizeof(sources[0]); ++i) {
 		TEST_ASSERT_SUCCESS(
 			nat64s_make_v6_syn_from(
@@ -4187,10 +4349,44 @@ test_unroutable_addresses_take_no_session(struct nat64s_env *env) {
 	TEST_ASSERT_NULL(out, "the error must not be translated");
 
 	TEST_ASSERT_EQUAL(
-		env->config->stats[NAT64S_NON_GLOBAL],
+		nat64s_stat(env, NAT64S_NON_GLOBAL),
 		refused + sizeof(sources) / sizeof(sources[0]) +
 			sizeof(destinations) / sizeof(destinations[0]) + 1,
 		"every refused address must be counted"
+	);
+
+	// A multicast prefix is no translation prefix. Configured all the
+	// same, it lets no multicast destination through: the dataplane is
+	// held to the rule whatever the configuration carries.
+	struct nat64s_env_settings multicast_round = nat64s_suite_settings;
+	multicast_round.multicast_prefix = true;
+	TEST_ASSERT_SUCCESS(
+		nat64s_env_reconfigure(env, &multicast_round),
+		"reconfigure failed"
+	);
+	refused = nat64s_stat(env, NAT64S_NON_GLOBAL);
+	TEST_ASSERT_SUCCESS(nat64s_make_v6_syn(env, port, &in), "build failed");
+	struct rte_ipv6_hdr *syn = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(in),
+		struct rte_ipv6_hdr *,
+		in->network_header.offset
+	);
+	memcpy(syn->dst_addr, multicast_prefixes[0], NAT64S_PREFIX_LEN);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		dropped,
+		"a multicast destination must be refused under a "
+		"multicast prefix too"
+	);
+	TEST_ASSERT_NULL(out, "the packet must not be translated");
+	TEST_ASSERT_EQUAL(
+		nat64s_stat(env, NAT64S_NON_GLOBAL),
+		refused + 1,
+		"the refused multicast destination must be counted"
+	);
+	TEST_ASSERT_SUCCESS(
+		nat64s_env_reconfigure(env, &nat64s_suite_settings),
+		"restoring the suite's settings failed"
 	);
 
 	// The same port towards a forwardable remote, from a forwardable
@@ -4209,6 +4405,357 @@ test_unroutable_addresses_take_no_session(struct nat64s_env *env) {
 		nat64s_test_entry_live(wan, now, &wan_key),
 		"the routable flow's wan entry must be there"
 	);
+	return TEST_SUCCESS;
+}
+
+// A session is served while the configuration still holds its identity:
+// its public address in the pool, its prefix among the prefixes.
+//
+// An update that takes either away leaves the session unserved on both
+// sides, its packets dropped and counted, while a flow opened afterwards
+// translates under the new identity. The session is served again once an
+// update brings its identity back.
+static int
+test_session_outlives_its_pool_address(struct nat64s_env *env) {
+	const uint64_t now = 25900000000000ull;
+	dataplane_ut_set_time_ns(env->ut, now);
+	// A port inside the window is the one the session keeps.
+	const uint16_t port = 2902;
+	struct packet *in = NULL;
+	struct packet *out = NULL;
+	bool dropped = false;
+	TEST_ASSERT_SUCCESS(nat64s_make_v6_syn(env, port, &in), "build failed");
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the flow must translate under the suite's pool");
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	struct nat64s_env_settings other = nat64s_suite_settings;
+	other.pool = other_pool;
+	other.pool_count = 1;
+	TEST_ASSERT_SUCCESS(
+		nat64s_env_reconfigure(env, &other), "reconfigure failed"
+	);
+	uint64_t gone = nat64s_stat(env, NAT64S_SESSION_GONE);
+
+	// The remote's reply to the address the pool no longer holds.
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_reply(env, port, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		dropped,
+		"a reply to an address that left the pool must be dropped"
+	);
+	TEST_ASSERT_NULL(out, "the reply must not be translated");
+	TEST_ASSERT_EQUAL(
+		nat64s_stat(env, NAT64S_SESSION_GONE),
+		gone + 1,
+		"the dropped reply must be counted"
+	);
+
+	// The remote's error about the session.
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_frag_needed(env, port, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(dropped, "an error about the session must be dropped");
+	TEST_ASSERT_NULL(out, "the error must not be translated");
+	TEST_ASSERT_EQUAL(
+		nat64s_stat(env, NAT64S_SESSION_GONE),
+		gone + 2,
+		"the dropped error must be counted"
+	);
+
+	// The client's next packet of the session.
+	TEST_ASSERT_SUCCESS(nat64s_make_v6_syn(env, port, &in), "build failed");
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		dropped, "the client's packet of the session must be dropped"
+	);
+	TEST_ASSERT_NULL(out, "the packet must not be translated");
+	TEST_ASSERT_EQUAL(
+		nat64s_stat(env, NAT64S_SESSION_GONE),
+		gone + 3,
+		"the dropped packet must be counted"
+	);
+
+	// The client's error about the session.
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v6_packet_too_big(env, port, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		dropped, "the client's error about the session must be dropped"
+	);
+	TEST_ASSERT_NULL(out, "the error must not be translated");
+	TEST_ASSERT_EQUAL(
+		nat64s_stat(env, NAT64S_SESSION_GONE),
+		gone + 4,
+		"the dropped error must be counted"
+	);
+
+	// A flow opened afterwards takes an address of the new pool.
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v6_syn(env, port + 1, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "a new flow must translate under the new pool");
+	struct rte_ipv4_hdr *ipv4 = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(out),
+		struct rte_ipv4_hdr *,
+		out->network_header.offset
+	);
+	TEST_ASSERT_EQUAL(
+		ipv4->src_addr,
+		other_pool_addr,
+		"the new flow must leave under an address of the new pool"
+	);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	// The address back in the pool, the session is served again, in a
+	// pool of several addresses whatever order they are given in; the
+	// flow opened under the other address stays served too.
+	struct nat64s_env_settings both = nat64s_suite_settings;
+	both.pool = both_pools;
+	both.pool_count = 2;
+	TEST_ASSERT_SUCCESS(
+		nat64s_env_reconfigure(env, &both), "reconfigure failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_reply(env, port, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		!dropped,
+		"a session whose address is one of the pool's again must answer"
+	);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_reply(env, port + 1, &in), "build failed"
+	);
+	// That flow leaves under the other address of the pool.
+	struct rte_ipv4_hdr *reply = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(in),
+		struct rte_ipv4_hdr *,
+		in->network_header.offset
+	);
+	reply->dst_addr = other_pool_addr;
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		!dropped,
+		"a session whose address is in a pool of several must answer"
+	);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	// A pool whose addresses order one way as the numbers they stand
+	// for and the other way as the words the shared memory holds: the
+	// session is found by the latter order alone.
+	struct nat64s_env_settings wider = nat64s_suite_settings;
+	wider.pool = wider_pool;
+	wider.pool_count = 2;
+	TEST_ASSERT_SUCCESS(
+		nat64s_env_reconfigure(env, &wider), "reconfigure failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_reply(env, port, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the session must be found in a pool of several");
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	// The prefix of the session is part of its identity the same way: an
+	// update that drops it leaves the session unserved although its
+	// address stayed in the pool.
+	struct nat64s_env_settings other_prefix = nat64s_suite_settings;
+	other_prefix.second_prefix_only = true;
+	TEST_ASSERT_SUCCESS(
+		nat64s_env_reconfigure(env, &other_prefix), "reconfigure failed"
+	);
+	gone = nat64s_stat(env, NAT64S_SESSION_GONE);
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_reply(env, port, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		dropped, "a session whose prefix was dropped must be unserved"
+	);
+	TEST_ASSERT_NULL(out, "the reply must not be translated");
+	TEST_ASSERT_EQUAL(
+		nat64s_stat(env, NAT64S_SESSION_GONE),
+		gone + 1,
+		"the reply under a dropped prefix must be counted"
+	);
+
+	// An empty pool serves no session and gives a new flow no address.
+	struct nat64s_env_settings empty = nat64s_suite_settings;
+	empty.pool = other_pool;
+	empty.pool_count = 0;
+	TEST_ASSERT_SUCCESS(
+		nat64s_env_reconfigure(env, &empty), "reconfigure failed"
+	);
+	gone = nat64s_stat(env, NAT64S_SESSION_GONE);
+	uint64_t no_address = nat64s_stat(env, NAT64S_POOL_EMPTY);
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_reply(env, port, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(dropped, "no session is served by an empty pool");
+	TEST_ASSERT_EQUAL(
+		nat64s_stat(env, NAT64S_SESSION_GONE),
+		gone + 1,
+		"the reply to an empty pool must be counted"
+	);
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v6_syn(env, port + 3, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(dropped, "a new flow must not translate by an empty pool");
+	TEST_ASSERT_NULL(out, "the new flow must not be translated");
+	TEST_ASSERT_EQUAL(
+		nat64s_stat(env, NAT64S_POOL_EMPTY),
+		no_address + 1,
+		"a new flow without an address must be counted"
+	);
+
+	TEST_ASSERT_SUCCESS(
+		nat64s_env_reconfigure(env, &nat64s_suite_settings),
+		"restoring the suite's settings failed"
+	);
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_reply(env, port, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the session must be served again");
+	rte_pktmbuf_free(packet_to_mbuf(out));
+	return TEST_SUCCESS;
+}
+
+// A Fragmentation Needed error that carries no next-hop MTU, as a router
+// implementing no RFC 1191 sends it, gets one from the length of the
+// packet it quotes: the greatest plateau value below that length, and the
+// minimum IPv6 MTU where no value fits.
+static int
+test_legacy_fragmentation_needed_derives_mtu(struct nat64s_env *env) {
+	// Limits wide enough to leave the derived figure to the error.
+	struct nat64s_env_settings jumbo = nat64s_suite_settings;
+	jumbo.mtu_ipv4 = 9000;
+	jumbo.mtu_ipv6 = 9000;
+	TEST_ASSERT_SUCCESS(
+		nat64s_env_reconfigure(env, &jumbo), "reconfigure failed"
+	);
+	const uint64_t now = 25950000000000ull;
+	dataplane_ut_set_time_ns(env->ut, now);
+	TEST_ASSERT_SUCCESS(nat64s_test_warm_session(env), "warm-up failed");
+
+	struct packet *in = NULL;
+	struct packet *out = NULL;
+	bool dropped = false;
+	for (size_t i = 0;
+	     i < sizeof(quoted_lengths) / sizeof(quoted_lengths[0]);
+	     ++i) {
+		TEST_ASSERT_SUCCESS(
+			nat64s_make_v4_frag_needed_without_mtu(
+				env,
+				env->allocated_port,
+				quoted_lengths[i].total_length,
+				&in
+			),
+			"build failed"
+		);
+		TEST_ASSERT_SUCCESS(
+			nat64s_run(env, in, &out, &dropped), "run failed"
+		);
+		TEST_ASSERT(!dropped, "the error must translate");
+		struct yanet_icmp6_hdr *icmp6 = rte_pktmbuf_mtod_offset(
+			packet_to_mbuf(out),
+			struct yanet_icmp6_hdr *,
+			out->transport_header.offset
+		);
+		TEST_ASSERT_EQUAL(
+			rte_be_to_cpu_32(icmp6->yanet_icmp6_mtu),
+			quoted_lengths[i].ipv6_mtu,
+			"the translated error must carry the derived MTU"
+		);
+		rte_pktmbuf_free(packet_to_mbuf(out));
+	}
+
+	// A next-hop MTU the router did send is left to the translation.
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_frag_needed_without_mtu(
+			env, env->allocated_port, 1500, &in
+		),
+		"build failed"
+	);
+	struct yanet_icmp_hdr *icmp4 = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(in),
+		struct yanet_icmp_hdr *,
+		in->transport_header.offset
+	);
+	icmp4->yanet_icmp_nextmtu = rte_cpu_to_be_16(1400);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the error must translate");
+	struct yanet_icmp6_hdr *icmp6 = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(out),
+		struct yanet_icmp6_hdr *,
+		out->transport_header.offset
+	);
+	TEST_ASSERT_EQUAL(
+		rte_be_to_cpu_32(icmp6->yanet_icmp6_mtu),
+		1420u,
+		"a next-hop MTU the router sent must translate unchanged"
+	);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	TEST_ASSERT_SUCCESS(
+		nat64s_env_reconfigure(env, &nat64s_suite_settings),
+		"restoring the suite's settings failed"
+	);
+	return TEST_SUCCESS;
+}
+
+// The module's counters are registered by name, each under the id its slot
+// holds: the counter tooling reads them as it reads any module's.
+static int
+test_counters_registered(struct nat64s_env *env) {
+	struct counter_registry *registry =
+		&env->config->cp_module.counter_registry;
+	const struct counter *counters = ADDR_OF(&registry->names);
+	// Each slot holds a registered counter named after the module. The
+	// registry holds the ones every module has beside them.
+	for (size_t slot = 0; slot < NAT64S_STAT_COUNT; ++slot) {
+		uint64_t id = env->config->counter_ids[slot];
+		TEST_ASSERT(
+			id < registry->count,
+			"every counter of the module must be registered"
+		);
+		TEST_ASSERT(
+			strncmp(counters[id].name, "nat64s_", 7) == 0,
+			"a counter of the module must be named after it"
+		);
+		TEST_ASSERT_EQUAL(
+			counter_registry_lookup_index(
+				registry, counters[id].name
+			),
+			id,
+			"a counter must be found under its name"
+		);
+	}
+	const struct {
+		const char *name;
+		enum nat64s_stat slot;
+	} named[] = {
+		{"nat64s_translated_v6_to_v4", NAT64S_TRANSLATED_V6_TO_V4},
+		{"nat64s_translated_v4_to_v6", NAT64S_TRANSLATED_V4_TO_V6},
+		{"nat64s_malformed", NAT64S_MALFORMED},
+		{"nat64s_session_gone", NAT64S_SESSION_GONE},
+	};
+	for (size_t i = 0; i < sizeof(named) / sizeof(named[0]); ++i) {
+		TEST_ASSERT_EQUAL(
+			counter_registry_lookup_index(registry, named[i].name),
+			env->config->counter_ids[named[i].slot],
+			"a counter must be registered under its name"
+		);
+	}
 	return TEST_SUCCESS;
 }
 
@@ -4446,6 +4993,15 @@ main(void) {
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_unroutable_addresses_take_no_session(&env);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_session_outlives_its_pool_address(&env);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_legacy_fragmentation_needed_derives_mtu(&env);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_counters_registered(&env);
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_largest_timeout_kept_whole(&env);

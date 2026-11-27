@@ -2,6 +2,9 @@ package nat64s_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"syscall"
 	"testing"
 	"time"
 
@@ -86,6 +89,83 @@ func Test_MapRegistry_DefaultSizing_CreatesTheProductionMap(t *testing.T) {
 	)
 
 	releaseMap(t, registry, "t0", "sessions")
+}
+
+// Test_MapRegistry_Acquire_ReclaimsUnreferencedMapsBeforeAllocating
+// verifies that a map a config asks for takes the room of the maps no
+// config references anymore, whatever their names, instead of failing for
+// want of room until the next sweep.
+//
+// The agent's zone is filled with maps, each held by its own config, until
+// an allocation fails for want of memory: that is how many maps the zone
+// holds, whatever the build makes of a map. Once every config lets go, the
+// zone admits as many maps again under new names, and no more.
+func Test_MapRegistry_Acquire_ReclaimsUnreferencedMapsBeforeAllocating(t *testing.T) {
+	harness, err := dataplaneut.NewHarness(dataplaneut.Config{
+		CPMemory:      uint64(64 * datasize.MB),
+		DPMemory:      uint64(4 * datasize.MB),
+		WorkerCount:   1,
+		ObjectsToLoad: []string{cnat64s.MapObjectType},
+	})
+	require.NoError(t, err)
+	t.Cleanup(harness.Free)
+
+	agent, err := harness.SharedMemory().AgentAttach(
+		"nat64s-reclaim-test",
+		0,
+		4*datasize.MB,
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = agent.CleanUp() })
+
+	registry := nat64s.NewMapRegistry(agent, nat64s.WithRegistryMapSizing(
+		cnat64s.MapConfig{IndexSize: 1024, ExtraBucketCount: 64},
+	))
+
+	// Held maps, each by its own config, until the zone is full.
+	var held []string
+	for number := 0; ; number++ {
+		name := fmt.Sprintf("held%d", number)
+		err := registry.Acquire(fmt.Sprintf("t%d", number), name)
+		if errors.Is(err, syscall.ENOMEM) {
+			break
+		}
+		require.NoError(t, err)
+		held = append(held, name)
+	}
+	require.GreaterOrEqual(t,
+		len(held),
+		2,
+		"the zone must hold more than one map for the round to mean anything",
+	)
+
+	// Every config lets go: the zone admits as many maps again, since each
+	// allocation takes the room of the maps no config references anymore.
+	for number := range held {
+		registry.Release(fmt.Sprintf("t%d", number), held[number])
+	}
+	for number := range held {
+		require.NoError(t,
+			registry.Acquire(
+				fmt.Sprintf("fresh%d", number),
+				fmt.Sprintf("fresh%d", number),
+			),
+			"the maps no config references must give the new ones their room",
+		)
+	}
+	require.ErrorIs(t,
+		registry.Acquire("one-too-many", "one-too-many"),
+		syscall.ENOMEM,
+		"the zone must have no room beyond the maps it holds",
+	)
+
+	for number := range held {
+		registry.Release(
+			fmt.Sprintf("fresh%d", number),
+			fmt.Sprintf("fresh%d", number),
+		)
+	}
+	registry.ReclaimUnreferenced()
 }
 
 // Test_MapRegistry_Acquire_ReplacesUnreferencedMap verifies that a map no
