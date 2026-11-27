@@ -115,9 +115,11 @@ jobs:
           meson setup build -Ddataplane_only=true
       # yanet-packet forbids unsafe code and its zerocopy casts are sound by
       # construction, so Miri has nothing to check there, while its header
-      # tests took over 90% of the interpreted time.
+      # tests took over 90% of the interpreted time. yanet-layout is a host
+      # generator with no unsafe code that writes files, which Miri's isolation
+      # refuses.
       - name: Miri
         working-directory: bindings/rust
         env:
           MIRIFLAGS: ${{ matrix.miriflags }}
-        run: cargo "+$MIRI_TOOLCHAIN" miri nextest run --workspace --exclude yanet-packet --locked --no-fail-fast
+        run: cargo "+$MIRI_TOOLCHAIN" miri nextest run --workspace --exclude yanet-packet --exclude yanet-layout --locked --no-fail-fast
