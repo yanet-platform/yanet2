@@ -10,6 +10,7 @@
 #![no_std]
 
 pub mod index;
+pub mod layout;
 pub mod mutex;
 pub mod opaque;
 pub mod rel;

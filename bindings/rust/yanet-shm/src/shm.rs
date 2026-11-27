@@ -15,7 +15,10 @@ use core::{
     sync::atomic::{AtomicI8, AtomicI16, AtomicI32, AtomicI64, AtomicU8, AtomicU16, AtomicU32, AtomicU64},
 };
 
-use crate::rel::{ShmBox, ShmSlice};
+use crate::{
+    layout::{Field, Kind, Node, Param},
+    rel::{RelPtr, ShmBox, ShmSlice},
+};
 
 /// Largest alignment a shared-memory type may require.
 ///
@@ -39,23 +42,34 @@ pub const MAX_ALIGN: usize = 64;
 /// no-op and the alignment is at most [`MAX_ALIGN`]. Padding may be
 /// uninitialized; this trait permits typed field access, not viewing the
 /// object representation as an initialized byte slice.
-pub unsafe trait ShmLayout: Sized + 'static {}
+pub unsafe trait ShmLayout: Sized + 'static {
+    /// The description of the layout, for the Go views.
+    ///
+    /// A type that describes nothing of itself is opaque, and the generator
+    /// refuses a root that reaches it in a field holding bytes.
+    const LAYOUT: &'static Node = &Node::of::<Self>(Kind::Opaque);
+}
 
 macro_rules! plain_leaf {
-    ($($ty:ty),* $(,)?) => {$(
+    ($({ signed: $signed:literal, atomic: $atomic:literal }: $($ty:ty),*;)*) => {$($(
         // SAFETY: the leaf accepts every bit pattern, has no padding, needs
         // no drop and is aligned to at most 8.
-        unsafe impl ShmLayout for $ty {}
-    )*};
+        unsafe impl ShmLayout for $ty {
+            const LAYOUT: &'static Node = &Node::of::<Self>(Kind::Int { signed: $signed, atomic: $atomic });
+        }
+    )*)*};
 }
 
 plain_leaf! {
-    u8, u16, u32, u64,
-    i8, i16, i32, i64,
-    AtomicU8, AtomicU16, AtomicU32, AtomicU64,
-    AtomicI8, AtomicI16, AtomicI32, AtomicI64,
-    (),
+    { signed: false, atomic: false }: u8, u16, u32, u64;
+    { signed: true, atomic: false }: i8, i16, i32, i64, isize;
+    { signed: false, atomic: true }: AtomicU8, AtomicU16, AtomicU32, AtomicU64;
+    { signed: true, atomic: true }: AtomicI8, AtomicI16, AtomicI32, AtomicI64;
 }
+
+// SAFETY: the unit type has no bytes, so it has no invalid pattern, no
+// padding and no drop, and is aligned to 1.
+unsafe impl ShmLayout for () {}
 
 // The build proves the layout of an address that the leaves below rely on.
 //
@@ -85,19 +99,64 @@ const _: () = {
 
 // SAFETY: an address is its octets alone, as the build proved above: every
 // bit pattern is a value, with no padding, no drop and an alignment of 1.
-unsafe impl ShmLayout for Ipv4Addr {}
+unsafe impl ShmLayout for Ipv4Addr {
+    const LAYOUT: &'static Node = <[u8; 4]>::LAYOUT;
+}
 
 // SAFETY: as for the IPv4 address.
-unsafe impl ShmLayout for Ipv6Addr {}
+unsafe impl ShmLayout for Ipv6Addr {
+    const LAYOUT: &'static Node = <[u8; 16]>::LAYOUT;
+}
 
 // SAFETY: an array of layout elements has no padding between elements and
 // no invalid pattern.
-unsafe impl<T: ShmLayout, const N: usize> ShmLayout for [T; N] {}
+unsafe impl<T: ShmLayout, const N: usize> ShmLayout for [T; N] {
+    const LAYOUT: &'static Node = &Node::of::<Self>(Kind::Array { len: N, elem: T::LAYOUT });
+}
 
 // SAFETY: an offset accepts every bit pattern; the block it names is owned
 // by the graph and aligned for `T` by the builder.
-unsafe impl<T: ShmLayout> ShmLayout for ShmBox<T> {}
+unsafe impl<T: ShmLayout> ShmLayout for ShmBox<T> {
+    const LAYOUT: &'static Node = &Node::of::<Self>(Kind::Edge {
+        kind: "box",
+        members: &[Field {
+            name: "ptr",
+            offset: ShmBox::<T>::PTR_OFFSET,
+            ty: <RelPtr<Param<0>>>::LAYOUT,
+        }],
+        args: &[T::LAYOUT],
+    });
+}
 
 // SAFETY: as for the box, over the whole element range; an empty slice is
 // NULL with a zero count.
-unsafe impl<T: ShmLayout> ShmLayout for ShmSlice<T> {}
+unsafe impl<T: ShmLayout> ShmLayout for ShmSlice<T> {
+    const LAYOUT: &'static Node = &Node::of::<Self>(Kind::Edge {
+        kind: "slice",
+        members: &[
+            Field {
+                name: "ptr",
+                offset: ShmSlice::<T>::PTR_OFFSET,
+                ty: <RelPtr<Param<0>>>::LAYOUT,
+            },
+            Field {
+                name: "len",
+                offset: ShmSlice::<T>::LEN_OFFSET,
+                ty: u64::LAYOUT,
+            },
+        ],
+        args: &[T::LAYOUT],
+    });
+}
+
+// SAFETY: an offset accepts every bit pattern, needs no drop and is aligned
+// to 8; whoever follows it checks the target.
+unsafe impl<T: ShmLayout> ShmLayout for RelPtr<T> {
+    const LAYOUT: &'static Node = &Node::of::<Self>(Kind::Ptr { target: T::LAYOUT });
+}
+
+// SAFETY: a placeholder has no bytes, so it has no invalid pattern, no
+// padding and no drop, and is aligned to 1.
+unsafe impl<const N: usize> ShmLayout for Param<N> {
+    const LAYOUT: &'static Node = &Node::of::<Self>(Kind::Param { index: N });
+}

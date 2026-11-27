@@ -51,6 +51,9 @@ pub struct ShmSlice<T> {
 }
 
 impl<T> ShmSlice<T> {
+    /// Byte offset of the relative pointer inside the slot pair.
+    pub const PTR_OFFSET: usize = core::mem::offset_of!(ShmSlice<u8>, ptr);
+
     /// Byte offset of the element count inside the slot pair.
     pub const LEN_OFFSET: usize = core::mem::offset_of!(ShmSlice<u8>, len);
 
@@ -89,6 +92,9 @@ impl<T> ShmSlice<T> {
 }
 
 impl<T> ShmBox<T> {
+    /// Byte offset of the relative pointer inside the slot.
+    pub const PTR_OFFSET: usize = core::mem::offset_of!(ShmBox<u8>, ptr);
+
     /// The value the owned block holds, resolved through `cx`.
     #[inline(always)]
     pub fn get<'g>(&'g self, cx: &impl Resolve<'g>) -> &'g T {

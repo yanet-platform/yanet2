@@ -564,7 +564,9 @@ macro_rules! classifiers {
         // mirror of those, so every pattern is valid; once the configuration
         // is published C rewrites only the memory contexts the LPMs embed,
         // which are opaque. Dropping is a no-op.
-        unsafe impl ShmLayout for $name {}
+        unsafe impl ShmLayout for $name {
+            c_layout!(stringify!($raw));
+        }
 
         // SAFETY: the C object is the whole value; the compile, the join or
         // the decode that wrote it allocated only in the memory context, in

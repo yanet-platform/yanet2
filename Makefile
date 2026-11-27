@@ -270,12 +270,13 @@ go-test-prepare:
 	meson compile -C build go-test-prepare
 	@test -f build/yanet_cgo_cppflags || { echo "ERROR: build/yanet_cgo_cppflags not found: go tests need this checkout's own build/, not a link to another one (remove it and run 'meson setup build')"; exit 1; }
 
-# Generates the native control plane's views of the shared-memory structures.
+# Generates the native control plane's views of the shared-memory structures,
+# and those of the SDK fixture modules when build/ builds the fixtures.
 #
 # The Go packages need them to compile. Ninja regenerates its build files
 # first, so a build/ configured before this target existed learns it.
 native-layout:
-	ninja -C build controlplane/native/layout/native-layout.stamp
+	ninja -C build native-layout
 
 # The packages the native control plane is built from: its own and the
 # module configuration builders on top of it.

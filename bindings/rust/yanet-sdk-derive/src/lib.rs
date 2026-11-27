@@ -30,6 +30,10 @@ use syn::{DeriveInput, ItemImpl, parse_macro_input};
 /// argument the bounds admit. `<Type>Parts` takes the build's lifetime and
 /// owner, then the struct's parameters.
 ///
+/// The layout description of the struct, which the Go views are generated
+/// from, gives its path, its size, its alignment and each field's offset as
+/// Rust lays them out.
+///
 /// ```
 /// use yanet_sdk::{Build, OwnedSlice, Owner, ShmLayout, ShmSlice};
 ///

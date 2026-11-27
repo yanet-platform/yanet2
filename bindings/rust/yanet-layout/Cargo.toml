@@ -1,0 +1,17 @@
+[package]
+name = "yanet-layout"
+description = "Generator of the Go views of the SDK modules' shared-memory layouts, which make native-layout runs; a plain cargo build or test skips it."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+yanet-sdk = { path = "../yanet-sdk" }
+yanet-sdk-fixture = { path = "../yanet-sdk-fixture" }

@@ -169,6 +169,7 @@ pub use yanet_packet as packet;
 pub use yanet_sdk_derive::{FfiRecord, ShmLayout, api};
 pub use yanet_shm::{
     index::{HashIndexKey, HashIndexRef},
+    layout,
     mutex::{Mutex, MutexGuard},
     rel::{ShmBox, ShmSlice},
     resolve::{Graph, Resolve},
@@ -207,7 +208,10 @@ pub mod prelude {
 /// Paths the derive expands to; not part of the API.
 #[doc(hidden)]
 pub mod __private {
-    pub use yanet_shm::shm::{MAX_ALIGN, ShmLayout};
+    pub use yanet_shm::{
+        layout::{Field as LayoutField, Kind as LayoutKind, Node as LayoutNode},
+        shm::{MAX_ALIGN, ShmLayout},
+    };
     pub use yanet_sys::cp::{Build, FfiRecord, Init, MemoryContext, Owner, Partial, Place, Refusal};
 }
 

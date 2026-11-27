@@ -311,4 +311,6 @@ const FLAG: u64 = bindings::LPM_VALUE_FLAG as u64;
 // Every pattern is valid: the opaque context is never read by Rust, the
 // directory slot is an offset word and the count an integer. Dropping is a
 // no-op and the alignment is 8.
-unsafe impl<const K: usize> ShmLayout for Lpm<K> {}
+unsafe impl<const K: usize> ShmLayout for Lpm<K> {
+    c_layout!("lpm");
+}

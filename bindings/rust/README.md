@@ -8,12 +8,13 @@ builder, the derive, the module-crate facade and the packet header views.
 
 | Crate | Environment | Role |
 |-------|-------------|------|
-| `yanet-shm` | `no_std`, no `alloc` | the provenance root, relative-pointer field types, `Opaque`, `Mutex` with guard-bound access to plain shared state, the slots of an exact-match index with their placement and the `HashIndexRef` lookup, `ShmLayout` leaves (the fixed-width integers, their atomics and the IPv4 and IPv6 addresses of `core::net`, whose layout the build checks) |
+| `yanet-shm` | `no_std`, no `alloc` | the provenance root, relative-pointer field types, `Opaque`, `Mutex` with guard-bound access to plain shared state, the slots of an exact-match index with their placement and the `HashIndexRef` lookup, `ShmLayout` leaves (the fixed-width integers and their atomics, `isize`, and the IPv4 and IPv6 addresses of `core::net`, whose layout the build checks), the layout description the Go views are generated from |
 | `yanet-sys` | `no_std`, no `alloc` | the C bindings of the SDK, modules mirroring the C tree, one bindgen output (generated into `OUT_DIR`, only here) and one module per C library: `common` (LPM type with its lookup by an array, a `core::net` address of the key's length or a key type of a module, and its construction by the C routines, and the exact-match `HashIndex`, whose slots a memory context of its own holds), `counters` (the counter value address), `dp` (bindings of `lib/dataplane`, the `Module` trait, `Cx`/`CommitCx`/`ObjectCommitCx`, `Batch`/`Packet` with the packet operations (allocation, copy, freeing, resizing, parsing, tunnels), counters, devices and object links (`ObjectLink`, resolved through `ModuleCx`), an object's own counters (`ObjectCounter`, resolved by the object's prepare step through `ObjectCommitCx`), counter layouts, which declare whether a counter counts or holds a level (`u64` and `Traffic` counts, a `Gauge` level and `[T; N]` values under one name), and the `BoundCounter` handle bound to read and add, which also takes from a gauge and picks a value of `[T; N]` by a constant index, per-worker state (`PerWorker` slots and `PerWorkerSlice` regions, one block per worker, reached only through the `WorkerSlot` and `WorkerSlice` handles a prepare step makes through `PrepareCx` and the handler uses with its `Cx`; a module's prepare finds its worker through the dp shim's `yanet_sys_dp_module_worker_idx`, an object's reads its context's; no author API names a worker index or count), the `Object` trait, the handler runtime, `export_module!` and `export_object!`), `cp` (mirror of `lib/controlplane`: the configuration `Builder` and the `ObjectBuilder` over one build core, with its `Copy` `Scope` handle, kind-tagged so that a module scope registers counters and devices and links objects and an object scope registers counters of the object's own only, and the `Owned`/`OwnedSlice`/`OwnedSlots`/`OwnedRegions` blocks it allocates, the `Built` configuration and the `BuiltObject` it returns, the `Owner` seam to the C control plane (`Header`, `Context` and `BlockAddr` newtypes for its addresses) and the release of a build by walking its owning edges; makes no C call itself but those of the C objects a configuration embeds, such as the LPM); the C shims of `common/` and the dataplane |
-| `yanet-sdk-derive` | proc macro | `#[derive(ShmLayout)]`: the layout contract check, `Build` and the `<Type>Parts` struct a build writes from; `#[derive(FfiRecord)]` and `#[yanet_sdk::api]` |
+| `yanet-sdk-derive` | proc macro | `#[derive(ShmLayout)]`: the layout contract check, the layout description, `Build` and the `<Type>Parts` struct a build writes from; `#[derive(FfiRecord)]` and `#[yanet_sdk::api]` |
 | `yanet-sdk` | `no_std`, `forbid(unsafe_code)` | the module-crate surface: `Module`, `Object`, contexts, batches, field types (`Mutex` and its `MutexGuard`, `HashIndex` with its `HashIndexRef`, `Counter`, `TaggedCounter`, `TaggedCounters` with its prepared `TaggedCountersRef` handle, `ObjectCounter`, `Device`, `PerWorker` and `PerWorkerSlice` with their prepared `WorkerSlot` and `WorkerSlice` handles, ...), the derive and the builders |
 | `yanet-sdk-api` | `std` | the control-plane side of a module: `Agent`, a non-owning handle on an attached C agent that owns the configurations and objects an API builds (the builder's `Owner` over the C routines a C module's API calls, the release of a configuration as those do, the release of an object as a C object's owner does, and `Agent::read`, the control-plane read of an object's body under a branded `ObjectCx` its edges resolve through), `Error`, the C error chain, and the guards and conversions the exports of `#[yanet_sdk::api]` expand to (`catch_unwind`, so an api crate is built with unwinding); a crate of its own because a dataplane plugin never links these C calls |
 | `yanet-sdk-build` | `std`, build-dependency | `generate_header`: an api crate's `build.rs` writes the C header of its records and constants |
+| `yanet-layout` | `std`, outside the default members | the generator of the Go views of the layouts, and its binary that lists the fixture modules' roots |
 | `yanet-sdk-plugin` | `no_std` | a dataplane plugin's runtime: the panic handler (C `abort`), `export_module!` and `export_object!`, so a plugin is a `#![no_std]` cdylib of one line (a module's line lists the object types its plugin carries; an object type that ships without a module is a plugin of its own), built under `--profile plugin` (`panic = "abort"`) |
 | `yanet-sdk-testing` | `std`, dev-only | the block arena (one region, as one mapping) and resolving context of the tests, Miri included; with the `cp` feature `TestOwner`, the owner of the configuration builder under Miri and natively, with no C memory |
 | `yanet-sdk-fixture` | library `no_std`, `forbid(unsafe_code)` | minimal modules, `Fixture` (a test program whose mode word selects what it does with a batch), `Tally` (a prepared value and counters, those of tagged registries included, by id among them), `Fib` (forwards by a route FIB of two C LPM tables) and `Assign` (classify) and `Stash` (writes a linked `State`), and the object type `State` (atomic slots and their prepared seed, and a counter of its own that `Stash` keeps as a gauge), with no tests; their plugins `lib{fixture,tally,fib,assign,fixture_state,stash}_dp.so` and `libstash_state_plugin.so` (`Stash` with `State`, named outside the loader's pattern) are examples of one line over `yanet-sdk-plugin`, built on request (`--features plugin`, `--profile plugin`) |
@@ -141,7 +142,7 @@ meson setup build
 cd bindings/rust
 export CLANG_PATH=/usr/bin/clang-23 LIBCLANG_PATH=/usr/lib/llvm-23/lib
 cargo test --workspace                      # native suites
-MIRIFLAGS="-Zmiri-strict-provenance" cargo +nightly-2026-10-22 miri nextest run --workspace --exclude yanet-packet   # Miri (cargo-nextest); add -Zmiri-tree-borrows for Tree Borrows; yanet-packet forbids unsafe code
+MIRIFLAGS="-Zmiri-strict-provenance" cargo +nightly-2026-10-22 miri nextest run --workspace --exclude yanet-packet --exclude yanet-layout   # Miri (cargo-nextest); add -Zmiri-tree-borrows for Tree Borrows; yanet-packet forbids unsafe code; yanet-layout writes files, which Miri isolation refuses
 cargo bench -p yanet-sys --bench dp --no-run                                        # dataplane hot path, built on every core
 taskset -c 2 cargo bench -p yanet-sys --bench dp -- --save-baseline main            # run pinned to one core, -- --baseline main on the change
 cargo bench -p yanet-sys --bench dp --profile plugin --no-run                       # adds the plugins' thin LTO, keeps unwinding
@@ -212,6 +213,18 @@ Miri stays the layer for the language rules of the unsafe code; these tests
 add bounds, use after free and the C behaviour, on real memory. CI runs them
 natively in `.github/workflows/rust-sdk-ut.yml` and under ASan in
 `.github/workflows/rust-sdk-ut-asan.yml`.
+
+## Go views of the layouts
+
+The native Go control plane reads a configuration through Go views generated
+from the layout description of its `ShmLayout` types: the derive gives rustc's
+own offsets of every field, private ones included, and each SDK field type its
+members over placeholder type arguments. `Mutex`, `HashIndex`, `Device`,
+`TaggedCounter` and `TaggedCounters` describe nothing, and a root that
+reaches one fails generation. `yanet-layout` lists the fixture modules' roots;
+`make native-layout` runs it, with the plugins' profile and target, when the
+fixtures are on (see the `sdkfixture` package for what it writes). Views for
+arm64 come from `make native-layout` in a build directory configured on arm64.
 
 ## Worker counter cells
 

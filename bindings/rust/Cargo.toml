@@ -16,6 +16,22 @@ members = [
     "yanet-shm",
     "yanet-sys",
     "yanet-packet",
+    "yanet-layout",
+]
+# Every member but the generator of the Go views, which make native-layout
+# runs, so a plain cargo build or test leaves it out.
+default-members = [
+    "yanet-sdk",
+    "yanet-sdk-api",
+    "yanet-sdk-build",
+    "yanet-sdk-derive",
+    "yanet-sdk-fixture",
+    "yanet-sdk-fixture-api",
+    "yanet-sdk-plugin",
+    "yanet-sdk-testing",
+    "yanet-shm",
+    "yanet-sys",
+    "yanet-packet",
 ]
 
 [workspace.package]

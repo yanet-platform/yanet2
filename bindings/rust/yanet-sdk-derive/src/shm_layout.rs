@@ -114,6 +114,7 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     let mut idents = Vec::new();
     let mut field_idents = Vec::new();
     let mut field_names = Vec::new();
+    let mut layout_fields = Vec::new();
     for (idx, field) in fields.named.iter().enumerate() {
         let ident = field.ident.as_ref().expect("named field");
         let field_ty = &field.ty;
@@ -144,6 +145,14 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
                 __addr + #core::mem::offset_of!(#ty, #ident),
                 __memory,
             );
+        });
+        let layout_name = ident.to_string();
+        layout_fields.push(quote_spanned! {field_ty.span()=>
+            #p::LayoutField {
+                name: #layout_name,
+                offset: #core::mem::offset_of!(#ty, #ident),
+                ty: <#field_ty as #p::ShmLayout>::LAYOUT,
+            }
         });
         idents.push(quote!(#ident: #binding));
         field_idents.push(ident);
@@ -214,7 +223,12 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         // aligned to at most 64 by its own layout and every alignment hint
         // of the repr is bounded likewise, so the struct is too. Padding is never
         // accessed as data.
-        unsafe impl #impl_generics #p::ShmLayout for #ty #where_clause {}
+        unsafe impl #impl_generics #p::ShmLayout for #ty #where_clause {
+            const LAYOUT: &'static #p::LayoutNode = &#p::LayoutNode::of::<Self>(#p::LayoutKind::Struct {
+                name: #core::concat!(#core::module_path!(), "::", #core::stringify!(#name)),
+                fields: &[#(#layout_fields),*],
+            });
+        }
 
         #[doc = #parts_doc]
         #vis struct #parts_name #parts_generics #parts_where {

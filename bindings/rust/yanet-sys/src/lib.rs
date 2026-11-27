@@ -28,6 +28,35 @@ pub mod bindings {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
 
+/// The layout description of an SDK field type: its kind, its members (its
+/// words, and the C table of a classifier node), each at Rust's offset, and its
+/// type arguments.
+///
+/// Each member's type is the one it has in `$shape`, the field type over
+/// placeholder type arguments, so the description is generic.
+macro_rules! edge_layout {
+    ($kind:literal, $shape:ty, [$($member:ident),*], [$($arg:ty),*]) => {
+        const LAYOUT: &'static yanet_shm::layout::Node =
+            &yanet_shm::layout::Node::of::<Self>(yanet_shm::layout::Kind::Edge {
+                kind: $kind,
+                members: &[$(yanet_shm::layout::Field {
+                    name: stringify!($member),
+                    offset: core::mem::offset_of!(Self, $member),
+                    ty: yanet_shm::layout::member_type(|shape: &$shape| &shape.$member),
+                }),*],
+                args: &[$(<$arg as yanet_shm::shm::ShmLayout>::LAYOUT),*],
+            });
+    };
+}
+
+/// The layout description of a mirror of the C struct of that tag name.
+macro_rules! c_layout {
+    ($name:expr) => {
+        const LAYOUT: &'static yanet_shm::layout::Node =
+            &yanet_shm::layout::Node::of::<Self>(yanet_shm::layout::Kind::C { name: $name });
+    };
+}
+
 pub mod classify;
 pub mod common;
 pub mod counters;
