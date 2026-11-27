@@ -5,6 +5,7 @@ package classify_test
 import (
 	"fmt"
 	"math/rand/v2"
+	"runtime"
 	"testing"
 	"unsafe"
 
@@ -232,4 +233,54 @@ func FuzzJoin(f *testing.F) {
 		require.NoError(t, err)
 		requireJoinMatchesReference(t, left.Stage(), right.Stage())
 	})
+}
+
+// sharedLeftLines compiles two lines of one ruleset whose pairs all share
+// one left group of the given rows, each pair with right points of its own.
+//
+// A rule per pair matches the first half of the left points and a pair of
+// right points of its own; a rule per left point, absent on the right,
+// makes every left point a class of its own. The group covers exactly
+// half of the left points, so the join keeps it as its rows rather than
+// its complement, and the row index really lists them.
+func sharedLeftLines(t *testing.T, rows uint32, pairs int) (*classify.Line, *classify.Line) {
+	t.Helper()
+	const columns = 128
+	leftRules := make([]classify.LineRule, 0, pairs+2*int(rows))
+	rightRules := make([]classify.LineRule, 0, cap(leftRules))
+	for first := uint32(0); len(leftRules) < pairs; first++ {
+		for second := first + 1; second < columns && len(leftRules) < pairs; second++ {
+			leftRules = append(leftRules, classify.LineRule{Ranges: []classify.LineRange{{From: 0, To: rows - 1}}})
+			rightRules = append(rightRules, classify.LineRule{Ranges: []classify.LineRange{{From: first, To: first}, {From: second, To: second}}})
+		}
+	}
+	for point := range 2 * rows {
+		leftRules = append(leftRules, classify.LineRule{Ranges: []classify.LineRange{{From: point, To: point}}})
+		rightRules = append(rightRules, classify.LineRule{Absent: true})
+	}
+	left, err := classify.CompileLine(leftRules, 2*rows)
+	require.NoError(t, err)
+	right, err := classify.CompileLine(rightRules, columns)
+	require.NoError(t, err)
+	return left, right
+}
+
+// Test_Join_ScratchDoesNotGrowWithPairsSharingLeftGroup verifies that a
+// join's heap stays within 4x when its pairs sharing one left group grow.
+func Test_Join_ScratchDoesNotGrowWithPairsSharingLeftGroup(t *testing.T) {
+	const rows = 4096
+	allocated := func(pairs int) uint64 {
+		left, right := sharedLeftLines(t, rows, pairs)
+		memory := classifytest.LayOut(make([]byte, memorySize))
+		table := classifytest.Alloc[layout.ValueTable](memory)
+		var before, after runtime.MemStats
+		runtime.GC()
+		runtime.ReadMemStats(&before)
+		_, err := left.Stage().Join(right.Stage(), table, &memory.Context, "joint")
+		runtime.ReadMemStats(&after)
+		require.NoError(t, err)
+		return after.TotalAlloc - before.TotalAlloc
+	}
+	few, many := allocated(8), allocated(2000)
+	require.Less(t, many, 4*few, "the heap of a join of 2000 pairs against one of 8")
 }

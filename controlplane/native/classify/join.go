@@ -256,8 +256,15 @@ type joiner struct {
 	// Rows and Columns hold the sides of every pair.
 	Rows    []*joinSide
 	Columns []*joinSide
-	// Painted lists the pairs painting each row; ColumnTerms the C terms of
-	// each column, and ColumnHashes their hash.
+	// LeftPairs lists the pairs of each left group, as numbered by the
+	// rules.
+	//
+	// The join numbers the pairs by their left group, so the pairs a row
+	// paints are the runs of the left groups holding it, and the row
+	// index holds every left group once however many pairs share it.
+	LeftPairs lists
+	// Painted lists the left groups painting each row; ColumnTerms the C
+	// terms of each column, and ColumnHashes their hash.
 	Painted      lists
 	ColumnTerms  lists
 	ColumnHashes []uint32
@@ -285,6 +292,8 @@ type joiner struct {
 	Nodes    []paintNode
 	RowTerms []uint32
 	RowHash  uint32
+	// RowGroups holds the left groups changing from the row above.
+	RowGroups []uint32
 	// The scratch of the paint, the terms and the key of one cell, each
 	// the length of the pair count.
 	CellPaint []uint32
@@ -308,6 +317,7 @@ func (m *Stage) newJoiner(right *Stage, pairs []groupPair) *joiner {
 		Left:         make([]uint32, hDim),
 		Up:           make([]uint32, hDim),
 		Heads:        make([]uint32, hDim),
+		RowGroups:    make([]uint32, len(pairs)),
 		// A pair set of a cell or a row holds every pair at most once.
 		CellPaint: make([]uint32, len(pairs)),
 		Terms:     make([]uint32, len(pairs)),
@@ -316,15 +326,21 @@ func (m *Stage) newJoiner(right *Stage, pairs []groupPair) *joiner {
 	leftSides := make([]joinSide, m.GroupCount())
 	rightSides := make([]joinSide, right.GroupCount())
 	marks := make([]bool, max(vDim, hDim))
-	rowValues := make([][]uint32, len(pairs))
-	columnValues := make([][]uint32, len(pairs))
+	lefts := make([]uint32, len(pairs))
+	pairLefts := make([][]uint32, len(pairs))
 	for pair, groups := range pairs {
+		lefts[pair] = groups.Left
+		pairLefts[pair] = lefts[pair : pair+1]
+	}
+	joined.LeftPairs = newLists(m.GroupCount(), pairLefts)
+	columnValues := make([][]uint32, len(pairs))
+	for pair, listed := range joined.LeftPairs.Items {
+		groups := pairs[listed]
 		rows := &leftSides[groups.Left]
 		columns := &rightSides[groups.Right]
 		rows.Init(m.group(groups.Left), vDim, marks, false)
 		columns.Init(right.group(groups.Right), hDim, marks, true)
 		joined.Rows[pair], joined.Columns[pair] = rows, columns
-		rowValues[pair] = rows.Small
 		if !rows.Flipped {
 			continue
 		}
@@ -339,6 +355,10 @@ func (m *Stage) newJoiner(right *Stage, pairs []groupPair) *joiner {
 		for _, column := range columns.Edges {
 			joined.LeftBase[column]++
 		}
+	}
+	rowValues := make([][]uint32, len(leftSides))
+	for group := range leftSides {
+		rowValues[group] = leftSides[group].Small
 	}
 	joined.Painted = newLists(vDim, rowValues)
 	joined.ColumnTerms = newLists(hDim, columnValues)
@@ -368,7 +388,7 @@ func (m *Stage) newJoiner(right *Stage, pairs []groupPair) *joiner {
 // and lists the pairs painting each of its columns. The counts wrap, the
 // true ones being at most the pair count.
 func (m *joiner) PrepareRow(row uint32) {
-	painted := m.Painted.Get(row)
+	groups, runs := m.Painted.Get(row), m.LeftPairs.Offsets
 	// The row works on local slices, stored back once: storing a slice
 	// into the joiner per item costs a write barrier check.
 	left, heads, up := m.Left, m.Heads, m.Up
@@ -376,47 +396,54 @@ func (m *joiner) PrepareRow(row uint32) {
 	rowHash := uint32(0)
 	copy(left, m.LeftBase)
 	clear(heads)
-	for _, pair := range painted {
-		columns := m.Columns[pair]
-		if columns.Flipped {
-			rowTerms = append(rowTerms, pair)
-			rowHash ^= pairHash(pair)
-		}
-		sign := uint32(1)
-		if m.Rows[pair].Flipped {
-			sign = ^uint32(0)
-		}
-		for _, column := range columns.Edges {
-			left[column] += sign
-		}
-		for _, column := range columns.Small {
-			nodes = append(nodes, paintNode{Pair: pair, Next: heads[column]})
-			heads[column] = uint32(len(nodes))
+	for _, group := range groups {
+		for pair := uint32(runs[group]); pair < uint32(runs[group+1]); pair++ {
+			columns := m.Columns[pair]
+			if columns.Flipped {
+				rowTerms = append(rowTerms, pair)
+				rowHash ^= pairHash(pair)
+			}
+			sign := uint32(1)
+			if m.Rows[pair].Flipped {
+				sign = ^uint32(0)
+			}
+			for _, column := range columns.Edges {
+				left[column] += sign
+			}
+			for _, column := range columns.Small {
+				nodes = append(nodes, paintNode{Pair: pair, Next: heads[column]})
+				heads[column] = uint32(len(nodes))
+			}
 		}
 	}
 	m.Nodes, m.RowTerms, m.RowHash = nodes, rowTerms, rowHash
 	if row == 0 {
 		return
 	}
-	// The pairs with an edge at the row paint one of it and the row above.
-	changed := m.Key[:xorInto(m.Key, painted, m.Painted.Get(row-1))]
+	// The pairs with an edge at the row are those of the left groups
+	// holding one of it and the row above.
+	changed := m.RowGroups[:xorInto(m.RowGroups, groups, m.Painted.Get(row-1))]
 	base := uint32(0)
-	for _, pair := range changed {
-		if m.Columns[pair].Flipped {
-			base++
+	for _, group := range changed {
+		for pair := uint32(runs[group]); pair < uint32(runs[group+1]); pair++ {
+			if m.Columns[pair].Flipped {
+				base++
+			}
 		}
 	}
 	for column := range up {
 		up[column] = base
 	}
-	for _, pair := range changed {
-		columns := m.Columns[pair]
-		sign := uint32(1)
-		if columns.Flipped {
-			sign = ^uint32(0)
-		}
-		for _, column := range columns.Small {
-			up[column] += sign
+	for _, group := range changed {
+		for pair := uint32(runs[group]); pair < uint32(runs[group+1]); pair++ {
+			columns := m.Columns[pair]
+			sign := uint32(1)
+			if columns.Flipped {
+				sign = ^uint32(0)
+			}
+			for _, column := range columns.Small {
+				up[column] += sign
+			}
 		}
 	}
 }
@@ -488,8 +515,9 @@ func (m *joiner) Paint(rows [][]uint32) error {
 	return nil
 }
 
-// pairsOf returns the pairs covering a class, ascending, in out: those
-// either of its key or of the K terms, but not both.
+// pairsOf returns the pairs covering a class, ascending in the join's
+// numbering, in out: those either of its key or of the K terms, but not
+// both.
 func (m *joiner) pairsOf(out []uint32, class uint32) []uint32 {
 	return out[:xorInto(out, m.Keys.Get(class), m.Common)]
 }
@@ -502,7 +530,7 @@ func (m *joiner) Stage(ruleGroups []uint32) *Stage {
 	pairs := make([]uint32, pairCount)
 	for class := range uint32(len(m.Classes.Hashes)) {
 		for _, pair := range m.pairsOf(pairs, class) {
-			starts[pair+1]++
+			starts[m.LeftPairs.Items[pair]+1]++
 		}
 	}
 	for pair := range pairCount {
@@ -512,8 +540,9 @@ func (m *joiner) Stage(ruleGroups []uint32) *Stage {
 	filled := slices.Clone(starts[:pairCount])
 	for class := range uint32(len(m.Classes.Hashes)) {
 		for _, pair := range m.pairsOf(pairs, class) {
-			values[filled[pair]] = class
-			filled[pair]++
+			listed := m.LeftPairs.Items[pair]
+			values[filled[listed]] = class
+			filled[listed]++
 		}
 	}
 	return &Stage{ruleGroups: ruleGroups, values: values, starts: starts, maxValue: uint32(len(m.Classes.Hashes) - 1)}
