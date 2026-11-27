@@ -14,7 +14,8 @@ use core::{
 };
 
 use yanet_shm::{
-    index::{HashIndexKey, HashIndexRef, Slot},
+    index::{HashIndexKey, HashIndexRef, HashIndexSlot},
+    layout::{Field, Kind, Node},
     opaque::Opaque,
     rel::ShmSlice,
     resolve::Resolve,
@@ -35,7 +36,7 @@ pub struct HashIndex<K> {
     /// link after publish when another context under the same parent is
     /// finalised.
     _memory_context: Opaque<bindings::memory_context>,
-    slots: ShmSlice<Slot<K>>,
+    slots: ShmSlice<HashIndexSlot<K>>,
 }
 
 const _: () = {
@@ -43,7 +44,9 @@ const _: () = {
     assert!(offset_of!(Rust, _memory_context) == 0);
     assert!(offset_of!(Rust, slots) == size_of::<bindings::memory_context>());
     // The fields leave no padding.
-    assert!(size_of::<Rust>() == size_of::<bindings::memory_context>() + size_of::<ShmSlice<Slot<Ipv4Addr>>>());
+    assert!(
+        size_of::<Rust>() == size_of::<bindings::memory_context>() + size_of::<ShmSlice<HashIndexSlot<Ipv4Addr>>>()
+    );
     assert!(align_of::<Rust>() <= MAX_ALIGN);
 };
 
@@ -62,4 +65,26 @@ impl<K: HashIndexKey> HashIndex<K> {
 // count words of a slice, sizes and offsets asserted with no padding. Every
 // pattern is valid: Rust never reads the context, and the slice is two words.
 // Dropping is a no-op and the alignment is 8.
-unsafe impl<K: ShmLayout> ShmLayout for HashIndex<K> {}
+unsafe impl<K: ShmLayout> ShmLayout for HashIndex<K> {
+    // The context as its C view and the slice of the slots.
+    //
+    // The description takes no type argument: a slot holds its key by value,
+    // so each key type gives the index another shape, and a module whose
+    // indices hold two key types fails generation.
+    const LAYOUT: &'static Node = &Node::of::<Self>(Kind::Edge {
+        kind: "hash_index",
+        members: &[
+            Field {
+                name: "memory_context",
+                offset: offset_of!(Self, _memory_context),
+                ty: &Node::of::<bindings::memory_context>(Kind::C { name: "memory_context" }),
+            },
+            Field {
+                name: "slots",
+                offset: offset_of!(Self, slots),
+                ty: <ShmSlice<HashIndexSlot<K>>>::LAYOUT,
+            },
+        ],
+        args: &[],
+    });
+}

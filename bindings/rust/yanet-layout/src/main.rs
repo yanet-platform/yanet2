@@ -1,11 +1,12 @@
 //! Writes the Go views of the fixture modules' configurations into
 //! `controlplane/native/sdk/sdkfixture`.
 
+use core::net::Ipv4Addr;
 use std::process::ExitCode;
 
 use yanet_layout::Constant;
-use yanet_sdk::{Object, ShmLayout};
-use yanet_sdk_fixture::{StashConfig, State, StateConfig, assign::AssignConfig};
+use yanet_sdk::{HashIndex, Object, ShmLayout};
+use yanet_sdk_fixture::{StashConfig, State, StateConfig, TallyConfig, assign::AssignConfig};
 
 fn main() -> ExitCode {
     let generated = yanet_layout::generate(
@@ -15,7 +16,13 @@ fn main() -> ExitCode {
         )
         .as_ref(),
         "github.com/yanet-platform/yanet2/controlplane/native/sdk/sdkfixture",
-        &[AssignConfig::LAYOUT, StashConfig::LAYOUT, StateConfig::LAYOUT],
+        &[
+            AssignConfig::LAYOUT,
+            StashConfig::LAYOUT,
+            StateConfig::LAYOUT,
+            TallyConfig::LAYOUT,
+            <HashIndex<Ipv4Addr>>::LAYOUT,
+        ],
         &[("STATE_TYPE", Constant::Str(State::TYPE))],
     );
     match generated {
