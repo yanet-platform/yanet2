@@ -124,7 +124,8 @@ range_index_free(struct range_index *range_index) {
  * of the full keyspace: radix maps each range-start key -> an index into the
  * values[] array.  This function walks the radix in ascending order, derives
  * each range's upper bound from the next key, and inserts [from..to] -> value
- * into the LPM.  The LPM must already be initialised by the caller.
+ * into the LPM, neighbouring ranges of one value as one.  The LPM must
+ * already be initialised by the caller.
  */
 struct range_index_lpm_ctx {
 	struct lpm *lpm;
@@ -138,6 +139,17 @@ range_index_lpm_cb(
 	uint8_t key_size, const uint8_t *from, uint32_t index, void *data
 ) {
 	struct range_index_lpm_ctx *ctx = (struct range_index_lpm_ctx *)data;
+
+	/*
+	 * A range of the previous value extends the open range.
+	 *
+	 * Neighbours holding one value make one insert, so a boundary
+	 * between them never splits a slot into a page that only repeats
+	 * its parent.
+	 */
+	if (ctx->values[index] == ctx->prev_value) {
+		return 0;
+	}
 
 	if (ctx->prev_value != LPM_VALUE_INVALID) {
 		uint8_t to[key_size];

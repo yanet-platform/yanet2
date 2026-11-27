@@ -4,9 +4,11 @@
 // Pins the regression of combining the high and the low address halves
 // through the shared classification: unique networks grouped across rules,
 // masks spanning both halves, networks shared and nested across rules, a
-// wildcard network, the source with destination joint, and the high half
-// trie built once with its final values matching the former build with
-// the region ordinals overwritten by those values. Every classification
+// wildcard network, the source with destination joint, neighbouring high
+// half ranges of one value inserted without a page of their own, and the
+// high half trie built once with its final values matching, page by page,
+// the former build with the region ordinals overwritten by those values
+// while no neighbouring ranges share a final value. Every classification
 // scenario compiles an explicit classifier - the destination attribute
 // alone, or the source and destination pair with their joint - decodes
 // its ruleset and classifies synthetic packets through the packet getters
@@ -644,6 +646,10 @@ run_failed_commit_zeroes_attr_test(struct memory_context *mctx, void *memory) {
  * starts captured before the commit releases them and a trie built over
  * them twice, first with the region ordinals and then with the values
  * the commit resolved.
+ *
+ * It holds the committed trie's pages only while no neighbouring ranges
+ * share a resolved value: the commit inserts such neighbours as one
+ * range, without the page their boundary splits in the reference.
  */
 struct test_hi_reference {
 	struct lpm lpm;
@@ -799,7 +805,8 @@ test_first_match(
 
 // Verifies that the high half trie built in one pass with the resolved
 // values equals the ordinal build overwritten with the same values, page
-// by page, and classifies seeded overlapping prefixes as the oracle.
+// by page, for a seeded ruleset of no neighbouring ranges sharing a
+// value, and classifies its overlapping prefixes as the oracle.
 static void
 run_hi_single_build_test(struct memory_context *mctx, void *memory) {
 	(void)memory;
@@ -868,6 +875,7 @@ run_hi_single_build_test(struct memory_context *mctx, void *memory) {
 
 	test_hi_reference_revalue(&test_hi_ref, &flt.dst_attr.hi);
 	assert(test_hi_ref.lpm.page_count > 1);
+	// Holds for this seed only: no neighbouring ranges share a value.
 	assert_lpm_equal(&flt.dst_attr.hi, &test_hi_ref.lpm);
 
 	uint8_t src[NET6_LEN] = {0};
@@ -890,6 +898,49 @@ run_hi_single_build_test(struct memory_context *mctx, void *memory) {
 	lpm_free(&test_hi_ref.lpm);
 	free(test_hi_ref.starts);
 	test_filter_net6_dst_free(mctx, &flt);
+}
+
+// Verifies that high half ranges of one value, cut by a network inside a
+// wildcard of the same rule, leave the trie one page and resolve the rule.
+static void
+run_equal_hi_ranges_one_page_test(struct memory_context *mctx, void *memory) {
+	(void)memory;
+
+	uint8_t addr_src[NET6_LEN] = {0x20, 0x01, 0x0d, 0xb8};
+	uint8_t addr_link[NET6_LEN] = {0xfe, 0x80};
+	uint8_t addr_any[NET6_LEN] = {0};
+
+	struct net6 src = net6_bits(addr_src, 32, 0);
+	struct net6 dsts[2] = {
+		net6_bits(addr_any, 0, 0), net6_bits(addr_link, 10, 0)
+	};
+	struct test_rule rule = rule_src_dst(&src, 1, dsts, 2);
+	const struct classifier_rule *rules[1] = {&rule.rule};
+
+	struct test_filter_net6_both flt;
+	test_filter_net6_both_compile(mctx, rules, 1, &flt);
+
+	assert(flt.cls.dst_attr.hi.page_count == 1);
+
+	// The last address before the inner network, its first and last
+	// address, and the first address after it.
+	uint8_t dst_addrs[4][NET6_LEN] = {
+		{0xfe, 0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
+		{0xfe, 0x80},
+		{0xfe, 0xbf, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
+		{0xfe, 0xc0},
+	};
+	uint32_t value = lpm_lookup(&flt.cls.dst_attr.hi, 8, dst_addrs[0]);
+	uint8_t src_other[NET6_LEN] = {0x20, 0x01, 0x0d, 0xb9};
+	for (uint32_t idx = 0; idx < 4; ++idx) {
+		assert(lpm_lookup(&flt.cls.dst_attr.hi, 8, dst_addrs[idx]) ==
+		       value);
+		assert(classify_both(&flt, addr_src, dst_addrs[idx]) == 0);
+		assert(classify_both(&flt, src_other, dst_addrs[idx]) ==
+		       CLASSIFY_RULE_INVALID);
+	}
+
+	test_filter_net6_both_free(mctx, &flt);
 }
 
 #define TEST_REGIONS_SEEDS 1000
@@ -1092,6 +1143,7 @@ main(void) {
 	run_scenario(run_shared_networks_test, memory);
 	run_scenario(run_nested_networks_test, memory);
 	run_scenario(run_src_dst_test, memory);
+	run_scenario(run_equal_hi_ranges_one_page_test, memory);
 	run_scenario(run_failed_commit_zeroes_attr_test, memory);
 	run_scenario(run_hi_single_build_test, memory);
 	run_scenario(run_regions_match_sets_test, memory);
