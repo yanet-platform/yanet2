@@ -109,7 +109,6 @@ func requireNet6MatchesReference(t *testing.T, block []byte, rules []classify.Ne
 	attr := classifytest.Alloc[layout.ClassifyAttrNet6](memory)
 	nets, err := classify.CompileNet6(rules, attr, &memory.Context, "net6")
 	require.NoError(t, err)
-	require.NoError(t, nets.Commit())
 
 	classes := classifytest.ReadNet6(attr)
 	err = classifytest.CheckStage(
@@ -186,11 +185,11 @@ func Test_CompileNet6_RefusesMaskHalvesThatAreNotPrefixes(t *testing.T) {
 	}
 }
 
-// Test_Net6_ExhaustedLeavesAttributeZeroed verifies that an IPv6 network
-// compile and commit refused any of their allocations fail as exhausted,
-// leave the attribute zeroed and give the allocator back every byte they
+// Test_CompileNet6_ExhaustedLeavesAttributeZeroed verifies that an IPv6
+// network compile refused any of its allocations fails as exhausted,
+// leaves the attribute zeroed and gives the allocator back every byte it
 // took.
-func Test_Net6_ExhaustedLeavesAttributeZeroed(t *testing.T) {
+func Test_CompileNet6_ExhaustedLeavesAttributeZeroed(t *testing.T) {
 	context := unsafe.Sizeof(layout.MemoryContext{})
 	chunk := unsafe.Sizeof(layout.LpmPage{}) * 16
 	// A host splits the row of its high half into the classes on both
@@ -216,13 +215,7 @@ func Test_Net6_ExhaustedLeavesAttributeZeroed(t *testing.T) {
 			nativetest.LeaveOnly(t, &memory.Allocator, tc.kept...)
 			free := shmalloc.FreeSize(&memory.Allocator)
 
-			err := func() error {
-				nets, err := classify.CompileNet6(rules, attr, &memory.Context, "net6")
-				if err != nil {
-					return err
-				}
-				return nets.Commit()
-			}()
+			_, err := classify.CompileNet6(rules, attr, &memory.Context, "net6")
 			require.ErrorIs(t, err, shmalloc.ErrNoMemory)
 			requireZeroed(t, attr, "the attribute")
 			require.Equal(t, free, shmalloc.FreeSize(&memory.Allocator), "the allocator's free bytes")
@@ -284,7 +277,6 @@ func commitNet6Filter(t *testing.T, rules []classify.Net6Rule) func(destination 
 	free := shmalloc.FreeSize(&memory.Allocator)
 	nets, err := classify.CompileNet6(rules, &filter.Dst, &memory.Context, "test_net6_dst")
 	require.NoError(t, err)
-	require.NoError(t, nets.Commit())
 	members := make([]bool, len(rules))
 	for rule := range members {
 		members[rule] = true
@@ -382,10 +374,8 @@ func Test_CompileNet6_SrcDst(t *testing.T) {
 	free := shmalloc.FreeSize(&memory.Allocator)
 	source, err := classify.CompileNet6(sourceRules, &filter.Src, &memory.Context, "test_net6_src")
 	require.NoError(t, err)
-	require.NoError(t, source.Commit())
 	destination, err := classify.CompileNet6(destinationRules, &filter.Dst, &memory.Context, "test_net6_dst")
 	require.NoError(t, err)
-	require.NoError(t, destination.Commit())
 	pair, err := source.Stage().Join(destination.Stage(), &filter.Joint, &memory.Context, "joint")
 	require.NoError(t, err)
 	require.NoError(t, pair.Decode([]bool{true, true, true}, &filter.RuleMap, &memory.Context, "rule_map"))

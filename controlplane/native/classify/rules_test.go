@@ -503,10 +503,8 @@ func commitRatelimitShaped(t require.TestingT, memory *classifytest.Memory, rule
 
 	source6, err := classify.CompileNet6(ruleset.Source6, &holder.Source6, context, "ratelimit:src6")
 	require.NoError(t, err)
-	require.NoError(t, source6.Commit())
 	destination6, err := classify.CompileNet6(ruleset.Destination6, &holder.Destination6, context, "ratelimit:dst6")
 	require.NoError(t, err)
-	require.NoError(t, destination6.Commit())
 	nets6, err := source6.Stage().Join(destination6.Stage(), &holder.Nets6, context, "ratelimit:nets6")
 	require.NoError(t, err)
 	transport6 := transport(ruleset.Protocol6, ruleset.Port6, &holder.Protocol6, &holder.Port6, &holder.Transport6, "6")

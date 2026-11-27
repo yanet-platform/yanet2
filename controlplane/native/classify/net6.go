@@ -37,24 +37,10 @@ type Net6Rule struct {
 	Absent bool
 }
 
-// Net6 is a compiled IPv6 network attribute: both halves of the address
-// space cut into stretches and the stage a join consumes; the table of
-// the high stretches the low half splits is already in the attribute.
+// Net6 is a compiled IPv6 network attribute: the stage a join consumes;
+// the lookups are already in the attribute.
 type Net6 struct {
-	// attr is the attribute the compile wrote the table into; the commit
-	// completes it in the same memory context under the same name.
-	attr    *layout.ClassifyAttrNet6
-	context *layout.MemoryContext
-	name    string
-	// hiStarts holds the first value of every high stretch, ascending;
-	// hiValues its class, or the row mark and its row of the table.
-	hiStarts []uint64
-	hiValues []uint32
-	// loStarts holds the first value of every low stretch, ascending;
-	// loValues its column of the table.
-	loStarts []uint64
-	loValues []uint32
-	stage    Stage
+	stage Stage
 }
 
 // Stage returns the stage a join consumes, a copy, so the compile keeps
@@ -108,12 +94,13 @@ func (m network6) IsAny() bool {
 // CompileNet6 compiles the IPv6 network attribute of a ruleset to the
 // lookups and the stage classify_net6_compile produces.
 //
-// As C does, the compile writes the table of the split high stretches
-// straight into the attribute, in a child memory context of context
-// titled for the attribute, and the commit takes it over. The compile
-// zeroes the attribute first, whatever it held; a failure frees what the
-// compile wrote and leaves it zeroed, a success leaves it to the commit
-// or to the free.
+// The compile commits in the same call, as C's does. Where C builds the
+// table of the split high stretches in its compile scratch and moves it
+// in at commit, this one writes it straight into the attribute; then a
+// prefix tree of each half follows, each in a child memory context of
+// context titled for the attribute. The compile zeroes the attribute
+// first, whatever it held; a failure frees what the compile wrote and
+// leaves it zeroed, a success leaves it to the free.
 //
 // Each half of the address space is cut into classes as the IPv4 one is;
 // a network covers a run of high intervals by a run of low ones. A region
@@ -129,7 +116,7 @@ func CompileNet6(rules []Net6Rule, attr *layout.ClassifyAttrNet6, context *layou
 	return compiled, nil
 }
 
-// compileNet6 compiles the attribute, writing its table into it.
+// compileNet6 compiles the attribute into it.
 func compileNet6(rules []Net6Rule, attr *layout.ClassifyAttrNet6, context *layout.MemoryContext, name string) (*Net6, error) {
 	nets, starts, err := normalizeNet6Rules(rules)
 	if err != nil {
@@ -215,6 +202,8 @@ func compileNet6(rules []Net6Rule, attr *layout.ClassifyAttrNet6, context *layou
 			cells[column] = regionValues[region]
 		}
 	}
+	// A high stretch maps to its class, or the row mark and its row of the
+	// table; a low stretch to its column.
 	var hiStarts, loStarts []uint64
 	var hiValues, loValues []uint32
 	for idx, start := range hi.Starts {
@@ -233,16 +222,13 @@ func compileNet6(rules []Net6Rule, attr *layout.ClassifyAttrNet6, context *layou
 			loValues = append(loValues, lo.Classes[idx])
 		}
 	}
-	return &Net6{
-		attr:     attr,
-		context:  context,
-		name:     name,
-		hiStarts: hiStarts,
-		hiValues: hiValues,
-		loStarts: loStarts,
-		loValues: loValues,
-		stage:    stage,
-	}, nil
+	if err := insertStretches(&attr.Hi, context, leafName(name, "hi"), hiStarts, hiValues); err != nil {
+		return nil, err
+	}
+	if err := insertStretches(&attr.Lo, context, leafName(name, "lo"), loStarts, loValues); err != nil {
+		return nil, err
+	}
+	return &Net6{stage: stage}, nil
 }
 
 // normalizeNet6Rules returns the networks of every rule in one slice,
@@ -670,31 +656,9 @@ func (m *net6Sweep) NetRegions(count int) lists {
 	return regions
 }
 
-// Commit completes the attribute in shared memory as C's commit leaves
-// it: the table the compile wrote, then a prefix tree of each half, each
-// in a child memory context titled for the attribute.
-//
-// A failure frees the attribute, the table included, and leaves it
-// zeroed, as C does.
-func (m *Net6) Commit() error {
-	if err := m.commit(); err != nil {
-		FreeNet6(m.attr)
-		return err
-	}
-	return nil
-}
-
-// commit writes the trees of the halves.
-func (m *Net6) commit() error {
-	if err := insertStretches(&m.attr.Hi, m.context, leafName(m.name, "hi"), m.hiStarts, m.hiValues); err != nil {
-		return err
-	}
-	return insertStretches(&m.attr.Lo, m.context, leafName(m.name, "lo"), m.loStarts, m.loValues)
-}
-
-// FreeNet6 releases what a compile and a commit wrote into an IPv6
-// network attribute and zeroes it, as classify_attr_net6_free does; it is
-// safe on a zeroed attribute.
+// FreeNet6 releases what a compile wrote into an IPv6 network attribute
+// and zeroes it, as classify_attr_net6_free does; it is safe on a zeroed
+// attribute.
 func FreeNet6(attr *layout.ClassifyAttrNet6) {
 	lpm.Free(&attr.Hi)
 	lpm.Free(&attr.Lo)
