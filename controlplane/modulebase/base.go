@@ -8,12 +8,12 @@
 package modulebase
 
 import (
+	"io"
 	"time"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/native/agent"
 )
 
@@ -76,10 +76,8 @@ func (m registeredService) Register(server *grpc.Server) {
 // Services are added from the module constructor alone, before the
 // gateway reads the surface, so nothing guards the list.
 type Base struct {
-	// Exactly one attachment is set: the constructor attached the module
-	// either through cgo or natively.
-	attachment *ffi.Attachment
-	native     *nativeAttachment
+	// The constructor attached the module either through cgo or natively.
+	attachment io.Closer
 
 	name     string
 	endpoint string
@@ -88,32 +86,12 @@ type Base struct {
 	log *zap.Logger
 }
 
-// NewBase attaches to the shared-memory agent under the module's type
-// name.
-//
-// The returned base carries a logger scoped to the module.
-func NewBase(cfg ffi.AttachConfig, name, endpoint string, options ...Option) (*Base, error) {
-	log := moduleOptions(name, options).Log
-
-	attachment, err := ffi.Attach(cfg, name, log)
-	if err != nil {
-		return nil, err
-	}
-
-	return &Base{
-		attachment: attachment,
-		name:       name,
-		endpoint:   endpoint,
-		log:        log,
-	}, nil
-}
-
 // NewNativeBase attaches to the shared-memory agent under the module's
 // type name without cgo.
 //
 // The module publishes through the native agent, and the cgo agent is
 // nil. The returned base carries a logger scoped to the module.
-func NewNativeBase(cfg ffi.AttachConfig, name, endpoint string, options ...Option) (*Base, error) {
+func NewNativeBase(cfg agent.AttachConfig, name, endpoint string, options ...Option) (*Base, error) {
 	opts := moduleOptions(name, options)
 	log := opts.Log
 
@@ -123,10 +101,10 @@ func NewNativeBase(cfg ffi.AttachConfig, name, endpoint string, options ...Optio
 	}
 
 	return &Base{
-		native:   native,
-		name:     name,
-		endpoint: endpoint,
-		log:      log,
+		attachment: native,
+		name:       name,
+		endpoint:   endpoint,
+		log:        log,
 	}, nil
 }
 
@@ -140,22 +118,14 @@ func moduleOptions(name string, options []Option) *options {
 	return opts
 }
 
-// Agent returns the shared-memory agent the module publishes through,
-// or nil for a module attached natively.
-func (m *Base) Agent() *ffi.Agent {
-	if m.attachment == nil {
-		return nil
-	}
-	return m.attachment.Agent
-}
-
 // NativeAgent returns the agent a natively attached module publishes
 // through, or nil for a module attached through cgo.
 func (m *Base) NativeAgent() *agent.Agent {
-	if m.native == nil {
+	native, ok := m.attachment.(*nativeAttachment)
+	if !ok {
 		return nil
 	}
-	return m.native.Agent
+	return native.Agent
 }
 
 // Log returns the logger scoped to the module.
@@ -201,8 +171,5 @@ func (m *Base) RegisterService(server *grpc.Server) {
 
 // Close releases the shared-memory attachment.
 func (m *Base) Close() error {
-	if m.native != nil {
-		return m.native.Close()
-	}
 	return m.attachment.Close()
 }

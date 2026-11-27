@@ -9,7 +9,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/yanet-platform/yanet2/common/go/xbackoff"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/native/agent"
 	"github.com/yanet-platform/yanet2/controlplane/native/zone"
 )
@@ -33,14 +32,14 @@ type nativeAttachment struct {
 //
 // A failed attach unmaps the storage again, so an error leaves nothing
 // behind for the caller to release. A bus error on the mapping is left to
-// the process's handler, which the director installs through its own cgo
-// attach before any module attaches.
+// the process: the director's cgo attach installs a handler before any
+// module attaches, and in a daemon without cgo it is Go's fatal fault.
 //
 // The storage maps only once every instance is ready. The dataplane marks
 // its instances ready one after another once all are set up, so a module
 // attaching as soon as its director's instance is ready waits for the
 // rest, within the bound.
-func attachNative(cfg ffi.AttachConfig, name string, deadline time.Time, log *zap.Logger) (*nativeAttachment, error) {
+func attachNative(cfg agent.AttachConfig, name string, deadline time.Time, log *zap.Logger) (*nativeAttachment, error) {
 	path := cfg.MemoryPath.Unwrap()
 	instanceID := cfg.InstanceID.Unwrap()
 	log.Debug("mapping shared memory",

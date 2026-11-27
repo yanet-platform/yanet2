@@ -278,9 +278,11 @@ go-test-prepare:
 native-layout:
 	ninja -C build native-layout
 
-# The packages the native control plane is built from: its own and the
-# module configuration builders on top of it.
-NATIVE_PACKAGES := ./controlplane/native/... ./modules/decap/controlplane/decapshm/...
+# The packages the native control plane is built from: its own, the
+# module configuration builders on top of it and the base native modules
+# attach through.
+NATIVE_PACKAGES := ./controlplane/native/... ./controlplane/modulebase/... \
+	./modules/decap/controlplane/decapshm/...
 
 # Builds every native control-plane package without cgo.
 native-nocgo: native-layout
