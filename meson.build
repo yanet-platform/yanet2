@@ -321,6 +321,13 @@ configure_file(
 # below the last assignment to that environment.
 yanet_go_nocgo_env = yanet_go_env + {'CGO_ENABLED': '0'}
 
+# The native Go allocator shares free lists with the C one, so its red
+# zones must match: cgo builds add -asan to the Go flags of the build.
+yanet_go_cgo_env = environment(yanet_go_env)
+if b_sanitize.contains('address')
+  yanet_go_cgo_env.append('GOFLAGS', '-asan', separator: ' ')
+endif
+
 # The Go binaries are not fuzz targets and the fuzz suite runs none of them,
 # so a fuzzing build skips them to save build time.
 yanet_go_binaries = not get_option('fuzzing').enabled()
@@ -555,7 +562,7 @@ if not dataplane_only
         '--stamp', '@OUTPUT@',
       ] + (package.has_key('build_tag') ? ['--build-tag', package['build_tag']] : [])
       + cgo_native_inputs,
-      env: yanet_go_env,
+      env: yanet_go_cgo_env,
       # The marker hashes every archive the package's CGO flags name: the
       # probe builds the project ones, the marker's inputs the external ones.
       depends: go_cgo_flags + (cgo_probes.has_key(package_path) ? [cgo_probes[package_path]] : []),
