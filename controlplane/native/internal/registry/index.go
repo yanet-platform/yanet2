@@ -2,7 +2,10 @@
 
 package registry
 
-import "github.com/yanet-platform/yanet2/controlplane/native/layout"
+import (
+	"github.com/yanet-platform/yanet2/controlplane/native/layout"
+	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
+)
 
 const (
 	// Invalid marks an empty slot of a hash or string index and a lookup
@@ -23,7 +26,7 @@ func indexEntries(index *layout.HashIndex) []layout.HashIndexEntry {
 // newEntries allocates the entries of an index of that capacity, every
 // one empty, or returns nil.
 func newEntries(context *layout.MemoryContext, capacity uint32) []layout.HashIndexEntry {
-	entries, _ := AllocArray[layout.HashIndexEntry](context, uint64(capacity)*sparseFactor)
+	entries, _ := shmalloc.AllocArray[layout.HashIndexEntry](context, uint64(capacity)*sparseFactor)
 	for idx := range entries {
 		entries[idx] = layout.HashIndexEntry{Hash: Invalid, Value: Invalid}
 	}
@@ -79,7 +82,7 @@ func IndexRehash(index *layout.HashIndex, capacity uint32) bool {
 	}
 	index.Entries.Set(&fresh[0])
 	index.Capacity = capacity
-	FreeArray(index.MemoryContext.Get(), old)
+	shmalloc.FreeArray(index.MemoryContext.Get(), old)
 	return true
 }
 
@@ -89,7 +92,7 @@ func IndexFini(index *layout.HashIndex) {
 	if entries == nil {
 		return
 	}
-	FreeArray(index.MemoryContext.Get(), entries)
+	shmalloc.FreeArray(index.MemoryContext.Get(), entries)
 	index.Entries.Set(nil)
 	index.Capacity = 0
 	index.Count = 0

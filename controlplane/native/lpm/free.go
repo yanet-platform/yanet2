@@ -19,9 +19,9 @@ func Free(tree *layout.Lpm) {
 		chunkCount := (tree.PageCount + chunkSize - 1) / chunkSize
 		directory := registry.Slice(pages, chunkCapacity(chunkCount))
 		for idx := range chunkCount {
-			registry.FreeArray(context, registry.Slice(directory[idx].Get(), chunkSize))
+			shmalloc.FreeArray(context, registry.Slice(directory[idx].Get(), chunkSize))
 		}
-		registry.FreeArray(context, directory)
+		shmalloc.FreeArray(context, directory)
 	}
 	shmalloc.ContextFini(context)
 }

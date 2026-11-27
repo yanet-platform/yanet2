@@ -2,7 +2,10 @@
 
 package registry
 
-import "github.com/yanet-platform/yanet2/controlplane/native/layout"
+import (
+	"github.com/yanet-platform/yanet2/controlplane/native/layout"
+	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
+)
 
 // KeyReader returns the key a string index stored a value under.
 type KeyReader func(value uint32) []byte
@@ -31,7 +34,7 @@ func StrFini(index *layout.StrIndex) {
 	if values == nil {
 		return
 	}
-	FreeArray(index.MemoryContext.Get(), values)
+	shmalloc.FreeArray(index.MemoryContext.Get(), values)
 	index.Values.Set(nil)
 }
 
@@ -74,7 +77,7 @@ func strPlace(index *layout.StrIndex, key string, keySize int, value uint32) {
 func strExpand(index *layout.StrIndex, keySize int, read KeyReader) bool {
 	capacity := max(index.Size, 1) * sparseFactor * 2
 	context := index.MemoryContext.Get()
-	fresh, ok := AllocArray[uint32](context, uint64(capacity))
+	fresh, ok := shmalloc.AllocArray[uint32](context, uint64(capacity))
 	if !ok {
 		return false
 	}
@@ -90,6 +93,6 @@ func strExpand(index *layout.StrIndex, keySize int, read KeyReader) bool {
 			strPlace(index, string(read(value)), keySize, value)
 		}
 	}
-	FreeArray(context, old)
+	shmalloc.FreeArray(context, old)
 	return true
 }

@@ -46,7 +46,7 @@ func newPlainDevice(t testing.TB, owner *agent.Agent, name string, weight uint64
 func destroyDevice(device *layout.CpDevice) {
 	owner := device.Entity.Agent.Get()
 	cpconfig.FiniDevice(device)
-	registry.FreeNode(&owner.MemoryContext, device, 0)
+	shmalloc.FreeNode(&owner.MemoryContext, device, 0)
 }
 
 // deviceContext returns the context of the device of a name in the first

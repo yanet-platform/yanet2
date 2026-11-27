@@ -16,6 +16,7 @@ import (
 
 	"github.com/yanet-platform/yanet2/controlplane/native/internal/registry"
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
+	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
 )
 
 // FreeGeneration frees a generation nothing references, as
@@ -30,13 +31,13 @@ func FreeGeneration(cp *layout.CpConfig, gen *layout.CpConfigGen) {
 	for root := range registry.Pointees(roots) {
 		FreeWorkerContext(cp, root)
 	}
-	registry.FreeArray(&cp.EctxMemoryContext, roots)
+	shmalloc.FreeArray(&cp.EctxMemoryContext, roots)
 	registry.FiniEntities(&gen.ModuleRegistry.EntityRegistry)
 	registry.Fini(&gen.FunctionRegistry.Registry, FreeFunctionItem)
 	registry.Fini(&gen.PipelineRegistry.Registry, FreePipelineItem)
 	registry.FiniEntities(&gen.DeviceRegistry.EntityRegistry)
 	registry.FiniEntities(&gen.ObjectRegistry.EntityRegistry)
-	registry.FreeNode(&cp.MemoryContext, gen, 0)
+	shmalloc.FreeNode(&cp.MemoryContext, gen, 0)
 }
 
 // FreeFunctionItem frees the function of a registry item whose last
@@ -59,7 +60,7 @@ func FreeFunction(function *layout.CpFunction) {
 		}
 	}
 	FiniCounterRegistry(&function.CounterRegistry)
-	registry.FreeNode(
+	shmalloc.FreeNode(
 		function.MemoryContext.Get(), function,
 		unsafe.Sizeof(layout.CpFunctionChain{})*uintptr(function.ChainCount),
 	)
@@ -68,7 +69,7 @@ func FreeFunction(function *layout.CpFunction) {
 // FreeChain frees a chain, as cp_chain_fini and cp_chain_free do.
 func FreeChain(chain *layout.CpChain) {
 	FiniCounterRegistry(&chain.CounterRegistry)
-	registry.FreeNode(chain.MemoryContext.Get(), chain, unsafe.Sizeof(layout.CpChainModule{})*uintptr(chain.Length))
+	shmalloc.FreeNode(chain.MemoryContext.Get(), chain, unsafe.Sizeof(layout.CpChainModule{})*uintptr(chain.Length))
 }
 
 // FreePipelineItem frees the pipeline of a registry item whose last
@@ -81,7 +82,7 @@ func FreePipelineItem(item *layout.RegistryItem) {
 // cp_pipeline_free do.
 func FreePipeline(pipeline *layout.CpPipeline) {
 	FiniCounterRegistry(&pipeline.CounterRegistry)
-	registry.FreeNode(
+	shmalloc.FreeNode(
 		pipeline.MemoryContext.Get(), pipeline,
 		unsafe.Sizeof(layout.CpPipelineFunction{})*uintptr(pipeline.Length),
 	)
@@ -91,9 +92,9 @@ func FreePipeline(pipeline *layout.CpPipeline) {
 // as counter_registry_fini does.
 func FiniCounterRegistry(counters *layout.CounterRegistry) {
 	context := counters.MemoryContext.Get()
-	registry.FreeArray(context, registry.Slice(counters.Names.Get(), counters.Capacity))
+	shmalloc.FreeArray(context, registry.Slice(counters.Names.Get(), counters.Capacity))
 	for pool := range counters.FreeSlots {
-		registry.FreeArray(context, registry.Slice(counters.FreeSlots[pool].Get(), counters.FreeCapacities[pool]))
+		shmalloc.FreeArray(context, registry.Slice(counters.FreeSlots[pool].Get(), counters.FreeCapacities[pool]))
 	}
 	registry.StrFini(&counters.StrIndex)
 	*counters = layout.CounterRegistry{}

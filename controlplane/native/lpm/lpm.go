@@ -89,15 +89,15 @@ func newPage(tree *layout.Lpm, slot *layout.LpmValue) error {
 		pages := oldPages
 		if grow {
 			var ok bool
-			if pages, ok = registry.AllocArray[shm.Ptr[layout.LpmPage]](context, newCapacity); !ok {
+			if pages, ok = shmalloc.AllocArray[shm.Ptr[layout.LpmPage]](context, newCapacity); !ok {
 				return errTreeMemory
 			}
 		}
 
-		chunk, ok := registry.AllocArray[layout.LpmPage](context, chunkSize)
+		chunk, ok := shmalloc.AllocArray[layout.LpmPage](context, chunkSize)
 		if !ok {
 			if grow {
-				registry.FreeArray(context, pages)
+				shmalloc.FreeArray(context, pages)
 			}
 			return errTreeMemory
 		}
@@ -109,7 +109,7 @@ func newPage(tree *layout.Lpm, slot *layout.LpmValue) error {
 				pages[idx].Set(oldPages[idx].Get())
 			}
 			tree.Pages.Set(&pages[0])
-			registry.FreeArray(context, oldPages)
+			shmalloc.FreeArray(context, oldPages)
 		}
 	}
 	fresh := page(tree, tree.PageCount)

@@ -38,13 +38,13 @@ func freeSlotPush(counters *layout.CounterRegistry, pool int, offset uint64) err
 	if counters.FreeCounts[pool] == counters.FreeCapacities[pool] {
 		context := counters.MemoryContext.Get()
 		capacity := max(counters.FreeCapacities[pool]*2, 8)
-		grown, ok := registry.AllocArray[uint64](context, capacity)
+		grown, ok := shmalloc.AllocArray[uint64](context, capacity)
 		if !ok {
 			return fmt.Errorf("allocate released slots of pool %d: %w", pool, shmalloc.ErrNoMemory)
 		}
 		old := freeSlots(counters, pool)
 		copy(grown, old[:counters.FreeCounts[pool]])
-		registry.FreeArray(context, old)
+		shmalloc.FreeArray(context, old)
 		counters.FreeSlots[pool].Set(&grown[0])
 		counters.FreeCapacities[pool] = capacity
 	}

@@ -103,7 +103,7 @@ func Init(context *layout.MemoryContext, owner *layout.CpConfig, registry *layou
 	}
 	if !IndexInit(&registry.KeyIndex, context, uint32(capacity)) {
 		registry.Items.Set(nil)
-		FreeArray(context, all)
+		shmalloc.FreeArray(context, all)
 		return false
 	}
 	return true
@@ -155,7 +155,7 @@ func extend(registry *layout.Registry) bool {
 	for idx := capacity; idx > oldCapacity; idx-- {
 		pushEmpty(registry, idx-1)
 	}
-	FreeArray(context, old)
+	shmalloc.FreeArray(context, old)
 	return true
 }
 
@@ -244,6 +244,6 @@ func Fini(registry *layout.Registry, free func(item *layout.RegistryItem)) {
 		}
 	}
 	IndexFini(&registry.KeyIndex)
-	FreeArray(registry.MemoryContext.Get(), slots(registry))
+	shmalloc.FreeArray(registry.MemoryContext.Get(), slots(registry))
 	*registry = layout.Registry{}
 }
