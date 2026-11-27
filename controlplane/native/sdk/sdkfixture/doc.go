@@ -6,4 +6,8 @@
 // shapes of the SDK field types and the views into zz_layout_<arch>.go, with
 // a test against the same description in zz_layout_<arch>_test.go. Neither
 // file is committed.
+//
+// The native builders of the fixture modules' configurations name those
+// views, so their files build only under the sdk_rust_fixtures tag, which
+// the Makefile passes where the build generates the views.
 package sdkfixture

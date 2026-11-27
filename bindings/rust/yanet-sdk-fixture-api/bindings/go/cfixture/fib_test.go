@@ -12,9 +12,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/yanet-platform/xnetip"
 
+	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/bindings/rust/yanet-sdk-fixture-api/bindings/go/cfixture"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
 )
 
 // prefix4 returns the range of the IPv4 prefix, mapped to the value.
@@ -362,14 +364,14 @@ func Test_Fib_Build_ReversedRange_ReturnsMemoryToBaseline(t *testing.T) {
 // from start up to end in steps, until a build fits, and returns the limit
 // that fits, zero when none does.
 //
-// Each build that fails must be refused as exhausted memory, or by the header's
-// registries, which C reports without a kind, and leave the agent's free memory
-// as it was; the one that fits is freed, which must restore it as well. The
-// agents live as long as the harness does.
+// Each build that fails must be refused as exhausted memory, or, by C, for its
+// header's registries, which C reports without a kind, and leave the agent's
+// free memory as it was; the one that fits is freed, which must restore it as
+// well. The agents live as long as the harness does.
 func sweep(
 	t *testing.T,
 	bed *bed,
-	build func(agent *ffi.Agent) (*cfixture.ModuleConfig, error),
+	build func(agent *ffi.Agent) (moduleConfig, error),
 	start, end, stride int,
 ) int {
 	t.Helper()
@@ -399,15 +401,21 @@ func sweep(
 }
 
 // buildFib returns the build of a FIB of the input for a sweep.
-func buildFib(input cfixture.Fib) func(agent *ffi.Agent) (*cfixture.ModuleConfig, error) {
-	return func(agent *ffi.Agent) (*cfixture.ModuleConfig, error) {
+func buildFib(input cfixture.Fib) func(agent *ffi.Agent) (moduleConfig, error) {
+	return func(agent *ffi.Agent) (moduleConfig, error) {
 		return cfixture.NewFibConfig(agent, "fib", input)
 	}
 }
 
 // exhaustedOrUntagged reports whether the error is a refusal for lack of
-// memory or carries no kind.
+// memory, or one of C that carries no kind.
 func exhaustedOrUntagged(err error) bool {
+	if errors.Is(err, shmalloc.ErrNoMemory) {
+		return true
+	}
+	if _, ok := errors.AsType[*cerrors.Error](err); !ok {
+		return false
+	}
 	for _, kind := range []error{
 		ffi.ErrNotFound,
 		ffi.ErrFailedPrecondition,

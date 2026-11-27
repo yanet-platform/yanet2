@@ -113,8 +113,15 @@ func (m *bed) buildFixture(options fixtureOptions) (*cfixture.ModuleConfig, erro
 	)
 }
 
+// moduleConfig is a module configuration a bed publishes and frees,
+// whichever builder made it.
+type moduleConfig interface {
+	AsFFIModule() ffi.ModuleConfig
+	Free() error
+}
+
 // freeAtEnd frees the configuration when the test ends, before the agent goes.
-func (m *bed) freeAtEnd(config *cfixture.ModuleConfig) {
+func (m *bed) freeAtEnd(config moduleConfig) {
 	m.t.Cleanup(func() { _ = config.Free() })
 }
 
@@ -134,7 +141,7 @@ func (m *bed) fixture(options fixtureOptions) *cfixture.ModuleConfig {
 type instance struct {
 	moduleType string
 	name       string
-	config     *cfixture.ModuleConfig
+	config     moduleConfig
 	path       dataplaneut.CounterPath
 }
 

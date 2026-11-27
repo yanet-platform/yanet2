@@ -29,9 +29,7 @@ on:
       - "bindings/go/dataplane_ut/**"
       - "common/go/dataplane/**"
       - "controlplane/ffi/**"
-      - "controlplane/native/layout/**"
-      - "controlplane/native/sdk/**"
-      - "controlplane/native/shm/**"
+      - "controlplane/native/**"
       - "devices/plain/bindings/go/cplain/**"
       - "**/meson.build"
       - "meson_options.txt"
@@ -62,9 +60,7 @@ on:
       - "bindings/go/dataplane_ut/**"
       - "common/go/dataplane/**"
       - "controlplane/ffi/**"
-      - "controlplane/native/layout/**"
-      - "controlplane/native/sdk/**"
-      - "controlplane/native/shm/**"
+      - "controlplane/native/**"
       - "devices/plain/bindings/go/cplain/**"
       - "**/meson.build"
       - "meson_options.txt"
@@ -150,13 +146,13 @@ jobs:
       - name: Configure lint
         run: echo "CGO_CPPFLAGS=$(cat build/yanet_cgo_cppflags)" >> "$GITHUB_ENV"
 
-      # go-lint.yml cannot type-check this package: its files carry a build tag
-      # and its header exists only after the build above.
+      # go-lint.yml cannot type-check these packages: their files carry a build
+      # tag, and the cgo header and the Go views exist only after the build above.
       - name: Lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
           version: v2.15.0
-          args: --timeout 5m --build-tags sdk_rust_fixtures ./bindings/rust/...
+          args: --timeout 5m --build-tags sdk_rust_fixtures ./bindings/rust/... ./controlplane/native/sdk/...
 
       - name: Save Go build cache
         if: success() && github.ref == 'refs/heads/main' && steps.go-buildcache.outputs.cache-hit != 'true' && !env.ACT

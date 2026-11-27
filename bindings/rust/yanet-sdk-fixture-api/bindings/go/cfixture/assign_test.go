@@ -5,7 +5,11 @@ package cfixture_test
 import (
 	"encoding/binary"
 	"fmt"
+	"net"
+	"net/netip"
+	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
@@ -13,6 +17,10 @@ import (
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/bindings/rust/yanet-sdk-fixture-api/bindings/go/cfixture"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/native/classify"
+	"github.com/yanet-platform/yanet2/controlplane/native/cpconfig"
+	"github.com/yanet-platform/yanet2/controlplane/native/layout"
+	"github.com/yanet-platform/yanet2/controlplane/native/sdk/sdkfixture"
 )
 
 const (
@@ -22,11 +30,14 @@ const (
 
 // assignRule is a rule of an assign test: its networks, protocols and ports,
 // each empty for any, and what it does.
+//
+// A network is a prefix, or a C record the prefix cannot spell, which only
+// the cgo build takes.
 type assignRule struct {
 	family   uint64
 	src, dst []any
-	protos   []cfixture.LineRange
-	ports    []cfixture.PortRange
+	protos   []classify.LineRange
+	ports    []classify.PortRange
 	pass     bool
 	counter  string
 }
@@ -40,22 +51,36 @@ func assignOf(t *testing.T, rules ...assignRule) cfixture.Assign {
 		if family == cfixture.AssignFamilyIPv4 {
 			offset := len(assign.Nets4)
 			for _, item := range items {
-				assign.Nets4 = append(assign.Nets4, item.(cfixture.Net4))
+				record, ok := item.(cfixture.Net4)
+				if prefix, isPrefix := item.(netip.Prefix); isPrefix {
+					record, ok = cfixture.NewNet4(prefix.Addr().As4(), [4]byte(net.CIDRMask(prefix.Bits(), 32))), true
+				}
+				require.True(t, ok, "IPv4 network %v", item)
+				assign.Nets4 = append(assign.Nets4, record)
 			}
 			return cfixture.NewSpan(uint64(offset), uint64(len(items)))
 		}
 		offset := len(assign.Nets6)
 		for _, item := range items {
-			assign.Nets6 = append(assign.Nets6, item.(cfixture.Net6))
+			record, ok := item.(cfixture.Net6)
+			if prefix, isPrefix := item.(netip.Prefix); isPrefix {
+				record, ok = cfixture.NewNet6(prefix.Addr().As16(), [16]byte(net.CIDRMask(prefix.Bits(), 128))), true
+			}
+			require.True(t, ok, "IPv6 network %v", item)
+			assign.Nets6 = append(assign.Nets6, record)
 		}
 		return cfixture.NewSpan(uint64(offset), uint64(len(items)))
 	}
 	for _, rule := range rules {
 		src, dst := nets(rule.family, rule.src), nets(rule.family, rule.dst)
 		protos := cfixture.NewSpan(uint64(len(assign.Lines)), uint64(len(rule.protos)))
-		assign.Lines = append(assign.Lines, rule.protos...)
+		for _, lines := range rule.protos {
+			assign.Lines = append(assign.Lines, cfixture.NewLineRange(lines.From, lines.To))
+		}
 		ports := cfixture.NewSpan(uint64(len(assign.Ports)), uint64(len(rule.ports)))
-		assign.Ports = append(assign.Ports, rule.ports...)
+		for _, port := range rule.ports {
+			assign.Ports = append(assign.Ports, cfixture.NewPortRange(port.From, port.To))
+		}
 		record, err := cfixture.NewAssignRule(rule.family, src, dst, protos, ports, rule.pass, rule.counter)
 		require.NoError(t, err)
 		assign.Rules = append(assign.Rules, record)
@@ -63,36 +88,102 @@ func assignOf(t *testing.T, rules ...assignRule) cfixture.Assign {
 	return assign
 }
 
+// assignBuild builds an assign configuration named config of the rules over
+// an agent of the bed's harness.
+type assignBuild func(t *testing.T, bed *bed, agent *ffi.Agent, rules []assignRule) (moduleConfig, error)
+
+// buildAssignCgo builds through the SDK's Rust builder of the fixture api.
+func buildAssignCgo(t *testing.T, _ *bed, agent *ffi.Agent, rules []assignRule) (moduleConfig, error) {
+	return cfixture.NewAssignConfig(agent, "config", assignOf(t, rules...))
+}
+
+// buildAssignNative builds through the native Go builder over the agent's
+// native view; the rules' networks must be prefixes.
+func buildAssignNative(t *testing.T, bed *bed, agent *ffi.Agent, rules []assignRule) (moduleConfig, error) {
+	families := map[uint64]sdkfixture.AssignFamily{
+		cfixture.AssignFamilyAny:  sdkfixture.AssignAny,
+		cfixture.AssignFamilyIPv4: sdkfixture.AssignIPv4,
+		cfixture.AssignFamilyIPv6: sdkfixture.AssignIPv6,
+	}
+	prefixes := func(items []any) []netip.Prefix {
+		out := make([]netip.Prefix, 0, len(items))
+		for _, item := range items {
+			prefix, ok := item.(netip.Prefix)
+			require.True(t, ok, "network %v is not a prefix", item)
+			out = append(out, prefix)
+		}
+		return out
+	}
+	native := make([]sdkfixture.AssignRule, 0, len(rules))
+	for _, rule := range rules {
+		family, ok := families[rule.family]
+		require.True(t, ok, "family %d", rule.family)
+		native = append(native, sdkfixture.AssignRule{
+			Family:  family,
+			Src:     prefixes(rule.src),
+			Dst:     prefixes(rule.dst),
+			Protos:  rule.protos,
+			Ports:   rule.ports,
+			Pass:    rule.pass,
+			Counter: rule.counter,
+		})
+	}
+	module, err := sdkfixture.NewAssignConfig(bed.harness.NativeAgent(t, agent), "config", native)
+	if err != nil {
+		return nil, err
+	}
+	return nativeConfig{module: module}, nil
+}
+
+// nativeConfig is a configuration the native builder made, which the bed
+// publishes through its cgo agent.
+type nativeConfig struct {
+	module *layout.CpModule
+}
+
+// AsFFIModule returns the handle the cgo agent publishes.
+func (m nativeConfig) AsFFIModule() ffi.ModuleConfig {
+	return ffi.NewModuleConfig(unsafe.Pointer(m.module))
+}
+
+// Free frees the configuration natively.
+func (m nativeConfig) Free() error {
+	return sdkfixture.FreeAssignConfig(m.module)
+}
+
+// forEachBuild runs an assign scenario once over each builder: the SDK's
+// Rust builder through cgo and the native Go one.
+func forEachBuild(t *testing.T, scenario func(t *testing.T, build assignBuild)) {
+	for _, tc := range []struct {
+		name  string
+		build assignBuild
+	}{
+		{name: "cgo", build: buildAssignCgo},
+		{name: "native", build: buildAssignNative},
+	} {
+		t.Run(tc.name, func(t *testing.T) { scenario(t, tc.build) })
+	}
+}
+
 // assignInstance builds an assign configuration of the rules as an instance
 // of the module type assign.
-func (m *bed) assignInstance(assign cfixture.Assign) *instance {
+func (m *bed) assignInstance(build assignBuild, rules ...assignRule) *instance {
 	m.t.Helper()
 
-	config, err := cfixture.NewAssignConfig(m.agent, "config", assign)
+	config, err := build(m.t, m, m.agent, rules)
 	require.NoError(m.t, err)
 	m.freeAtEnd(config)
 	return &instance{moduleType: "assign", name: "config", config: config}
 }
 
 // net4 returns the IPv4 network of the address and prefix length.
-func net4(addr [4]byte, bits int) cfixture.Net4 {
-	var mask [4]byte
-	binary.BigEndian.PutUint32(mask[:], ^uint32(0)<<(32-bits))
-	return cfixture.NewNet4(addr, mask)
+func net4(addr [4]byte, bits int) netip.Prefix {
+	return netip.PrefixFrom(netip.AddrFrom4(addr), bits)
 }
 
 // net6 returns the IPv6 network of the address and prefix length.
-func net6(addr [16]byte, bits int) cfixture.Net6 {
-	var mask [16]byte
-	for idx := range mask {
-		switch left := bits - 8*idx; {
-		case left >= 8:
-			mask[idx] = 0xff
-		case left > 0:
-			mask[idx] = ^byte(0) << (8 - left)
-		}
-	}
-	return cfixture.NewNet6(addr, mask)
+func net6(addr [16]byte, bits int) netip.Prefix {
+	return netip.PrefixFrom(netip.AddrFrom16(addr), bits)
 }
 
 // transportLen is the transport header the parser requires of the protocol.
@@ -150,13 +241,19 @@ func addr6(hi, lo byte) [16]byte {
 // the wider, and that each attribute, through its joint, decides a match: the
 // source and the destination networks, the protocol and the port.
 func Test_Assign_FirstMatch_ByEachAttribute(t *testing.T) {
+	forEachBuild(t, assignFirstMatchByEachAttribute)
+}
+
+// assignFirstMatchByEachAttribute runs the scenario of the test of
+// its name over a build.
+func assignFirstMatchByEachAttribute(t *testing.T, build assignBuild) {
 	bed := newBed(t)
-	inst := bed.assignInstance(assignOf(t,
+	inst := bed.assignInstance(build,
 		assignRule{
 			family:  cfixture.AssignFamilyIPv4,
 			src:     []any{net4([4]byte{10}, 8)},
-			protos:  []cfixture.LineRange{cfixture.NewLineRange(protoUDP, protoUDP)},
-			ports:   []cfixture.PortRange{cfixture.NewPortRange(53, 53)},
+			protos:  []classify.LineRange{{From: protoUDP, To: protoUDP}},
+			ports:   []classify.PortRange{{From: 53, To: 53}},
 			counter: "dns",
 		},
 		assignRule{
@@ -172,7 +269,7 @@ func Test_Assign_FirstMatch_ByEachAttribute(t *testing.T) {
 			pass:    false,
 			counter: "elsewhere",
 		},
-	))
+	)
 	bed.serveBeforeForward(inst)
 	inner, outside := [4]byte{10, 1, 2, 3}, [4]byte{192, 0, 2, 1}
 	frames := [][]byte{
@@ -209,12 +306,18 @@ func Test_Assign_FirstMatch_ByEachAttribute(t *testing.T) {
 // are classified by the rules of their family alone, and that a rule's action
 // is found by its index among the rules of both families.
 func Test_Assign_Families_ShareTheRuleIndex(t *testing.T) {
+	forEachBuild(t, assignFamiliesShareTheRuleIndex)
+}
+
+// assignFamiliesShareTheRuleIndex runs the scenario of the test of
+// its name over a build.
+func assignFamiliesShareTheRuleIndex(t *testing.T, build assignBuild) {
 	bed := newBed(t)
-	inst := bed.assignInstance(assignOf(t,
+	inst := bed.assignInstance(build,
 		assignRule{
 			family:  cfixture.AssignFamilyIPv6,
 			src:     []any{net6(addr6(1, 0), 120)},
-			ports:   []cfixture.PortRange{cfixture.NewPortRange(1000, 2000)},
+			ports:   []classify.PortRange{{From: 1000, To: 2000}},
 			pass:    true,
 			counter: "v6 ports",
 		},
@@ -227,7 +330,7 @@ func Test_Assign_Families_ShareTheRuleIndex(t *testing.T) {
 			family:  cfixture.AssignFamilyIPv6,
 			counter: "v6 rest",
 		},
-	))
+	)
 	bed.serveBeforeForward(inst)
 	frames := [][]byte{
 		ip6Frame(addr6(1, 7), addr6(9, 9), protoTCP, 1500),
@@ -252,20 +355,26 @@ func Test_Assign_Families_ShareTheRuleIndex(t *testing.T) {
 // family without rules and one that is not IP are dropped and counted by no
 // rule.
 func Test_Assign_Unclassified_IsDropped(t *testing.T) {
+	forEachBuild(t, assignUnclassifiedIsDropped)
+}
+
+// assignUnclassifiedIsDropped runs the scenario of the test of
+// its name over a build.
+func assignUnclassifiedIsDropped(t *testing.T, build assignBuild) {
 	bed := newBed(t)
-	inst := bed.assignInstance(assignOf(t,
+	inst := bed.assignInstance(build,
 		assignRule{
 			family:  cfixture.AssignFamilyIPv4,
-			ports:   []cfixture.PortRange{cfixture.NewPortRange(53, 53)},
+			ports:   []classify.PortRange{{From: 53, To: 53}},
 			pass:    true,
 			counter: "dns",
 		},
 		assignRule{
 			family:  cfixture.AssignFamilyIPv4,
-			ports:   []cfixture.PortRange{cfixture.NewPortRange(0, 0)},
+			ports:   []classify.PortRange{{From: 0, To: 0}},
 			counter: "port zero",
 		},
-	))
+	)
 	bed.serveBeforeForward(inst)
 	src, dst := [4]byte{192, 0, 2, 1}, [4]byte{192, 0, 2, 2}
 	frames := [][]byte{
@@ -321,7 +430,7 @@ func Test_Assign_Build_RefusesInvalidRules(t *testing.T) {
 			assign: func(t *testing.T) cfixture.Assign {
 				return assignOf(t, assignRule{
 					family: cfixture.AssignFamilyIPv4,
-					ports:  []cfixture.PortRange{cfixture.NewPortRange(80, 53)},
+					ports:  []classify.PortRange{{From: 80, To: 53}},
 				})
 			},
 			want: "a range ends before it starts",
@@ -331,7 +440,7 @@ func Test_Assign_Build_RefusesInvalidRules(t *testing.T) {
 			assign: func(t *testing.T) cfixture.Assign {
 				return assignOf(t, assignRule{
 					family: cfixture.AssignFamilyIPv6,
-					protos: []cfixture.LineRange{cfixture.NewLineRange(17, 6)},
+					protos: []classify.LineRange{{From: 17, To: 6}},
 				})
 			},
 			want: "a range ends before it starts",
@@ -375,19 +484,25 @@ func Test_Assign_Build_RefusesInvalidRules(t *testing.T) {
 // that a packet takes whichever of its family's rule and such a rule comes
 // first in the ruleset.
 func Test_Assign_AnyFamily_TakesTheEarlierRuleOfBothPaths(t *testing.T) {
+	forEachBuild(t, assignAnyFamilyTakesTheEarlierRuleOfBothPaths)
+}
+
+// assignAnyFamilyTakesTheEarlierRuleOfBothPaths runs the scenario of the test of
+// its name over a build.
+func assignAnyFamilyTakesTheEarlierRuleOfBothPaths(t *testing.T, build assignBuild) {
 	bed := newBed(t)
-	inst := bed.assignInstance(assignOf(t,
+	inst := bed.assignInstance(build,
 		assignRule{
 			family:  cfixture.AssignFamilyIPv4,
 			src:     []any{net4([4]byte{10}, 8)},
-			ports:   []cfixture.PortRange{cfixture.NewPortRange(53, 80)},
+			ports:   []classify.PortRange{{From: 53, To: 80}},
 			pass:    true,
 			counter: "v4 low ports",
 		},
 		assignRule{
 			family:  cfixture.AssignFamilyAny,
-			protos:  []cfixture.LineRange{cfixture.NewLineRange(protoUDP, protoUDP)},
-			ports:   []cfixture.PortRange{cfixture.NewPortRange(53, 53)},
+			protos:  []classify.LineRange{{From: protoUDP, To: protoUDP}},
+			ports:   []classify.PortRange{{From: 53, To: 53}},
 			pass:    true,
 			counter: "dns",
 		},
@@ -400,7 +515,7 @@ func Test_Assign_AnyFamily_TakesTheEarlierRuleOfBothPaths(t *testing.T) {
 			pass:    true,
 			counter: "v6 rest",
 		},
-	))
+	)
 	bed.serveBeforeForward(inst)
 	inner, outside := [4]byte{10, 1, 1, 1}, [4]byte{192, 0, 2, 1}
 	frames := [][]byte{
@@ -445,13 +560,58 @@ func Test_Assign_Build_RefusedAfterComposing_ReturnsMemoryToBaseline(t *testing.
 	assign := assignOf(t,
 		assignRule{family: cfixture.AssignFamilyIPv4, src: []any{net4([4]byte{10}, 8)}, counter: "v4"},
 		assignRule{family: cfixture.AssignFamilyIPv6, dst: []any{net6(addr6(1, 0), 120)}, counter: "v6"},
-		assignRule{family: cfixture.AssignFamilyAny, ports: []cfixture.PortRange{cfixture.NewPortRange(53, 53)}, counter: "\xff"},
+		assignRule{family: cfixture.AssignFamilyAny, ports: []classify.PortRange{{From: 53, To: 53}}, counter: "\xff"},
 	)
 
 	_, err := cfixture.NewAssignConfig(bed.agent, "config", assign)
 
 	require.ErrorContains(t, err, "a name is not NUL terminated UTF-8")
 	require.Equal(t, bed.baseline, bed.agent.BlockAllocatorFreeSize())
+}
+
+// Test_Assign_NativeBuild_RefusedAfterAllocating_ReturnsMemoryToBaseline
+// verifies that the native build refuses a network of another family than its
+// rule's as the compile of its side meets it, and a counter name its field
+// cannot hold once every classifier is built, and gives back all it took.
+func Test_Assign_NativeBuild_RefusedAfterAllocating_ReturnsMemoryToBaseline(t *testing.T) {
+	composed := []assignRule{
+		{family: cfixture.AssignFamilyIPv4, src: []any{net4([4]byte{10}, 8)}, counter: "v4"},
+		{family: cfixture.AssignFamilyIPv6, dst: []any{net6(addr6(1, 0), 120)}, counter: "v6"},
+	}
+	for _, tc := range []struct {
+		name  string
+		rules []assignRule
+		want  error
+	}{
+		{
+			name:  "IPv6 network of an IPv4 rule",
+			rules: []assignRule{{family: cfixture.AssignFamilyIPv4, dst: []any{net6(addr6(1, 0), 120)}}},
+			want:  classify.ErrInvalidRule,
+		},
+		{
+			name:  "IPv4 network of an IPv6 rule",
+			rules: []assignRule{{family: cfixture.AssignFamilyIPv6, src: []any{net4([4]byte{10}, 8)}}},
+			want:  classify.ErrInvalidRule,
+		},
+		{
+			name: "counter name longer than its field after every classifier",
+			rules: append(composed, assignRule{
+				family:  cfixture.AssignFamilyAny,
+				ports:   []classify.PortRange{{From: 53, To: 53}},
+				counter: strings.Repeat("c", len(layout.Counter{}.Name)),
+			}),
+			want: cpconfig.ErrInvalidName,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bed := newBed(t)
+
+			_, err := buildAssignNative(t, bed, bed.agent, tc.rules)
+
+			require.ErrorIs(t, err, tc.want)
+			require.Equal(t, bed.baseline, bed.agent.BlockAllocatorFreeSize())
+		})
+	}
 }
 
 // Test_Assign_Build_MemoryRunsOut_ReturnsMemoryToBaseline verifies that an
@@ -464,36 +624,42 @@ func Test_Assign_Build_RefusedAfterComposing_ReturnsMemoryToBaseline(t *testing.
 // buddy allocator runs dry, so a failure between two small allocations of one
 // routine is out of a sweep's reach.
 func Test_Assign_Build_MemoryRunsOut_ReturnsMemoryToBaseline(t *testing.T) {
+	forEachBuild(t, assignBuildMemoryRunsOutReturnsMemoryToBaseline)
+}
+
+// assignBuildMemoryRunsOutReturnsMemoryToBaseline runs the scenario of the test of
+// its name over a build.
+func assignBuildMemoryRunsOutReturnsMemoryToBaseline(t *testing.T, build assignBuild) {
 	bed := newBed(t, func(config *dataplaneut.Config) {
 		config.CPMemory = uint64(512 * datasize.MB)
 	})
-	assign := assignOf(t,
-		assignRule{
+	rules := []assignRule{
+		{
 			family:  cfixture.AssignFamilyIPv4,
 			src:     []any{net4([4]byte{10}, 8), net4([4]byte{192, 0, 2}, 24)},
 			dst:     []any{net4([4]byte{198, 51, 100}, 24)},
-			protos:  []cfixture.LineRange{cfixture.NewLineRange(protoUDP, protoUDP)},
-			ports:   []cfixture.PortRange{cfixture.NewPortRange(53, 53), cfixture.NewPortRange(1000, 2000)},
+			protos:  []classify.LineRange{{From: protoUDP, To: protoUDP}},
+			ports:   []classify.PortRange{{From: 53, To: 53}, {From: 1000, To: 2000}},
 			counter: "v4",
 		},
-		assignRule{
+		{
 			family:  cfixture.AssignFamilyIPv6,
 			src:     []any{net6(addr6(1, 0), 120), net6(addr6(2, 0), 64)},
 			dst:     []any{net6(addr6(3, 0), 96)},
 			counter: "v6",
 		},
-		assignRule{
+		{
 			family:  cfixture.AssignFamilyAny,
-			protos:  []cfixture.LineRange{cfixture.NewLineRange(protoTCP, protoTCP)},
-			ports:   []cfixture.PortRange{cfixture.NewPortRange(443, 443)},
+			protos:  []classify.LineRange{{From: protoTCP, To: protoTCP}},
+			ports:   []classify.PortRange{{From: 443, To: 443}},
 			counter: "any",
 		},
-	)
-	build := func(agent *ffi.Agent) (*cfixture.ModuleConfig, error) {
-		return cfixture.NewAssignConfig(agent, "config", assign)
+	}
+	buildOver := func(agent *ffi.Agent) (moduleConfig, error) {
+		return build(t, bed, agent, rules)
 	}
 
-	fits := sweep(t, bed, build, 0, 16<<20, 16<<10)
+	fits := sweep(t, bed, buildOver, 0, 16<<20, 16<<10)
 
 	require.NotZero(t, fits, "the build fits within the sweep")
 }
@@ -558,7 +724,7 @@ func Test_Assign_Build_EachLargeRequestRefused_ReturnsMemoryToBaseline(t *testin
 	assign := assignOf(t,
 		assignRule{family: cfixture.AssignFamilyIPv4, src: []any{net4([4]byte{10}, 8)}, counter: "v4"},
 		assignRule{family: cfixture.AssignFamilyIPv6, src: nets6, counter: "v6"},
-		assignRule{family: cfixture.AssignFamilyAny, ports: []cfixture.PortRange{cfixture.NewPortRange(53, 53)}, counter: "any"},
+		assignRule{family: cfixture.AssignFamilyAny, ports: []classify.PortRange{{From: 53, To: 53}}, counter: "any"},
 	)
 	build := func(agent *ffi.Agent) (*cfixture.ModuleConfig, error) {
 		return cfixture.NewAssignConfig(agent, "config", assign)
