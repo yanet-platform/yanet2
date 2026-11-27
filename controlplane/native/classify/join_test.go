@@ -46,8 +46,11 @@ func Test_Join_MatchesReference(t *testing.T) {
 			require.NoError(t, err)
 			devices, err := classify.CompileDevice(randomDeviceRules(seed, count))
 			require.NoError(t, err)
-			nets, err := classify.CompileNet6(randomNet6Rules(seed, count))
+			memory := classifytest.LayOut(make([]byte, memorySize))
+			attr := classifytest.Alloc[layout.ClassifyAttrNet6](memory)
+			nets, err := classify.CompileNet6(randomNet6Rules(seed, count), attr, &memory.Context, "net6")
 			require.NoError(t, err)
+			defer classify.FreeNet6(attr)
 			requireJoinMatchesReference(t, lines.Stage(), devices.Stage())
 			requireJoinMatchesReference(t, devices.Stage(), nets.Stage())
 		})
@@ -82,6 +85,54 @@ func Test_Join_ZeroStagesJoinAsEmpty(t *testing.T) {
 	require.Equal(t, [][]uint32{{0}}, classifytest.Table(table), "the table")
 	require.Zero(t, joint.GroupCount(), "the joint's pairs")
 	require.Zero(t, joint.MaxValue(), "the joint's largest class")
+}
+
+// collidingPairs are pairs whose pair hashes xor to zero, found by
+// Gaussian elimination over the hashes of pairs 0 to 32.
+var collidingPairs = []int{1, 3, 4, 5, 8, 11, 15, 16, 18, 19, 24, 25, 27}
+
+// collidingLines compiles two lines of one ruleset whose rules are its
+// pairs: on the nested one the colliding pairs' rules cover nested
+// ranges from the first point, every other rule a point of its own, and
+// the last point stays uncovered; on the other every rule covers the
+// whole line. The set of the colliding pairs and the empty set hash
+// alike.
+func collidingLines(t *testing.T) (nested, whole *classify.Line) {
+	t.Helper()
+	nestedRules := make([]classify.LineRule, collidingPairs[len(collidingPairs)-1]+1)
+	wholeRules := make([]classify.LineRule, len(nestedRules))
+	for rule := range nestedRules {
+		point := 0x40 + uint32(rule)
+		nestedRules[rule] = classify.LineRule{Ranges: []classify.LineRange{{From: point, To: point}}}
+		wholeRules[rule] = classify.LineRule{Ranges: []classify.LineRange{{From: 0, To: 0xff}}}
+	}
+	for depth, rule := range collidingPairs {
+		nestedRules[rule] = classify.LineRule{Ranges: []classify.LineRange{{From: 0, To: uint32(depth)}}}
+	}
+	nested, err := classify.CompileLine(nestedRules, 0x100)
+	require.NoError(t, err)
+	whole, err = classify.CompileLine(wholeRules, 0x100)
+	require.NoError(t, err)
+	return nested, whole
+}
+
+// Test_Join_TellsHashAlikePairSetsApart verifies that a join whose
+// classes or column terms are pair sets hashing alike, the colliding
+// pairs' set and the empty one, equals the join built cell by cell.
+func Test_Join_TellsHashAlikePairSetsApart(t *testing.T) {
+	nested, whole := collidingLines(t)
+	cases := []struct {
+		name        string
+		left, right *classify.Line
+	}{
+		{name: "classes of the rows", left: nested, right: whole},
+		{name: "terms of the columns", left: whole, right: nested},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			requireJoinMatchesReference(t, tc.left.Stage(), tc.right.Stage())
+		})
+	}
 }
 
 // splitLines compiles two lines of one ruleset over domains of the given

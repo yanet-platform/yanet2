@@ -15,6 +15,12 @@ type LineRange struct {
 	To   uint32
 }
 
+// foldLineRange folds an interval into a list's hash, as the line
+// compile's hash does.
+func foldLineRange(hash uint32, item LineRange) uint32 {
+	return (hash*31+item.From)*31 + item.To
+}
+
 // LineRule is what one rule matches on a line attribute.
 type LineRule struct {
 	// Ranges are the intervals the rule matches; a rule without any, or
@@ -47,7 +53,7 @@ func CompileLine(rules []LineRule, size uint32) (*Line, error) {
 	}
 	groups, firsts := groupRules(len(rules), func(idx int) ([]LineRange, bool) {
 		return rules[idx].Ranges, rules[idx].Absent
-	})
+	}, foldLineRange)
 
 	values := make([]uint32, size)
 	regions := newRefiner(size)

@@ -115,10 +115,10 @@ func Test_JoinRules_ExhaustedLeavesTableZeroed(t *testing.T) {
 		kept []uintptr
 	}{
 		{name: "no room for the memory context"},
-		{name: "no room for the row array", kept: []uintptr{context}},
-		{name: "no room for a row", kept: []uintptr{context, shm.PtrSize}},
-		{name: "no room for the class map's memory context", kept: []uintptr{context, shm.PtrSize, 5 * 4}},
-		{name: "no room for the class map", kept: []uintptr{context, shm.PtrSize, 5 * 4, context}},
+		{name: "no room for a row", kept: []uintptr{context}},
+		{name: "no room for the row array", kept: []uintptr{context, 5 * 4}},
+		{name: "no room for the class map's memory context", kept: []uintptr{context, 5 * 4, shm.PtrSize}},
+		{name: "no room for the class map", kept: []uintptr{context, 5 * 4, shm.PtrSize, context}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -501,12 +501,10 @@ func commitRatelimitShaped(t require.TestingT, memory *classifytest.Memory, rule
 	transport4 := transport(ruleset.Protocol4, ruleset.Port4, &holder.Protocol4, &holder.Port4, &holder.Transport4, "4")
 	require.NoError(t, nets4.JoinRules(transport4, members4, &holder.Rules4, context, "ratelimit:rules4"))
 
-	source6, err := classify.CompileNet6(ruleset.Source6)
+	source6, err := classify.CompileNet6(ruleset.Source6, &holder.Source6, context, "ratelimit:src6")
 	require.NoError(t, err)
-	require.NoError(t, source6.Commit(&holder.Source6, context, "ratelimit:src6"))
-	destination6, err := classify.CompileNet6(ruleset.Destination6)
+	destination6, err := classify.CompileNet6(ruleset.Destination6, &holder.Destination6, context, "ratelimit:dst6")
 	require.NoError(t, err)
-	require.NoError(t, destination6.Commit(&holder.Destination6, context, "ratelimit:dst6"))
 	nets6, err := source6.Stage().Join(destination6.Stage(), &holder.Nets6, context, "ratelimit:nets6")
 	require.NoError(t, err)
 	transport6 := transport(ruleset.Protocol6, ruleset.Port6, &holder.Protocol6, &holder.Port6, &holder.Transport6, "6")

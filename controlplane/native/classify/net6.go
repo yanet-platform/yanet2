@@ -37,23 +37,10 @@ type Net6Rule struct {
 	Absent bool
 }
 
-// Net6 is a compiled IPv6 network attribute: both halves of the address
-// space cut into stretches, the table of the high stretches the low half
-// splits, and the stage a join consumes.
+// Net6 is a compiled IPv6 network attribute: the stage a join consumes;
+// the lookups are already in the attribute.
 type Net6 struct {
-	// hiStarts holds the first value of every high stretch, ascending;
-	// hiValues its class, or the row mark and its row of the table.
-	hiStarts []uint64
-	hiValues []uint32
-	// loStarts holds the first value of every low stretch, ascending;
-	// loValues its column of the table.
-	loStarts []uint64
-	loValues []uint32
-	// table holds the classes of every row, row after row.
-	table   []uint32
-	rows    uint32
-	columns uint32
-	stage   Stage
+	stage Stage
 }
 
 // Stage returns the stage a join consumes, a copy, so the compile keeps
@@ -81,6 +68,24 @@ type network6 struct {
 	Lo half
 }
 
+// foldNetwork6 folds a network into a list's hash, as the IPv6 compile's
+// hash does: the bytes of the masked address, then those of the mask,
+// both high half first.
+func foldNetwork6(hash uint32, item network6) uint32 {
+	for _, value := range [2]uint64{item.Hi.From, item.Lo.From} {
+		for shift := 56; shift >= 0; shift -= 8 {
+			hash = hash*31 + uint32(value>>shift&0xff)
+		}
+	}
+	for _, bits := range [2]uint8{item.Hi.Bits, item.Lo.Bits} {
+		mask := ^uint64(0) << (64 - bits)
+		for shift := 56; shift >= 0; shift -= 8 {
+			hash = hash*31 + uint32(mask>>shift&0xff)
+		}
+	}
+	return hash
+}
+
 // IsAny reports whether the network has no mask at all.
 func (m network6) IsAny() bool {
 	return m.Hi.Bits == 0 && m.Lo.Bits == 0
@@ -89,11 +94,30 @@ func (m network6) IsAny() bool {
 // CompileNet6 compiles the IPv6 network attribute of a ruleset to the
 // lookups and the stage classify_net6_compile produces.
 //
+// The compile commits in the same call, as C's does. Where C builds the
+// table of the split high stretches in its compile scratch and moves it
+// in at commit, this one writes it straight into the attribute; then a
+// prefix tree of each half follows, each in a child memory context of
+// context titled for the attribute. The compile zeroes the attribute
+// first, whatever it held; a failure frees what the compile wrote and
+// leaves it zeroed, a success leaves it to the free.
+//
 // Each half of the address space is cut into classes as the IPv4 one is;
 // a network covers a run of high intervals by a run of low ones. A region
 // is the set of networks covering a cell of the two, found by the sweep
 // over the high half C runs and numbered in the order it writes them.
-func CompileNet6(rules []Net6Rule) (*Net6, error) {
+func CompileNet6(rules []Net6Rule, attr *layout.ClassifyAttrNet6, context *layout.MemoryContext, name string) (*Net6, error) {
+	*attr = layout.ClassifyAttrNet6{}
+	compiled, err := compileNet6(rules, attr, context, name)
+	if err != nil {
+		FreeNet6(attr)
+		return nil, err
+	}
+	return compiled, nil
+}
+
+// compileNet6 compiles the attribute into it.
+func compileNet6(rules []Net6Rule, attr *layout.ClassifyAttrNet6, context *layout.MemoryContext, name string) (*Net6, error) {
 	nets, starts, err := normalizeNet6Rules(rules)
 	if err != nil {
 		return nil, err
@@ -103,7 +127,7 @@ func CompileNet6(rules []Net6Rule) (*Net6, error) {
 	}
 	groups, firsts := groupRules(len(rules), func(idx int) ([]network6, bool) {
 		return netsOf(idx), rules[idx].Absent
-	})
+	}, foldNetwork6)
 
 	// The networks of the groups, each distinct one once, and the one at
 	// every place of a group's first rule.
@@ -127,7 +151,13 @@ func CompileNet6(rules []Net6Rule) (*Net6, error) {
 	sweep := newNet6Sweep(unique, hiSpans, loSpans, &lo)
 	rows := make([]uint32, hi.ClassCount)
 	split := sweep.MarkSplit(rows, hi.Classes)
-	table := make([]uint32, uint64(split)*uint64(sweep.Columns))
+	var table [][]uint32
+	if split > 0 {
+		table, err = initValueTable(&attr.Comb, context, leafName(name, "comb"), split, sweep.Columns)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if err := sweep.SweepRows(rows, hi.Classes, table); err != nil {
 		return nil, err
 	}
@@ -166,9 +196,14 @@ func CompileNet6(rules []Net6Rule) (*Net6, error) {
 		}
 	})
 
-	for idx, region := range table {
-		table[idx] = regionValues[region]
+	// The cells hold regions until the refinement numbers them.
+	for _, cells := range table {
+		for column, region := range cells {
+			cells[column] = regionValues[region]
+		}
 	}
+	// A high stretch maps to its class, or the row mark and its row of the
+	// table; a low stretch to its column.
 	var hiStarts, loStarts []uint64
 	var hiValues, loValues []uint32
 	for idx, start := range hi.Starts {
@@ -187,16 +222,13 @@ func CompileNet6(rules []Net6Rule) (*Net6, error) {
 			loValues = append(loValues, lo.Classes[idx])
 		}
 	}
-	return &Net6{
-		hiStarts: hiStarts,
-		hiValues: hiValues,
-		loStarts: loStarts,
-		loValues: loValues,
-		table:    table,
-		rows:     split,
-		columns:  sweep.Columns,
-		stage:    stage,
-	}, nil
+	if err := insertStretches(&attr.Hi, context, leafName(name, "hi"), hiStarts, hiValues); err != nil {
+		return nil, err
+	}
+	if err := insertStretches(&attr.Lo, context, leafName(name, "lo"), loStarts, loValues); err != nil {
+		return nil, err
+	}
+	return &Net6{stage: stage}, nil
 }
 
 // normalizeNet6Rules returns the networks of every rule in one slice,
@@ -508,11 +540,10 @@ func (m *net6Sweep) region(class uint32) uint32 {
 	return *region
 }
 
-// writeRow writes the regions of a split row into its zeroed cells. A
-// row with few low intervals under the levels from the vector one writes
-// the uniform region over the rest, and only when it is not the empty
-// set one, then the regions under those levels; the order numbers the
-// regions as C numbers them.
+// writeRow writes the regions of a split row into its cells. A row with
+// few low intervals under the levels from the vector one writes the
+// uniform region over every cell, then the regions under those levels;
+// the order numbers the regions as C numbers them.
 func (m *net6Sweep) writeRow(cells []uint32) {
 	if uint64(m.Moved)*8 >= uint64(m.Columns) {
 		for column := range cells {
@@ -520,10 +551,9 @@ func (m *net6Sweep) writeRow(cells []uint32) {
 		}
 		return
 	}
-	if uniform := m.region(m.Uniform); uniform != 0 {
-		for column := range cells {
-			cells[column] = uniform
-		}
+	uniform := m.region(m.Uniform)
+	for column := range cells {
+		cells[column] = uniform
 	}
 	for depth := uint32(len(m.Levels)); depth > m.VectorLevel; {
 		depth--
@@ -567,7 +597,7 @@ func (m *net6Sweep) MarkSplit(rows, hiClasses []uint32) uint32 {
 // SweepRows sweeps the high intervals over the nested networks and
 // writes the row of every high class: a pending one once into the next
 // table row, any other into its region.
-func (m *net6Sweep) SweepRows(rows, hiClasses []uint32, table []uint32) error {
+func (m *net6Sweep) SweepRows(rows, hiClasses []uint32, table [][]uint32) error {
 	next := uint32(0)
 	tableRow := uint32(0)
 	for interval, class := range hiClasses {
@@ -584,7 +614,7 @@ func (m *net6Sweep) SweepRows(rows, hiClasses []uint32, table []uint32) error {
 		switch {
 		case *row == none:
 			*row = Net6RowMark | tableRow
-			m.writeRow(table[int(tableRow)*int(m.Columns):][:m.Columns])
+			m.writeRow(table[tableRow])
 			tableRow++
 		case *row&Net6RowMark == 0:
 			*row = m.region(m.Uniform)
@@ -626,42 +656,7 @@ func (m *net6Sweep) NetRegions(count int) lists {
 	return regions
 }
 
-// Commit writes the attribute into shared memory as C's commit leaves
-// it: the table of the split rows, then a prefix tree of each half, each
-// in a child memory context of context titled for the attribute.
-//
-// A failure frees what the commit wrote and leaves the attribute zeroed,
-// as C does.
-func (m *Net6) Commit(attr *layout.ClassifyAttrNet6, context *layout.MemoryContext, name string) error {
-	if err := m.commit(attr, context, name); err != nil {
-		FreeNet6(attr)
-		return err
-	}
-	return nil
-}
-
-// commit writes the table and the trees of the halves.
-//
-// The attribute starts empty, as C's commit clears it, so a failure
-// frees only what the commit wrote.
-func (m *Net6) commit(attr *layout.ClassifyAttrNet6, context *layout.MemoryContext, name string) error {
-	*attr = layout.ClassifyAttrNet6{}
-	if m.rows > 0 {
-		rows, err := initValueTable(&attr.Comb, context, leafName(name, "comb"), m.rows, m.columns)
-		if err != nil {
-			return err
-		}
-		for row, cells := range rows {
-			copy(cells, m.table[row*int(m.columns):])
-		}
-	}
-	if err := insertStretches(&attr.Hi, context, leafName(name, "hi"), m.hiStarts, m.hiValues); err != nil {
-		return err
-	}
-	return insertStretches(&attr.Lo, context, leafName(name, "lo"), m.loStarts, m.loValues)
-}
-
-// FreeNet6 releases what a commit wrote into an IPv6 network attribute
+// FreeNet6 releases what a compile wrote into an IPv6 network attribute
 // and zeroes it, as classify_attr_net6_free does; it is safe on a zeroed
 // attribute.
 func FreeNet6(attr *layout.ClassifyAttrNet6) {

@@ -13,8 +13,9 @@
 // C's class; the bytes of the tables need not match C's.
 //
 // A compile refuses input C cannot take, or that would panic in Go, before
-// it allocates anything; a commit that runs out of shared memory frees what it took and leaves its
-// artefact zeroed, as C's error paths do.
+// it allocates anything, but for the IPv6 class limit the sweep meets; a
+// compile or a commit that fails once it wrote shared memory frees what it
+// took and leaves its artefact zeroed, as C's error paths do.
 package classify
 
 import "errors"
