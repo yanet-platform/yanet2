@@ -153,24 +153,6 @@ func UpdateObjects(instance *zone.Instance, objects []*layout.CpObject, options 
 	})
 }
 
-// objectKeyHash hashes an object's type and name as the object registry's
-// index does.
-func objectKeyHash(objectType, name string) uint64 {
-	return registry.HashNamePair(
-		registry.FieldKey(name, len(layout.CpObject{}.Name)),
-		registry.FieldKey(objectType, len(layout.CpObject{}.Type)),
-	)
-}
-
-// objectMatch matches the object of a type and name.
-func objectMatch(objectType, name string) func(item *layout.RegistryItem) bool {
-	return func(item *layout.RegistryItem) bool {
-		object := registry.Container[layout.CpObject](item, 0)
-		return shm.Equal(object.Name[:], registry.FieldKey(name, len(object.Name))) &&
-			shm.Equal(object.Type[:], registry.FieldKey(objectType, len(object.Type)))
-	}
-}
-
 // upsertObject puts an object into the generation's registry, as
 // cp_object_registry_upsert does.
 //
@@ -178,11 +160,9 @@ func objectMatch(objectType, name string) func(item *layout.RegistryItem) bool {
 // counters it continues. The caller holds the instance's configuration
 // lock and the object's agent current.
 func (m *build) upsertObject(object *layout.CpObject) error {
-	objects := &m.gen.ObjectRegistry.EntityRegistry
 	objectType, name := shm.String(object.Type[:]), shm.String(object.Name[:])
 	var oldCounters, oldLinkCounters *layout.CounterRegistry
-	if index, found := lookupObject(m.gen, objectType, name); found {
-		old := registry.Container[layout.CpObject](registry.Item(&objects.Registry, index), 0)
+	if old := registry.LookupObject(&m.gen.ObjectRegistry, objectType, name); old != nil {
 		oldCounters, oldLinkCounters = &old.CounterRegistry, &old.LinkCounterRegistry
 	}
 	if err := linkCounters(&object.CounterRegistry, oldCounters); err != nil {
@@ -192,8 +172,8 @@ func (m *build) upsertObject(object *layout.CpObject) error {
 		return fmt.Errorf("link the link counter registry: %w", err)
 	}
 	if !registry.ReplaceEntity(
-		objects, objectHash, objectKeyHash(objectType, name),
-		objectMatch(objectType, name), &object.Entity.ConfigItem,
+		&m.gen.ObjectRegistry.EntityRegistry, objectHash, registry.ObjectKeyHash(objectType, name),
+		registry.ObjectMatch(objectType, name), &object.Entity.ConfigItem,
 	) {
 		return fmt.Errorf("replace object %s:%s in registry: %w", objectType, name, errZoneMemory)
 	}
@@ -213,7 +193,7 @@ func DeleteObject(instance *zone.Instance, objectType, name string, options ...U
 	}
 	return publish(instance, options, change{
 		Check: func(old *layout.CpConfigGen) error {
-			if _, found := lookupObject(old, objectType, name); !found {
+			if _, found := registry.LookupObjectIndex(&old.ObjectRegistry, objectType, name); !found {
 				return fmt.Errorf("object %s:%s: %w", objectType, name, ErrNotFound)
 			}
 			if module := linkingModule(old, objectType, name); module != nil {
@@ -226,8 +206,8 @@ func DeleteObject(instance *zone.Instance, objectType, name string, options ...U
 		},
 		Put: func(m *build) error {
 			if !registry.ReplaceEntity(
-				&m.gen.ObjectRegistry.EntityRegistry, objectHash, objectKeyHash(objectType, name),
-				objectMatch(objectType, name), nil,
+				&m.gen.ObjectRegistry.EntityRegistry, objectHash, registry.ObjectKeyHash(objectType, name),
+				registry.ObjectMatch(objectType, name), nil,
 			) {
 				return fmt.Errorf("delete object %s:%s from registry", objectType, name)
 			}

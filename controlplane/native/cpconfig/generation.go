@@ -171,35 +171,6 @@ func runtimeRegistries(module *layout.CpModule) []shm.Ptr[layout.CpModuleCounter
 	return registry.Slice(module.RuntimeCounterRegistries.Get(), module.RuntimeCounterRegistryCount)
 }
 
-// moduleKeyHash hashes a module's type and name as the module registry's
-// index does.
-func moduleKeyHash(moduleType, name string) uint64 {
-	return registry.HashNamePair(
-		registry.FieldKey(name, len(layout.CpModule{}.Name)),
-		registry.FieldKey(moduleType, len(layout.CpModule{}.Type)),
-	)
-}
-
-// moduleMatch matches the module of a type and name.
-func moduleMatch(moduleType, name string) func(item *layout.RegistryItem) bool {
-	return func(item *layout.RegistryItem) bool {
-		module := registry.Container[layout.CpModule](item, 0)
-		return shm.Equal(module.Name[:], registry.FieldKey(name, len(module.Name))) &&
-			shm.Equal(module.Type[:], registry.FieldKey(moduleType, len(module.Type)))
-	}
-}
-
-// lookupModule returns the module of a type and name in the registry, or
-// nil.
-func lookupModule(modules *layout.CpModuleRegistry, moduleType, name string) *layout.CpModule {
-	entities := &modules.EntityRegistry.Registry
-	index, found := registry.Lookup(entities, moduleKeyHash(moduleType, name), moduleMatch(moduleType, name))
-	if !found {
-		return nil
-	}
-	return registry.Container[layout.CpModule](registry.Item(entities, index), 0)
-}
-
 // upsertModule puts a module configuration into the generation's
 // registry, as cp_module_registry_upsert does.
 //
@@ -209,12 +180,12 @@ func lookupModule(modules *layout.CpModuleRegistry, moduleType, name string) *la
 func (m *build) upsertModule(module *layout.CpModule) error {
 	modules := &m.gen.ModuleRegistry
 	moduleType, name := shm.String(module.Type[:]), shm.String(module.Name[:])
-	if err := linkModuleCounters(module, lookupModule(modules, moduleType, name)); err != nil {
+	if err := linkModuleCounters(module, registry.LookupModule(modules, moduleType, name)); err != nil {
 		return err
 	}
 	if !registry.ReplaceEntity(
-		&modules.EntityRegistry, moduleHash, moduleKeyHash(moduleType, name),
-		moduleMatch(moduleType, name), &module.Entity.ConfigItem,
+		&modules.EntityRegistry, moduleHash, registry.ModuleKeyHash(moduleType, name),
+		registry.ModuleMatch(moduleType, name), &module.Entity.ConfigItem,
 	) {
 		return fmt.Errorf("replace module %s:%s in registry: %w", moduleType, name, errZoneMemory)
 	}

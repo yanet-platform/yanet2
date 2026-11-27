@@ -7,6 +7,7 @@ import (
 	"unsafe"
 
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
+	"github.com/yanet-platform/yanet2/controlplane/native/shm"
 )
 
 // Function returns the function an item of a function registry belongs
@@ -24,6 +25,105 @@ func Pipeline(item *layout.RegistryItem) *layout.CpPipeline {
 // Owner returns the agent an item of an entity registry belongs to.
 func Owner(item *layout.RegistryItem) *layout.Agent {
 	return Container[layout.CpEntity](item, 0).Agent.Get()
+}
+
+// PipelineMatch matches the pipeline of a name already cut to its field.
+func PipelineMatch(key string) Match {
+	return func(item *layout.RegistryItem) bool {
+		return shm.Equal(Pipeline(item).Name[:], key)
+	}
+}
+
+// LookupPipeline returns the pipeline of a name in the registry, or nil,
+// as cp_pipeline_registry_lookup does.
+func LookupPipeline(pipelines *layout.CpPipelineRegistry, name string) *layout.CpPipeline {
+	key := FieldKey(name, len(layout.CpPipeline{}.Name))
+	index, found := Lookup(&pipelines.Registry, HashName(key), PipelineMatch(key))
+	if !found {
+		return nil
+	}
+	return Pipeline(Item(&pipelines.Registry, index))
+}
+
+// FunctionMatch matches the function of a name already cut to its field.
+func FunctionMatch(key string) Match {
+	return func(item *layout.RegistryItem) bool {
+		return shm.Equal(Function(item).Name[:], key)
+	}
+}
+
+// LookupFunction returns the function of a name in the registry, or nil,
+// as cp_function_registry_lookup does.
+func LookupFunction(functions *layout.CpFunctionRegistry, name string) *layout.CpFunction {
+	key := FieldKey(name, len(layout.CpFunction{}.Name))
+	index, found := Lookup(&functions.Registry, HashName(key), FunctionMatch(key))
+	if !found {
+		return nil
+	}
+	return Function(Item(&functions.Registry, index))
+}
+
+// ModuleKeyHash hashes a module's type and name as the module registry's
+// index does.
+func ModuleKeyHash(moduleType, name string) uint64 {
+	return HashNamePair(
+		FieldKey(name, len(layout.CpModule{}.Name)),
+		FieldKey(moduleType, len(layout.CpModule{}.Type)),
+	)
+}
+
+// ModuleMatch matches the module of a type and name.
+func ModuleMatch(moduleType, name string) Match {
+	return func(item *layout.RegistryItem) bool {
+		module := Container[layout.CpModule](item, 0)
+		return shm.Equal(module.Name[:], FieldKey(name, len(module.Name))) &&
+			shm.Equal(module.Type[:], FieldKey(moduleType, len(module.Type)))
+	}
+}
+
+// LookupModule returns the module of a type and name in the registry, or
+// nil, as cp_module_registry_lookup does.
+func LookupModule(modules *layout.CpModuleRegistry, moduleType, name string) *layout.CpModule {
+	entities := &modules.EntityRegistry.Registry
+	index, found := Lookup(entities, ModuleKeyHash(moduleType, name), ModuleMatch(moduleType, name))
+	if !found {
+		return nil
+	}
+	return Container[layout.CpModule](Item(entities, index), 0)
+}
+
+// ObjectKeyHash hashes an object's type and name as the object registry's
+// index does.
+func ObjectKeyHash(objectType, name string) uint64 {
+	return HashNamePair(
+		FieldKey(name, len(layout.CpObject{}.Name)),
+		FieldKey(objectType, len(layout.CpObject{}.Type)),
+	)
+}
+
+// ObjectMatch matches the object of a type and name.
+func ObjectMatch(objectType, name string) Match {
+	return func(item *layout.RegistryItem) bool {
+		object := Container[layout.CpObject](item, 0)
+		return shm.Equal(object.Name[:], FieldKey(name, len(object.Name))) &&
+			shm.Equal(object.Type[:], FieldKey(objectType, len(object.Type)))
+	}
+}
+
+// LookupObjectIndex returns the registry slot of the object of a type and
+// name, as cp_object_registry_lookup_index does.
+func LookupObjectIndex(objects *layout.CpObjectRegistry, objectType, name string) (uint64, bool) {
+	return Lookup(&objects.EntityRegistry.Registry, ObjectKeyHash(objectType, name), ObjectMatch(objectType, name))
+}
+
+// LookupObject returns the object of a type and name in the registry, or
+// nil, as cp_object_registry_lookup does.
+func LookupObject(objects *layout.CpObjectRegistry, objectType, name string) *layout.CpObject {
+	index, found := LookupObjectIndex(objects, objectType, name)
+	if !found {
+		return nil
+	}
+	return Container[layout.CpObject](Item(&objects.EntityRegistry.Registry, index), 0)
 }
 
 // CopyEntities copies an entity registry and counts each copied item

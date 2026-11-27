@@ -218,7 +218,7 @@ func newChain(context *layout.MemoryContext, config ChainConfig) (*layout.CpChai
 // into the function's own registries, which go with the function.
 func (m *build) upsertFunction(function *layout.CpFunction) error {
 	name := shm.String(function.Name[:])
-	old := m.lookupFunction(name)
+	old := registry.LookupFunction(&m.gen.FunctionRegistry, name)
 	var oldCounters *layout.CounterRegistry
 	if old != nil {
 		oldCounters = &old.CounterRegistry
@@ -249,28 +249,9 @@ func (m *build) upsertFunction(function *layout.CpFunction) error {
 	key := registry.FieldKey(name, len(function.Name))
 	if !registry.Replace(
 		&m.gen.FunctionRegistry.Registry, functionHash, registry.HashName(key),
-		functionMatch(key), &function.ConfigItem, teardown.FreeFunctionItem,
+		registry.FunctionMatch(key), &function.ConfigItem, teardown.FreeFunctionItem,
 	) {
 		return fmt.Errorf("replace function in registry: %w", errZoneMemory)
 	}
 	return nil
-}
-
-// functionMatch matches the function of a name already cut to its field.
-func functionMatch(key string) registry.Match {
-	return func(item *layout.RegistryItem) bool {
-		return shm.Equal(registry.Function(item).Name[:], key)
-	}
-}
-
-// lookupFunction returns the function of a name the generation holds, or
-// nil.
-func (m *build) lookupFunction(name string) *layout.CpFunction {
-	functions := &m.gen.FunctionRegistry.Registry
-	key := registry.FieldKey(name, len(layout.CpFunction{}.Name))
-	index, ok := registry.Lookup(functions, registry.HashName(key), functionMatch(key))
-	if !ok {
-		return nil
-	}
-	return registry.Function(registry.Item(functions, index))
 }

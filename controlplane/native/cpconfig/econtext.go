@@ -318,7 +318,7 @@ func (m *build) entry(
 	position := 0
 	for idx := range named {
 		path.Pipeline = shm.String(named[idx].Name[:])
-		pipeline := m.lookupPipeline(path.Pipeline)
+		pipeline := registry.LookupPipeline(&m.gen.PipelineRegistry, path.Pipeline)
 		if pipeline == nil {
 			return nil, fmt.Errorf("device %q: %w: %s", path.Device, ErrMissingPipeline, path.Pipeline)
 		}
@@ -370,7 +370,7 @@ func (m *build) pipeline(
 
 	for idx, named := range pipeline.Functions(int(pipeline.Length)) {
 		path.Function = shm.String(named.Name[:])
-		function := m.lookupFunction(path.Function)
+		function := registry.LookupFunction(&m.gen.FunctionRegistry, path.Function)
 		if function == nil {
 			return nil, fmt.Errorf("pipeline %q: %w: %s", path.Pipeline, ErrMissingFunction, path.Function)
 		}
@@ -482,7 +482,7 @@ func (m *build) chain(device *layout.DeviceEctx, path pathNames, chain *layout.C
 
 	for idx, named := range chain.Modules(int(chain.Length)) {
 		moduleType, moduleName := shm.String(named.Type[:]), shm.String(named.Name[:])
-		module := lookupModule(&m.gen.ModuleRegistry, moduleType, moduleName)
+		module := registry.LookupModule(&m.gen.ModuleRegistry, moduleType, moduleName)
 		if module == nil {
 			return nil, fmt.Errorf(
 				"%w: module %s:%s in chain %q of function %q in pipeline %q",
@@ -596,7 +596,7 @@ func (m *build) objectLinks(built *layout.ModuleEctx, modulePath tagSet, module 
 	objects := registry.Slice(m.tree.Objects.Get(), m.tree.ObjectCount)
 	for idx, linked := range registry.Slice(module.Objects.Get(), count) {
 		objectType, objectName := shm.String(linked.Type[:]), shm.String(linked.Name[:])
-		index, ok := lookupObject(m.gen, objectType, objectName)
+		index, ok := registry.LookupObjectIndex(&m.gen.ObjectRegistry, objectType, objectName)
 		if !ok {
 			return fmt.Errorf("%w: %s:%s", ErrMissingObject, objectType, objectName)
 		}
@@ -690,13 +690,4 @@ func (m *build) linkModule(devices []shm.Ptr[layout.DeviceEctx], owner *layout.D
 		}
 	}
 	return nil
-}
-
-// lookupObject returns the registry slot of the object of a type and
-// name in the generation, as cp_config_gen_lookup_object_index does.
-func lookupObject(gen *layout.CpConfigGen, objectType, name string) (uint64, bool) {
-	return registry.Lookup(
-		&gen.ObjectRegistry.EntityRegistry.Registry, objectKeyHash(objectType, name),
-		objectMatch(objectType, name),
-	)
 }
