@@ -13,13 +13,14 @@ use std::{env::consts::ARCH, fs, path::Path};
 
 use yanet_sdk::layout::{Field, Kind, Node};
 
-/// Writes the views of the roots and the string constants, and their test,
-/// into `zz_layout_<arch>.go` and `zz_layout_<arch>_test.go` of `dir`, the
-/// package of import path `import`.
+/// Writes the Go views of the roots and the string constants, and their test,
+/// as `zz_layout_<arch>.go` and `zz_layout_<arch>_test.go` into the directory
+/// of the Go package of the given import path.
 ///
 /// Fails, naming where it was reached, on a type without a layout
-/// description that holds bytes, and on two types under one Go name; a file
-/// that already holds its output is left alone.
+/// description that holds bytes, on an atomic narrower than Go's, and on two
+/// types under one Go name; a file that already holds its output is left
+/// alone.
 pub fn generate(dir: &Path, import: &str, roots: &[&'static Node], constants: &[(&str, &str)]) -> Result<(), String> {
     let goarch = match ARCH {
         "x86_64" => "amd64",
@@ -56,8 +57,8 @@ struct Views {
 
 impl Views {
     /// Records a type and everything it reaches, refusing what has no Go
-    /// view; `context` names where it was reached, and `generic` marks the
-    /// members of a shape, which are no instance.
+    /// view and naming where it was reached; the members of a field type's
+    /// shape are no instance the test pins.
     fn reach(&mut self, node: &'static Node, context: &str, generic: bool) -> Result<(), String> {
         match node.kind {
             Kind::Array { elem, .. } => self.reach(elem, context, generic)?,
@@ -68,7 +69,7 @@ impl Views {
                 match self.declared.iter().find(|seen| declaration(seen).0 == name) {
                     // Instances of one field type differ in their arguments
                     // alone.
-                    Some(seen) if *seen == node || edge && declaration(seen).1 == members => {}
+                    Some(seen) if *seen == node || edge && same_shape(seen, node) => {}
                     Some(_) => return Err(format!("{context}: no Go view of two types named {name}")),
                     None => {
                         self.declared.push(node);
@@ -86,6 +87,9 @@ impl Views {
                     }
                 }
             }
+            Kind::Int { atomic: true, .. } if node.size < 4 => {
+                return Err(format!("{context}: no Go view of an atomic of {} bits", node.size * 8));
+            }
             Kind::Int { .. } | Kind::Param { .. } | Kind::C { .. } => {}
             Kind::Opaque => return Err(format!("{context}: no Go view of a type without a layout description")),
         }
@@ -100,7 +104,12 @@ impl Views {
             body.push_str("\n// Values the crates name, from the build of the views.\n");
         }
         for (name, value) in constants {
-            let _ = writeln!(body, "const {} string = {value:?}", camel(&name.to_lowercase()));
+            let _ = writeln!(
+                body,
+                "const {} string = {}",
+                camel(&name.to_lowercase()),
+                go_string(value)
+            );
         }
         for node in &self.declared {
             let name = declaration(node).0;
@@ -201,8 +210,19 @@ fn declaration(node: &Node) -> (String, Vec<&'static Field>) {
     (name, fields)
 }
 
-/// Writes the Go struct of a struct or a field type's shape, of its type
-/// parameters `params`, with padding where Rust leaves bytes.
+/// Whether two field type instances share one shape: their size, alignment,
+/// members and number of type arguments.
+fn same_shape(left: &Node, right: &Node) -> bool {
+    let arity = |node: &Node| match node.kind {
+        Kind::Edge { args, .. } => args.len(),
+        _ => 0,
+    };
+    (left.size, left.align, arity(left)) == (right.size, right.align, arity(right))
+        && declaration(left).1 == declaration(right).1
+}
+
+/// Writes the Go struct of a struct or a field type's shape, with the given
+/// type parameters and padding where Rust leaves bytes.
 fn render_struct(out: &mut String, node: &Node, params: &str) {
     let (name, members) = declaration(node);
     let mut lines = Vec::new();
@@ -225,8 +245,8 @@ fn render_struct(out: &mut String, node: &Node, params: &str) {
     out.push_str("}\n");
 }
 
-/// The import block of a Go source: `always`, and each shared package the
-/// source names as a qualifier.
+/// The import block of a Go source: the given imports, and each shared
+/// package the source names as a qualifier.
 fn imports(source: &str, always: &[&str]) -> String {
     let mut paths = always.to_vec();
     for (package, path) in [
@@ -246,8 +266,8 @@ fn imports(source: &str, always: &[&str]) -> String {
     format!("import (\n{lines})\n")
 }
 
-/// The Go type of a reached type; `qualifier` prefixes the generated
-/// declarations where another package names them.
+/// The Go type of a reached type, with the generated declarations qualified
+/// where another package names them.
 fn go_type(node: &Node, qualifier: &str) -> String {
     match node.kind {
         Kind::Int { signed, atomic } => {
@@ -278,12 +298,26 @@ fn go_name(path: &str) -> String {
     path.rsplit("::").next().unwrap_or(path).to_owned()
 }
 
-/// The Go name of a field or a member.
+/// The Go name of a field or a member, a raw identifier without its prefix.
 fn go_field(name: &str) -> String {
+    let name = name.strip_prefix("r#").unwrap_or(name);
     match name {
         "id" => "ID".to_owned(),
         _ => camel(name),
     }
+}
+
+/// A Go string literal of the value.
+fn go_string(value: &str) -> String {
+    let escaped: String = value
+        .chars()
+        .map(|char| match char {
+            '"' | '\\' => format!("\\{char}"),
+            char if char.is_control() => format!("\\u{:04x}", u32::from(char)),
+            char => char.to_string(),
+        })
+        .collect();
+    format!("\"{escaped}\"")
 }
 
 /// `snake_case` as `CamelCase`.
@@ -317,6 +351,24 @@ mod tests {
                 offset: 0,
                 ty: u64::LAYOUT,
             }],
+            args: &[],
+        },
+    };
+
+    /// The members of the SDK's box.
+    const BOX_MEMBERS: &[Field] = match &<ShmBox<u64>>::LAYOUT.kind {
+        Kind::Edge { members, .. } => members,
+        _ => panic!("the box is a field type"),
+    };
+
+    /// A field type of the kind and the members of the SDK's box, without its
+    /// type argument.
+    static BOX_WITHOUT_ARGUMENT: Node = Node {
+        size: 8,
+        align: 8,
+        kind: Kind::Edge {
+            kind: "box",
+            members: BOX_MEMBERS,
             args: &[],
         },
     };
@@ -360,13 +412,15 @@ mod tests {
     }
 
     /// Verifies that a field type reusing the kind of another with other
-    /// members fails generation; the directory exists, so only the refusal
-    /// can make it fail.
+    /// members or another number of type arguments fails generation; the
+    /// directory exists, so only the refusal can make it fail.
     #[test]
     fn test_generate_refuses_two_field_types_of_one_kind() {
         let dir = env::temp_dir().join("yanet-layout-test");
         fs::create_dir_all(&dir).unwrap();
-        let roots = [<ShmBox<u64>>::LAYOUT, &OTHER_BOX];
-        assert_matches!(generate(&dir, "example.com/views", &roots, &[]), Err(_));
+        for other in [&OTHER_BOX, &BOX_WITHOUT_ARGUMENT] {
+            let roots = [<ShmBox<u64>>::LAYOUT, other];
+            assert_matches!(generate(&dir, "example.com/views", &roots, &[]), Err(_));
+        }
     }
 }
