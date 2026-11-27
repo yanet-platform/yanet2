@@ -436,13 +436,12 @@ mod tests {
         assert!(!view.contains("Empty"), "{view}");
     }
 
-    /// Verifies that integer constants render as Go constants of their type.
     #[test]
     fn test_generate_renders_typed_integer_constants() {
         let dir = env::temp_dir().join("yanet-layout-test-constants");
         fs::create_dir_all(&dir).unwrap();
         let constants = [("FLAGS", Constant::U32(16)), ("LIMIT", Constant::U64(u64::MAX))];
-        generate(&dir, "example.com/views", &[], &constants).unwrap();
+        generate(&dir, "example.com/views", &[&TRAILING_EMPTY], &constants).unwrap();
         let view = fs::read_dir(&dir)
             .unwrap()
             .map(|entry| entry.unwrap().path())
