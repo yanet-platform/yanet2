@@ -13,8 +13,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
 	"github.com/yanet-platform/yanet2/controlplane/configstore"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
 // Handle is the shared-memory handle of a published config.
@@ -26,7 +26,7 @@ type Backend[P any] interface {
 	// dataplane, returning the handle of the published generation.
 	Update(name string, payload P) (Handle, error)
 	// Delete removes the config the dataplane runs under the name, also
-	// one an earlier process published, and reports ffi.ErrNotFound when
+	// one an earlier process published, and reports cerrors.NotFound when
 	// the dataplane runs none.
 	Delete(name string) error
 }
@@ -50,7 +50,7 @@ type Entry[P any] struct {
 // Free releases the shared-memory handle held by the entry.
 //
 // It is safe to call even when no handle is held. The result is the
-// handle's: nil when destroyed, ffi.ErrStillReferenced when a live
+// handle's: nil when destroyed, cerrors.ErrStillReferenced when a live
 // generation still references it and the caller must remember it.
 func (m *Entry[P]) Free() error {
 	if m.Handle == nil {
@@ -217,7 +217,7 @@ func (m *Core[P]) Delete(name string) error {
 		},
 		func() error {
 			err := m.backend.Delete(name)
-			if errors.Is(err, ffi.ErrNotFound) {
+			if errors.Is(err, cerrors.NotFound) {
 				return configstore.ErrNotFound
 			}
 			return err
@@ -234,7 +234,7 @@ func DeleteError(name string, err error) error {
 	switch {
 	case errors.Is(err, configstore.ErrNotFound):
 		return status.Errorf(codes.NotFound, "config %q not found", name)
-	case errors.Is(err, ffi.ErrFailedPrecondition):
+	case errors.Is(err, cerrors.FailedPrecondition):
 		return status.Errorf(codes.FailedPrecondition, "failed to delete config %q: %v", name, err)
 	default:
 		return status.Errorf(codes.Internal, "failed to delete config %q: %v", name, err)

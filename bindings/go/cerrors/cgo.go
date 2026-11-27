@@ -1,8 +1,3 @@
-// Package cerrors provides Go bindings for the C yanet_error type defined in
-// lib/errors.
-//
-// It is meant to be used by FFI wrappers to convert C error chains into
-// idiomatic Go errors.
 package cerrors
 
 //#cgo CFLAGS: -I../../../
@@ -16,44 +11,15 @@ import (
 	"unsafe"
 )
 
-// Kind is the failure category a C error chain reports, the target of
-// errors.Is the way a syscall.Errno is.
-//
-// The C layer tags the cause, the caller maps it to a status code: the same
-// kind means different things to different operations, so no mapping lives
-// here.
-type Kind int
-
-const (
-	// NotFound: the entity the operation names does not exist.
-	NotFound Kind = C.YANET_ERROR_NOT_FOUND
-	// FailedPrecondition: the system is not in the state the operation
-	// needs, such as a live configuration naming an entity that does not
-	// exist.
-	FailedPrecondition Kind = C.YANET_ERROR_FAILED_PRECONDITION
-	// Busy: the entity is still referenced, so the operation was refused.
-	Busy Kind = C.YANET_ERROR_BUSY
-	// InvalidArgument: the request is wrong regardless of the system state.
-	InvalidArgument Kind = C.YANET_ERROR_INVALID_ARGUMENT
-	// ResourceExhausted: the pool the operation draws from has no room
-	// left for the request.
-	ResourceExhausted Kind = C.YANET_ERROR_RESOURCE_EXHAUSTED
-)
-
-func (m Kind) Error() string {
-	switch m {
-	case NotFound:
-		return "not found"
-	case FailedPrecondition:
-		return "failed precondition"
-	case Busy:
-		return "busy"
-	case InvalidArgument:
-		return "invalid argument"
-	case ResourceExhausted:
-		return "resource exhausted"
-	}
-	return "unknown error kind"
+// The kinds carry the values of the C enum: a kind that differs indexes
+// past the array and fails the build.
+func _() {
+	var kinds [1]struct{}
+	_ = kinds[NotFound-C.YANET_ERROR_NOT_FOUND]
+	_ = kinds[FailedPrecondition-C.YANET_ERROR_FAILED_PRECONDITION]
+	_ = kinds[Busy-C.YANET_ERROR_BUSY]
+	_ = kinds[InvalidArgument-C.YANET_ERROR_INVALID_ARGUMENT]
+	_ = kinds[ResourceExhausted-C.YANET_ERROR_RESOURCE_EXHAUSTED]
 }
 
 // Error is a Go wrapper around a formatted *C.yanet_error chain.

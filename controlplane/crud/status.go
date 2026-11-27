@@ -6,7 +6,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
 )
 
 // PublishError maps a failed update of the named config to the gRPC
@@ -23,11 +23,11 @@ func PublishError(name string, err error) error {
 
 	code := codes.Internal
 	switch {
-	case errors.Is(err, ffi.ErrFailedPrecondition):
+	case errors.Is(err, cerrors.FailedPrecondition):
 		code = codes.FailedPrecondition
-	case errors.Is(err, ffi.ErrResourceExhausted):
+	case errors.Is(err, cerrors.ResourceExhausted):
 		code = codes.ResourceExhausted
-	case errors.Is(err, ffi.ErrInvalidArgument):
+	case errors.Is(err, cerrors.InvalidArgument):
 		code = codes.InvalidArgument
 	}
 	return status.Errorf(code, "failed to update config %q: %v", name, err)

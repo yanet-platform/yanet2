@@ -6,7 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
 )
 
 // ErrNotFound is reported by Delete when nothing is published under the
@@ -15,7 +15,7 @@ var ErrNotFound = errors.New("config not found")
 
 // Entry is a published configuration owned by a Store.
 type Entry interface {
-	// Free releases the entry, reporting ffi.ErrStillReferenced when a
+	// Free releases the entry, reporting cerrors.ErrStillReferenced when a
 	// live configuration generation still references it.
 	Free() error
 }
@@ -292,7 +292,7 @@ func (m *Store[E]) remove(name string) {
 // parkOrFree frees a retired entry and parks it when the free is
 // refused. The caller must already hold the parked list's lock.
 func (m *Store[E]) parkOrFree(entry E) {
-	if err := entry.Free(); errors.Is(err, ffi.ErrStillReferenced) {
+	if err := entry.Free(); errors.Is(err, cerrors.ErrStillReferenced) {
 		m.deferred = append(m.deferred, entry)
 	}
 }
@@ -302,7 +302,7 @@ func (m *Store[E]) parkOrFree(entry E) {
 func (m *Store[E]) reclaimDeferred() {
 	kept := m.deferred[:0]
 	for _, entry := range m.deferred {
-		if err := entry.Free(); errors.Is(err, ffi.ErrStillReferenced) {
+		if err := entry.Free(); errors.Is(err, cerrors.ErrStillReferenced) {
 			kept = append(kept, entry)
 		}
 	}

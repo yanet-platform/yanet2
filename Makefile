@@ -279,9 +279,10 @@ native-layout:
 	ninja -C build native-layout
 
 # The packages the native control plane is built from: its own, the
-# module configuration builders on top of it and the base native modules
-# attach through.
+# module configuration builders on top of it, the base native modules
+# attach through and the config store their services publish through.
 NATIVE_PACKAGES := ./controlplane/native/... ./controlplane/modulebase/... \
+	./controlplane/crud/... ./controlplane/configstore/... \
 	./modules/decap/controlplane/decapshm/...
 
 # Builds every native control-plane package without cgo.

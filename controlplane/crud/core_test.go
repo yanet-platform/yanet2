@@ -8,9 +8,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
 	"github.com/yanet-platform/yanet2/controlplane/configstore"
 	"github.com/yanet-platform/yanet2/controlplane/crud"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
 // stubHandle counts its frees and can report a live generation the
@@ -23,7 +23,7 @@ type stubHandle struct {
 func (m *stubHandle) Free() error {
 	m.frees++
 	if m.refuseOnce && m.frees == 1 {
-		return ffi.ErrStillReferenced
+		return cerrors.ErrStillReferenced
 	}
 	return nil
 }
@@ -60,7 +60,7 @@ func (m *fakeBackend) Delete(name string) error {
 		return m.deleteErr
 	}
 	if !m.running[name] {
-		return ffi.ErrNotFound
+		return cerrors.NotFound
 	}
 
 	delete(m.running, name)
@@ -237,7 +237,7 @@ func Test_DeleteError_MapsFailures(t *testing.T) {
 		code codes.Code
 	}{
 		{name: "nothing published", err: configstore.ErrNotFound, code: codes.NotFound},
-		{name: "dataplane refusal", err: ffi.ErrFailedPrecondition, code: codes.FailedPrecondition},
+		{name: "dataplane refusal", err: cerrors.FailedPrecondition, code: codes.FailedPrecondition},
 		{name: "anything else", err: errors.New("boom"), code: codes.Internal},
 	}
 	for _, tc := range cases {

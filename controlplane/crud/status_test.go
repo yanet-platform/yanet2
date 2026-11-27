@@ -8,8 +8,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
 	"github.com/yanet-platform/yanet2/controlplane/crud"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
 // Test_PublishError_MapsFailures verifies that each failed update kind
@@ -22,9 +22,9 @@ func Test_PublishError_MapsFailures(t *testing.T) {
 		code codes.Code
 	}{
 		{name: "status from the mutation", err: status.Error(codes.InvalidArgument, "bad prefix"), code: codes.InvalidArgument},
-		{name: "dataplane refusal", err: ffi.ErrFailedPrecondition, code: codes.FailedPrecondition},
-		{name: "no room left", err: ffi.ErrResourceExhausted, code: codes.ResourceExhausted},
-		{name: "refused input", err: ffi.ErrInvalidArgument, code: codes.InvalidArgument},
+		{name: "dataplane refusal", err: cerrors.FailedPrecondition, code: codes.FailedPrecondition},
+		{name: "no room left", err: cerrors.ResourceExhausted, code: codes.ResourceExhausted},
+		{name: "refused input", err: cerrors.InvalidArgument, code: codes.InvalidArgument},
 		{name: "anything else", err: errors.New("boom"), code: codes.Internal},
 	}
 
