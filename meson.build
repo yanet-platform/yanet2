@@ -151,8 +151,10 @@ if b_sanitize != 'none'
         sanitize_link_args = ['-Wl,-rpath,$ORIGIN']
         # The native Go allocator shares free lists with the C one, so its
         # red zones must match the C allocator's, which only -asan turns on.
-        if b_sanitize.contains('address')
-            yanet_go_env += {'GOFLAGS': '-asan'}
+        # The flag joins the caller's Go flags rather than replacing them.
+        if b_sanitize.contains('address') and not dataplane_only
+            yanet_go_flags = run_command(go, 'env', 'GOFLAGS', check: true).stdout().strip()
+            yanet_go_env += {'GOFLAGS': (yanet_go_flags + ' -asan').strip()}
         endif
     endif
 endif
@@ -325,9 +327,10 @@ configure_file(
 # Because it snapshots the Go build environment above, it must stay
 # below the last assignment to that environment.
 yanet_go_nocgo_env = yanet_go_env + {'CGO_ENABLED': '0'}
-# -asan needs cgo, and builds without it allocate no shared memory.
+# -asan needs cgo, and builds without it allocate no shared memory, so
+# they keep only the caller's Go flags.
 if yanet_go_nocgo_env.has_key('GOFLAGS')
-  yanet_go_nocgo_env += {'GOFLAGS': ''}
+  yanet_go_nocgo_env += {'GOFLAGS': yanet_go_flags}
 endif
 
 # The Go binaries are not fuzz targets and the fuzz suite runs none of them,
