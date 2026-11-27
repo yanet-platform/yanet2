@@ -299,6 +299,7 @@ stage_init(
 }
 
 extern uint64_t join_test_interned_cells;
+extern uint64_t join_test_row_index_items;
 
 // The pair sets of the cells being ordered, a byte per pair.
 static const uint8_t *cell_sets;
@@ -442,6 +443,39 @@ assert_join(
 	vline_free(&map);
 	value_table_free(&table);
 	classifier_fini(&out, ctx, rule_count);
+}
+
+// Verifies that the row index of a join holds the rows of every left group
+// once, however many pairs share the group and in whatever rule order.
+static void
+run_join_row_index_test(void) {
+	enum { ROWS = 64, PAIRS = 48 };
+	struct join_arena arena;
+	join_arena_open(&arena, 16 << 20);
+	uint32_t left_groups[PAIRS];
+	uint32_t right_groups[PAIRS];
+	for (uint32_t pair = 0; pair < PAIRS; ++pair) {
+		left_groups[pair] = pair % 2;
+		right_groups[pair] = pair / 2;
+	}
+	struct classifier left = {0}, right = {0};
+	stage_init(&left, &arena.ctx, left_groups, PAIRS);
+	stage_init(&right, &arena.ctx, right_groups, PAIRS);
+	uint32_t values[2 * ROWS];
+	for (uint32_t value = 0; value < 2 * ROWS; ++value) {
+		values[value] = value;
+	}
+	// Each left group holds half of the rows, so neither is complemented.
+	add_group(&left, values, ROWS);
+	add_group(&left, values + ROWS, ROWS);
+	for (uint32_t group = 0; group < PAIRS / 2; ++group) {
+		add_group(&right, values + group, 1);
+	}
+	assert_join(&arena.ctx, &left, &right, PAIRS);
+	assert(join_test_row_index_items == 2 * ROWS);
+	classifier_fini(&left, &arena.ctx, PAIRS);
+	classifier_fini(&right, &arena.ctx, PAIRS);
+	join_arena_close(&arena);
 }
 
 // Verifies that the coverage map gives class zero and a later class with
@@ -723,6 +757,7 @@ main(void) {
 	run_join_heap_failure_cleanup_test();
 	run_join_failure_cleanup_test();
 	run_join_random_test();
+	run_join_row_index_test();
 	puts("first-match/projection, duplicate rows, failed-build cleanup "
 	     "and class join: PASS");
 	return 0;

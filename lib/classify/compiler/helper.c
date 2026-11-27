@@ -346,14 +346,18 @@ merge_pair_eq(uint32_t value, const void *data) {
 }
 
 // Test builds collide the class hashes, so only the exact key compare keeps
-// the classes apart, and count the cells the join interns.
+// the classes apart, and count the cells the join interns and the items of
+// its row index.
 #ifdef JOIN_TEST
 #define JOIN_HASH_MASK 0xffu
 uint64_t join_test_interned_cells;
+uint64_t join_test_row_index_items;
 #define JOIN_COUNT_INTERNED_CELL() (++join_test_interned_cells)
+#define JOIN_NOTE_ROW_INDEX_ITEMS(count) (join_test_row_index_items = (count))
 #else
 #define JOIN_HASH_MASK UINT32_MAX
 #define JOIN_COUNT_INTERNED_CELL() ((void)0)
+#define JOIN_NOTE_ROW_INDEX_ITEMS(count) ((void)0)
 #endif
 
 // A pair set hashes as the xor of its pair hashes.
@@ -477,7 +481,8 @@ join_side_init(
 	return 0;
 }
 
-// The pairs holding each value of a dimension, ascending per value.
+// The spans holding each value of a dimension, by span number ascending
+// per value.
 struct join_csr {
 	size_t *offsets;
 	uint32_t *items;
@@ -488,15 +493,15 @@ join_csr_init(
 	struct join_csr *csr,
 	uint32_t dim,
 	const struct join_span *spans,
-	uint32_t pair_count
+	uint32_t span_count
 ) {
 	csr->offsets = calloc((size_t)dim + 1, sizeof(size_t));
 	if (csr->offsets == NULL) {
 		return -1;
 	}
-	for (uint32_t pair = 0; pair < pair_count; ++pair) {
-		for (uint32_t idx = 0; idx < spans[pair].count; ++idx) {
-			++csr->offsets[spans[pair].values[idx]];
+	for (uint32_t span = 0; span < span_count; ++span) {
+		for (uint32_t idx = 0; idx < spans[span].count; ++idx) {
+			++csr->offsets[spans[span].values[idx]];
 		}
 	}
 	for (uint32_t value = 0; value < dim; ++value) {
@@ -507,10 +512,10 @@ join_csr_init(
 		return -1;
 	}
 	// Filling backward moves every end to its start.
-	for (uint32_t pair = pair_count; pair-- > 0;) {
-		for (uint32_t idx = 0; idx < spans[pair].count; ++idx) {
-			csr->items[--csr->offsets[spans[pair].values[idx]]] =
-				pair;
+	for (uint32_t span = span_count; span-- > 0;) {
+		for (uint32_t idx = 0; idx < spans[span].count; ++idx) {
+			csr->items[--csr->offsets[spans[span].values[idx]]] =
+				span;
 		}
 	}
 	return 0;
@@ -691,7 +696,13 @@ struct join {
 	// The sides of each pair, in one block owned by the first.
 	struct join_side **rows;
 	struct join_side **cols;
-	// The pairs painting each row; the C terms of each column.
+	// The pairs of each left group, as numbered by the rules.
+	//
+	// The join numbers the pairs by their left group, so the pairs a row
+	// paints are the runs of the left groups holding it, and the row
+	// index holds every left group once however many pairs share it.
+	struct join_csr left_pairs;
+	// The left groups painting each row; the C terms of each column.
 	struct join_csr painted;
 	struct join_csr col_terms;
 	struct join_classes classes;
@@ -714,6 +725,8 @@ struct join {
 	uint32_t *row_terms;
 	uint32_t row_term_count;
 	uint32_t row_hash;
+	// The left groups changing from the row above.
+	uint32_t *row_groups;
 	// The K terms.
 	uint32_t *common;
 	uint32_t common_count;
@@ -730,6 +743,8 @@ join_fini(struct join *join) {
 	}
 	free(join->sides);
 	free(join->rows);
+	free(join->left_pairs.offsets);
+	free(join->left_pairs.items);
 	free(join->painted.offsets);
 	free(join->painted.items);
 	free(join->col_terms.offsets);
@@ -752,18 +767,20 @@ join_init(
 ) {
 	uint32_t v_dim = value_registry_capacity(registry1);
 	uint32_t h_dim = value_registry_capacity(registry2);
+	uint32_t left_count = registry1->range_count;
 	size_t pairs = (size_t)pair_count + 1;
 	*join = (struct join){
 		.v_dim = v_dim,
 		.h_dim = h_dim,
 		.pair_count = pair_count,
 		.side_count = registry1->range_count + registry2->range_count,
-		.block = calloc(5 * (h_dim + pairs), sizeof(uint32_t)),
+		.block = calloc(5 * (h_dim + pairs) + pairs, sizeof(uint32_t)),
 		.rows = malloc(2 * pairs * sizeof(struct join_side *)),
 	};
 	join->sides = calloc(join->side_count + 1, sizeof(struct join_side));
 	uint8_t *marks = calloc(v_dim > h_dim ? v_dim : h_dim, 1);
-	struct join_span *spans = malloc(2 * pairs * sizeof(*spans));
+	struct join_span *spans =
+		malloc((2 * pairs + left_count) * sizeof(*spans));
 	int rc = -1;
 	if (join->block == NULL || join->rows == NULL || join->sides == NULL ||
 	    marks == NULL || spans == NULL) {
@@ -779,15 +796,24 @@ join_init(
 	join->paint = join->common + pairs;
 	join->terms = join->paint + pairs;
 	join->key = join->terms + pairs;
+	join->row_groups = join->key + pairs;
 	join->cols = join->rows + pairs;
 
 	const struct value_range *ranges1 = ADDR_OF(&registry1->ranges);
 	const struct value_range *ranges2 = ADDR_OF(&registry2->ranges);
-	struct join_side *sides2 = join->sides + registry1->range_count;
+	struct join_side *sides2 = join->sides + left_count;
 	struct join_span *col_spans = spans + pairs;
+	struct join_span *row_spans = col_spans + pairs;
 	for (uint32_t pair = 0; pair < pair_count; ++pair) {
-		uint32_t group1 = pair_group1[pair];
-		uint32_t group2 = pair_group2[pair];
+		spans[pair] = (struct join_span){pair_group1 + pair, 1};
+	}
+	if (join_csr_init(&join->left_pairs, left_count, spans, pair_count)) {
+		goto done;
+	}
+	for (uint32_t pair = 0; pair < pair_count; ++pair) {
+		uint32_t listed = join->left_pairs.items[pair];
+		uint32_t group1 = pair_group1[listed];
+		uint32_t group2 = pair_group2[listed];
 		struct join_side *rows = join->sides + group1;
 		struct join_side *cols = sides2 + group2;
 		if (join_side_init(
@@ -800,7 +826,6 @@ join_init(
 		}
 		join->rows[pair] = rows;
 		join->cols[pair] = cols;
-		spans[pair] = rows->small;
 		col_spans[pair] = (struct join_span){0};
 		if (!rows->flipped) {
 			continue;
@@ -817,10 +842,14 @@ join_init(
 			++join->left_base[cols->edges[idx]];
 		}
 	}
-	if (join_csr_init(&join->painted, v_dim, spans, pair_count) ||
+	for (uint32_t group = 0; group < left_count; ++group) {
+		row_spans[group] = join->sides[group].small;
+	}
+	if (join_csr_init(&join->painted, v_dim, row_spans, left_count) ||
 	    join_csr_init(&join->col_terms, h_dim, col_spans, pair_count)) {
 		goto done;
 	}
+	JOIN_NOTE_ROW_INDEX_ITEMS(join->painted.offsets[v_dim]);
 	rc = 0;
 
 done:
@@ -840,64 +869,84 @@ done:
 static int
 join_row(struct join *join, uint32_t v) {
 	uint32_t h_dim = join->h_dim;
-	struct join_span painted = join_csr_get(&join->painted, v);
+	struct join_span groups = join_csr_get(&join->painted, v);
 	memcpy(join->left, join->left_base, (size_t)h_dim * sizeof(uint32_t));
 	memset(join->heads, 0xff, (size_t)h_dim * sizeof(uint32_t));
 	join->row_term_count = 0;
 	join->row_hash = 0;
 	uint32_t node_count = 0;
-	for (uint32_t idx = 0; idx < painted.count; ++idx) {
-		uint32_t pair = painted.values[idx];
-		const struct join_side *cols = join->cols[pair];
-		if (cols->flipped) {
-			join->row_terms[join->row_term_count++] = pair;
-			join->row_hash ^= join_pair_hash(pair);
-		}
-		uint32_t sign = join->rows[pair]->flipped ? UINT32_MAX : 1;
-		for (uint32_t edge = 0; edge < cols->edge_count; ++edge) {
-			join->left[cols->edges[edge]] += sign;
-		}
-		if (node_count + cols->small.count > join->node_capacity) {
-			// Node ids stay below all-ones.
-			size_t capacity =
-				2 * ((size_t)node_count + cols->small.count);
-			if (capacity >= UINT32_MAX) {
-				return -1;
+	const size_t *runs = join->left_pairs.offsets;
+	for (uint32_t idx = 0; idx < groups.count; ++idx) {
+		uint32_t group = groups.values[idx];
+		uint32_t end = (uint32_t)runs[group + 1];
+		for (uint32_t pair = (uint32_t)runs[group]; pair < end;
+		     ++pair) {
+			const struct join_side *cols = join->cols[pair];
+			if (cols->flipped) {
+				join->row_terms[join->row_term_count++] = pair;
+				join->row_hash ^= join_pair_hash(pair);
 			}
-			struct join_node *nodes =
-				realloc(join->nodes, capacity * sizeof(*nodes));
-			if (nodes == NULL) {
-				return -1;
+			uint32_t sign =
+				join->rows[pair]->flipped ? UINT32_MAX : 1;
+			for (uint32_t edge = 0; edge < cols->edge_count;
+			     ++edge) {
+				join->left[cols->edges[edge]] += sign;
 			}
-			join->nodes = nodes;
-			join->node_capacity = (uint32_t)capacity;
-		}
-		for (uint32_t col = 0; col < cols->small.count; ++col) {
-			uint32_t h = cols->small.values[col];
-			join->nodes[node_count] =
-				(struct join_node){pair, join->heads[h]};
-			join->heads[h] = node_count++;
+			if (node_count + cols->small.count >
+			    join->node_capacity) {
+				// Node ids stay below all-ones.
+				size_t capacity = 2 * ((size_t)node_count +
+						       cols->small.count);
+				if (capacity >= UINT32_MAX) {
+					return -1;
+				}
+				struct join_node *nodes =
+					realloc(join->nodes,
+						capacity * sizeof(*nodes));
+				if (nodes == NULL) {
+					return -1;
+				}
+				join->nodes = nodes;
+				join->node_capacity = (uint32_t)capacity;
+			}
+			for (uint32_t col = 0; col < cols->small.count; ++col) {
+				uint32_t h = cols->small.values[col];
+				join->nodes[node_count] = (struct join_node
+				){pair, join->heads[h]};
+				join->heads[h] = node_count++;
+			}
 		}
 	}
 
 	if (v == 0) {
 		return 0;
 	}
-	// The pairs with an edge at the row paint one of it and the row above.
+	// The pairs with an edge at the row are those of the left groups
+	// holding one of it and the row above.
 	struct join_span above = join_csr_get(&join->painted, v - 1);
-	uint32_t count = join_xor(join->key, painted, above);
+	uint32_t count = join_xor(join->row_groups, groups, above);
 	uint32_t base = 0;
 	for (uint32_t idx = 0; idx < count; ++idx) {
-		base += join->cols[join->key[idx]]->flipped;
+		uint32_t group = join->row_groups[idx];
+		uint32_t end = (uint32_t)runs[group + 1];
+		for (uint32_t pair = (uint32_t)runs[group]; pair < end;
+		     ++pair) {
+			base += join->cols[pair]->flipped;
+		}
 	}
 	for (uint32_t h = 0; h < h_dim; ++h) {
 		join->up[h] = base;
 	}
 	for (uint32_t idx = 0; idx < count; ++idx) {
-		const struct join_side *cols = join->cols[join->key[idx]];
-		uint32_t sign = cols->flipped ? UINT32_MAX : 1;
-		for (uint32_t col = 0; col < cols->small.count; ++col) {
-			join->up[cols->small.values[col]] += sign;
+		uint32_t group = join->row_groups[idx];
+		uint32_t end = (uint32_t)runs[group + 1];
+		for (uint32_t pair = (uint32_t)runs[group]; pair < end;
+		     ++pair) {
+			const struct join_side *cols = join->cols[pair];
+			uint32_t sign = cols->flipped ? UINT32_MAX : 1;
+			for (uint32_t col = 0; col < cols->small.count; ++col) {
+				join->up[cols->small.values[col]] += sign;
+			}
 		}
 	}
 	return 0;
@@ -986,9 +1035,8 @@ join_collect(struct join *join, struct value_registry *registry) {
 			join->key, join_class_key(&join->classes, id), common
 		);
 		for (uint32_t idx = 0; idx < count; ++idx) {
-			if (value_range_append(
-				    context, ranges + join->key[idx], id
-			    )) {
+			uint32_t pair = join->left_pairs.items[join->key[idx]];
+			if (value_range_append(context, ranges + pair, id)) {
 				return -1;
 			}
 		}
