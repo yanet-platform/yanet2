@@ -149,9 +149,8 @@ if b_sanitize != 'none'
             'CGO_LDFLAGS': cgo_flags + ' -Wl,-rpath,$ORIGIN',
         }
         sanitize_link_args = ['-Wl,-rpath,$ORIGIN']
-        # The native Go allocator shares free lists with the C one, so its
-        # red zones must match the C allocator's, which only -asan turns on.
-        # The flag joins the caller's Go flags rather than replacing them.
+        # The native Go allocator shares free lists with the C one, so its red
+        # zones must match: -asan joins the Go flags the caller set.
         if b_sanitize.contains('address') and not dataplane_only
             yanet_go_flags = run_command(go, 'env', 'GOFLAGS', check: true).stdout().strip()
             yanet_go_env += {'GOFLAGS': (yanet_go_flags + ' -asan').strip()}
