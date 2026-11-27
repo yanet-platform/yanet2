@@ -27,6 +27,9 @@ var errRuleTableMemory = fmt.Errorf("rule table memory: %w", shmalloc.ErrNoMemor
 // its stored one. The table takes a child memory context of context
 // named name, its map a child of that titled classes; a failure frees
 // the table and leaves it zeroed, as C does.
+//
+// Every distinct row goes into the table's memory as the join finds it;
+// the row array and the class map follow once every row is in.
 func (m *Stage) JoinRules(right *Stage, members []bool, table *layout.RuleTable, context *layout.MemoryContext, name string) error {
 	if len(right.ruleGroups) != len(m.ruleGroups) || len(members) != len(m.ruleGroups) {
 		return fmt.Errorf(
@@ -34,21 +37,41 @@ func (m *Stage) JoinRules(right *Stage, members []bool, table *layout.RuleTable,
 			len(m.ruleGroups), len(right.ruleGroups), len(members), ErrInvalidRule,
 		)
 	}
-	rows, classMap := m.ruleRows(right, members)
-	if err := commitRuleTable(table, context, name, rows, classMap, right.maxValue+1); err != nil {
+	*table = layout.RuleTable{}
+	tableContext := registry.AllocNode[layout.MemoryContext](context, 0)
+	if tableContext == nil {
+		return errRuleTableMemory
+	}
+	shmalloc.ContextInitFrom(tableContext, context, name)
+	table.MemoryContext.Set(tableContext)
+	table.VDim = m.maxValue + 1
+	table.HDim = right.maxValue + 1
+
+	rows, classMap, err := m.ruleRows(right, members, tableContext)
+	if err == nil {
+		err = commitRuleTable(table, rows, classMap)
+	}
+	if err != nil {
+		// The table owns the rows once its row array is in.
+		if table.Rows.IsNil() {
+			for _, row := range rows {
+				registry.FreeArray(tableContext, row)
+			}
+		}
 		FreeRuleTable(table)
 		return err
 	}
 	return nil
 }
 
-// ruleRows returns the distinct rows of first member rules, as the bytes
-// of their cells in order of first appearance, and the row of every
-// value of the stage.
+// ruleRows stores the distinct rows of first member rules in the table's
+// memory context, in order of first appearance, and returns them and the
+// row of every value of the stage.
 //
 // A row no member pair covers is stored the first time it appears,
-// without looking for an equal one, as C stores it.
-func (m *Stage) ruleRows(right *Stage, members []bool) ([]string, []uint32) {
+// without looking for an equal one, as C stores it. A failure returns
+// the rows stored so far for the caller to free.
+func (m *Stage) ruleRows(right *Stage, members []bool, context *layout.MemoryContext) ([][]uint32, []uint32, error) {
 	memberGroups := make([]uint32, len(m.ruleGroups))
 	for rule, group := range m.ruleGroups {
 		memberGroups[rule] = InvalidGroup
@@ -73,7 +96,11 @@ func (m *Stage) ruleRows(right *Stage, members []bool) ([]string, []uint32) {
 
 	row := slices.Repeat([]uint32{InvalidRule}, int(right.maxValue)+1)
 	cells := valueBytes(row)
-	var rows []string
+	var rows [][]uint32
+	// The map keys every stored row by a view of its bytes in shared
+	// memory: each row is an allocation of its own, written once before
+	// its key goes in, and nothing moves or frees it while the map lives,
+	// which ends with this call.
 	numbers := map[string]uint32{}
 	classMap := make([]uint32, m.maxValue+1)
 	// paintedIn stamps every right group with the value whose row it
@@ -102,12 +129,18 @@ func (m *Stage) ruleRows(right *Stage, members []bool) ([]string, []uint32) {
 				}
 			}
 		}
-		number, ok := numbers[string(cells)]
-		if !ok || len(pairsOfValue) == 0 {
-			number = uint32(len(rows))
-			rows = append(rows, string(cells))
+		number, found := numbers[string(cells)]
+		if !found || len(pairsOfValue) == 0 {
+			stored, ok := registry.AllocArray[uint32](context, uint64(len(row)))
 			if !ok {
-				numbers[rows[number]] = number
+				return rows, nil, errRuleTableMemory
+			}
+			copy(stored, row)
+			number = uint32(len(rows))
+			rows = append(rows, stored)
+			if !found {
+				storedBytes := valueBytes(stored)
+				numbers[unsafe.String(unsafe.SliceData(storedBytes), len(storedBytes))] = number
 			}
 		}
 		if len(pairsOfValue) == 0 {
@@ -119,7 +152,7 @@ func (m *Stage) ruleRows(right *Stage, members []bool) ([]string, []uint32) {
 		}
 		touched = touched[:0]
 	}
-	return rows, classMap
+	return rows, classMap, nil
 }
 
 // valueBytes returns the bytes of a list of values in place.
@@ -127,38 +160,22 @@ func valueBytes(values []uint32) []byte {
 	return unsafe.Slice((*byte)(unsafe.Pointer(unsafe.SliceData(values))), len(values)*4)
 }
 
-// commitRuleTable writes the rows and the class map into a rule table in
-// shared memory as classify_join_rules publishes them: the rows first,
-// the map once every row is in.
+// commitRuleTable hands the stored rows and the class map to a rule
+// table as classify_join_rules publishes them: the row array first, the
+// map once every row is in.
 //
 // A failure leaves what it wrote for the caller to free.
-func commitRuleTable(table *layout.RuleTable, context *layout.MemoryContext, name string, rows []string, classMap []uint32, hDim uint32) error {
-	*table = layout.RuleTable{}
-	tableContext := registry.AllocNode[layout.MemoryContext](context, 0)
-	if tableContext == nil {
-		return errRuleTableMemory
-	}
-	shmalloc.ContextInitFrom(tableContext, context, name)
-	table.MemoryContext.Set(tableContext)
-	table.VDim = uint32(len(classMap))
-	table.HDim = hDim
-
+func commitRuleTable(table *layout.RuleTable, rows [][]uint32, classMap []uint32) error {
+	tableContext := table.MemoryContext.Get()
 	pointers, ok := registry.AllocArray[shm.Ptr[uint32]](tableContext, uint64(len(rows)))
 	if !ok {
 		return errRuleTableMemory
 	}
-	// The free reads the rows set so far: the rest stay nil.
-	clear(pointers)
-	table.Rows.Set(unsafe.SliceData(pointers))
-	table.ClassCount = uint32(len(rows))
-	for number, cells := range rows {
-		values, ok := registry.AllocArray[uint32](tableContext, uint64(hDim))
-		if !ok {
-			return errRuleTableMemory
-		}
-		copy(valueBytes(values), cells)
+	for number, values := range rows {
 		pointers[number].Set(unsafe.SliceData(values))
 	}
+	table.Rows.Set(unsafe.SliceData(pointers))
+	table.ClassCount = uint32(len(rows))
 
 	values, err := initVline(&table.ClassMap, tableContext, "classes", uint32(len(classMap)))
 	if err != nil {

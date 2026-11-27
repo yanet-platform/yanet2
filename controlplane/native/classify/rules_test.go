@@ -115,10 +115,10 @@ func Test_JoinRules_ExhaustedLeavesTableZeroed(t *testing.T) {
 		kept []uintptr
 	}{
 		{name: "no room for the memory context"},
-		{name: "no room for the row array", kept: []uintptr{context}},
-		{name: "no room for a row", kept: []uintptr{context, shm.PtrSize}},
-		{name: "no room for the class map's memory context", kept: []uintptr{context, shm.PtrSize, 5 * 4}},
-		{name: "no room for the class map", kept: []uintptr{context, shm.PtrSize, 5 * 4, context}},
+		{name: "no room for a row", kept: []uintptr{context}},
+		{name: "no room for the row array", kept: []uintptr{context, 5 * 4}},
+		{name: "no room for the class map's memory context", kept: []uintptr{context, 5 * 4, shm.PtrSize}},
+		{name: "no room for the class map", kept: []uintptr{context, 5 * 4, shm.PtrSize, context}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
