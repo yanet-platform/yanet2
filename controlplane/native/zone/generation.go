@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
+	"github.com/yanet-platform/yanet2/controlplane/native/internal/registry"
 	"github.com/yanet-platform/yanet2/controlplane/native/internal/teardown"
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
 	"github.com/yanet-platform/yanet2/controlplane/native/shm"
@@ -59,4 +60,26 @@ func (m *Generation) Release() {
 		return
 	}
 	teardown.ReleaseGeneration(m.cp, gen)
+}
+
+// LookupModule returns the module configuration of a type and name the
+// generation publishes, or nil, as cp_config_gen_lookup_module does.
+//
+// A generation that publishes nothing or was released finds nothing.
+func (m *Generation) LookupModule(moduleType, name string) *layout.CpModule {
+	if m.Gen == nil {
+		return nil
+	}
+	return registry.LookupModule(&m.Gen.ModuleRegistry, moduleType, name)
+}
+
+// LookupObject returns the object of a type and name the generation
+// publishes, or nil, as cp_config_gen_lookup_object does.
+//
+// A generation that publishes nothing or was released finds nothing.
+func (m *Generation) LookupObject(objectType, name string) *layout.CpObject {
+	if m.Gen == nil {
+		return nil
+	}
+	return registry.LookupObject(&m.Gen.ObjectRegistry, objectType, name)
 }

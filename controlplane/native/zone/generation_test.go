@@ -14,6 +14,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/native/cpconfig"
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
 	"github.com/yanet-platform/yanet2/controlplane/native/nativetest"
+	"github.com/yanet-platform/yanet2/controlplane/native/shm"
 	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
 	"github.com/yanet-platform/yanet2/controlplane/native/zone"
 )
@@ -207,4 +208,132 @@ func Test_Generation_Release_DropsThePin(t *testing.T) {
 
 	pinned.Release()
 	require.Equal(t, before, atomic.LoadUint64(&published.Refcnt))
+}
+
+// ringSize is the size of a test ring object: its header and a raw body.
+const ringSize = unsafe.Sizeof(layout.CpObject{}) + 64
+
+// publishRing builds a ring object of the topology's agent and publishes
+// it, replacing the one of its name.
+func publishRing(t *testing.T, memory *published, name string) *layout.CpObject {
+	t.Helper()
+	object := (*layout.CpObject)(shmalloc.ContextAlloc(&memory.Owner.Agent.MemoryContext, ringSize))
+	require.NotNil(t, object)
+	require.NoError(t, cpconfig.InitObject(object, memory.Owner, "ring", name))
+	require.NoError(t, cpconfig.UpdateObjects(memory.Instance, []*layout.CpObject{object}, memory.Deliver()))
+	return object
+}
+
+// pinLookupTopology publishes the topology with ring objects "first" and
+// "gone", deletes "gone" and the module "second", and pins the generation.
+func pinLookupTopology(t *testing.T) *zone.Generation {
+	t.Helper()
+	memory := newPublished(t)
+	publishRing(t, memory, "first")
+	publishRing(t, memory, "gone")
+	require.NoError(t, cpconfig.DeleteObject(memory.Instance, "ring", "gone", memory.Deliver()))
+	require.NoError(t, cpconfig.DeleteModule(memory.Instance, "blackhole", "second", memory.Deliver()))
+	generation, err := memory.Instance.Pin()
+	require.NoError(t, err)
+	t.Cleanup(generation.Release)
+	return generation
+}
+
+// lookupCase is a type and name looked up in a pinned generation and
+// whether it is found.
+type lookupCase struct {
+	name       string
+	entityType string
+	entityName string
+	found      bool
+}
+
+// Test_Generation_LookupModule_FindsPublishedModuleByTypeAndName verifies
+// that a module configuration is found only under its published type and name.
+func Test_Generation_LookupModule_FindsPublishedModuleByTypeAndName(t *testing.T) {
+	generation := pinLookupTopology(t)
+	cases := []lookupCase{
+		{"published module", "blackhole", "first", true},
+		{"unpublished name", "blackhole", "third", false},
+		{"deleted module", "blackhole", "second", false},
+		{"name of an object of another type", "ring", "first", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			module := generation.LookupModule(tc.entityType, tc.entityName)
+			if !tc.found {
+				require.Nil(t, module)
+				return
+			}
+			require.NotNil(t, module)
+			require.Equal(t, tc.entityType, shm.String(module.Type[:]))
+			require.Equal(t, tc.entityName, shm.String(module.Name[:]))
+		})
+	}
+}
+
+// Test_Generation_LookupObject_FindsPublishedObjectByTypeAndName verifies
+// that an object is found only under its published type and name.
+func Test_Generation_LookupObject_FindsPublishedObjectByTypeAndName(t *testing.T) {
+	generation := pinLookupTopology(t)
+	cases := []lookupCase{
+		{"published object", "ring", "first", true},
+		{"unpublished name", "ring", "third", false},
+		{"deleted object", "ring", "gone", false},
+		{"name of a module of another type", "blackhole", "first", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			object := generation.LookupObject(tc.entityType, tc.entityName)
+			if !tc.found {
+				require.Nil(t, object)
+				return
+			}
+			require.NotNil(t, object)
+			require.Equal(t, tc.entityType, shm.String(object.Type[:]))
+			require.Equal(t, tc.entityName, shm.String(object.Name[:]))
+		})
+	}
+}
+
+// Test_Generation_Lookup_ReadsThePinnedGeneration verifies that lookups
+// read the generation a pin holds, not a later one.
+//
+// A pin taken before a module and an object are republished still finds
+// the replaced ones, and a pin taken after finds their replacements.
+func Test_Generation_Lookup_ReadsThePinnedGeneration(t *testing.T) {
+	memory := newPublished(t)
+	oldObject := publishRing(t, memory, "first")
+	pinned, err := memory.Instance.Pin()
+	require.NoError(t, err)
+	defer pinned.Release()
+	oldModule := pinned.LookupModule("blackhole", "first")
+	require.NotNil(t, oldModule)
+
+	newModule, err := cpconfig.NewBlackhole(memory.Owner, "first")
+	require.NoError(t, err)
+	require.NoError(t, cpconfig.UpdateModules(memory.Instance, []*layout.CpModule{newModule}, memory.Deliver()))
+	newObject := publishRing(t, memory, "first")
+	fresh, err := memory.Instance.Pin()
+	require.NoError(t, err)
+	defer fresh.Release()
+
+	require.Same(t, oldModule, pinned.LookupModule("blackhole", "first"))
+	require.Same(t, oldObject, pinned.LookupObject("ring", "first"))
+	require.Same(t, newModule, fresh.LookupModule("blackhole", "first"))
+	require.Same(t, newObject, fresh.LookupObject("ring", "first"))
+}
+
+// Test_Generation_Lookup_ReleasedGenerationFindsNothing verifies that a
+// released pin no longer reads the generation it held.
+func Test_Generation_Lookup_ReleasedGenerationFindsNothing(t *testing.T) {
+	memory := newPublished(t)
+	publishRing(t, memory, "first")
+	generation, err := memory.Instance.Pin()
+	require.NoError(t, err)
+
+	generation.Release()
+
+	require.Nil(t, generation.LookupModule("blackhole", "first"))
+	require.Nil(t, generation.LookupObject("ring", "first"))
 }

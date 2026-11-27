@@ -118,8 +118,8 @@ func DeleteModule(instance *zone.Instance, moduleType, name string, options ...U
 	return publish(instance, options, change{
 		Put: func(m *build) error {
 			if !registry.ReplaceEntity(
-				&m.gen.ModuleRegistry.EntityRegistry, moduleHash, moduleKeyHash(moduleType, name),
-				moduleMatch(moduleType, name), nil,
+				&m.gen.ModuleRegistry.EntityRegistry, moduleHash, registry.ModuleKeyHash(moduleType, name),
+				registry.ModuleMatch(moduleType, name), nil,
 			) {
 				return fmt.Errorf("delete module %s:%s: %w", moduleType, name, ErrNotFound)
 			}
@@ -237,7 +237,7 @@ func (m *build) putModules(modules []*layout.CpModule) error {
 	for _, module := range modules {
 		for _, linked := range registry.Slice(module.Objects.Get(), module.ObjectCount) {
 			objectType, objectName := shm.String(linked.Type[:]), shm.String(linked.Name[:])
-			if _, ok := lookupObject(m.gen, objectType, objectName); !ok {
+			if _, ok := registry.LookupObjectIndex(&m.gen.ObjectRegistry, objectType, objectName); !ok {
 				return fmt.Errorf(
 					"module %s:%s: %w: %s:%s",
 					shm.String(module.Type[:]), shm.String(module.Name[:]),
