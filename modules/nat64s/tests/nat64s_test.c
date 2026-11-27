@@ -2877,6 +2877,266 @@ test_first_fragment_refused(struct nat64s_env *env) {
 	return TEST_SUCCESS;
 }
 
+// A new session keeps the port its own wan entry already holds.
+//
+// The wan entry is written before the lan entry, and another worker may
+// handle the same first packet: in both cases the session meets its own
+// entry at the port it derived, and stays on that one port.
+static int
+test_own_wan_entry_keeps_its_port(struct nat64s_env *env) {
+	const uint64_t now = 23600000000000ull;
+	dataplane_ut_set_time_ns(env->ut, now);
+	// A port inside the window is the session's on both sides.
+	const uint16_t port = 2110;
+
+	// The wan entry on its own, as a first packet whose lan insert
+	// found no room leaves it.
+	struct nat64state_wan_key wan_key = nat64s_test_wan_key(port);
+	struct nat64state_value entry = {0};
+	entry.cli_port = port;
+	memcpy(entry.src6, client_addr, sizeof(entry.src6));
+	memcpy(entry.prefix, nat64_prefix, sizeof(entry.prefix));
+	fwtable_t *wan_table =
+		fwstate_map_nat64_object_wan_table(&env->map->cp_object);
+	rwlock_t *lock = NULL;
+	TEST_ASSERT(
+		fwtable_insert(
+			wan_table,
+			0,
+			now,
+			300ull * 1000000000ull,
+			&wan_key,
+			&entry,
+			&lock
+		) >= 0,
+		"the session's wan entry must be recorded"
+	);
+	rwlock_write_unlock(lock);
+	// The probe is to meet it.
+	void *found = NULL;
+	lock = NULL;
+	bool from_stale = false;
+	TEST_ASSERT(
+		fwtable_lookup(
+			wan_table, now, &wan_key, &found, &lock, &from_stale
+		) >= 0,
+		"the recorded wan entry must be found"
+	);
+	if (lock != NULL) {
+		rwlock_read_unlock(lock);
+	}
+
+	struct packet *in = NULL;
+	struct packet *out = NULL;
+	bool dropped = false;
+	TEST_ASSERT_SUCCESS(nat64s_make_v6_syn(env, port, &in), "build failed");
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the SYN must not be dropped");
+	struct rte_tcp_hdr *tcp = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(out),
+		struct rte_tcp_hdr *,
+		out->transport_header.offset
+	);
+	TEST_ASSERT_EQUAL(
+		rte_be_to_cpu_16(tcp->src_port),
+		port,
+		"the session must keep the port its own wan entry holds"
+	);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	// The lan entry was written as well: the client's next packet finds
+	// the session.
+	TEST_ASSERT_SUCCESS(nat64s_make_v6_syn(env, port, &in), "build failed");
+	nat64s_test_set_tcp_flags(in, RTE_TCP_ACK_FLAG);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		!dropped,
+		"the client's next packet must find the session it completed"
+	);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	// And the remote's answer to the kept port reaches the client.
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_reply(env, port, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the answer to the kept port must be translated");
+	return nat64s_test_assert_reply_to(out, client_addr, port);
+}
+
+// One client endpoint under two configured prefixes derives one external
+// tuple towards one remote.
+//
+// The session under the second prefix moves off the first one's port
+// while that lives, and each answer returns under its own session's
+// prefix.
+static int
+test_second_prefix_moves_off_live_session(struct nat64s_env *env) {
+	dataplane_ut_set_time_ns(env->ut, 23700000000000ull);
+	// A port inside the window is kept, so both sessions derive it.
+	const uint16_t port = 2111;
+	struct packet *in = NULL;
+	struct packet *out = NULL;
+	bool dropped = false;
+
+	TEST_ASSERT_SUCCESS(nat64s_make_v6_syn(env, port, &in), "build failed");
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the SYN under the first prefix must translate");
+	struct rte_tcp_hdr *tcp = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(out),
+		struct rte_tcp_hdr *,
+		out->transport_header.offset
+	);
+	TEST_ASSERT_EQUAL(
+		rte_be_to_cpu_16(tcp->src_port),
+		port,
+		"the first session must keep its in-window port"
+	);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	// The same client endpoint towards the same remote.
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v6_syn_to2(env, port, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the SYN under the second prefix must translate");
+	tcp = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(out),
+		struct rte_tcp_hdr *,
+		out->transport_header.offset
+	);
+	uint16_t moved = rte_be_to_cpu_16(tcp->src_port);
+	TEST_ASSERT(
+		moved != port,
+		"the second session must move off the first one's port"
+	);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	// Each answer returns under its own session's prefix.
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_reply(env, port, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the first session's answer must be translated");
+	struct rte_ipv6_hdr *ipv6 = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(out),
+		struct rte_ipv6_hdr *,
+		out->network_header.offset
+	);
+	TEST_ASSERT(
+		memcmp(ipv6->src_addr, prefixes[0], NAT64S_PREFIX_LEN) == 0,
+		"the first session's answer must return under the first prefix"
+	);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_reply(env, moved, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the second session's answer must be translated");
+	ipv6 = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(out),
+		struct rte_ipv6_hdr *,
+		out->network_header.offset
+	);
+	TEST_ASSERT(
+		memcmp(ipv6->src_addr, prefixes[1], NAT64S_PREFIX_LEN) == 0,
+		"the second session's answer must return under the second "
+		"prefix"
+	);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+	return TEST_SUCCESS;
+}
+
+// Two source ports of one client whose derived external ports coincide.
+//
+// The second flow finds the first one's entry under the port it derived.
+// The entry is another client port's, so the flow moves, and each answer
+// reaches its own client port.
+static int
+test_derived_port_collision_between_client_ports_moves(struct nat64s_env *env) {
+	dataplane_ut_set_time_ns(env->ut, 23800000000000ull);
+	const uint16_t first_port = 435;
+	const uint16_t second_port = 514;
+	const uint8_t other_remote[4] = {192, 0, 2, 99};
+	struct packet *in = NULL;
+	struct packet *out = NULL;
+	bool dropped = false;
+
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v6_syn(env, first_port, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the first flow's SYN must translate");
+	struct rte_tcp_hdr *tcp = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(out),
+		struct rte_tcp_hdr *,
+		out->transport_header.offset
+	);
+	uint16_t derived = rte_be_to_cpu_16(tcp->src_port);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	// The precondition, read off the second flow towards another remote:
+	// both client ports derive one external port.
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v6_syn_to(env, second_port, other_remote, &in),
+		"build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		!dropped,
+		"the second flow's SYN towards another remote must "
+		"translate"
+	);
+	tcp = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(out),
+		struct rte_tcp_hdr *,
+		out->transport_header.offset
+	);
+	TEST_ASSERT_EQUAL(
+		rte_be_to_cpu_16(tcp->src_port),
+		derived,
+		"the two client ports must derive one external port"
+	);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	// Towards the first flow's remote, the derived port is that flow's.
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v6_syn(env, second_port, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the second flow's SYN must translate");
+	tcp = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(out),
+		struct rte_tcp_hdr *,
+		out->transport_header.offset
+	);
+	uint16_t moved = rte_be_to_cpu_16(tcp->src_port);
+	TEST_ASSERT(
+		moved != derived,
+		"the second flow must move off the first one's derived port"
+	);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	// Each answer reaches its own client port.
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_reply(env, derived, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the first flow's answer must be translated");
+	TEST_ASSERT_SUCCESS(
+		nat64s_test_assert_reply_to(out, client_addr, first_port),
+		"the first flow's answer must reach its own client port"
+	);
+
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_reply(env, moved, &in), "build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the second flow's answer must be translated");
+	return nat64s_test_assert_reply_to(out, client_addr, second_port);
+}
+
 // A new flow finding every candidate port taken towards its remote gives
 // up instead of sharing one: its SYN is dropped, and the sessions holding
 // the ports keep answering their own clients.
@@ -3478,6 +3738,17 @@ main(void) {
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_first_fragment_refused(&env);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_own_wan_entry_keeps_its_port(&env);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_second_prefix_moves_off_live_session(&env);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_derived_port_collision_between_client_ports_moves(
+			&env
+		);
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_exhausted_window_drops_new_flow(&env);

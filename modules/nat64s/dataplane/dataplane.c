@@ -855,18 +855,47 @@ nat64s_handle_v4_error(
 	return rc;
 }
 
+// The identity a session's entries carry: the client endpoint under the
+// prefix its outbound packets use.
+struct nat64s_session_identity {
+	const uint8_t *src6;
+	const uint8_t *prefix;
+	uint16_t cli_port;
+};
+
+// Whether a stored entry is the given client's under the given prefix.
+//
+// Read on the entry found under a session's own external tuple, that
+// settles whether the tuple is the session's: the key carries the rest
+// of the flow — protocol, remote port and remote address — so only this
+// client towards this remote can have written it.
+static inline bool
+nat64s_entry_is_clients(
+	const struct nat64state_value *stored,
+	const struct nat64s_session_identity *identity
+) {
+	return stored != NULL && stored->cli_port == identity->cli_port &&
+	       memcmp(stored->src6, identity->src6, 16) == 0 &&
+	       memcmp(stored->prefix, identity->prefix, NAT64S_PREFIX_LEN) == 0;
+}
+
 // Find a free external port for a new session, stepping from the allocated
 // one through the window, wrapping, for a bounded number of probes; the
 // port found is stored back and written into the key.
 //
-// Returns false when every probed port is taken towards the remote.
+// Returns false when every probed port is taken towards the remote by
+// another session. A port the session's own entry holds is kept, so that
+// a first packet whose lan insert found no room, and another worker on
+// the same first packet, leave no unpaired entry behind and the session
+// stays on one port.
 static inline bool
 nat64s_probe_wan_port(
 	struct nat64s_prepared *prepared,
 	const struct nat64s_module_config *config,
 	uint64_t now,
 	struct nat64state_wan_key *wan_key,
-	uint16_t *port
+	uint16_t *port,
+	const struct nat64s_session_identity *identity
 ) {
 	uint32_t tries = config->port_hi - config->port_lo;
 	if (tries > NAT64S_MAX_PORT_PROBES) {
@@ -884,8 +913,10 @@ nat64s_probe_wan_port(
 			&lock,
 			&from_stale
 		);
+		bool own =
+			taken >= 0 && nat64s_entry_is_clients(found, identity);
 		nat64s_lookup_unlock(lock);
-		if (taken < 0) {
+		if (taken < 0 || own) {
 			return true;
 		}
 		if (++*port >= config->port_hi) {
@@ -905,25 +936,20 @@ nat64s_probe_wan_port(
 // Whether the entry an insert just stored in the given table layer
 // belongs to the given session.
 //
-// The session is the client endpoint — address and port — together with
-// the prefix of its outbound packets. The identity the value ops keep on
-// a merge is read back before the insert's write lock goes, so a
-// concurrent refresh cannot swap it underneath.
+// The identity the value ops keep on a merge is read back before the
+// insert's write lock goes, so a concurrent refresh cannot swap it
+// underneath.
 static inline bool
 nat64s_wan_entry_owned(
 	fwmap_t *layer,
 	int64_t idx,
-	const uint8_t src6[16],
-	const uint8_t prefix[NAT64S_PREFIX_LEN],
-	uint16_t cli_port
+	const struct nat64s_session_identity *identity
 ) {
-	const struct nat64state_value *stored =
-		(const struct nat64state_value *)fwmap_get_value(
-			layer, (uint32_t)idx
-		);
-	return stored != NULL && stored->cli_port == cli_port &&
-	       memcmp(stored->src6, src6, 16) == 0 &&
-	       memcmp(stored->prefix, prefix, NAT64S_PREFIX_LEN) == 0;
+	return nat64s_entry_is_clients(
+		(const struct nat64state_value *)
+			fwmap_get_value(layer, (uint32_t)idx),
+		identity
+	);
 }
 
 // Whether the entry an insert just stored is latched as an established
@@ -1154,10 +1180,10 @@ nat64s_handle_v6(
 	// reads the wan entry, so the lan side is what keeps an active flow's
 	// reverse mapping alive.
 	//
-	// The wan entry goes first. Should the lan insert then fail, the
-	// orphan wan entry merely ages out and the next packet retries both;
-	// the opposite order would leave a lan entry whose flow can never be
-	// answered until it expires.
+	// The wan entry goes first. Should the lan insert then fail, the wan
+	// entry stays as the session's own: the next packet keeps its port
+	// and completes the pair. The opposite order would leave a lan entry
+	// whose flow can never be answered until it expires.
 	uint32_t remote_addr = 0;
 	memcpy(&remote_addr, &ipv6->dst_addr[12], sizeof(remote_addr));
 	uint16_t remote_port = dport;
@@ -1185,9 +1211,15 @@ nat64s_handle_v6(
 	//
 	// A flow that finds every probed port taken gives up: a shared tuple
 	// would hand its return traffic to another client.
-	if (created && !nat64s_probe_wan_port(
-			       prepared, config, now, &wan_key, &value.port
-		       )) {
+	struct nat64s_session_identity identity = {
+		.src6 = ipv6->src_addr,
+		.prefix = prefix,
+		.cli_port = sport,
+	};
+	if (created &&
+	    !nat64s_probe_wan_port(
+		    prepared, config, now, &wan_key, &value.port, &identity
+	    )) {
 		nat64s_stats_bump(stats, NAT64S_INSERT_FAILED);
 		return -1;
 	}
@@ -1229,9 +1261,7 @@ nat64s_handle_v6(
 	bool same_layer =
 		ATOMIC_ADDR_OF(&prepared->wan.table->head) == wan_layer;
 	bool owned = same_layer &&
-		     nat64s_wan_entry_owned(
-			     wan_layer, wan_idx, ipv6->src_addr, prefix, sport
-		     );
+		     nat64s_wan_entry_owned(wan_layer, wan_idx, &identity);
 	bool latched =
 		same_layer && nat64s_entry_established(wan_layer, wan_idx);
 	rwlock_write_unlock(lock);
