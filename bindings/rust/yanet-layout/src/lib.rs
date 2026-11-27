@@ -293,9 +293,11 @@ fn go_type(node: &Node, qualifier: &str) -> String {
     }
 }
 
-/// The Go name of a struct: the last segment of its path.
+/// The Go name of a struct: the last segment of its path, a raw identifier
+/// without its prefix.
 fn go_name(path: &str) -> String {
-    path.rsplit("::").next().unwrap_or(path).to_owned()
+    let name = path.rsplit("::").next().unwrap_or(path);
+    name.strip_prefix("r#").unwrap_or(name).to_owned()
 }
 
 /// The Go name of a field or a member, a raw identifier without its prefix.
@@ -324,7 +326,15 @@ fn go_string(value: &str) -> String {
 fn camel(name: &str) -> String {
     name.split('_')
         .filter(|part| !part.is_empty())
-        .map(|part| part[..1].to_uppercase() + &part[1..])
+        .map(|part| {
+            let mut chars = part.chars();
+            chars
+                .next()
+                .into_iter()
+                .flat_map(char::to_uppercase)
+                .chain(chars)
+                .collect::<String>()
+        })
         .collect()
 }
 
