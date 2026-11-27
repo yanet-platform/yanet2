@@ -90,6 +90,8 @@ struct nat64s_env_settings {
 	uint32_t port_lo;
 	uint32_t port_hi;
 	struct nat64state_timeouts timeouts;
+	// The IPv6 MTU limit of the round; zero leaves the default.
+	uint32_t mtu_ipv6;
 	// Whether the config carries the Well-Known Prefix in place of the
 	// suite's first one.
 	bool well_known;
@@ -116,6 +118,7 @@ nat64s_env_update(const struct nat64s_env_settings *settings) {
 		.port_lo = settings->port_lo,
 		.port_hi = settings->port_hi,
 		.timeouts = settings->timeouts,
+		.mtu_ipv6 = (uint16_t)settings->mtu_ipv6,
 		.map_name = "sessions",
 	};
 }
@@ -533,6 +536,56 @@ nat64s_make_v6_echo(
 	return nat64s_make_v6_echo_from(env, client_addr, ident, out);
 }
 
+// Build a parsed IPv4 TCP reply from the remote towards the pool, its
+// IPv4 header extended by four option bytes: a source-route option of
+// the given type, or nothing but the end of the options list when the
+// type is zero.
+static int
+nat64s_make_v4_reply_with_option(
+	struct nat64s_env *env,
+	uint16_t allocated_port,
+	uint8_t option_type,
+	struct packet **out
+) {
+	struct rte_mbuf *mbuf = dataplane_ut_alloc_mbuf(env->ut);
+	TEST_ASSERT_NOT_NULL(mbuf, "dataplane_ut_alloc_mbuf returned NULL");
+
+	uint8_t *data = (uint8_t *)rte_pktmbuf_append(
+		mbuf,
+		sizeof(struct rte_ether_hdr) + 24 + sizeof(struct rte_tcp_hdr)
+	);
+	TEST_ASSERT_NOT_NULL(data, "packet payload allocation failed");
+	memset(data, 0, rte_pktmbuf_data_len(mbuf));
+
+	struct rte_ether_hdr *ether = (struct rte_ether_hdr *)data;
+	ether->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
+
+	struct rte_ipv4_hdr *ipv4 = (struct rte_ipv4_hdr *)(ether + 1);
+	ipv4->version_ihl = RTE_IPV4_VHL_DEF + 1;
+	ipv4->total_length = rte_cpu_to_be_16(24 + sizeof(struct rte_tcp_hdr));
+	ipv4->next_proto_id = IPPROTO_TCP;
+	ipv4->src_addr = remote_addr;
+	ipv4->dst_addr = pool_addrs[0];
+
+	uint8_t *options = (uint8_t *)(ipv4 + 1);
+	options[0] = option_type;
+	options[1] = option_type ? 4 : 0; // length
+	options[2] = option_type ? 4 : 0; // pointer into the route data
+
+	struct rte_tcp_hdr *tcp = (struct rte_tcp_hdr *)(options + 4);
+	tcp->src_port = rte_cpu_to_be_16(REMOTE_PORT);
+	tcp->dst_port = rte_cpu_to_be_16(allocated_port);
+	tcp->tcp_flags = RTE_TCP_SYN_FLAG | RTE_TCP_ACK_FLAG;
+	tcp->data_off = (sizeof(struct rte_tcp_hdr) / 4) << 4;
+
+	struct packet *packet = mbuf_to_packet(mbuf);
+	memset(packet, 0, sizeof(*packet));
+	packet->mbuf = mbuf;
+	TEST_ASSERT_SUCCESS(parse_packet(packet), "parse_packet failed");
+	*out = packet;
+	return TEST_SUCCESS;
+}
+
 // Build a parsed ICMPv4 echo reply from the remote towards the pool.
 static int
 nat64s_make_v4_echo_reply(
@@ -848,6 +901,79 @@ nat64s_run(
 	if (drop != NULL) {
 		rte_pktmbuf_free(packet_to_mbuf(drop));
 	}
+	return TEST_SUCCESS;
+}
+
+// A return packet the translation refuses refreshes nothing.
+//
+// The translation refuses a packet carrying a source-route option
+// itself. Such a reply of a live session is dropped and does not keep
+// the session alive: past its timeout without a translated packet, the
+// session is gone. The same reply with no such option is translated.
+static int
+test_refused_return_packet_refreshes_nothing(struct nat64s_env *env) {
+	const uint64_t sec = 1000000000ull;
+	const uint64_t now = 3900000000000ull;
+	dataplane_ut_set_time_ns(env->ut, now);
+	// A port inside the window is the session's on both sides.
+	const uint16_t port = 2120;
+	struct packet *in = NULL;
+	struct packet *out = NULL;
+	bool dropped = false;
+	TEST_ASSERT_SUCCESS(nat64s_make_v6_syn(env, port, &in), "build failed");
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "the SYN must open the session");
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	// The control: a reply whose header ends its options list at once is
+	// translated.
+	dataplane_ut_set_time_ns(env->ut, now + 100 * sec);
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_reply_with_option(env, port, 0, &in),
+		"build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		!dropped, "a reply without a source route must be translated"
+	);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	// The remote's reply with a source-route option is dropped, and is
+	// no translation.
+	dataplane_ut_set_time_ns(env->ut, now + 250 * sec);
+	uint64_t translated = env->config->stats[NAT64S_TRANSLATED_V4_TO_V6];
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_reply_with_option(env, port, 0x83, &in),
+		"build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT_NULL(
+		out, "a reply with a source-route option must not be forwarded"
+	);
+	TEST_ASSERT(
+		dropped, "a reply with a source-route option must be dropped"
+	);
+	TEST_ASSERT_EQUAL(
+		env->config->stats[NAT64S_TRANSLATED_V4_TO_V6],
+		translated,
+		"a refused packet is no translation"
+	);
+
+	// Past its timeout since the last translated packet, the session is
+	// gone.
+	dataplane_ut_set_time_ns(env->ut, now + 500 * sec);
+	TEST_ASSERT_SUCCESS(nat64s_make_v6_syn(env, port, &in), "build failed");
+	struct rte_tcp_hdr *ack = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(in),
+		struct rte_tcp_hdr *,
+		in->transport_header.offset
+	);
+	ack->tcp_flags = RTE_TCP_ACK_FLAG;
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT_NULL(
+		out, "a refused return packet must not keep a session alive"
+	);
+	TEST_ASSERT(dropped, "the session must have aged out unrefreshed");
 	return TEST_SUCCESS;
 }
 
@@ -2698,6 +2824,35 @@ test_default_window_ends_with_last_port(struct nat64s_env *env) {
 	return TEST_SUCCESS;
 }
 
+// An IPv6 MTU limit above the largest one the translation carries is
+// held down to it.
+//
+// The limit reaches the config as the largest carried value, so a direct
+// caller cannot hand the translation an arithmetic it does not hold.
+static int
+test_ipv6_mtu_above_carried_is_held_down(struct nat64s_env *env) {
+	const struct nat64s_env_settings large = {
+		.port_lo = 1024,
+		.port_hi = 4096,
+		.timeouts = {.timeout = 300, .tcp_established = 300},
+		.mtu_ipv6 = 40000,
+	};
+	TEST_ASSERT_SUCCESS(
+		nat64s_env_reconfigure(env, &large), "reconfigure failed"
+	);
+	TEST_ASSERT_EQUAL(
+		env->config->mtu.ipv6,
+		NAT64S_MTU_IPV6_MAX,
+		"an IPv6 MTU limit above the carried one must be held down"
+	);
+
+	TEST_ASSERT_SUCCESS(
+		nat64s_env_reconfigure(env, &nat64s_suite_settings),
+		"restoring the suite's settings failed"
+	);
+	return TEST_SUCCESS;
+}
+
 // An ICMPv6 error whose source lies under a NAT64 prefix is hairpinned
 // traffic like any other packet: it is dropped before the session its
 // quote would match is ever looked up.
@@ -3934,6 +4089,9 @@ main(void) {
 		res = test_latched_lan_entry_holds_return_refresh(&env);
 	}
 	if (res == TEST_SUCCESS) {
+		res = test_refused_return_packet_refreshes_nothing(&env);
+	}
+	if (res == TEST_SUCCESS) {
 		res = test_return_traffic_keeps_lan_entry(&env);
 	}
 	if (res == TEST_SUCCESS) {
@@ -3959,6 +4117,9 @@ main(void) {
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_default_window_ends_with_last_port(&env);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_ipv6_mtu_above_carried_is_held_down(&env);
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_hairpinned_error_dropped(&env);

@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math"
+	"net/netip"
 	"slices"
 
 	"go.uber.org/zap"
@@ -179,6 +179,13 @@ func decodeConfig(wire *nat64spb.Config) (*NAT64sConfig, error) {
 		if wireAddr == nil {
 			return nil, fmt.Errorf("pool[%d]: address is required", idx)
 		}
+		if !isPoolAddress(wireAddr.ToAddr()) {
+			return nil, fmt.Errorf(
+				"pool[%d]: %s is not a unicast address of a single host",
+				idx,
+				wireAddr.ToAddr(),
+			)
+		}
 		addr := networkOrderIPv4(wireAddr)
 		if _, ok := seen[addr]; ok {
 			return nil, fmt.Errorf("pool[%d]: address is listed twice", idx)
@@ -199,10 +206,15 @@ func decodeConfig(wire *nat64spb.Config) (*NAT64sConfig, error) {
 	config.Timeout.TCPEstablished = uint16(wire.GetTcpEstablishedTimeout())
 
 	if wireMTU := wire.GetMtu(); wireMTU != nil {
-		if wireMTU.GetIpv4Mtu() > math.MaxUint16 || wireMTU.GetIpv6Mtu() > math.MaxUint16 {
+		if wireMTU.GetIpv4Mtu() > nat64spb.MaxIPv4MTU ||
+			wireMTU.GetIpv6Mtu() > nat64spb.MaxIPv6MTU {
 			return nil, fmt.Errorf(
-				"mtu limits must fit 16 bits, got ipv4=%d ipv6=%d",
-				wireMTU.GetIpv4Mtu(), wireMTU.GetIpv6Mtu(),
+				"mtu limits must be at most %d for IPv4 and %d for IPv6, "+
+					"got ipv4=%d ipv6=%d",
+				nat64spb.MaxIPv4MTU,
+				nat64spb.MaxIPv6MTU,
+				wireMTU.GetIpv4Mtu(),
+				wireMTU.GetIpv6Mtu(),
 			)
 		}
 		config.MTU = MTUConfig{
@@ -275,6 +287,22 @@ func encodeConfig(config *NAT64sConfig) *nat64spb.Config {
 func isDefaultPortRange(wireRange *nat64spb.PortRange) bool {
 	return wireRange == nil ||
 		(wireRange.GetLo() == 0 && wireRange.GetHi() == 0)
+}
+
+// isPoolAddress reports whether an address can be one of the translator's
+// own on the IPv4 side.
+//
+// It has to be a unicast address that names a host — neither unspecified,
+// loopback nor link-local, and not multicast — outside the blocks held
+// for a whole network or for the future, the limited broadcast among
+// them: a translated packet leaves with a pool address as its source, and
+// nothing could answer for such an address.
+func isPoolAddress(address netip.Addr) bool {
+	if !address.IsGlobalUnicast() {
+		return false
+	}
+	first := address.As4()[0]
+	return first != 0 && first < 240
 }
 
 // networkOrderIPv4 is the integer the shared memory carries for a wire IPv4

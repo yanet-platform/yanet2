@@ -50,6 +50,12 @@ func Test_PortHiMax_MatchesTheRequestBound(t *testing.T) {
 	require.Equal(t, uint32(nat64spb.PortRangeHiMax), uint32(cnat64s.PortHiMax))
 }
 
+// Test_MTUv6Max_MatchesTheRequestBound verifies that the request boundary
+// refuses exactly the IPv6 MTU limits the translation cannot carry.
+func Test_MTUv6Max_MatchesTheRequestBound(t *testing.T) {
+	require.Equal(t, uint32(nat64spb.MaxIPv6MTU), uint32(cnat64s.MTUv6Max))
+}
+
 // Test_MapObjectConfig_CreateMap_ReportsTheCauseOfARefusal verifies that
 // a refused creation says why.
 //

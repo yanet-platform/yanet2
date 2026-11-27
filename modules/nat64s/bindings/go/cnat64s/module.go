@@ -65,6 +65,9 @@ const TimeoutMax = C.NAT64STATE_TIMEOUT_MAX
 // window, one past the last port a 16-bit field carries.
 const PortHiMax = C.NAT64S_PORT_HI_MAX
 
+// MTUv6Max is the largest IPv6 MTU limit the translation carries.
+const MTUv6Max = C.NAT64S_MTU_IPV6_MAX
+
 // NewModuleConfig allocates a new, empty nat64s module configuration.
 //
 // The caller owns it and releases it with Free while its agent is alive:

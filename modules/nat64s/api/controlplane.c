@@ -196,9 +196,14 @@ nat64s_module_config_update(
 	config->timeouts.tcp_established = update->timeouts.tcp_established;
 
 	// Zero selects the defaults; the translation core's length
-	// arithmetic assumes a nonzero limit.
+	// arithmetic assumes a nonzero limit, and holds the IPv6 difference
+	// in a signed 16-bit number.
 	config->mtu.ipv4 = update->mtu_ipv4 ? update->mtu_ipv4 : 1450;
-	config->mtu.ipv6 = update->mtu_ipv6 ? update->mtu_ipv6 : 1280;
+	config->mtu.ipv6 = update->mtu_ipv6
+				   ? (update->mtu_ipv6 < NAT64S_MTU_IPV6_MAX
+					      ? update->mtu_ipv6
+					      : NAT64S_MTU_IPV6_MAX)
+				   : 1280;
 
 	// Link the session map objects; the module is freshly constructed, so
 	// no earlier links exist.

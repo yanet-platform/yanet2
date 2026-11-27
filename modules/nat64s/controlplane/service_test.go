@@ -96,6 +96,14 @@ func poolAddresses(pool []uint32) [][4]byte {
 	return addresses
 }
 
+// poolAddress replaces a request's pool with the one address, given as
+// its wire form, a big-endian integer.
+func poolAddress(address uint32) func(*nat64spb.UpdateConfigRequest) {
+	return func(request *nat64spb.UpdateConfigRequest) {
+		request.Config.Pool = []*commonpb.IPv4Address{{Addr: address}}
+	}
+}
+
 // Test_NAT64sService_UpdateConfig_AcceptsWholeConfig verifies the happy
 // path: a whole config publishes and reads back through ShowConfig.
 func Test_NAT64sService_UpdateConfig_AcceptsWholeConfig(t *testing.T) {
@@ -167,6 +175,25 @@ func Test_NAT64sService_UpdateConfig_KeepsWindowEndingWithLastPort(t *testing.T)
 	shown, err := service.ShowConfig(t.Context(), &nat64spb.ShowConfigRequest{Name: "t0"})
 	require.NoError(t, err)
 	require.Equal(t, uint32(65536), shown.GetConfig().GetPortRange().GetHi())
+}
+
+// Test_NAT64sService_UpdateConfig_KeepsLargestIPv6Mtu verifies that the
+// largest IPv6 MTU limit the translation carries is stored as it was
+// sent.
+func Test_NAT64sService_UpdateConfig_KeepsLargestIPv6Mtu(t *testing.T) {
+	backend := &mockBackend{}
+	service := nat64s.NewNAT64sService(backend)
+
+	request := validUpdate("t0")
+	request.Config.Mtu = &nat64spb.MTUConfig{
+		Ipv4Mtu: 1500,
+		Ipv6Mtu: nat64spb.MaxIPv6MTU,
+	}
+
+	require.NoError(t, updateConfig(t, service, request))
+	require.Len(t, backend.Configs, 1)
+	require.Equal(t, uint32(1500), backend.Configs[0].MTU.IPv4MTU)
+	require.Equal(t, uint32(nat64spb.MaxIPv6MTU), backend.Configs[0].MTU.IPv6MTU)
 }
 
 // Test_NAT64sService_UpdateConfig_StoresPoolInNetworkOrder verifies that a
@@ -265,6 +292,41 @@ func Test_NAT64sService_UpdateConfig_RejectsBadConfigs(t *testing.T) {
 			message: "listed twice",
 		},
 		{
+			name:    "pool address unspecified",
+			mutate:  poolAddress(0x00000000),
+			message: "pool[0]: 0.0.0.0 is not a unicast address of a single host",
+		},
+		{
+			name:    "pool address of a whole network",
+			mutate:  poolAddress(0x00010203),
+			message: "pool[0]: 0.1.2.3 is not a unicast address of a single host",
+		},
+		{
+			name:    "pool address loopback",
+			mutate:  poolAddress(0x7f000001),
+			message: "pool[0]: 127.0.0.1 is not a unicast address of a single host",
+		},
+		{
+			name:    "pool address multicast",
+			mutate:  poolAddress(0xe0000001),
+			message: "pool[0]: 224.0.0.1 is not a unicast address of a single host",
+		},
+		{
+			name:    "pool address reserved",
+			mutate:  poolAddress(0xf0000001),
+			message: "pool[0]: 240.0.0.1 is not a unicast address of a single host",
+		},
+		{
+			name:    "pool address limited broadcast",
+			mutate:  poolAddress(0xffffffff),
+			message: "pool[0]: 255.255.255.255 is not a unicast address of a single host",
+		},
+		{
+			name:    "pool address link-local",
+			mutate:  poolAddress(0xa9fe0001),
+			message: "pool[0]: 169.254.0.1 is not a unicast address of a single host",
+		},
+		{
 			name: "empty port range",
 			mutate: func(r *nat64spb.UpdateConfigRequest) {
 				r.Config.PortRange = &nat64spb.PortRange{Lo: 4096, Hi: 1024}
@@ -335,6 +397,20 @@ func Test_NAT64sService_UpdateConfig_RejectsBadConfigs(t *testing.T) {
 			},
 			message: "ipv6_mtu 1279 is below the IPv6 minimum",
 		},
+		{
+			name: "ipv6 mtu above the largest limit",
+			mutate: func(r *nat64spb.UpdateConfigRequest) {
+				r.Config.Mtu = &nat64spb.MTUConfig{Ipv6Mtu: 32768}
+			},
+			message: "ipv6_mtu 32768 exceeds the largest limit of 32767",
+		},
+		{
+			name: "ipv4 mtu above the largest limit",
+			mutate: func(r *nat64spb.UpdateConfigRequest) {
+				r.Config.Mtu = &nat64spb.MTUConfig{Ipv4Mtu: 65536}
+			},
+			message: "ipv4_mtu 65536 exceeds the largest limit of 65535",
+		},
 	}
 
 	for _, tc := range tests {
@@ -366,6 +442,58 @@ func Test_NAT64sService_UpdateConfig_DecodeJudgesMapName(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
 	require.Empty(t, backend.Configs)
+}
+
+// Test_NAT64sService_UpdateConfig_AcceptsPrivateAndSharedPool verifies
+// that pool addresses of the private and shared blocks stay allowed: a
+// deployment under a network-specific prefix may translate to them.
+func Test_NAT64sService_UpdateConfig_AcceptsPrivateAndSharedPool(t *testing.T) {
+	backend := &mockBackend{}
+	service := nat64s.NewNAT64sService(backend)
+
+	// 10.0.0.1 of the private block and 100.64.0.1 of the shared one.
+	request := validUpdate("t0")
+	request.Config.Pool = []*commonpb.IPv4Address{{Addr: 0x0a000001}, {Addr: 0x64400001}}
+
+	require.NoError(t, updateConfig(t, service, request))
+	require.Len(t, backend.Configs, 1)
+	require.Len(t, backend.Configs[0].Pool, 2)
+}
+
+// Test_NAT64sService_UpdateConfig_DecodeRefusesLargeMtu verifies that a
+// config decoded without the request boundary ahead of it still refuses
+// an MTU limit beyond what each family's field or the translation
+// carries.
+func Test_NAT64sService_UpdateConfig_DecodeRefusesLargeMtu(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		mtu     *nat64spb.MTUConfig
+		message string
+	}{
+		{
+			name:    "ipv4",
+			mtu:     &nat64spb.MTUConfig{Ipv4Mtu: 65536},
+			message: "must be at most 65535 for IPv4",
+		},
+		{
+			name:    "ipv6",
+			mtu:     &nat64spb.MTUConfig{Ipv6Mtu: 40000},
+			message: "32767 for IPv6",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := &mockBackend{}
+			service := nat64s.NewNAT64sService(backend)
+
+			request := validUpdate("t0")
+			request.Config.Mtu = tc.mtu
+			_, err := service.UpdateConfig(t.Context(), request)
+			require.Error(t, err)
+			require.Equal(t, codes.InvalidArgument, status.Code(err))
+			require.Contains(t, err.Error(), tc.message)
+			require.Empty(t, backend.Configs)
+		})
+	}
 }
 
 // Test_NAT64sService_UpdateConfig_DecodeRefusesLargeTimeouts verifies

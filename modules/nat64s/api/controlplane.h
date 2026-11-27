@@ -13,6 +13,11 @@ struct yanet_shm;
  * window: one past the last port a 16-bit field carries. */
 #define NAT64S_PORT_HI_MAX 65536
 
+/* The largest IPv6 MTU limit the translation carries: it keeps the
+ * difference between the limit and a packet's length as a signed 16-bit
+ * number. */
+#define NAT64S_MTU_IPV6_MAX 32767
+
 /* The whole replaceable state of one nat64s module config. An update
  * applies to a freshly created config; the map names link the session
  * tables (NULL or empty links none). */
@@ -59,7 +64,8 @@ nat64s_module_config_free(struct cp_module *cp_module, yanet_error **err);
  * Fill a freshly created nat64s module configuration: copy the
  * prefixes, pool, the two session timeouts and MTU limits, and link the session
  * map objects. Zero timeout knobs select their defaults; the names link nothing
- * when NULL or empty.
+ * when NULL or empty. An IPv6 MTU limit above NAT64S_MTU_IPV6_MAX is held down
+ * to it.
  */
 int
 nat64s_module_config_update(

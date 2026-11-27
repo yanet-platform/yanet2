@@ -25,6 +25,15 @@ const MaxTimeout = math.MaxUint16
 // source-port window: one past the last port a 16-bit field carries.
 const PortRangeHiMax = 65536
 
+// MaxIPv4MTU is the largest IPv4 MTU limit in bytes: what a 16-bit field
+// carries.
+const MaxIPv4MTU = math.MaxUint16
+
+// MaxIPv6MTU is the largest IPv6 MTU limit in bytes the translation
+// carries: it keeps the difference between the limit and a packet's
+// length as a signed 16-bit number.
+const MaxIPv6MTU = math.MaxInt16
+
 // Validate checks that a show request names a configuration.
 func (m *ShowConfigRequest) Validate() error {
 	return commonpb.ValidateModuleName("name", m.GetName())
@@ -88,8 +97,26 @@ func ValidateTimeout(field string, value uint32) error {
 }
 
 // Validate checks that each MTU limit is zero, which leaves it unset, or
-// at least its protocol's minimum.
+// lies within its protocol's minimum and largest limit.
+//
+// The largest IPv6 limit is the one the translation carries: a larger
+// one would reach the dataplane, which keeps the difference between the
+// limit and a packet's length in a signed 16-bit number.
 func (m *MTUConfig) Validate() error {
+	if mtu := m.GetIpv4Mtu(); mtu > MaxIPv4MTU {
+		return fmt.Errorf(
+			"ipv4_mtu %d exceeds the largest limit of %d",
+			mtu,
+			MaxIPv4MTU,
+		)
+	}
+	if mtu := m.GetIpv6Mtu(); mtu > MaxIPv6MTU {
+		return fmt.Errorf(
+			"ipv6_mtu %d exceeds the largest limit of %d",
+			mtu,
+			MaxIPv6MTU,
+		)
+	}
 	if mtu := m.GetIpv4Mtu(); mtu != 0 && mtu < minIPv4MTU {
 		return fmt.Errorf(
 			"ipv4_mtu %d is below the IPv4 minimum of %d",

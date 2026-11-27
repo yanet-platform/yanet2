@@ -1410,6 +1410,22 @@ nat64s_handle_v4(
 			nat64state_entry_ttl(proto, true, &config->timeouts),
 	};
 
+	// The packet translates before anything is refreshed, under the port
+	// the client knows its flow by.
+	//
+	// The translation refuses some packets itself — one carrying a
+	// source-route option, one whose options it cannot read — and such a
+	// packet must not keep a session alive: a remote would else hold a
+	// half-open mapping with packets that never reach the client.
+	if (cli_port != dport && nat64s_patch_dest_port(packet, cli_port)) {
+		nat64s_stats_bump(stats, NAT64S_MALFORMED);
+		return -1;
+	}
+	struct nat64_ctx ctx = nat64s_ctx(config);
+	if (nat64_translate_v4_to_v6(&ctx, packet, prefix, src6) != 0) {
+		return -1;
+	}
+
 	// Return traffic keeps its own entry alive: a flow whose client is
 	// silent for a while must not lose its reverse mapping while the
 	// remote still talks.
@@ -1455,8 +1471,10 @@ nat64s_handle_v4(
 		};
 		memcpy(lan_key.src_addr, src6, sizeof(lan_key.src_addr));
 		memcpy(lan_key.dst_addr, prefix, NAT64S_PREFIX_LEN);
+		// The remote's address from the key, a copy: the translation
+		// rewrote the header it was read from.
 		memcpy(lan_key.dst_addr + NAT64S_PREFIX_LEN,
-		       &ipv4->src_addr,
+		       &key.remote_addr,
 		       sizeof(uint32_t));
 
 		struct nat64state_value lan_refresh = {0};
@@ -1476,20 +1494,9 @@ nat64s_handle_v4(
 		}
 	}
 
-	// The client's own port is restored even when it is zero: an echo
-	// leaves with a translated identifier like any other outside the
-	// window, and its reply must come back under the client's own.
-	if (cli_port != dport && nat64s_patch_dest_port(packet, cli_port)) {
-		nat64s_stats_bump(stats, NAT64S_MALFORMED);
-		return -1;
-	}
-
-	struct nat64_ctx ctx = nat64s_ctx(config);
-	int rc = nat64_translate_v4_to_v6(&ctx, packet, prefix, src6);
-	if (rc == 0) {
-		nat64s_stats_bump(stats, NAT64S_TRANSLATED_V4_TO_V6);
-	}
-	return rc;
+	// Both entries stand behind the packet already translated.
+	nat64s_stats_bump(stats, NAT64S_TRANSLATED_V4_TO_V6);
+	return 0;
 }
 
 void
