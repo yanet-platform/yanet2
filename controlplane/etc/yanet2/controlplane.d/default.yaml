@@ -173,6 +173,16 @@ modules:
     instance_id: 0
     memory_path: *memory_path
     memory_requirements: 16MB
+  nat64s:
+    instance_id: 0
+    memory_path: *memory_path
+    # The nat64state-map objects linked by nat64s configs allocate in
+    # this module's agent zone, one map per config and about 272 MiB each
+    # at the default sizing.
+    #
+    # A zone of 1 GiB holds three such maps. Raise it to give more
+    # configs a map of their own.
+    memory_requirements: 1GB
   pdump:
     instance_id: 0
     memory_path: *memory_path

@@ -21,8 +21,8 @@ func Test_ShippedDefaultConfig_NoUnknownKeys(t *testing.T) {
 }
 
 // Test_ShippedDefaultConfig_LoadsIntendedEnabledSet asserts that the shipped
-// default config starts all eleven bundled modules plus the plain, vlan and
-// vxlan devices, leaves trafgen disabled, and sets an explicit gateway
+// default config starts every bundled module but l3b, plus the plain, vlan
+// and vxlan devices, leaves trafgen disabled, and sets an explicit gateway
 // instance.
 func Test_ShippedDefaultConfig_LoadsIntendedEnabledSet(t *testing.T) {
 	cfg, err := xcfg.LoadConfig[yncp.Config]("../etc/yanet2/controlplane.d/default.yaml")
@@ -35,8 +35,10 @@ func Test_ShippedDefaultConfig_LoadsIntendedEnabledSet(t *testing.T) {
 	require.NotNil(t, cfg.Modules.Forward.Unwrap())
 	require.NotNil(t, cfg.Modules.Mirror.Unwrap())
 	require.NotNil(t, cfg.Modules.NAT64.Unwrap())
+	require.NotNil(t, cfg.Modules.NAT64s.Unwrap())
 	require.NotNil(t, cfg.Modules.Pdump.Unwrap())
 	require.NotNil(t, cfg.Modules.ACL.Unwrap())
+	require.NotNil(t, cfg.Modules.FWState.Unwrap())
 	require.NotNil(t, cfg.Modules.Blackhole.Unwrap())
 	require.NotNil(t, cfg.Modules.Unrdup.Unwrap())
 
@@ -58,19 +60,20 @@ func Test_ShippedDefaultConfig_OmittedBackendEndpointsUseEphemeralPorts(t *testi
 	require.NoError(t, err)
 
 	endpoints := map[string]string{
-		"route module":      config.Modules.Route.Unwrap().Endpoint.Unwrap(),
-		"route MPLS module": config.Modules.RouteMPLS.Unwrap().Endpoint.Unwrap(),
-		"decap module":      config.Modules.Decap.Unwrap().Endpoint.Unwrap(),
-		"DSCP module":       config.Modules.DSCP.Unwrap().Endpoint.Unwrap(),
-		"forward module":    config.Modules.Forward.Unwrap().Endpoint.Unwrap(),
-		"mirror module":     config.Modules.Mirror.Unwrap().Endpoint.Unwrap(),
-		"NAT64 module":      config.Modules.NAT64.Unwrap().Endpoint.Unwrap(),
-		"pdump module":      config.Modules.Pdump.Unwrap().Endpoint.Unwrap(),
-		"ACL module":        config.Modules.ACL.Unwrap().Endpoint.Unwrap(),
-		"blackhole module":  config.Modules.Blackhole.Unwrap().Endpoint.Unwrap(),
-		"plain device":      config.Devices.Plain.Unwrap().Endpoint.Unwrap(),
-		"VLAN device":       config.Devices.Vlan.Unwrap().Endpoint.Unwrap(),
-		"VXLAN device":      config.Devices.Vxlan.Unwrap().Endpoint.Unwrap(),
+		"route module":          config.Modules.Route.Unwrap().Endpoint.Unwrap(),
+		"route MPLS module":     config.Modules.RouteMPLS.Unwrap().Endpoint.Unwrap(),
+		"decap module":          config.Modules.Decap.Unwrap().Endpoint.Unwrap(),
+		"DSCP module":           config.Modules.DSCP.Unwrap().Endpoint.Unwrap(),
+		"forward module":        config.Modules.Forward.Unwrap().Endpoint.Unwrap(),
+		"mirror module":         config.Modules.Mirror.Unwrap().Endpoint.Unwrap(),
+		"NAT64 module":          config.Modules.NAT64.Unwrap().Endpoint.Unwrap(),
+		"stateful NAT64 module": config.Modules.NAT64s.Unwrap().Endpoint.Unwrap(),
+		"pdump module":          config.Modules.Pdump.Unwrap().Endpoint.Unwrap(),
+		"ACL module":            config.Modules.ACL.Unwrap().Endpoint.Unwrap(),
+		"blackhole module":      config.Modules.Blackhole.Unwrap().Endpoint.Unwrap(),
+		"plain device":          config.Devices.Plain.Unwrap().Endpoint.Unwrap(),
+		"VLAN device":           config.Devices.Vlan.Unwrap().Endpoint.Unwrap(),
+		"VXLAN device":          config.Devices.Vxlan.Unwrap().Endpoint.Unwrap(),
 	}
 	for name, endpoint := range endpoints {
 		t.Run(name, func(t *testing.T) {

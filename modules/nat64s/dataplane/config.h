@@ -43,7 +43,10 @@ enum nat64s_stat {
  * session keeps that prefix for its return traffic. Under the Well-Known
  * Prefix a source or destination standing for an address of a block no
  * global traffic uses is refused, whatever the configuration carries
- * (RFC 6052 3.1).
+ * (RFC 6052 3.1). A source no router forwards — the unspecified, the
+ * loopback, a link-local or a multicast address — and a destination
+ * standing for an address no unicast packet can be sent to are refused
+ * under every prefix, before they can take a session.
  *
  * Of ICMP only errors and echoes cross: any other message is dropped
  * before it could take a session, as the translation could not carry it.

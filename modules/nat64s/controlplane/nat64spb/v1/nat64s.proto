@@ -54,7 +54,9 @@ message Config {
   // session uses the one its destination embeds under and keeps it for
   // its return traffic. Under the Well-Known Prefix 64:ff9b::/96 a
   // source or destination that stands for a non-global IPv4 address is
-  // dropped (RFC 6052 3.1).
+  // dropped (RFC 6052 3.1). Under every prefix a source no router
+  // forwards, and a destination that stands for an address no unicast
+  // packet can be sent to, are dropped as well.
   repeated common.commonpb.v1.IPv6Prefix prefixes = 1;
   // Public IPv4 pool the lan-side flows translate to.
   repeated common.commonpb.v1.IPv4Address pool = 2;

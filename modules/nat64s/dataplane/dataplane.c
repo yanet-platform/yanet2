@@ -364,7 +364,8 @@ static const rte_be32_t nat64s_global_anycast[] = {
 //
 // That prefix stands for global addresses only (RFC 6052 3.1), whatever
 // the configuration carries, so such a source or destination is refused.
-// A network-specific prefix may stand for any address.
+// A network-specific prefix stands for the private blocks as well; the
+// blocks no unicast packet can be sent to are refused under every prefix.
 static inline bool
 nat64s_wkp_hides_non_global(const uint8_t addr[16]) {
 	if (memcmp(addr, nat64s_well_known_prefix, NAT64S_PREFIX_LEN) != 0) {
@@ -389,6 +390,42 @@ nat64s_wkp_hides_non_global(const uint8_t addr[16]) {
 		return true;
 	}
 	return false;
+}
+
+// Whether an IPv4 address is one a unicast packet can be sent to.
+//
+// No such packet can be sent to this network, the loopback, a multicast
+// group or the reserved block holding the broadcast address, whatever
+// prefix stands for the address. Any other translates under a
+// network-specific prefix, a private one among them: reaching it is what
+// such a prefix is for.
+static inline bool
+nat64s_dest_forwardable(uint32_t ipv4) {
+	return (ipv4 & NAT64S_IPV4(255, 0, 0, 0)) != NAT64S_IPV4(0, 0, 0, 0) &&
+	       (ipv4 & NAT64S_IPV4(255, 0, 0, 0)) !=
+		       NAT64S_IPV4(127, 0, 0, 0) &&
+	       (ipv4 & NAT64S_IPV4(240, 0, 0, 0)) !=
+		       NAT64S_IPV4(224, 0, 0, 0) &&
+	       (ipv4 & NAT64S_IPV4(240, 0, 0, 0)) != NAT64S_IPV4(240, 0, 0, 0);
+}
+
+// Whether an IPv6 source address is one a router forwards a packet under.
+//
+// A router forwards no packet sourced from the unspecified, the loopback,
+// a link-local or a multicast address. The translation would replace such
+// a source with a pool one and let the packet through, so it is refused
+// before it can take a session.
+static inline bool
+nat64s_source_forwardable(const uint8_t addr[16]) {
+	// Multicast, then link-local unicast, whose first ten bits are
+	// 1111111010.
+	if (addr[0] == 0xff || (addr[0] == 0xfe && (addr[1] & 0xc0) == 0x80)) {
+		return false;
+	}
+	// The unspecified address and the loopback one: the first fifteen
+	// bytes zero, the last at most one.
+	static const uint8_t zero[15];
+	return memcmp(addr, zero, sizeof(zero)) != 0 || addr[15] > 1;
 }
 
 static inline struct nat64_ctx
@@ -1064,11 +1101,15 @@ nat64s_handle_v6(
 	// RFC 6146 3.5: a source inside a configured prefix is hairpinned
 	// traffic, not a client flow — translating it again loops. Errors
 	// are held to it before anything is looked up on their behalf.
+	//
+	// A source no router forwards is refused the same way, before it can
+	// take a session.
 	if (nat64s_dst_prefix(config, ipv6->src_addr) != NULL) {
 		nat64s_stats_bump(stats, NAT64S_HAIRPIN);
 		return -1;
 	}
-	if (nat64s_wkp_hides_non_global(ipv6->src_addr)) {
+	if (nat64s_wkp_hides_non_global(ipv6->src_addr) ||
+	    !nat64s_source_forwardable(ipv6->src_addr)) {
 		nat64s_stats_bump(stats, NAT64S_NON_GLOBAL);
 		return -1;
 	}
@@ -1107,7 +1148,10 @@ nat64s_handle_v6(
 		nat64s_stats_bump(stats, NAT64S_NO_PREFIX);
 		return -1;
 	}
-	if (nat64s_wkp_hides_non_global(ipv6->dst_addr)) {
+	uint32_t remote_addr = 0;
+	rte_memcpy(&remote_addr, &ipv6->dst_addr[12], sizeof(remote_addr));
+	if (nat64s_wkp_hides_non_global(ipv6->dst_addr) ||
+	    !nat64s_dest_forwardable(remote_addr)) {
 		nat64s_stats_bump(stats, NAT64S_NON_GLOBAL);
 		return -1;
 	}
@@ -1184,8 +1228,6 @@ nat64s_handle_v6(
 	// The wan entry goes first. Should the lan insert then fail, the wan
 	// entry stays as the session's own: the next packet keeps its port
 	// and completes the pair.
-	uint32_t remote_addr = 0;
-	memcpy(&remote_addr, &ipv6->dst_addr[12], sizeof(remote_addr));
 	uint16_t remote_port = dport;
 	if (nat64s_is_icmp(proto)) {
 		// An echo is answered under the identifier it left with, so

@@ -1882,6 +1882,21 @@ test_remote_reset_does_not_establish(struct nat64s_env *env) {
 	return TEST_SUCCESS;
 }
 
+// Whether a table holds a live entry under the key.
+static bool
+nat64s_test_entry_live(fwtable_t *table, uint64_t now, const void *key) {
+	void *found = NULL;
+	rwlock_t *lock = NULL;
+	bool from_stale = false;
+	bool live =
+		fwtable_lookup(table, now, key, &found, &lock, &from_stale) >=
+		0;
+	if (lock != NULL) {
+		rwlock_read_unlock(lock);
+	}
+	return live;
+}
+
 // Latch the entry a key names in one of the session tables as
 // established, by hand.
 //
@@ -4029,6 +4044,174 @@ test_well_known_prefix_refuses_non_global(struct nat64s_env *env) {
 	return TEST_SUCCESS;
 }
 
+// A client packet sourced from an address no router forwards, or sent to
+// one no unicast packet can be sent to, is refused before it can take a
+// session: neither table holds an entry for it.
+//
+// The translation would give such a packet a pool source and a routable
+// remote, letting through what must not cross a router, and every varied
+// tuple of it would spend a slot of the session tables.
+static int
+test_unroutable_addresses_take_no_session(struct nat64s_env *env) {
+	const uint64_t now = 25800000000000ull;
+	dataplane_ut_set_time_ns(env->ut, now);
+	// A port inside the window is the one the session would keep, so the
+	// entry it would take in either table is known.
+	const uint16_t port = 2900;
+	fwtable_t *lan =
+		fwstate_map_nat64_object_lan_table(&env->map->cp_object);
+	fwtable_t *wan =
+		fwstate_map_nat64_object_wan_table(&env->map->cp_object);
+
+	const uint8_t unspecified[16] = {0};
+	uint8_t loopback[16] = {0};
+	loopback[15] = 1;
+	uint8_t link_local[16] = {0xfe, 0x80};
+	link_local[15] = 1;
+	uint8_t multicast[16] = {0xff, 0x02};
+	multicast[15] = 1;
+	const uint8_t *const sources[] = {
+		unspecified,
+		loopback,
+		link_local,
+		multicast,
+	};
+	const uint8_t this_network[4] = {0, 1, 2, 3};
+	const uint8_t host_loopback[4] = {127, 0, 0, 1};
+	const uint8_t group[4] = {224, 0, 0, 1};
+	const uint8_t reserved[4] = {240, 0, 0, 1};
+	const uint8_t broadcast[4] = {255, 255, 255, 255};
+	const uint8_t *const destinations[] = {
+		this_network,
+		host_loopback,
+		group,
+		reserved,
+		broadcast,
+	};
+
+	struct packet *in = NULL;
+	struct packet *out = NULL;
+	bool dropped = false;
+	uint64_t refused = env->config->stats[NAT64S_NON_GLOBAL];
+	for (size_t i = 0; i < sizeof(sources) / sizeof(sources[0]); ++i) {
+		TEST_ASSERT_SUCCESS(
+			nat64s_make_v6_syn_from(
+				env, sources[i], port, remote4, &in
+			),
+			"build failed"
+		);
+		TEST_ASSERT_SUCCESS(
+			nat64s_run(env, in, &out, &dropped), "run failed"
+		);
+		TEST_ASSERT(
+			dropped, "a source no router forwards must be refused"
+		);
+		TEST_ASSERT_NULL(out, "the packet must not be translated");
+
+		struct nat64state_lan_key lan_key = nat64s_test_lan_key(port);
+		memcpy(lan_key.src_addr, sources[i], sizeof(lan_key.src_addr));
+		TEST_ASSERT(
+			!nat64s_test_entry_live(lan, now, &lan_key),
+			"a refused source must take no lan entry"
+		);
+	}
+	struct nat64state_wan_key wan_key = nat64s_test_wan_key(port);
+	TEST_ASSERT(
+		!nat64s_test_entry_live(wan, now, &wan_key),
+		"a refused source must take no wan entry"
+	);
+
+	for (size_t i = 0; i < sizeof(destinations) / sizeof(destinations[0]);
+	     ++i) {
+		TEST_ASSERT_SUCCESS(
+			nat64s_make_v6_syn_to(env, port, destinations[i], &in),
+			"build failed"
+		);
+		TEST_ASSERT_SUCCESS(
+			nat64s_run(env, in, &out, &dropped), "run failed"
+		);
+		TEST_ASSERT(
+			dropped,
+			"an address no unicast packet can be sent to must be "
+			"refused"
+		);
+		TEST_ASSERT_NULL(out, "the packet must not be translated");
+
+		struct nat64state_lan_key lan_key = nat64s_test_lan_key(port);
+		memcpy(lan_key.dst_addr + NAT64S_PREFIX_LEN,
+		       destinations[i],
+		       sizeof(host_loopback));
+		TEST_ASSERT(
+			!nat64s_test_entry_live(lan, now, &lan_key),
+			"a refused destination must take no lan entry"
+		);
+		wan_key = nat64s_test_wan_key(port);
+		memcpy(&wan_key.remote_addr,
+		       destinations[i],
+		       sizeof(host_loopback));
+		TEST_ASSERT(
+			!nat64s_test_entry_live(wan, now, &wan_key),
+			"a refused destination must take no wan entry"
+		);
+	}
+
+	// An error is held to the source rule all the same. It quotes the
+	// suite's session, which an error from the client's own address
+	// translates through.
+	TEST_ASSERT_SUCCESS(nat64s_test_warm_session(env), "warm-up failed");
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v6_packet_too_big(env, CLIENT_PORT, &in),
+		"build failed"
+	);
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		!dropped,
+		"an error from the client's own address must translate"
+	);
+	rte_pktmbuf_free(packet_to_mbuf(out));
+
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v6_packet_too_big(env, CLIENT_PORT, &in),
+		"build failed"
+	);
+	struct rte_ipv6_hdr *outer = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(in),
+		struct rte_ipv6_hdr *,
+		in->network_header.offset
+	);
+	memcpy(outer->src_addr, link_local, sizeof(outer->src_addr));
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		dropped, "an error from a link-local source must be refused"
+	);
+	TEST_ASSERT_NULL(out, "the error must not be translated");
+
+	TEST_ASSERT_EQUAL(
+		env->config->stats[NAT64S_NON_GLOBAL],
+		refused + sizeof(sources) / sizeof(sources[0]) +
+			sizeof(destinations) / sizeof(destinations[0]) + 1,
+		"every refused address must be counted"
+	);
+
+	// The same port towards a forwardable remote, from a forwardable
+	// source, takes both entries.
+	TEST_ASSERT_SUCCESS(nat64s_make_v6_syn(env, port, &in), "build failed");
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(!dropped, "routable addresses must translate");
+	rte_pktmbuf_free(packet_to_mbuf(out));
+	struct nat64state_lan_key lan_key = nat64s_test_lan_key(port);
+	wan_key = nat64s_test_wan_key(port);
+	TEST_ASSERT(
+		nat64s_test_entry_live(lan, now, &lan_key),
+		"the routable flow's lan entry must be there"
+	);
+	TEST_ASSERT(
+		nat64s_test_entry_live(wan, now, &wan_key),
+		"the routable flow's wan entry must be there"
+	);
+	return TEST_SUCCESS;
+}
+
 // The largest timeout a knob represents reaches the session whole.
 //
 // One configured with it still answers half a second short of it, on
@@ -4260,6 +4443,9 @@ main(void) {
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_well_known_prefix_refuses_non_global(&env);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_unroutable_addresses_take_no_session(&env);
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_largest_timeout_kept_whole(&env);
