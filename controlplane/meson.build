@@ -19,7 +19,7 @@ if yanet_go_binaries
           '-o', '@OUTPUT@',
           join_paths(meson.current_source_dir(), 'cmd', 'yncp-director'),
       ],
-      env: yanet_go_env,
+      env: yanet_go_cgo_env,
       build_by_default: true,
       build_always_stale: true,
       # Every proto generator and every native library the director links

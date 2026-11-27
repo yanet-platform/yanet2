@@ -18,7 +18,7 @@ if yanet_go_binaries and native_layout_enabled
       '-o', '@OUTPUT@',
       meson.project_source_root() / 'bindings/go/dataplane_ut/cmd/dataplane-helper',
     ],
-    env: yanet_go_env,
+    env: yanet_go_cgo_env,
     build_by_default: true,
     # Go tracks the helper's sources itself.
     build_always_stale: true,

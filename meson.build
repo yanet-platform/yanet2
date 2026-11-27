@@ -149,12 +149,6 @@ if b_sanitize != 'none'
             'CGO_LDFLAGS': cgo_flags + ' -Wl,-rpath,$ORIGIN',
         }
         sanitize_link_args = ['-Wl,-rpath,$ORIGIN']
-        # The native Go allocator shares free lists with the C one, so its red
-        # zones must match: -asan joins the Go flags the caller set.
-        if b_sanitize.contains('address') and not dataplane_only
-            yanet_go_flags = run_command(go, 'env', 'GOFLAGS', check: true).stdout().strip()
-            yanet_go_env += {'GOFLAGS': (yanet_go_flags + ' -asan').strip()}
-        endif
     endif
 endif
 
@@ -326,10 +320,12 @@ configure_file(
 # Because it snapshots the Go build environment above, it must stay
 # below the last assignment to that environment.
 yanet_go_nocgo_env = yanet_go_env + {'CGO_ENABLED': '0'}
-# -asan needs cgo, and builds without it allocate no shared memory, so
-# they keep only the caller's Go flags.
-if yanet_go_nocgo_env.has_key('GOFLAGS')
-  yanet_go_nocgo_env += {'GOFLAGS': yanet_go_flags}
+
+# The native Go allocator shares free lists with the C one, so its red
+# zones must match: cgo builds add -asan to the Go flags of the build.
+yanet_go_cgo_env = environment(yanet_go_env)
+if b_sanitize.contains('address')
+  yanet_go_cgo_env.append('GOFLAGS', '-asan', separator: ' ')
 endif
 
 # The Go binaries are not fuzz targets and the fuzz suite runs none of them,
@@ -566,7 +562,7 @@ if not dataplane_only
         '--stamp', '@OUTPUT@',
       ] + (package.has_key('build_tag') ? ['--build-tag', package['build_tag']] : [])
       + cgo_native_inputs,
-      env: yanet_go_env,
+      env: yanet_go_cgo_env,
       # The marker hashes every archive the package's CGO flags name: the
       # probe builds the project ones, the marker's inputs the external ones.
       depends: go_cgo_flags + (cgo_probes.has_key(package_path) ? [cgo_probes[package_path]] : []),
