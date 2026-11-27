@@ -11,15 +11,18 @@ if yanet_go_binaries
   custom_target(
       'yanet-controlplane',
       output: 'yanet-controlplane',
+      # The native Go allocator shares free lists with the C one, so its red
+      # zones must match: an AddressSanitizer build builds it with -asan.
       command: [
           go,
           'build',
+      ] + (b_sanitize.contains('address') ? ['-asan'] : []) + [
           '-ldflags=' + controlplane_ld_flags,
           '-buildvcs=false',
           '-o', '@OUTPUT@',
           join_paths(meson.current_source_dir(), 'cmd', 'yncp-director'),
       ],
-      env: yanet_go_cgo_env,
+      env: yanet_go_env,
       build_by_default: true,
       build_always_stale: true,
       # Every proto generator and every native library the director links
