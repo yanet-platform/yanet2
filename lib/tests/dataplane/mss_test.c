@@ -619,6 +619,99 @@ test_clamp_syn_ack(void) {
 	return TEST_SUCCESS;
 }
 
+/* Store the urgent pointer and refill the TCP checksum over the segment. */
+static void
+refill_ip6_tcp_cksum(struct packet *p, uint16_t urp_be) {
+	struct rte_tcp_hdr *tcp = pkt_tcp(p);
+	tcp->tcp_urp = urp_be;
+	tcp->cksum = 0;
+	tcp->cksum = rte_ipv6_udptcp_cksum(pkt_ip6(p), tcp);
+}
+
+/*
+ * verifies that a clamp whose checksum sum comes out all ones stores zero, as
+ * a full computation does (RFC 9293, section 3.1), not all ones.
+ */
+static int
+test_clamp_all_ones_sum_stores_zero(void) {
+	uint8_t opts[4];
+	write_mss_opt(opts, 1200);
+	struct packet p;
+	TEST_ASSERT_SUCCESS(
+		build_ip6_tcp(
+			&p, RTE_TCP_SYN_FLAG, opts, 4, 0, DEFAULT_HEADROOM, 1
+		),
+		"build"
+	);
+
+	/*
+	 * The clamped segment's checksum as its urgent pointer makes its sum
+	 * all ones; the segment then offers a larger MSS to clamp.
+	 */
+	struct rte_tcp_hdr *tcp = pkt_tcp(&p);
+	uint16_t urp_be = tcp->cksum;
+	write_mss_opt((uint8_t *)(tcp + 1), 1460);
+	refill_ip6_tcp_cksum(&p, urp_be);
+
+	TEST_ASSERT_EQUAL(
+		packet_set_mss(&p, 1200, 1300), packet_set_mss_ok, "rc"
+	);
+	TEST_ASSERT_EQUAL(
+		pkt_tcp(&p)->cksum, 0, "all-ones sum not stored as zero"
+	);
+	TEST_ASSERT_SUCCESS(verify_ip6_tcp_cksum(&p), "cksum");
+
+	free_packet(&p);
+	return TEST_SUCCESS;
+}
+
+/*
+ * verifies that an MSS insert whose checksum sum comes out all ones stores
+ * zero, as a full computation does (RFC 9293, section 3.1), not all ones.
+ */
+static int
+test_insert_all_ones_sum_stores_zero(void) {
+	uint8_t opts[4];
+	write_mss_opt(opts, 1300);
+	struct packet with_mss;
+	TEST_ASSERT_SUCCESS(
+		build_ip6_tcp(
+			&with_mss,
+			RTE_TCP_SYN_FLAG,
+			opts,
+			4,
+			0,
+			DEFAULT_HEADROOM,
+			1
+		),
+		"build with MSS"
+	);
+	/* The checksum of the segment the insert produces, urgent pointer 0. */
+	uint16_t urp_be = pkt_tcp(&with_mss)->cksum;
+	free_packet(&with_mss);
+
+	/* That checksum as the urgent pointer makes the sum all ones. */
+	struct packet p;
+	TEST_ASSERT_SUCCESS(
+		build_ip6_tcp(
+			&p, RTE_TCP_SYN_FLAG, NULL, 0, 0, DEFAULT_HEADROOM, 1
+		),
+		"build"
+	);
+	refill_ip6_tcp_cksum(&p, urp_be);
+
+	TEST_ASSERT_EQUAL(
+		packet_set_mss(&p, 1200, 1300), packet_set_mss_ok, "rc"
+	);
+	TEST_ASSERT_EQUAL(
+		pkt_tcp(&p)->cksum, 0, "all-ones sum not stored as zero"
+	);
+	TEST_ASSERT_SUCCESS(verify_ip6_tcp_cksum(&p), "cksum");
+
+	free_packet(&p);
+	return TEST_SUCCESS;
+}
+
 int
 main(void) {
 	log_enable_name("info");
@@ -645,6 +738,10 @@ main(void) {
 		{"malformed_data_off_short", test_malformed_data_off_short},
 		{"malformed_hdr_full_60", test_malformed_hdr_full_60},
 		{"clamp_syn_ack", test_clamp_syn_ack},
+		{"clamp_all_ones_sum_stores_zero",
+		 test_clamp_all_ones_sum_stores_zero},
+		{"insert_all_ones_sum_stores_zero",
+		 test_insert_all_ones_sum_stores_zero},
 	};
 
 	size_t total = sizeof(tests) / sizeof(tests[0]);

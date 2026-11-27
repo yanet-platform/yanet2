@@ -171,8 +171,8 @@ clamp_mss_option(
 	uint16_t new_mss_be = rte_cpu_to_be_16(clamp_mss);
 	memcpy(opt->data, &new_mss_be, sizeof(new_mss_be));
 	cksum = csum_plus(cksum, new_mss_be);
-	/* preserve all-ones checksum (RFC 1624). */
-	tcp->cksum = (cksum == 0xffff) ? cksum : ~cksum;
+	/* A full computation stores an all-ones sum as zero (RFC 9293). */
+	tcp->cksum = ~cksum;
 }
 
 /*
@@ -221,8 +221,8 @@ tcp_cksum_add_mss(struct rte_tcp_hdr *tcp, struct tcp_option *opt) {
 	cksum = csum_plus(cksum, kind_and_len);
 	cksum = csum_plus(cksum, mss_be);
 	cksum = csum_plus(cksum, rte_cpu_to_be_16(TCP_OPTION_MSS_LEN));
-	/* preserve all-ones checksum (RFC 1624). */
-	tcp->cksum = (cksum == 0xffff) ? cksum : ~cksum;
+	/* A full computation stores an all-ones sum as zero (RFC 9293). */
+	tcp->cksum = ~cksum;
 }
 
 /*
