@@ -29,6 +29,9 @@ on:
       - "bindings/go/dataplane_ut/**"
       - "common/go/dataplane/**"
       - "controlplane/ffi/**"
+      - "controlplane/native/layout/**"
+      - "controlplane/native/sdk/**"
+      - "controlplane/native/shm/**"
       - "devices/plain/bindings/go/cplain/**"
       - "**/meson.build"
       - "meson_options.txt"
@@ -59,6 +62,9 @@ on:
       - "bindings/go/dataplane_ut/**"
       - "common/go/dataplane/**"
       - "controlplane/ffi/**"
+      - "controlplane/native/layout/**"
+      - "controlplane/native/sdk/**"
+      - "controlplane/native/shm/**"
       - "devices/plain/bindings/go/cplain/**"
       - "**/meson.build"
       - "meson_options.txt"
@@ -98,8 +104,9 @@ jobs:
     timeout-minutes: 45
     container: ghcr.io/yanet-platform/yanet2-ci@sha256:3cbb2aae05beb4efc16f160cfa4d5307deba5d3110005d6557fdb49e5e2ee7a1
     env:
-      # The Makefile runs just these Go packages, and no meson tests.
-      GO_TEST_PACKAGES: ./bindings/rust/yanet-sdk-fixture-api/bindings/go/cfixture
+      # The Makefile runs just these Go packages, and no meson tests: the
+      # fixture tests and the generated test of the fixture's Go views.
+      GO_TEST_PACKAGES: ./bindings/rust/yanet-sdk-fixture-api/bindings/go/cfixture ./controlplane/native/sdk/...
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

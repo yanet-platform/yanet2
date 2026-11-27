@@ -470,6 +470,11 @@ if not dataplane_only
   # production closure of the control plane is fixed.
   subdir('bindings/rust')
 
+  # Every generated Go view of the shared-memory layouts: make native-layout.
+  if native_layout_enabled
+    alias_target('native-layout', native_layout_gen, get_variable('rust_sdk_fixture_layout', []))
+  endif
+
   # Meson computes the link closure of each package for a probe program.
   #
   # The closure becomes the package's generated #cgo flags, so no tracked Go

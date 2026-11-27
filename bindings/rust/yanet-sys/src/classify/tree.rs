@@ -14,7 +14,7 @@ use core::{
     mem::{offset_of, size_of},
 };
 
-use yanet_shm::{rel::ShmBox, resolve::Resolve, shm::ShmLayout};
+use yanet_shm::{layout::Param, rel::ShmBox, resolve::Resolve, shm::ShmLayout};
 
 use super::{Addr4, Joint, LineAttr, Net4Attr, Net6Attr, PortAttr, Rule, RuleMap, RuleTable, lpm_value};
 use crate::{
@@ -361,12 +361,14 @@ const _: () = {
 
 /// The shared-memory impls of the nodes that hold their inputs.
 macro_rules! holders {
-    ($($name:ident<$($param:ident),*> { $table:ident: $raw:ty, $free:ident; $($edge:ident: $ty:ident),* })*) => {$(
+    ($($name:ident<$($param:ident),*> $kind:literal $shape:ty { $table:ident: $raw:ty, $free:ident; $($edge:ident: $ty:ident),* })*) => {$(
         // SAFETY: a `#[repr(C)]` struct of an opaque C object, which accepts
         // every pattern, and offset words, without padding (asserted above);
         // the C object leads, so the node has its alignment, and dropping is
         // a no-op.
-        unsafe impl<$($param: ShmLayout),*> ShmLayout for $name<$($param),*> {}
+        unsafe impl<$($param: ShmLayout),*> ShmLayout for $name<$($param),*> {
+            edge_layout!($kind, $shape, [$table, $($edge),*], [$($param),*]);
+        }
 
         // SAFETY: written only by the scope's joins and decodes, which put
         // the C object and the owned edges whole; freeing returns what the C
@@ -396,9 +398,9 @@ macro_rules! holders {
 }
 
 holders! {
-    Join<L, R> { table: bindings::value_table, yanet_sys_classify_joint_free; right: R, left: L }
-    Rules<L, R> { table: bindings::rule_table, yanet_sys_classify_rule_table_free; right: R, left: L }
-    Decode<N> { map: bindings::vline, yanet_sys_classify_rule_map_free; input: N }
+    Join<L, R> "join" Join<Param<0>, Param<1>> { table: bindings::value_table, yanet_sys_classify_joint_free; right: R, left: L }
+    Rules<L, R> "rules" Rules<Param<0>, Param<1>> { table: bindings::rule_table, yanet_sys_classify_rule_table_free; right: R, left: L }
+    Decode<N> "decode" Decode<Param<0>> { map: bindings::vline, yanet_sys_classify_rule_map_free; input: N }
 }
 
 mod sealed {

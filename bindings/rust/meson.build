@@ -116,6 +116,27 @@ if sdk_rust_fixtures.enabled()
 
   subdir('plugins')
 
+  # The Go views of the fixture modules' configurations, which the layout
+  # generator writes from the layout description of their roots.
+  #
+  # The generator builds with the profile and target of the plugins, so it
+  # describes the layouts they were compiled with. The views instantiate the
+  # C views, so the same build writes both into the source tree.
+  if native_layout_enabled
+    rust_sdk_fixture_layout = custom_target(
+      'sdk-fixture-layout',
+      output: 'sdk-fixture-layout.stamp',
+      command: [
+        'sh', '-c', '"$1" run --profile plugin --locked --manifest-path "$2" -p yanet-layout --target "$3" && touch "$4"',
+        'sh', cargo, rust_manifest, rust_triple, '@OUTPUT@',
+      ],
+      env: rust_env,
+      build_always_stale: true,
+      build_by_default: false,
+    )
+    go_proto_targets += rust_sdk_fixture_layout
+  endif
+
   alias_target(
     'sdk-rust-fixtures',
     rust_sdk_fixture_api_archive,

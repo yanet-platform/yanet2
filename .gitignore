@@ -98,6 +98,7 @@ zz_yanet_cdeps.c
 zz_yanet_cgo.go
 /controlplane/native/layout/layout_*.go
 /controlplane/native/layout/.layout_*
+zz_layout_*.go
 
 # Ignore lock for subprojects
 subprojects/.wraplock

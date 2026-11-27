@@ -4,6 +4,7 @@
 use core::{cell::Cell, marker::PhantomData, ptr::NonNull};
 
 use yanet_shm::{
+    layout::Param,
     rel::RelPtr,
     root::ShmRoot,
     shm::{MAX_ALIGN, ShmLayout},
@@ -424,7 +425,9 @@ impl<O> ObjectLink<O> {
 // SAFETY: a registry index accepts every bit pattern, and the layout is a
 // zero-sized marker; the control plane writes the id the module's counter
 // registry assigned.
-unsafe impl<T: CounterLayout> ShmLayout for Counter<T> {}
+unsafe impl<T: CounterLayout> ShmLayout for Counter<T> {
+    edge_layout!("counter", Self, [id], []);
+}
 
 // SAFETY: a registry index and a counter index accept every bit pattern, and
 // the layout is a zero-sized marker; the control plane writes the indices the
@@ -439,7 +442,12 @@ unsafe impl<T> ShmLayout for TaggedCounters<T> where T: CounterLayout {}
 // SAFETY: a registry index accepts every bit pattern, and the layout is a
 // zero-sized marker; the control plane writes the id the object's counter
 // registry assigned.
-unsafe impl<T> ShmLayout for ObjectCounter<T> where T: CounterLayout {}
+unsafe impl<T> ShmLayout for ObjectCounter<T>
+where
+    T: CounterLayout,
+{
+    edge_layout!("object_counter", Self, [id], []);
+}
 
 // SAFETY: a device index accepts every bit pattern; the control plane writes
 // the index the module's device list assigned.
@@ -448,7 +456,9 @@ unsafe impl ShmLayout for Device {}
 // SAFETY: a link index accepts every bit pattern, and the object type is a
 // zero-sized marker; the control plane writes the index the module's object
 // links assigned.
-unsafe impl<O: Object> ShmLayout for ObjectLink<O> {}
+unsafe impl<O: Object> ShmLayout for ObjectLink<O> {
+    edge_layout!("object_link", Self, [index], []);
+}
 
 /// Bytes of the widest cache line a slot of [`PerWorker`] or a region of
 /// [`PerWorkerSlice`] keeps to itself.
@@ -861,7 +871,9 @@ unsafe impl<T: Copy + ShmLayout + Send> Sync for PerWorker<T> {}
 
 // SAFETY: as above; the block it names is owned by the graph and its slots
 // are plain values aligned for `T` by the builder.
-unsafe impl<T: Copy + ShmLayout> ShmLayout for PerWorker<T> {}
+unsafe impl<T: Copy + ShmLayout> ShmLayout for PerWorker<T> {
+    edge_layout!("per_worker", PerWorker<Param<0>>, [slots, workers], [T]);
+}
 
 // The builder writes and frees the field through two raw words, the offset
 // and then the count right after it, not through the struct, so its layout
@@ -1275,7 +1287,14 @@ unsafe impl<T: Copy + ShmLayout + Send> Sync for PerWorkerSlice<T> {}
 
 // SAFETY: as above; the table and the regions it names are owned by the graph,
 // and the regions hold plain values aligned for `T` by the builder.
-unsafe impl<T: Copy + ShmLayout> ShmLayout for PerWorkerSlice<T> {}
+unsafe impl<T: Copy + ShmLayout> ShmLayout for PerWorkerSlice<T> {
+    edge_layout!(
+        "per_worker_slice",
+        PerWorkerSlice<Param<0>>,
+        [regions, workers, len],
+        [T]
+    );
+}
 
 // The builder writes and frees the field through three raw words, the table
 // offset, then the worker count and the length right after it, not through the
