@@ -3,6 +3,7 @@
 package classify_test
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"math/rand/v2"
@@ -97,17 +98,18 @@ func randomNet6Rules(seed uint64, count int) []classify.Net6Rule {
 	return rules
 }
 
-// requireNet6MatchesReference compiles and commits the rules and requires
-// the class the committed attribute gives every cross of the ends of the
-// elementary intervals of both halves to reach, through the stage,
-// exactly the rules matching the address.
-func requireNet6MatchesReference(t *testing.T, rules []classify.Net6Rule) *classify.Net6 {
+// requireNet6MatchesReference compiles and commits the rules into a
+// memory laid out over block and requires the class the committed
+// attribute gives every cross of the ends of the elementary intervals of
+// both halves to reach, through the stage, exactly the rules matching
+// the address.
+func requireNet6MatchesReference(t *testing.T, block []byte, rules []classify.Net6Rule) *classify.Net6 {
 	t.Helper()
-	memory := classifytest.LayOut(make([]byte, memorySize))
+	memory := classifytest.LayOut(block)
 	attr := classifytest.Alloc[layout.ClassifyAttrNet6](memory)
-	nets, err := classify.CompileNet6(rules)
+	nets, err := classify.CompileNet6(rules, attr, &memory.Context, "net6")
 	require.NoError(t, err)
-	require.NoError(t, nets.Commit(attr, &memory.Context, "net6"))
+	require.NoError(t, nets.Commit())
 
 	classes := classifytest.ReadNet6(attr)
 	err = classifytest.CheckStage(
@@ -122,12 +124,14 @@ func requireNet6MatchesReference(t *testing.T, rules []classify.Net6Rule) *class
 
 // Test_CompileNet6_MatchesReference verifies that every cross of the
 // ends of the elementary intervals of both halves gets a class whose
-// stage reaches exactly the rules matching the address.
+// stage reaches exactly the rules matching the address, on memory a
+// previous owner left dirty, so no cell may rely on zeroed memory.
 func Test_CompileNet6_MatchesReference(t *testing.T) {
 	for seed := range uint64(60) {
 		t.Run(fmt.Sprintf("seed %d", seed), func(t *testing.T) {
 			random := rand.New(rand.NewPCG(seed, 17))
-			requireNet6MatchesReference(t, randomNet6Rules(seed, random.IntN(24)))
+			dirty := bytes.Repeat([]byte{0x5a}, memorySize)
+			requireNet6MatchesReference(t, dirty, randomNet6Rules(seed, random.IntN(24)))
 		})
 	}
 }
@@ -149,13 +153,13 @@ func Test_CompileNet6_GroupsEqualListsByContent(t *testing.T) {
 		{Networks: shared[:1]},
 		{Networks: copied[:1]},
 	}
-	nets := requireNet6MatchesReference(t, rules)
+	nets := requireNet6MatchesReference(t, make([]byte, memorySize), rules)
 	require.Equal(t, []uint32{0, 0, 0, 1, 1}, nets.Stage().RuleGroups())
 }
 
 // Test_CompileNet6_RefusesMaskHalvesThatAreNotPrefixes verifies that a
 // network a half of whose mask is not a prefix is refused as an invalid
-// rule.
+// rule before the compile allocates anything.
 func Test_CompileNet6_RefusesMaskHalvesThatAreNotPrefixes(t *testing.T) {
 	cases := []struct {
 		name string
@@ -170,17 +174,23 @@ func Test_CompileNet6_RefusesMaskHalvesThatAreNotPrefixes(t *testing.T) {
 			network := net6Network(0x2001_0db8_0000_0000, 64, 1, 64)
 			network.Mask[tc.hole] = 0
 			rules := []classify.Net6Rule{{Networks: []classify.Net6Network{net6Network(0x2001_0db8_0000_0000, 32, 0, 0)}}, {Networks: []classify.Net6Network{network}}}
-			_, err := classify.CompileNet6(rules)
+			memory := classifytest.LayOut(make([]byte, memorySize))
+			attr := classifytest.Alloc[layout.ClassifyAttrNet6](memory)
+			free := shmalloc.FreeSize(&memory.Allocator)
+
+			_, err := classify.CompileNet6(rules, attr, &memory.Context, "net6")
 			require.ErrorIs(t, err, classify.ErrInvalidRule)
+			requireZeroed(t, attr, "the attribute")
+			require.Equal(t, free, shmalloc.FreeSize(&memory.Allocator), "the allocator's free bytes")
 		})
 	}
 }
 
-// Test_Net6Commit_ExhaustedLeavesAttributeZeroed verifies that an IPv6
-// network commit refused any of its allocations fails as exhausted,
-// leaves the attribute zeroed and gives the allocator back every byte it
+// Test_Net6_ExhaustedLeavesAttributeZeroed verifies that an IPv6 network
+// compile and commit refused any of their allocations fail as exhausted,
+// leave the attribute zeroed and give the allocator back every byte they
 // took.
-func Test_Net6Commit_ExhaustedLeavesAttributeZeroed(t *testing.T) {
+func Test_Net6_ExhaustedLeavesAttributeZeroed(t *testing.T) {
 	context := unsafe.Sizeof(layout.MemoryContext{})
 	chunk := unsafe.Sizeof(layout.LpmPage{}) * 16
 	// A host splits the row of its high half into the classes on both
@@ -198,8 +208,7 @@ func Test_Net6Commit_ExhaustedLeavesAttributeZeroed(t *testing.T) {
 		{name: "no room for the low half's tree", kept: []uintptr{context, shm.PtrSize, cells, shm.PtrSize, chunk}},
 	}
 	host := net6Network(0x2001_0db8_0000_0000, 64, 1, 64)
-	nets, err := classify.CompileNet6([]classify.Net6Rule{{Networks: []classify.Net6Network{host}}})
-	require.NoError(t, err)
+	rules := []classify.Net6Rule{{Networks: []classify.Net6Network{host}}}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			memory := classifytest.LayOut(make([]byte, memorySize))
@@ -207,7 +216,14 @@ func Test_Net6Commit_ExhaustedLeavesAttributeZeroed(t *testing.T) {
 			nativetest.LeaveOnly(t, &memory.Allocator, tc.kept...)
 			free := shmalloc.FreeSize(&memory.Allocator)
 
-			require.ErrorIs(t, nets.Commit(attr, &memory.Context, "net6"), shmalloc.ErrNoMemory)
+			err := func() error {
+				nets, err := classify.CompileNet6(rules, attr, &memory.Context, "net6")
+				if err != nil {
+					return err
+				}
+				return nets.Commit()
+			}()
+			require.ErrorIs(t, err, shmalloc.ErrNoMemory)
 			requireZeroed(t, attr, "the attribute")
 			require.Equal(t, free, shmalloc.FreeSize(&memory.Allocator), "the allocator's free bytes")
 			require.True(t, memory.Context.FirstChild.IsNil(), "the attribute's memory contexts are unlinked")
@@ -236,7 +252,7 @@ func FuzzCompileNet6(f *testing.F) {
 			current.Networks = append(current.Networks, net6Network(hi, int(data[2]%65), lo, int(data[4]%65)))
 		}
 		rules = append(rules, current)
-		requireNet6MatchesReference(t, rules)
+		requireNet6MatchesReference(t, make([]byte, memorySize), rules)
 	})
 }
 
@@ -266,9 +282,9 @@ func commitNet6Filter(t *testing.T, rules []classify.Net6Rule) func(destination 
 	memory := classifytest.LayOut(make([]byte, memorySize))
 	filter := classifytest.Alloc[net6Filter](memory)
 	free := shmalloc.FreeSize(&memory.Allocator)
-	nets, err := classify.CompileNet6(rules)
+	nets, err := classify.CompileNet6(rules, &filter.Dst, &memory.Context, "test_net6_dst")
 	require.NoError(t, err)
-	require.NoError(t, nets.Commit(&filter.Dst, &memory.Context, "test_net6_dst"))
+	require.NoError(t, nets.Commit())
 	members := make([]bool, len(rules))
 	for rule := range members {
 		members[rule] = true
@@ -364,12 +380,12 @@ func Test_CompileNet6_SrcDst(t *testing.T) {
 	memory := classifytest.LayOut(make([]byte, memorySize))
 	filter := classifytest.Alloc[net6PairFilter](memory)
 	free := shmalloc.FreeSize(&memory.Allocator)
-	source, err := classify.CompileNet6(sourceRules)
+	source, err := classify.CompileNet6(sourceRules, &filter.Src, &memory.Context, "test_net6_src")
 	require.NoError(t, err)
-	require.NoError(t, source.Commit(&filter.Src, &memory.Context, "test_net6_src"))
-	destination, err := classify.CompileNet6(destinationRules)
+	require.NoError(t, source.Commit())
+	destination, err := classify.CompileNet6(destinationRules, &filter.Dst, &memory.Context, "test_net6_dst")
 	require.NoError(t, err)
-	require.NoError(t, destination.Commit(&filter.Dst, &memory.Context, "test_net6_dst"))
+	require.NoError(t, destination.Commit())
 	pair, err := source.Stage().Join(destination.Stage(), &filter.Joint, &memory.Context, "joint")
 	require.NoError(t, err)
 	require.NoError(t, pair.Decode([]bool{true, true, true}, &filter.RuleMap, &memory.Context, "rule_map"))
@@ -391,12 +407,11 @@ func Test_CompileNet6_SrcDst(t *testing.T) {
 	require.Equal(t, free, shmalloc.FreeSize(&memory.Allocator), "the allocator's free bytes")
 }
 
-// Test_Net6Commit_FailedCommitZeroesAttr verifies that a commit refused
-// its first allocation fails, frees nothing it did not allocate and
-// leaves an attribute that held garbage zeroed.
-func Test_Net6Commit_FailedCommitZeroesAttr(t *testing.T) {
-	nets, err := classify.CompileNet6([]classify.Net6Rule{{Networks: []classify.Net6Network{net6Network(0x2000_0000_0000_0000, 16, 0, 8)}}})
-	require.NoError(t, err)
+// Test_CompileNet6_FailedCompileZeroesAttr verifies that a compile
+// refused its first allocation fails, frees nothing it did not allocate
+// and leaves an attribute that held garbage zeroed.
+func Test_CompileNet6_FailedCompileZeroesAttr(t *testing.T) {
+	rules := []classify.Net6Rule{{Networks: []classify.Net6Network{net6Network(0x2000_0000_0000_0000, 16, 0, 8)}}}
 	memory := classifytest.LayOut(make([]byte, memorySize))
 	attr := classifytest.Alloc[layout.ClassifyAttrNet6](memory)
 	garbage := unsafe.Slice((*byte)(unsafe.Pointer(attr)), unsafe.Sizeof(*attr))
@@ -406,7 +421,8 @@ func Test_Net6Commit_FailedCommitZeroesAttr(t *testing.T) {
 	nativetest.LeaveOnly(t, &memory.Allocator)
 	free := shmalloc.FreeSize(&memory.Allocator)
 
-	require.ErrorIs(t, nets.Commit(attr, &memory.Context, "failed_commit"), shmalloc.ErrNoMemory)
+	_, err := classify.CompileNet6(rules, attr, &memory.Context, "failed_compile")
+	require.ErrorIs(t, err, shmalloc.ErrNoMemory)
 	requireZeroed(t, attr, "the attribute")
 	require.Equal(t, free, shmalloc.FreeSize(&memory.Allocator), "the allocator's free bytes")
 	require.Zero(t, memory.Context.BfreeCount, "the frees of the context")
