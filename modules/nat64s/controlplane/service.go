@@ -205,22 +205,14 @@ func decodeConfig(wire *nat64spb.Config) (*NAT64sConfig, error) {
 	config.Timeout.Timeout = uint16(wire.GetTimeout())
 	config.Timeout.TCPEstablished = uint16(wire.GetTcpEstablishedTimeout())
 
-	if wireMTU := wire.GetMtu(); wireMTU != nil {
-		if wireMTU.GetIpv4Mtu() > nat64spb.MaxIPv4MTU ||
-			wireMTU.GetIpv6Mtu() > nat64spb.MaxIPv6MTU {
-			return nil, fmt.Errorf(
-				"mtu limits must be at most %d for IPv4 and %d for IPv6, "+
-					"got ipv4=%d ipv6=%d",
-				nat64spb.MaxIPv4MTU,
-				nat64spb.MaxIPv6MTU,
-				wireMTU.GetIpv4Mtu(),
-				wireMTU.GetIpv6Mtu(),
-			)
-		}
-		config.MTU = MTUConfig{
-			IPv4MTU: wireMTU.GetIpv4Mtu(),
-			IPv6MTU: wireMTU.GetIpv6Mtu(),
-		}
+	// The request boundary applies the same rule; a config decoded for
+	// an in-process caller gets it here.
+	if err := wire.GetMtu().Validate(); err != nil {
+		return nil, fmt.Errorf("mtu: %w", err)
+	}
+	config.MTU = MTUConfig{
+		IPv4MTU: wire.GetMtu().GetIpv4Mtu(),
+		IPv6MTU: wire.GetMtu().GetIpv6Mtu(),
 	}
 
 	if wireRange := wire.GetPortRange(); !isDefaultPortRange(wireRange) {

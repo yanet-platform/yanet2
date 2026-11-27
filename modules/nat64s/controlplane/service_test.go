@@ -196,6 +196,22 @@ func Test_NAT64sService_UpdateConfig_KeepsLargestIPv6Mtu(t *testing.T) {
 	require.Equal(t, uint32(nat64spb.MaxIPv6MTU), backend.Configs[0].MTU.IPv6MTU)
 }
 
+// Test_NAT64sService_UpdateConfig_KeepsSmallestMtu verifies that an MTU
+// limit at its family's minimum is stored as it was sent: the smallest
+// one every link of that family must take.
+func Test_NAT64sService_UpdateConfig_KeepsSmallestMtu(t *testing.T) {
+	backend := &mockBackend{}
+	service := nat64s.NewNAT64sService(backend)
+
+	request := validUpdate("t0")
+	request.Config.Mtu = &nat64spb.MTUConfig{Ipv4Mtu: 68, Ipv6Mtu: 1280}
+
+	require.NoError(t, updateConfig(t, service, request))
+	require.Len(t, backend.Configs, 1)
+	require.Equal(t, uint32(68), backend.Configs[0].MTU.IPv4MTU)
+	require.Equal(t, uint32(1280), backend.Configs[0].MTU.IPv6MTU)
+}
+
 // Test_NAT64sService_UpdateConfig_StoresPoolInNetworkOrder verifies that a
 // pool address reaches the dataplane as its own network-order bytes, the
 // form packets are compared against, and reads back as the address sent.
@@ -460,25 +476,35 @@ func Test_NAT64sService_UpdateConfig_AcceptsPrivateAndSharedPool(t *testing.T) {
 	require.Len(t, backend.Configs[0].Pool, 2)
 }
 
-// Test_NAT64sService_UpdateConfig_DecodeRefusesLargeMtu verifies that a
-// config decoded without the request boundary ahead of it still refuses
-// an MTU limit beyond what each family's field or the translation
-// carries.
-func Test_NAT64sService_UpdateConfig_DecodeRefusesLargeMtu(t *testing.T) {
+// Test_NAT64sService_UpdateConfig_DecodeJudgesMtu verifies that a config
+// decoded without the request boundary ahead of it is held to the MTU
+// limits all the same: each one stays zero or within what its family's
+// link must take and its field or the translation can carry.
+func Test_NAT64sService_UpdateConfig_DecodeJudgesMtu(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		mtu     *nat64spb.MTUConfig
 		message string
 	}{
 		{
-			name:    "ipv4",
+			name:    "ipv4 above the largest limit",
 			mtu:     &nat64spb.MTUConfig{Ipv4Mtu: 65536},
-			message: "must be at most 65535 for IPv4",
+			message: "ipv4_mtu 65536 exceeds the largest limit of 65535",
 		},
 		{
-			name:    "ipv6",
+			name:    "ipv6 above the largest limit",
 			mtu:     &nat64spb.MTUConfig{Ipv6Mtu: 40000},
-			message: "32767 for IPv6",
+			message: "ipv6_mtu 40000 exceeds the largest limit of 32767",
+		},
+		{
+			name:    "ipv4 below the minimum",
+			mtu:     &nat64spb.MTUConfig{Ipv4Mtu: 67},
+			message: "ipv4_mtu 67 is below the IPv4 minimum of 68",
+		},
+		{
+			name:    "ipv6 below the minimum",
+			mtu:     &nat64spb.MTUConfig{Ipv6Mtu: 1},
+			message: "ipv6_mtu 1 is below the IPv6 minimum of 1280",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -605,43 +605,27 @@ nat64s_embedded_ports(
 	}
 }
 
-// The most extension headers walked in the packet an error quotes; the
-// shared core walks no more when it translates that packet.
-#define NAT64S_MAX_QUOTED_EXTENSIONS 4
-
-// Whether the header is one whose length the quote walker can step over.
-static inline bool
-nat64s_is_quoted_extension(uint16_t next_header) {
-	return next_header == IPPROTO_HOPOPTS ||
-	       next_header == IPPROTO_ROUTING || next_header == IPPROTO_DSTOPTS;
-}
-
-// The transport header of the IPv6 packet quoted in an error, found past
-// its extension headers. Returns false when the chain is cut short or too
-// long, or ends in a fragment: none of them carries a session's transport
-// identity where this module can read it.
+// The transport header of the IPv6 packet quoted in an error, which the
+// quote carries right behind its IPv6 header. Returns false for a quote
+// headed by anything but a transport header, an extension or a fragment
+// header among them.
+//
+// An error whose quote is headed by an extension header is one the
+// translation cannot size: `icmp_v6_to_v4` of the shared core drops
+// every extension header and still counts it in the translated quote's
+// length. Such an error is refused before it reaches the translation.
 static inline bool
 nat64s_quoted_transport(
-	const uint8_t *base,
-	size_t ip_off,
-	size_t data_len,
-	uint16_t *next_header,
-	size_t *offset
+	const uint8_t *base, size_t ip_off, uint16_t *proto, size_t *offset
 ) {
-	*offset = ip_off + sizeof(struct rte_ipv6_hdr);
-	*next_header = base[ip_off + offsetof(struct rte_ipv6_hdr, proto)];
-	for (size_t count = 0; nat64s_is_quoted_extension(*next_header);
-	     ++count) {
-		if (count == NAT64S_MAX_QUOTED_EXTENSIONS ||
-		    *offset + sizeof(struct yanet_ipv6_ext_2byte) > data_len) {
-			return false;
-		}
-		const struct yanet_ipv6_ext_2byte *extension =
-			(const struct yanet_ipv6_ext_2byte *)(base + *offset);
-		*next_header = extension->next_header;
-		*offset += ((size_t)extension->extension_length + 1) * 8;
+	uint16_t next = base[ip_off + offsetof(struct rte_ipv6_hdr, proto)];
+	if (next != IPPROTO_TCP && next != IPPROTO_UDP &&
+	    next != IPPROTO_ICMPV6) {
+		return false;
 	}
-	return *next_header != IPPROTO_FRAGMENT && *offset <= data_len;
+	*proto = next;
+	*offset = ip_off + sizeof(struct rte_ipv6_hdr);
+	return true;
 }
 
 // The lan side of an ICMPv6 error: find the session of the IPv6 packet
@@ -691,15 +675,13 @@ nat64s_handle_v6_error(
 	}
 
 	const uint8_t *base = (const uint8_t *)mbuf->buf_addr + mbuf->data_off;
-	uint16_t proto;
+	uint16_t next;
 	size_t l4_off;
-	if (!nat64s_quoted_transport(
-		    base, emb_off, data_len, &proto, &l4_off
-	    )) {
-		nat64s_stats_bump(stats, NAT64S_MALFORMED);
+	if (!nat64s_quoted_transport(base, emb_off, &next, &l4_off)) {
+		nat64s_stats_bump(stats, NAT64S_ICMP_UNSUPPORTED);
 		return -1;
 	}
-	proto = nat64s_session_proto(proto);
+	uint16_t proto = nat64s_session_proto(next);
 	uint16_t sport;
 	uint16_t dport;
 	if (!nat64s_embedded_ports(
@@ -796,6 +778,20 @@ nat64s_handle_v4_error(
 	}
 	size_t emb_ihl = (emb->version_ihl & RTE_IPV4_HDR_IHL_MASK) *
 			 RTE_IPV4_IHL_MULTIPLIER;
+	// A quote whose IPv4 header is cut short of its own size is
+	// malformed. One longer carries options, and the packets a session
+	// sent carry none: the translation writes every IPv4 header without
+	// them. Translated all the same, `icmp_v4_to_v6` of the shared core
+	// would count the options in the translated quote's length. Such an
+	// error is refused before the lookup.
+	if (emb_ihl < sizeof(struct rte_ipv4_hdr)) {
+		nat64s_stats_bump(stats, NAT64S_MALFORMED);
+		return -1;
+	}
+	if (emb_ihl > sizeof(struct rte_ipv4_hdr)) {
+		nat64s_stats_bump(stats, NAT64S_ICMP_UNSUPPORTED);
+		return -1;
+	}
 
 	uint16_t proto = nat64s_session_proto(emb->next_proto_id);
 	uint16_t sport;
@@ -1187,8 +1183,7 @@ nat64s_handle_v6(
 	//
 	// The wan entry goes first. Should the lan insert then fail, the wan
 	// entry stays as the session's own: the next packet keeps its port
-	// and completes the pair. The opposite order would leave a lan entry
-	// whose flow can never be answered until it expires.
+	// and completes the pair.
 	uint32_t remote_addr = 0;
 	memcpy(&remote_addr, &ipv6->dst_addr[12], sizeof(remote_addr));
 	uint16_t remote_port = dport;

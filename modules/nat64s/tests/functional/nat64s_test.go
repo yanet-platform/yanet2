@@ -458,9 +458,9 @@ func Test_NAT64sService_ReleasedSessionMapStartsEmptyForItsNextConfig(t *testing
 // still lists that map.
 //
 // A published config that links a map the registry holds no reference to
-// is the state in which the dataplane refuses the map's deletion; handing
-// the map out then would hand out that config's sessions. Once nothing
-// links it, the reference replaces it.
+// is the state in which the dataplane refuses the map's deletion. Every
+// reference is refused for as long as that config stays published; once
+// nothing links the map, a reference replaces it.
 func Test_MapRegistry_Acquire_KeepsMapWhoseReplacementWasRefused(t *testing.T) {
 	_, _, registry, service := setupNAT64sHarness(t)
 	ctx := t.Context()
@@ -525,9 +525,9 @@ func Test_NAT64sService_DeleteConfig_ReleasesSessionMap(t *testing.T) {
 // way survives the round.
 //
 // The round is parked inside its deletion by the agent's configuration
-// lock, which the deletion needs, while the reference is taken. A round
-// that judged the map unreferenced and then deleted it regardless would
-// take the new reference down with it.
+// lock, which the deletion needs, while the reference is taken: by then
+// the round has judged the map unreferenced, so the reference names a
+// map on its way out.
 func Test_MapRegistry_ReclaimUnreferenced_KeepsReferenceTakenMeanwhile(t *testing.T) {
 	_, agent, registry, _ := setupNAT64sHarness(t)
 	require.NoError(t, registry.Acquire("t0", "sessions"))

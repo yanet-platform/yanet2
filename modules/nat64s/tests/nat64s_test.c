@@ -678,6 +678,40 @@ nat64s_make_v4_frag_needed(
 	return TEST_SUCCESS;
 }
 
+// Build the remote's error of the suite's session with four bytes of
+// options in the quoted IPv4 header, ahead of the quoted TCP header.
+static int
+nat64s_make_v4_frag_needed_with_ip_options(
+	struct nat64s_env *env, uint16_t allocated_port, struct packet **out
+) {
+	struct packet *packet = NULL;
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_frag_needed(env, allocated_port, &packet),
+		"build failed"
+	);
+	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+	TEST_ASSERT_NOT_NULL(
+		rte_pktmbuf_append(mbuf, 4), "packet payload allocation failed"
+	);
+	struct rte_ipv4_hdr *emb = rte_pktmbuf_mtod_offset(
+		mbuf,
+		struct rte_ipv4_hdr *,
+		packet->transport_header.offset + sizeof(struct rte_icmp_hdr)
+	);
+	memmove((uint8_t *)emb + 24, emb + 1, sizeof(struct rte_tcp_hdr));
+	// The options are an end-of-option-list byte, then padding.
+	memset(emb + 1, 0, 4);
+	emb->version_ihl = RTE_IPV4_VHL_DEF + 1;
+	emb->total_length = rte_cpu_to_be_16(24 + sizeof(struct rte_tcp_hdr));
+	struct rte_ipv4_hdr *outer = rte_pktmbuf_mtod_offset(
+		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
+	);
+	outer->total_length =
+		rte_cpu_to_be_16(rte_be_to_cpu_16(outer->total_length) + 4);
+	*out = packet;
+	return TEST_SUCCESS;
+}
+
 // Build a parsed ICMPv4 Destination Unreachable error from the remote,
 // quoting the translated outbound echo request of an echo session.
 static int
@@ -771,6 +805,7 @@ nat64s_make_v6_packet_too_big(
 	memcpy(&emb->src_addr[12], &remote_addr, sizeof(remote_addr));
 	memcpy(emb->dst_addr, client_addr, 16);
 	emb->proto = IPPROTO_TCP;
+	emb->payload_len = rte_cpu_to_be_16(sizeof(struct rte_tcp_hdr));
 
 	struct rte_tcp_hdr *emb_tcp = (struct rte_tcp_hdr *)(emb + 1);
 	emb_tcp->src_port = rte_cpu_to_be_16(REMOTE_PORT);
@@ -810,6 +845,8 @@ nat64s_make_v6_packet_too_big_with_options(
 	options[1] = 0;		  // its length in eight-octet units, less one
 	memset(options + 2, 0, 6);
 	emb->proto = IPPROTO_HOPOPTS;
+	emb->payload_len =
+		rte_cpu_to_be_16(rte_be_to_cpu_16(emb->payload_len) + 8);
 
 	struct rte_ipv6_hdr *outer = rte_pktmbuf_mtod_offset(
 		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
@@ -1378,6 +1415,11 @@ test_client_error_translated(struct nat64s_env *env) {
 		pool_addrs[0],
 		"the quoted destination address must be the session's public "
 		"one"
+	);
+	TEST_ASSERT_EQUAL(
+		rte_be_to_cpu_16(emb->total_length),
+		sizeof(struct rte_ipv4_hdr) + sizeof(struct rte_tcp_hdr),
+		"the quoted packet must be sized to the TCP header it carries"
 	);
 	struct rte_tcp_hdr *emb_tcp = (struct rte_tcp_hdr *)(emb + 1);
 	TEST_ASSERT_EQUAL(
@@ -2900,11 +2942,11 @@ test_hairpinned_error_dropped(struct nat64s_env *env) {
 }
 
 // A client-side error whose quote carries a Hop-by-Hop header ahead of
-// the TCP header still finds the session and translates: the quoted
-// transport header is looked for past the quote's extension headers, not
-// right behind its IPv6 header.
+// the TCP header is refused, whatever session it names: the translation
+// would drop the header and still size the quote as though it had
+// stayed. The error counts as one the translation cannot carry.
 static int
-test_client_error_quoting_options_translated(struct nat64s_env *env) {
+test_client_error_quoting_options_refused(struct nat64s_env *env) {
 	dataplane_ut_set_time_ns(env->ut, 22200000000000ull);
 	TEST_ASSERT_SUCCESS(nat64s_test_warm_session(env), "warm-up failed");
 
@@ -2917,32 +2959,83 @@ test_client_error_quoting_options_translated(struct nat64s_env *env) {
 		),
 		"build failed"
 	);
+	uint64_t unsupported = env->config->stats[NAT64S_ICMP_UNSUPPORTED];
 	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
 	TEST_ASSERT(
-		!dropped,
-		"an error quoting a packet with extension headers must not be "
+		dropped,
+		"an error quoting a packet with extension headers must be "
 		"dropped"
 	);
-	TEST_ASSERT_NOT_NULL(out, "the error must be translated");
-	// The quote leaves without its extension header, as IPv4.
-	struct rte_mbuf *mbuf = packet_to_mbuf(out);
-	struct rte_tcp_hdr *emb_tcp = rte_pktmbuf_mtod_offset(
-		mbuf,
-		struct rte_tcp_hdr *,
-		out->transport_header.offset + sizeof(struct rte_icmp_hdr) +
-			sizeof(struct rte_ipv4_hdr)
+	TEST_ASSERT_NULL(out, "the error must not be translated");
+	TEST_ASSERT_EQUAL(
+		env->config->stats[NAT64S_ICMP_UNSUPPORTED],
+		unsupported + 1,
+		"the error must be counted as one the translation cannot carry"
+	);
+	return TEST_SUCCESS;
+}
+
+// The remote's error whose quote carries options in its IPv4 header is
+// refused, and counts as one the translation cannot carry: translated,
+// the options would be counted in the translated quote's length. A
+// quote whose IPv4 header is cut short of its own size is malformed
+// instead.
+static int
+test_remote_error_quoting_ip_options_refused(struct nat64s_env *env) {
+	dataplane_ut_set_time_ns(env->ut, 22300000000000ull);
+	TEST_ASSERT_SUCCESS(nat64s_test_warm_session(env), "warm-up failed");
+
+	struct packet *in = NULL;
+	struct packet *out = NULL;
+	bool dropped = false;
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_frag_needed_with_ip_options(
+			env, env->allocated_port, &in
+		),
+		"build failed"
+	);
+	uint64_t unsupported = env->config->stats[NAT64S_ICMP_UNSUPPORTED];
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		dropped,
+		"an error quoting a packet with IPv4 options must be dropped"
+	);
+	TEST_ASSERT_NULL(out, "the error must not be translated");
+	TEST_ASSERT_EQUAL(
+		env->config->stats[NAT64S_ICMP_UNSUPPORTED],
+		unsupported + 1,
+		"the error must be counted as one the translation cannot carry"
+	);
+
+	// A quote whose IPv4 header is cut short of its own size is
+	// malformed, not one the translation cannot carry.
+	TEST_ASSERT_SUCCESS(
+		nat64s_make_v4_frag_needed(env, env->allocated_port, &in),
+		"build failed"
+	);
+	struct rte_ipv4_hdr *cut_short = rte_pktmbuf_mtod_offset(
+		packet_to_mbuf(in),
+		struct rte_ipv4_hdr *,
+		in->transport_header.offset + sizeof(struct rte_icmp_hdr)
+	);
+	cut_short->version_ihl = RTE_IPV4_VHL_DEF - 1;
+	uint64_t malformed = env->config->stats[NAT64S_MALFORMED];
+	TEST_ASSERT_SUCCESS(nat64s_run(env, in, &out, &dropped), "run failed");
+	TEST_ASSERT(
+		dropped,
+		"an error quoting a cut-short IPv4 header must be dropped"
+	);
+	TEST_ASSERT_NULL(out, "the error must not be translated");
+	TEST_ASSERT_EQUAL(
+		env->config->stats[NAT64S_MALFORMED],
+		malformed + 1,
+		"the error must be counted as malformed"
 	);
 	TEST_ASSERT_EQUAL(
-		rte_be_to_cpu_16(emb_tcp->src_port),
-		REMOTE_PORT,
-		"the quoted source port must stay the remote's"
+		env->config->stats[NAT64S_ICMP_UNSUPPORTED],
+		unsupported + 1,
+		"a malformed quote is not one the translation cannot carry"
 	);
-	TEST_ASSERT_EQUAL(
-		rte_be_to_cpu_16(emb_tcp->dst_port),
-		env->allocated_port,
-		"the quoted destination port must be the allocated one"
-	);
-	rte_pktmbuf_free(mbuf);
 	return TEST_SUCCESS;
 }
 
@@ -4125,7 +4218,10 @@ main(void) {
 		res = test_hairpinned_error_dropped(&env);
 	}
 	if (res == TEST_SUCCESS) {
-		res = test_client_error_quoting_options_translated(&env);
+		res = test_client_error_quoting_options_refused(&env);
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_remote_error_quoting_ip_options_refused(&env);
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_error_addressed_elsewhere_dropped(&env);

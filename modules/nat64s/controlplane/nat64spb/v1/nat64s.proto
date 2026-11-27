@@ -33,9 +33,9 @@ message ShowConfigRequest { string name = 1; }
 
 // MTUConfig contains MTU configuration values.
 message MTUConfig {
-  // MTU value for IPv4, at most 65535; zero leaves the default.
+  // MTU value for IPv4, from 68 to 65535; zero leaves the default.
   uint32 ipv4_mtu = 1;
-  // MTU value for IPv6, at most 32767; zero leaves the default.
+  // MTU value for IPv6, from 1280 to 32767; zero leaves the default.
   uint32 ipv6_mtu = 2;
 }
 

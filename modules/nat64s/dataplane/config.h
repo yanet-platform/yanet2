@@ -47,6 +47,9 @@ enum nat64s_stat {
  *
  * Of ICMP only errors and echoes cross: any other message is dropped
  * before it could take a session, as the translation could not carry it.
+ * An error crosses only with a quote the translation can size: one whose
+ * transport header sits right behind its IPv6 header, and whose IPv4
+ * header carries no options.
  *
  * Session state lives in one linked nat64state_map object: its lan fwtable
  * keyed by the original IPv6 flow, its wan fwtable keyed by the translated
