@@ -15,11 +15,16 @@ import (
 	"fmt"
 	"net/netip"
 	"slices"
+	"testing"
 	"unsafe"
+
+	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 
 	"github.com/yanet-platform/yanet2/controlplane/native/classify"
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
 	"github.com/yanet-platform/yanet2/controlplane/native/lpm"
+	"github.com/yanet-platform/yanet2/controlplane/native/nativetest"
 	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
 )
 
@@ -47,6 +52,22 @@ func LayOut(block []byte) *Memory {
 	shmalloc.PutArena(&memory.Allocator, unsafe.Pointer(&block[arena]), uintptr(len(block))-arena)
 	shmalloc.ContextInit(&memory.Context, "root", &memory.Allocator)
 	return memory
+}
+
+// Map lays out a memory at the start of an anonymous mapping of size
+// bytes, unmapped when the test ends.
+//
+// The mapping stays outside the Go heap, so a large memory neither
+// raises the collector's goal nor hides the heap a compile uses.
+func Map(t testing.TB, size int) *Memory {
+	t.Helper()
+	block, err := unix.Mmap(-1, 0, size, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_PRIVATE|unix.MAP_ANONYMOUS)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		nativetest.Unpoison(block)
+		require.NoError(t, unix.Munmap(block))
+	})
+	return LayOut(block)
 }
 
 // Alloc carves a zeroed T out of the memory's arena, so the relative
