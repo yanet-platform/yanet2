@@ -27,7 +27,7 @@ use core::{
 };
 
 use yanet_shm::{
-    index::{HashIndexKey, Slot, Unplaced, place, place_iter, slots_for},
+    index::{HashIndexKey, HashIndexSlot, Unplaced, place, place_iter, slots_for},
     mutex::Mutex,
     rel::{ShmBox, ShmSlice},
     root::ShmRoot,
@@ -672,7 +672,7 @@ impl<K> HashIndexParts<'_, K> {
         }
     }
 
-    fn place(self, slots: &mut [Slot<K>], len: usize) -> Result<(), Refusal>
+    fn place(self, slots: &mut [HashIndexSlot<K>], len: usize) -> Result<(), Refusal>
     where
         K: HashIndexKey,
     {
@@ -744,7 +744,7 @@ unsafe impl<K: HashIndexKey> Build for HashIndex<K> {
         }
         let len = slots_for(records).ok_or(Refusal::BlockTooLarge)?;
         let size = len
-            .checked_mul(size_of::<Slot<K>>())
+            .checked_mul(size_of::<HashIndexSlot<K>>())
             .filter(|&size| size <= bindings::MEMORY_BLOCK_ALLOCATOR_MAX_SIZE as usize)
             .ok_or(Refusal::BlockTooLarge)?;
         let context = root.ptr::<bindings::memory_context>(addr);
@@ -769,9 +769,9 @@ unsafe impl<K: HashIndexKey> Build for HashIndex<K> {
         // as its size is a multiple of a slot's, and nothing else accesses
         // it. Every slot is written before the slice is made.
         let slots = unsafe {
-            let first = root.ptr::<Slot<K>>(unlinked.block.addr());
+            let first = root.ptr::<HashIndexSlot<K>>(unlinked.block.addr());
             for idx in 0..len {
-                first.add(idx).write(Slot::FREE);
+                first.add(idx).write(HashIndexSlot::FREE);
             }
             core::slice::from_raw_parts_mut(first, len)
         };
@@ -781,7 +781,7 @@ unsafe impl<K: HashIndexKey> Build for HashIndex<K> {
         // (caller contract).
         unsafe {
             root.ptr::<isize>(slice).write(offset_to(unlinked.block.addr(), slice));
-            root.ptr::<u64>(slice + ShmSlice::<Slot<K>>::LEN_OFFSET)
+            root.ptr::<u64>(slice + ShmSlice::<HashIndexSlot<K>>::LEN_OFFSET)
                 .write(len as u64);
         }
         forget(unlinked);
@@ -796,7 +796,7 @@ unsafe impl<K: HashIndexKey> Build for HashIndex<K> {
         let (offset, len) = unsafe {
             (
                 root.ptr::<isize>(slice).read(),
-                root.ptr::<u64>(slice + ShmSlice::<Slot<K>>::LEN_OFFSET).read(),
+                root.ptr::<u64>(slice + ShmSlice::<HashIndexSlot<K>>::LEN_OFFSET).read(),
             )
         };
         if offset == 0 {
@@ -806,7 +806,7 @@ unsafe impl<K: HashIndexKey> Build for HashIndex<K> {
         let unlinked = Unlinked {
             context: root.ptr(addr),
             block: root.ptr(target_of(offset, slice)),
-            size: len as usize * size_of::<Slot<K>>(),
+            size: len as usize * size_of::<HashIndexSlot<K>>(),
         };
         // Dropping returns the block of the slots and closes their context.
         drop(unlinked);

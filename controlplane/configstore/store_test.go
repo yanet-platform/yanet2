@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
 	"github.com/yanet-platform/yanet2/controlplane/configstore"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
 var errInjected = errors.New("injected failure")
@@ -132,7 +132,7 @@ func Test_Store_Update_FreesSuperseded(t *testing.T) {
 // name and released once the refusal ends.
 func Test_Store_Update_ParksRefusedThenReclaims(t *testing.T) {
 	store := configstore.NewStore[*freeSequence]()
-	refusing := newFreeSequence(ffi.ErrStillReferenced)
+	refusing := newFreeSequence(cerrors.ErrStillReferenced)
 
 	require.NoError(t, store.Update("a", publishing(refusing)))
 	require.NoError(t, store.Update("a", publishing(newFreeSequence())))
@@ -212,7 +212,7 @@ func Test_Store_Delete_FreesEntry(t *testing.T) {
 // entry whose free is refused is parked and released by a later delete.
 func Test_Store_Delete_ParksRefusedThenReclaims(t *testing.T) {
 	store := configstore.NewStore[*freeSequence]()
-	refusing := newFreeSequence(ffi.ErrStillReferenced)
+	refusing := newFreeSequence(cerrors.ErrStillReferenced)
 	require.NoError(t, store.Update("a", publishing(refusing)))
 	require.NoError(t, store.Update("b", publishing(newFreeSequence())))
 
@@ -251,7 +251,7 @@ func Test_Store_FailedMutation_ReclaimsParked(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			store := configstore.NewStore[*freeSequence]()
-			refusing := newFreeSequence(ffi.ErrStillReferenced)
+			refusing := newFreeSequence(cerrors.ErrStillReferenced)
 			require.NoError(t, store.Update("a", publishing(refusing)))
 			require.NoError(t, store.Update("a", publishing(newFreeSequence())))
 			require.Equal(t, int64(0), refusing.freed.Load())
@@ -268,9 +268,9 @@ func Test_Store_FailedMutation_ReclaimsParked(t *testing.T) {
 func Test_Store_ReclaimDeferred_RetriesUntilDrained(t *testing.T) {
 	store := configstore.NewStore[*freeSequence]()
 	refusing := newFreeSequence(
-		ffi.ErrStillReferenced,
-		ffi.ErrStillReferenced,
-		ffi.ErrStillReferenced,
+		cerrors.ErrStillReferenced,
+		cerrors.ErrStillReferenced,
+		cerrors.ErrStillReferenced,
 	)
 	require.NoError(t, store.Update("a", publishing(refusing)))
 	require.NoError(t, store.Delete("a", unpublishing(nil)))
@@ -509,7 +509,7 @@ func Test_Store_ConcurrentMutations(t *testing.T) {
 					}
 					continue
 				}
-				handle := newFreeSequence(ffi.ErrStillReferenced)
+				handle := newFreeSequence(cerrors.ErrStillReferenced)
 				handles <- handle
 				if err := store.Update(name, publishing(handle)); err != nil {
 					return err

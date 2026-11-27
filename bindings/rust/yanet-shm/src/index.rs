@@ -11,9 +11,15 @@
 //! run. Unlike C `hash_index`, a slot holds the key itself, so a lookup reads
 //! no other array.
 
-use core::net::{Ipv4Addr, Ipv6Addr};
+use core::{
+    mem::offset_of,
+    net::{Ipv4Addr, Ipv6Addr},
+};
 
-use crate::shm::ShmLayout;
+use crate::{
+    layout::{Field, Kind, Node},
+    shm::ShmLayout,
+};
 
 /// The position of a slot that holds no key.
 const FREE: u32 = u32::MAX;
@@ -60,19 +66,35 @@ impl HashIndexKey for Ipv6Addr {
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
-pub struct Slot<K> {
+pub struct HashIndexSlot<K> {
     key: K,
     position: u32,
 }
 
-impl<K: HashIndexKey> Slot<K> {
+impl<K: HashIndexKey> HashIndexSlot<K> {
     /// A slot that holds no key.
     pub const FREE: Self = Self { key: K::UNSPECIFIED, position: FREE };
 }
 
 // SAFETY: a key of a fixed layout and a 32-bit word, both valid for every bit
 // pattern and needing no drop, aligned as the larger of the two.
-unsafe impl<K: ShmLayout> ShmLayout for Slot<K> {}
+unsafe impl<K: ShmLayout> ShmLayout for HashIndexSlot<K> {
+    const LAYOUT: &'static Node = &Node::of::<Self>(Kind::Struct {
+        name: concat!(module_path!(), "::HashIndexSlot"),
+        fields: &[
+            Field {
+                name: "key",
+                offset: offset_of!(Self, key),
+                ty: K::LAYOUT,
+            },
+            Field {
+                name: "position",
+                offset: offset_of!(Self, position),
+                ty: u32::LAYOUT,
+            },
+        ],
+    });
+}
 
 /// How many slots an index of the given number of records takes: a power of
 /// two that leaves at least half of them free.
@@ -86,13 +108,13 @@ pub fn slots_for(records: usize) -> Option<usize> {
 /// An exact-match index resolved for the batch of one handler call.
 #[derive(Clone, Copy)]
 pub struct HashIndexRef<'g, K> {
-    slots: &'g [Slot<K>],
+    slots: &'g [HashIndexSlot<K>],
 }
 
 impl<'g, K: HashIndexKey> HashIndexRef<'g, K> {
     /// The index over the slots that a build placed.
     #[doc(hidden)]
-    pub fn new(slots: &'g [Slot<K>]) -> Self {
+    pub fn new(slots: &'g [HashIndexSlot<K>]) -> Self {
         Self { slots }
     }
 
@@ -136,7 +158,7 @@ pub enum Unplaced {
 /// an index gives them, so the walk of every key meets a free slot. On a
 /// refusal the slots hold the keys placed before it.
 #[doc(hidden)]
-pub fn place<K: HashIndexKey>(slots: &mut [Slot<K>], records: &[(K, u32)]) -> Result<(), Unplaced> {
+pub fn place<K: HashIndexKey>(slots: &mut [HashIndexSlot<K>], records: &[(K, u32)]) -> Result<(), Unplaced> {
     place_iter(slots, records.len(), records.iter().copied())
 }
 
@@ -146,7 +168,7 @@ pub fn place<K: HashIndexKey>(slots: &mut [Slot<K>], records: &[(K, u32)]) -> Re
 /// have no slots. A refusal leaves the records placed before it in the slots.
 #[doc(hidden)]
 pub fn place_iter<K: HashIndexKey>(
-    slots: &mut [Slot<K>],
+    slots: &mut [HashIndexSlot<K>],
     len: usize,
     mut records: impl Iterator<Item = (K, u32)>,
 ) -> Result<(), Unplaced> {
@@ -161,7 +183,7 @@ pub fn place_iter<K: HashIndexKey>(
                 break;
             };
             if slot.position == FREE {
-                *slot = Slot { key, position };
+                *slot = HashIndexSlot { key, position };
                 break;
             }
             if slot.key == key {
@@ -194,7 +216,7 @@ fn probe<K: HashIndexKey>(len: usize, key: K) -> impl Iterator<Item = usize> {
 mod tests {
     use core::net::Ipv4Addr;
 
-    use super::{HashIndexKey, HashIndexRef, Slot, place, probe, slots_for};
+    use super::{HashIndexKey, HashIndexRef, HashIndexSlot, place, probe, slots_for};
 
     /// The first `N` addresses whose walks start at the home slot of the
     /// address 0.0.0.1 in an index of the given length.
@@ -207,7 +229,7 @@ mod tests {
     }
 
     /// An index over slots a placement filled.
-    fn index<K: HashIndexKey>(slots: &[Slot<K>]) -> HashIndexRef<'_, K> {
+    fn index<K: HashIndexKey>(slots: &[HashIndexSlot<K>]) -> HashIndexRef<'_, K> {
         HashIndexRef::new(slots)
     }
 
@@ -221,7 +243,7 @@ mod tests {
 
     #[test]
     fn test_get_misses_the_unspecified_key_among_free_slots() {
-        let slots = [Slot::FREE; 4];
+        let slots = [HashIndexSlot::FREE; 4];
 
         assert_eq!(None, index(&slots).get(Ipv4Addr::UNSPECIFIED));
     }
@@ -229,7 +251,7 @@ mod tests {
     /// verifies that keys with one home slot are all kept and all found.
     #[test]
     fn test_place_keeps_keys_of_one_home_slot() {
-        let mut slots = [Slot::FREE; 8];
+        let mut slots = [HashIndexSlot::FREE; 8];
         let [first, second, third] = colliding(slots.len());
         assert_eq!(Ok(()), place(&mut slots, &[(first, 0), (second, 1), (third, 2)]));
 
@@ -244,7 +266,7 @@ mod tests {
     /// slot is not.
     #[test]
     fn test_get_passes_over_the_slots_of_other_keys() {
-        let mut slots = [Slot::FREE; 8];
+        let mut slots = [HashIndexSlot::FREE; 8];
         let [first, second, absent] = colliding(slots.len());
         assert_eq!(Ok(()), place(&mut slots, &[(first, 0), (second, 1)]));
 
@@ -256,7 +278,7 @@ mod tests {
     /// key the slots hold and missing the others.
     #[test]
     fn test_get_ends_over_slots_without_a_free_one() {
-        let slots: [Slot<Ipv4Addr>; 4] = core::array::from_fn(|idx| Slot {
+        let slots: [HashIndexSlot<Ipv4Addr>; 4] = core::array::from_fn(|idx| HashIndexSlot {
             key: Ipv4Addr::from_bits(idx as u32),
             position: idx as u32,
         });

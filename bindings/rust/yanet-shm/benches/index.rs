@@ -14,7 +14,7 @@ use core::{
 };
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use yanet_shm::index::{HashIndexKey, HashIndexRef, Slot, place, slots_for};
+use yanet_shm::index::{HashIndexKey, HashIndexRef, HashIndexSlot, place, slots_for};
 
 /// The sizes of the indexes measured.
 const SIZES: [u32; 2] = [16_000, 128_000];
@@ -56,9 +56,9 @@ fn ipv6(network: u32, idx: u32) -> Ipv6Addr {
 
 /// The slots of an index of the first `count` keys of network 10, each naming
 /// its own number.
-fn slots<K: HashIndexKey>(count: u32, key: fn(u32, u32) -> K) -> Vec<Slot<K>> {
+fn slots<K: HashIndexKey>(count: u32, key: fn(u32, u32) -> K) -> Vec<HashIndexSlot<K>> {
     let records: Vec<_> = (0..count).map(|idx| (key(10, idx), idx)).collect();
-    let mut slots = vec![Slot::FREE; slots_for(records.len()).expect("a count that fits")];
+    let mut slots = vec![HashIndexSlot::FREE; slots_for(records.len()).expect("a count that fits")];
     place(&mut slots, &records).expect("distinct keys");
     slots
 }

@@ -355,11 +355,14 @@ fn camel(name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use core::assert_matches;
+    use core::{
+        assert_matches,
+        net::{Ipv4Addr, Ipv6Addr},
+    };
     use std::{env, fs};
 
     use yanet_sdk::{
-        ShmBox, ShmLayout,
+        HashIndex, ShmBox, ShmLayout,
         layout::{Field, Kind, Node},
     };
 
@@ -450,6 +453,36 @@ mod tests {
         let view = fs::read_to_string(view).unwrap();
         assert!(view.contains("const Flags uint32 = 16\n"), "{view}");
         assert!(view.contains("const Limit uint64 = 18446744073709551615\n"), "{view}");
+    }
+
+    /// Verifies that an index views its context through the C view and its
+    /// slots as a slice of a struct of the key's bytes and the position.
+    #[test]
+    fn test_generate_renders_hash_index_slots() {
+        let dir = env::temp_dir().join("yanet-layout-test-index");
+        fs::create_dir_all(&dir).unwrap();
+        generate(&dir, "example.com/views", &[<HashIndex<Ipv4Addr>>::LAYOUT], &[]).unwrap();
+        let view = fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| !path.to_string_lossy().ends_with("_test.go"))
+            .unwrap();
+        let view = fs::read_to_string(view).unwrap();
+        let index =
+            "type HashIndex struct {\n\tMemoryContext layout.MemoryContext\n\tSlots         Slice[HashIndexSlot]\n}\n";
+        let slot = "type HashIndexSlot struct {\n\tKey      [4]uint8\n\tPosition uint32\n}\n";
+        assert!(view.contains(index), "{view}");
+        assert!(view.contains(slot), "{view}");
+    }
+
+    /// Verifies that indices of two key types fail generation, as their
+    /// slots give one view two shapes.
+    #[test]
+    fn test_generate_refuses_hash_indices_of_two_key_types() {
+        let dir = env::temp_dir().join("yanet-layout-test-index-keys");
+        fs::create_dir_all(&dir).unwrap();
+        let roots = [<HashIndex<Ipv4Addr>>::LAYOUT, <HashIndex<Ipv6Addr>>::LAYOUT];
+        assert_matches!(generate(&dir, "example.com/views", &roots, &[]), Err(_));
     }
 
     /// Verifies that a field type reusing the kind of another with other

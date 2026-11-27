@@ -432,12 +432,22 @@ unsafe impl<T: CounterLayout> ShmLayout for Counter<T> {
 // SAFETY: a registry index and a counter index accept every bit pattern, and
 // the layout is a zero-sized marker; the control plane writes the indices the
 // module's tagged registry assigned.
-unsafe impl<T> ShmLayout for TaggedCounter<T> where T: CounterLayout {}
+unsafe impl<T> ShmLayout for TaggedCounter<T>
+where
+    T: CounterLayout,
+{
+    edge_layout!("tagged_counter", Self, [registry, id], []);
+}
 
 // SAFETY: a registry index and a number of counters accept every bit pattern,
 // and the layout is a zero-sized marker; the control plane writes the index the
 // module's tagged registry assigned and the number of counters it registered.
-unsafe impl<T> ShmLayout for TaggedCounters<T> where T: CounterLayout {}
+unsafe impl<T> ShmLayout for TaggedCounters<T>
+where
+    T: CounterLayout,
+{
+    edge_layout!("tagged_counters", Self, [registry, len], []);
+}
 
 // SAFETY: a registry index accepts every bit pattern, and the layout is a
 // zero-sized marker; the control plane writes the id the object's counter
