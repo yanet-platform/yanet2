@@ -15,7 +15,6 @@ if yanet_go_binaries and native_layout_enabled
       go,
       'build',
       '-buildvcs=false',
-    ] + (b_sanitize.contains('address') ? ['-asan'] : []) + [
       '-o', '@OUTPUT@',
       meson.project_source_root() / 'bindings/go/dataplane_ut/cmd/dataplane-helper',
     ],

@@ -149,6 +149,11 @@ if b_sanitize != 'none'
             'CGO_LDFLAGS': cgo_flags + ' -Wl,-rpath,$ORIGIN',
         }
         sanitize_link_args = ['-Wl,-rpath,$ORIGIN']
+        # The native Go allocator shares free lists with the C one, so its
+        # red zones must match the C allocator's, which only -asan turns on.
+        if b_sanitize.contains('address')
+            yanet_go_env += {'GOFLAGS': '-asan'}
+        endif
     endif
 endif
 
@@ -320,6 +325,10 @@ configure_file(
 # Because it snapshots the Go build environment above, it must stay
 # below the last assignment to that environment.
 yanet_go_nocgo_env = yanet_go_env + {'CGO_ENABLED': '0'}
+# -asan needs cgo, and builds without it allocate no shared memory.
+if yanet_go_nocgo_env.has_key('GOFLAGS')
+  yanet_go_nocgo_env += {'GOFLAGS': ''}
+endif
 
 # The Go binaries are not fuzz targets and the fuzz suite runs none of them,
 # so a fuzzing build skips them to save build time.
