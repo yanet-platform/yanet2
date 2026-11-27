@@ -18,6 +18,12 @@ type PortRange struct {
 	To   uint16
 }
 
+// foldPortRange folds an interval into a list's hash, as the port
+// compile's hash does.
+func foldPortRange(hash uint32, item PortRange) uint32 {
+	return (hash*31+uint32(item.From))*31 + uint32(item.To)
+}
+
 // PortRule is what one rule matches on a port attribute.
 type PortRule struct {
 	// Ranges are the intervals the rule matches; a rule without any, or
@@ -52,7 +58,7 @@ func (m *Port) Stage() *Stage {
 func CompilePort(rules []PortRule) *Port {
 	groups, firsts := groupRules(len(rules), func(idx int) ([]PortRange, bool) {
 		return rules[idx].Ranges, rules[idx].Absent
-	})
+	}, foldPortRange)
 
 	starts := []uint32{0}
 	for _, first := range firsts {

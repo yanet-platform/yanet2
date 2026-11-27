@@ -3,6 +3,7 @@
 package classify
 
 import (
+	"bytes"
 	"fmt"
 	"slices"
 	"unsafe"
@@ -97,11 +98,8 @@ func (m *Stage) ruleRows(right *Stage, members []bool, context *layout.MemoryCon
 	row := slices.Repeat([]uint32{InvalidRule}, int(right.maxValue)+1)
 	cells := valueBytes(row)
 	var rows [][]uint32
-	// The map keys every stored row by a view of its bytes in shared
-	// memory: each row is an allocation of its own, written once before
-	// its key goes in, and nothing moves or frees it while the map lives,
-	// which ends with this call.
-	numbers := map[string]uint32{}
+	// The index numbers the stored rows by the hashes of their cells.
+	numbers := newHashIndex()
 	classMap := make([]uint32, m.maxValue+1)
 	// paintedIn stamps every right group with the value whose row it
 	// painted last, plus one.
@@ -114,6 +112,9 @@ func (m *Stage) ruleRows(right *Stage, members []bool, context *layout.MemoryCon
 			classMap[value] = uncovered
 			continue
 		}
+		// A row hashes as C hashes it: the xor of the hashes of its
+		// painted cells, each by its column and its rule.
+		hash := uint32(0)
 		for _, pair := range pairsOfValue {
 			// The cells of a right group painted in this row already hold
 			// an earlier or the same rule.
@@ -126,22 +127,24 @@ func (m *Stage) ruleRows(right *Stage, members []bool, context *layout.MemoryCon
 				if row[column] == InvalidRule {
 					row[column] = firstRules[pair]
 					touched = append(touched, column)
+					hash ^= mergeHash(column, firstRules[pair])
 				}
 			}
 		}
-		number, found := numbers[string(cells)]
-		if !found || len(pairsOfValue) == 0 {
+		number := none
+		if len(pairsOfValue) != 0 {
+			number = numbers.Find(hash, func(number uint32) bool {
+				return bytes.Equal(valueBytes(rows[number]), cells)
+			})
+		}
+		if number == none {
 			stored, ok := registry.AllocArray[uint32](context, uint64(len(row)))
 			if !ok {
 				return rows, nil, errRuleTableMemory
 			}
 			copy(stored, row)
-			number = uint32(len(rows))
+			number = numbers.Add(hash)
 			rows = append(rows, stored)
-			if !found {
-				storedBytes := valueBytes(stored)
-				numbers[unsafe.String(unsafe.SliceData(storedBytes), len(storedBytes))] = number
-			}
 		}
 		if len(pairsOfValue) == 0 {
 			uncovered = number

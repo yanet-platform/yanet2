@@ -85,7 +85,8 @@ func requireLineMatchesReference(t *testing.T, rules []classify.LineRule, size u
 
 // Test_CompileLine_MatchesReference verifies that both ends of every
 // elementary interval of a line domain get a class whose stage reaches
-// exactly the rules matching the point.
+// exactly the rules matching the point, rules whose intervals hash alike
+// included.
 func Test_CompileLine_MatchesReference(t *testing.T) {
 	for _, size := range lineSizes {
 		for seed := range uint64(16) {
@@ -94,6 +95,13 @@ func Test_CompileLine_MatchesReference(t *testing.T) {
 			})
 		}
 	}
+	t.Run("intervals hashing alike", func(t *testing.T) {
+		rules := []classify.LineRule{
+			{Ranges: []classify.LineRange{{From: 0, To: 62}}},
+			{Ranges: []classify.LineRange{{From: 1, To: 31}}},
+		}
+		requireLineMatchesReference(t, rules, 0x100)
+	})
 }
 
 // Test_LineCommit_ExhaustedLeavesAttributeZeroed verifies that a line

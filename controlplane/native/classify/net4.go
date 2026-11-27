@@ -48,6 +48,19 @@ type network struct {
 	Bits uint8
 }
 
+// foldNetwork folds a network into a list's hash, as the IPv4 compile's
+// hash does: the bytes of the masked address, then those of the mask.
+func foldNetwork(hash uint32, item network) uint32 {
+	mask := ^uint32(0) << (32 - item.Bits)
+	for shift := 24; shift >= 0; shift -= 8 {
+		hash = hash*31 + item.From>>shift&0xff
+	}
+	for shift := 24; shift >= 0; shift -= 8 {
+		hash = hash*31 + mask>>shift&0xff
+	}
+	return hash
+}
+
 // CompileNet4 compiles the IPv4 network attribute of a ruleset to the
 // lookups and the stage classify_net4_compile produces.
 //
@@ -64,7 +77,7 @@ func CompileNet4(rules []Net4Rule) (*Net4, error) {
 	}
 	groups, firsts := groupRules(len(rules), func(idx int) ([]network, bool) {
 		return netsOf(idx), rules[idx].Absent
-	})
+	}, foldNetwork)
 
 	// The networks of the groups sorted by first address, then length,
 	// each distinct one once.

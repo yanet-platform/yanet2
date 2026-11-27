@@ -36,6 +36,12 @@ func (m *Device) Stage() *Stage {
 	return &stage
 }
 
+// foldDevice folds a device identifier into a list's hash, as the
+// device compile's hash does.
+func foldDevice(hash, id uint32) uint32 {
+	return hash*31 + id
+}
+
 // CompileDevice compiles the device attribute of a ruleset to the
 // classes and the stage CLASSIFY_DEVICE_COMPILE produces: the domain
 // spans the identifiers up to the largest a present rule names, one its
@@ -56,7 +62,7 @@ func CompileDevice(rules []DeviceRule) (*Device, error) {
 	}
 	groups, firsts := groupRules(len(rules), func(idx int) ([]uint32, bool) {
 		return rules[idx].IDs, rules[idx].Absent
-	})
+	}, foldDevice)
 
 	values := make([]uint32, maxID+1)
 	regions := newRefiner(maxID + 1)

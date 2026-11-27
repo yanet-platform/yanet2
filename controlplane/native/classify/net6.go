@@ -82,6 +82,24 @@ type network6 struct {
 	Lo half
 }
 
+// foldNetwork6 folds a network into a list's hash, as the IPv6 compile's
+// hash does: the bytes of the masked address, then those of the mask,
+// both high half first.
+func foldNetwork6(hash uint32, item network6) uint32 {
+	for _, value := range [2]uint64{item.Hi.From, item.Lo.From} {
+		for shift := 56; shift >= 0; shift -= 8 {
+			hash = hash*31 + uint32(value>>shift&0xff)
+		}
+	}
+	for _, bits := range [2]uint8{item.Hi.Bits, item.Lo.Bits} {
+		mask := ^uint64(0) << (64 - bits)
+		for shift := 56; shift >= 0; shift -= 8 {
+			hash = hash*31 + uint32(mask>>shift&0xff)
+		}
+	}
+	return hash
+}
+
 // IsAny reports whether the network has no mask at all.
 func (m network6) IsAny() bool {
 	return m.Hi.Bits == 0 && m.Lo.Bits == 0
@@ -122,7 +140,7 @@ func compileNet6(rules []Net6Rule, attr *layout.ClassifyAttrNet6, context *layou
 	}
 	groups, firsts := groupRules(len(rules), func(idx int) ([]network6, bool) {
 		return netsOf(idx), rules[idx].Absent
-	})
+	}, foldNetwork6)
 
 	// The networks of the groups, each distinct one once, and the one at
 	// every place of a group's first rule.
