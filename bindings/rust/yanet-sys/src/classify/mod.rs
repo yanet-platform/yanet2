@@ -26,7 +26,6 @@ use core::{
     convert::Infallible,
     marker::PhantomData,
     mem::{align_of, offset_of, size_of},
-    net::Ipv4Addr,
     ptr, slice,
 };
 
@@ -82,27 +81,6 @@ impl Rule {
 impl Default for Rule {
     fn default() -> Self {
         Self::NONE
-    }
-}
-
-/// An IPv4 address as the IPv4 lookup takes it: its four bytes in network
-/// order, held as one aligned word.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[repr(transparent)]
-pub struct Addr4(u32);
-
-impl From<[u8; 4]> for Addr4 {
-    #[inline(always)]
-    fn from(octets: [u8; 4]) -> Self {
-        // The word's bytes in memory are the octets, in network order.
-        Self(u32::from_ne_bytes(octets))
-    }
-}
-
-impl From<Ipv4Addr> for Addr4 {
-    #[inline(always)]
-    fn from(addr: Ipv4Addr) -> Self {
-        Self::from(addr.octets())
     }
 }
 
@@ -651,16 +629,11 @@ pub fn results_min(rules: &mut [Rule], extra: &[Rule]) {
 
 #[cfg(test)]
 mod tests {
-    use core::{
-        mem::{offset_of, size_of, size_of_val},
-        net::Ipv4Addr,
-    };
+    use core::mem::{offset_of, size_of, size_of_val};
 
     use yanet_sdk_testing::{BlockArena, View};
 
-    use super::{
-        Addr4, Line, LineRange, Lines, Net4, Net6, Net6Attr, Nets4, Nets6, PortRange, Ports, ROW_MARK, Rule, Table,
-    };
+    use super::{Line, LineRange, Lines, Net4, Net6, Net6Attr, Nets4, Nets6, PortRange, Ports, ROW_MARK, Rule, Table};
     use crate::{bindings, cp::Refusal};
 
     /// Writes a value at an address of a block of the arena.
@@ -831,16 +804,6 @@ mod tests {
         assert_eq!(None, Rule::NONE.index());
         assert_eq!(None, Rule::default().index());
         assert_eq!(Some(3), Rule(3).index());
-    }
-
-    /// verifies that an IPv4 address holds its octets in network order in
-    /// memory, whether made from octets or from an address.
-    #[test]
-    fn test_addr4_holds_the_octets_in_network_order() {
-        let addr = Addr4::from([192, 0, 2, 1]);
-
-        assert_eq!(addr, Addr4::from(Ipv4Addr::new(192, 0, 2, 1)));
-        assert_eq!([192, 0, 2, 1], addr.0.to_ne_bytes());
     }
 
     /// A frozen line of the supplied words in one leaked arena.

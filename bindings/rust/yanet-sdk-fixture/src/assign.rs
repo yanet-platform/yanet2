@@ -10,7 +10,7 @@
 //! rules of both trees.
 
 use yanet_sdk::{
-    Addr4, Batch, CommitCx, Counter, Cx, Decode, Join, LineAttr, Module, Net4Attr, Net6Attr, PortAttr, Rules, ShmBox,
+    Batch, CommitCx, Counter, Cx, Decode, Join, LineAttr, Module, Net4Attr, Net6Attr, PortAttr, Rules, ShmBox,
     ShmLayout, ShmSlice, Traffic, Verdict, results_min,
 };
 
@@ -71,10 +71,7 @@ impl Module for Assign {
             let proto = packet.transport_protocol();
             let family = match packet.network_type() {
                 0x0800 => match (bytes(data, network + 12), bytes(data, network + 16)) {
-                    (Some(src), Some(dst)) => {
-                        let nets = (Addr4::from(src), Addr4::from(dst));
-                        Some(config.v4.get(cx).lookup(cx, (nets, (proto, port))))
-                    }
+                    (Some(src), Some(dst)) => Some(config.v4.get(cx).lookup(cx, ((src, dst), (proto, port)))),
                     _ => None,
                 },
                 0x86dd => match (bytes(data, network + 8), bytes(data, network + 24)) {

@@ -35,7 +35,7 @@ use proptest::{
     strategy::{Just, Strategy},
     test_runner::{Config, RngSeed, TestCaseError, TestError, TestRunner},
 };
-use yanet_sys::classify::{Addr4, LineRange, Net4, Net6, PortRange, Rule};
+use yanet_sys::classify::{LineRange, Net4, Net6, PortRange, Rule};
 
 /// Rulesets per property when `PROPTEST_CASES` is unset: a few seconds of a
 /// debug build.
@@ -526,7 +526,7 @@ fn test_rules_tree4_lookups_are_the_first_matching_rule_of_random_rulesets() {
                     port,
                 )
             },
-            |(src, dst, proto, port)| ((Addr4::from(src), Addr4::from(dst)), (proto, port)),
+            |(src, dst, proto, port)| ((src.octets(), dst.octets()), (proto, port)),
             |key| tree.lookup(&owner, key),
             |keys, rules| tree.lookup_burst(&owner, keys, |&key| key, rules),
         );

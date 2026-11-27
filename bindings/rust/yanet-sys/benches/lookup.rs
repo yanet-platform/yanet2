@@ -12,7 +12,7 @@ use core::{hint::black_box, time::Duration};
 use arena::ArenaOwner;
 use classify::{TestRule, any_or, build_any, build4, build6, edges, first, in4, in6, net4, net6};
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use yanet_sys::classify::{Addr4, LineRange, Net4, Net6, PortRange, Rule};
+use yanet_sys::classify::{LineRange, Net4, Net6, PortRange, Rule};
 
 /// Eight source networks with shared transport ranges and no fallback.
 fn rules4() -> Vec<TestRule<Net4>> {
@@ -101,7 +101,7 @@ fn lookup(criterion: &mut Criterion) {
         .map(|(index, &(proto, port))| {
             let src = [10, (index % 10) as u8, 0, 1];
             let dst = [172, 17, 0, 1];
-            ((Addr4::from(src), Addr4::from(dst)), (proto, port))
+            ((src, dst), (proto, port))
         })
         .collect::<Vec<_>>();
     let expected4 = transport

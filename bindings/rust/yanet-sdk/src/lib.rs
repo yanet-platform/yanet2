@@ -177,8 +177,8 @@ pub use yanet_shm::{
 };
 pub use yanet_sys::{
     classify::{
-        Addr4, Attribute, BURST, Decode, Join, LineAttr, LineRange, Lines, Net4, Net4Attr, Net6, Net6Attr, Nets4,
-        Nets6, Node, PortAttr, PortRange, Ports, Rule, Rules, results_min,
+        Attribute, BURST, Decode, Join, LineAttr, LineRange, Lines, Net4, Net4Attr, Net6, Net6Attr, Nets4, Nets6, Node,
+        PortAttr, PortRange, Ports, Rule, Rules, results_min,
     },
     common::{
         index::HashIndex,

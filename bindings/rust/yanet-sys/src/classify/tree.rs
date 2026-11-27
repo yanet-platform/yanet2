@@ -10,13 +10,14 @@
 //! in debug builds.
 
 use core::{
+    array,
     convert::Infallible,
     mem::{offset_of, size_of},
 };
 
 use yanet_shm::{layout::Param, rel::ShmBox, resolve::Resolve, shm::ShmLayout};
 
-use super::{Addr4, Joint, LineAttr, Net4Attr, Net6Attr, PortAttr, Rule, RuleMap, RuleTable, lpm_value};
+use super::{Joint, LineAttr, Net4Attr, Net6Attr, PortAttr, Rule, RuleMap, RuleTable, lpm_value};
 use crate::{
     bindings,
     cp::{Build, Init, MemoryContext, Owned, Owner, Place, Refusal},
@@ -81,11 +82,11 @@ pub trait Node: Build + sealed::Sealed {
 pub const BURST: usize = 32;
 
 impl Node for Net4Attr {
-    type Key = Addr4;
+    type Key = [u8; 4];
 
     #[inline(always)]
-    fn class<'g>(&'g self, cx: &impl Resolve<'g>, Addr4(addr): Addr4) -> u32 {
-        lpm_value(&self.lpm, cx, &addr.to_ne_bytes())
+    fn class<'g>(&'g self, cx: &impl Resolve<'g>, addr: [u8; 4]) -> u32 {
+        lpm_value(&self.lpm, cx, &addr)
     }
 }
 
@@ -163,7 +164,16 @@ impl<L: Node, R: Node> Node for Join<L, R> {
         key: impl Fn(&T) -> Self::Key,
         classes: &mut [u32],
     ) {
-        let (left, right) = sides(self.left.get(cx), self.right.get(cx), cx, items, &key);
+        let (mut left, mut right) = ([0; BURST], [0; BURST]);
+        sides(
+            self.left.get(cx),
+            self.right.get(cx),
+            cx,
+            items,
+            &key,
+            &mut left,
+            &mut right,
+        );
         for ((class, &left), &right) in classes.iter_mut().zip(&left).zip(&right) {
             *class = self.pair(cx, left, right);
         }
@@ -209,7 +219,16 @@ impl<L: Node, R: Node> Rules<L, R> {
         for (items, rules) in items.chunks(BURST).zip(rules.chunks_mut(BURST)) {
             let keys = burst_keys(items, &key);
             let keys = &keys[..items.len()];
-            let (left, right) = sides(self.left.get(cx), self.right.get(cx), cx, keys, &|&key| key);
+            let (mut left, mut right) = ([0; BURST], [0; BURST]);
+            sides(
+                self.left.get(cx),
+                self.right.get(cx),
+                cx,
+                keys,
+                &|&key| key,
+                &mut left,
+                &mut right,
+            );
             for ((rule, &left), &right) in rules.iter_mut().zip(&left).zip(&right) {
                 *rule = self.pair(cx, left, right);
             }
@@ -297,17 +316,18 @@ impl<N: Node> Decode<N> {
 
 /// The key of each item of a burst of at most [`BURST`], each taken once,
 /// and the default key past them.
+///
+/// Each slot is written once: a slot past the items gets the default key, a
+/// slot of an item only its key.
 #[inline(always)]
 fn burst_keys<T, K: Copy + Default>(items: &[T], key: impl Fn(&T) -> K) -> [K; BURST] {
-    let mut keys = [K::default(); BURST];
-    for (slot, item) in keys.iter_mut().zip(items) {
-        *slot = key(item);
-    }
-    keys
+    array::from_fn(|index| items.get(index).map_or_else(K::default, &key))
 }
 
-/// The classes of both inputs of a node over a burst of items: the whole
-/// burst through the left input, then through the right.
+/// The classes of both inputs of a node over a burst of items.
+///
+/// Written into the caller's array of each side, the whole burst through the
+/// left input, then through the right.
 #[inline(always)]
 fn sides<'g, L: Node, R: Node, T>(
     left: &'g L,
@@ -315,37 +335,12 @@ fn sides<'g, L: Node, R: Node, T>(
     cx: &impl Resolve<'g>,
     items: &[T],
     key: &impl Fn(&T) -> (L::Key, R::Key),
-) -> (BurstClasses, BurstClasses) {
+    lefts: &mut [u32; BURST],
+    rights: &mut [u32; BURST],
+) {
     debug_assert!(items.len() <= BURST, "a burst of {} items", items.len());
-    let (mut lefts, mut rights) = (BurstClasses::new(items.len()), BurstClasses::new(items.len()));
-    left.classes(cx, items, |item| key(item).0, lefts.as_mut());
-    right.classes(cx, items, |item| key(item).1, rights.as_mut());
-    (lefts, rights)
-}
-
-/// The classes of a burst of at most [`BURST`] items.
-struct BurstClasses {
-    classes: [u32; BURST],
-    len: usize,
-}
-
-impl BurstClasses {
-    fn new(len: usize) -> Self {
-        Self { classes: [0; BURST], len }
-    }
-
-    fn as_mut(&mut self) -> &mut [u32] {
-        &mut self.classes[..self.len]
-    }
-}
-
-impl<'a> IntoIterator for &'a BurstClasses {
-    type Item = &'a u32;
-    type IntoIter = core::slice::Iter<'a, u32>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.classes[..self.len].iter()
-    }
+    left.classes(cx, items, |item| key(item).0, &mut lefts[..items.len()]);
+    right.classes(cx, items, |item| key(item).1, &mut rights[..items.len()]);
 }
 
 // The nodes leave no padding: a C table, then the offset words of the boxes.
