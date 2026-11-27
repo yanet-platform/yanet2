@@ -1,4 +1,4 @@
-package ffi_test
+package agent_test
 
 import (
 	"testing"
@@ -7,13 +7,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/native/agent"
 )
 
 // moduleConfig mirrors how a module config embeds the attach config: the
 // attach keys sit at the document's top level beside the module's own.
 type moduleConfig struct {
-	ffi.AttachConfig `yaml:",inline"`
+	agent.AttachConfig `yaml:",inline"`
 
 	Endpoint xcfg.NonEmptyString `yaml:"endpoint"`
 }
@@ -22,7 +22,7 @@ type moduleConfig struct {
 // the top level of an embedding config and that the embedding config's own
 // keys still decode beside them.
 func Test_AttachConfig_InlineDecode(t *testing.T) {
-	cfg := moduleConfig{AttachConfig: ffi.DefaultAttachConfig(16 * datasize.MB)}
+	cfg := moduleConfig{AttachConfig: agent.DefaultAttachConfig(16 * datasize.MB)}
 	err := xcfg.Decode([]byte(
 		"instance_id: 2\nmemory_path: /dev/hugepages/test\nendpoint: '[::1]:9000'\n",
 	), &cfg, xcfg.WithKnownFields())
@@ -37,7 +37,7 @@ func Test_AttachConfig_InlineDecode(t *testing.T) {
 // Test_AttachConfig_UnknownKeyRejected verifies that an unknown top-level
 // key is still rejected when the attach keys are merged in by inlining.
 func Test_AttachConfig_UnknownKeyRejected(t *testing.T) {
-	cfg := moduleConfig{AttachConfig: ffi.DefaultAttachConfig(16 * datasize.MB)}
+	cfg := moduleConfig{AttachConfig: agent.DefaultAttachConfig(16 * datasize.MB)}
 	err := xcfg.Decode([]byte("instance_id: 0\nmemory_size: 1\n"), &cfg, xcfg.WithKnownFields())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "memory_size")
@@ -47,7 +47,7 @@ func Test_AttachConfig_UnknownKeyRejected(t *testing.T) {
 // carry the memory path and the given arena size but no instance, so a
 // listed agent that omits it still fails validation.
 func Test_DefaultAttachConfig_LeavesInstanceUnset(t *testing.T) {
-	cfg := ffi.DefaultAttachConfig(64 * datasize.MB)
+	cfg := agent.DefaultAttachConfig(64 * datasize.MB)
 
 	require.Equal(t, "/dev/hugepages/yanet", cfg.MemoryPath.Unwrap())
 	require.Equal(t, 64*datasize.MB, cfg.MemoryRequirements.Unwrap())

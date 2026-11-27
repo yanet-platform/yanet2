@@ -3,11 +3,11 @@ package l3b
 import (
 	"github.com/c2h5oh/datasize"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/native/agent"
 )
 
 type Config struct {
-	ffi.AttachConfig `yaml:",inline"`
+	agent.AttachConfig `yaml:",inline"`
 
 	Endpoint xcfg.NonEmptyString `yaml:"endpoint"`
 }
@@ -16,7 +16,7 @@ func DefaultConfig() *Config {
 	return &Config{
 		// A service's session table is the dominant allocation; the
 		// default arena must hold at least one complete service.
-		AttachConfig: ffi.DefaultAttachConfig(64 * datasize.MB),
+		AttachConfig: agent.DefaultAttachConfig(64 * datasize.MB),
 		Endpoint:     xcfg.MustNonEmptyString("[::1]:0"),
 	}
 }
