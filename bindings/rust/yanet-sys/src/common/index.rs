@@ -2,10 +2,10 @@
 //!
 //! [`HashIndex`] embeds a memory context of `common/memory.h`, opaque as the
 //! LPM's is, so a reference to it stays sound while C rewrites the context's
-//! sibling link. The build opens the context under the configuration's, named
-//! `hash_index`, and takes the block of the slots from it, so the memory
-//! diagnostics of C show the index as a node of its own. The slots and their
-//! lookup are pure Rust. Unlike C `hash_index`, a slot holds its key, so a
+//! sibling link. The control plane opens the context under the
+//! configuration's, named `hash_index`, and takes the block of the slots from
+//! it, so the memory diagnostics of C show the index as a node of its own. The
+//! lookup is pure Rust. Unlike C `hash_index`, a slot holds its key, so a
 //! lookup reads no other array.
 
 use core::{
@@ -26,10 +26,6 @@ use crate::bindings;
 
 /// An exact-match index of keys of type `K`, as a configuration holds it: the
 /// position each key names in an array of the author's.
-///
-/// Its parts are records of a key and the position it names, borrowed for the
-/// build. The build refuses a key given twice and a position of `u32::MAX`.
-/// An index of no records opens no memory context and allocates nothing.
 #[repr(C)]
 pub struct HashIndex<K> {
     /// The memory context of the block of the slots. C rewrites its sibling
@@ -51,10 +47,6 @@ const _: () = {
 };
 
 impl<K: HashIndexKey> HashIndex<K> {
-    /// Where the slice of the slots lies in the index.
-    #[doc(hidden)]
-    pub const SLOTS_OFFSET: usize = offset_of!(Self, slots);
-
     /// The index as a handler call reads it.
     pub fn resolve<'g>(&'g self, cx: &impl Resolve<'g>) -> HashIndexRef<'g, K> {
         HashIndexRef::new(self.slots.as_slice(cx))

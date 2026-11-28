@@ -36,9 +36,9 @@
 //!   and the dataplane calls a module's handlers only with contexts of that
 //!   module, whose configuration the control plane built with the body type the
 //!   module declares. An object type is registered under its type name, and the
-//!   plugin exporting it, the api crate building its objects and every module
-//!   linking one use the one Rust type of that name, so the object a link
-//!   resolves to holds the body and prepared value that type declares.
+//!   plugin exporting it, the layout description its objects are built to and
+//!   every module linking one use the one Rust type of that name, so the object
+//!   a link resolves to holds the body and prepared value that type declares.
 //! - **counters**: C builds a module context with one runtime counter storage
 //!   per tagged registry of its configuration, the storage of each registry at
 //!   the registry's index, and an object context with the counter storage it

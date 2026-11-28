@@ -18,7 +18,6 @@ extern crate alloc;
 mod common;
 
 use core::{
-    convert::Infallible,
     hint::black_box,
     mem::{offset_of, size_of, size_of_val},
     time::Duration,
@@ -29,7 +28,6 @@ use yanet_sdk_testing::BlockArena;
 use yanet_shm::{rel::RelPtr, shm::ShmLayout};
 use yanet_sys::{
     bindings,
-    cp::{Build, Init, MemoryContext, Owner, Place, Refusal},
     dp::{
         Batch, CommitCx, Counter, CounterLayout, CounterRef, Cx, Gauge, Module, Object, ObjectCommitCx, ObjectConfig,
         ObjectCounter, ObjectLink, PerWorker, PerWorkerSlice, TaggedCounter, TaggedCounters, TaggedCountersRef,
@@ -165,18 +163,6 @@ struct Config {
 // drop.
 unsafe impl ShmLayout for Config {}
 
-// SAFETY: the configuration is laid out by hand and never built: its parts
-// cannot exist, so nothing is ever written, and it owns no block to free.
-unsafe impl Build for Config {
-    type Parts<'b, W: Owner> = Infallible;
-
-    fn write<'s, 'b, W: Owner>(parts: Infallible, _: Place<'s, 'b, Self, W>) -> Result<Init<'s, Self>, Refusal> {
-        match parts {}
-    }
-
-    unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
-}
-
 /// Configuration of the state object: a slot and a region of `u64`s per
 /// worker, and a gauge of its own.
 #[repr(C)]
@@ -190,18 +176,6 @@ struct StateConfig {
 // offsets and counts of eight bytes, which accept every bit pattern, with no
 // padding and no drop.
 unsafe impl ShmLayout for StateConfig {}
-
-// SAFETY: as for the module's configuration: laid out by hand and never
-// built, and its blocks belong to the bench.
-unsafe impl Build for StateConfig {
-    type Parts<'b, W: Owner> = Infallible;
-
-    fn write<'s, 'b, W: Owner>(parts: Infallible, _: Place<'s, 'b, Self, W>) -> Result<Init<'s, Self>, Refusal> {
-        match parts {}
-    }
-
-    unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
-}
 
 /// An object of per-worker state, which prepares the handles of its context's
 /// worker.

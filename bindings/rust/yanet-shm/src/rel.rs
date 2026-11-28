@@ -4,8 +4,8 @@
 //! `ADDR_OF` family does. Every type here has private fields, no
 //! constructor and no `Copy`/`Clone`: safe code only ever sees a shared
 //! reference to a slot in place, so an offset is never separated from the
-//! address it is relative to and never re-based by a move. Builders write
-//! slots at their destination address. Resolution goes through a context
+//! address it is relative to and never re-based by a move. The control plane
+//! writes slots at their destination address. Resolution goes through a context
 //! holding the provenance root (`Resolve`), passed to the edge's method, never
 //! through the slot reference.
 //!

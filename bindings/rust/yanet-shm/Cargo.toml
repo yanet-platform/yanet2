@@ -10,9 +10,4 @@ publish.workspace = true
 workspace = true
 
 [dev-dependencies]
-criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 yanet-sdk-testing = { path = "../yanet-sdk-testing" }
-
-[[bench]]
-name = "index"
-harness = false

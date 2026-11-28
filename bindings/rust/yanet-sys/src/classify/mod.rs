@@ -5,31 +5,21 @@
 //! attribute of the rules, joins the classes of two classifiers into the
 //! classes of the next, and ends in a rule table or a rule map that maps the
 //! last classes to the first rule they match. Every classifier, joint, rule
-//! table and rule map is a C object a build writes, its type here a mirror of
-//! its C struct, and each node of the tree holds the classifiers whose classes
-//! it reads. The dataplane looks a packet's fields up, for one packet or a
-//! burst of them, through Rust ports of the C lookups over those layouts, as
-//! the LPM's is: no call into C. Classes never leave the tree. Table indices
-//! are checked in debug builds.
+//! table and rule map is a C object the control plane writes, its type here a
+//! mirror of its C struct, and each node of the tree holds the classifiers
+//! whose classes it reads. The dataplane looks a packet's fields up, for one
+//! packet or a burst of them, through Rust ports of the C lookups over those
+//! layouts, as the LPM's is: no call into C. Classes never leave the tree.
+//! Table indices are checked in debug builds.
 //!
-//! The compiles are C the shim compiles in, but the joins and the decode call
-//! the classification library's compiler (`lib/classify/compiler/helper.c`):
-//! a program that builds with them links that library; a missing link shows
-//! only when the program links.
-//!
-//! A ruleset is a slice with one slot per rule, `None` for a rule outside the
-//! projection a compile or a join covers, as C spells a projection with NULL
-//! rules; an attribute reads its own view of each rule. The first match is
-//! the rule of the lowest index, so the order of the slice is the precedence.
+//! A rule is known by its index in the ruleset. The first match is the rule
+//! of the lowest index, so the order of the ruleset is the precedence.
 
 use core::{
-    convert::Infallible,
-    marker::PhantomData,
     mem::{align_of, offset_of, size_of},
-    ptr, slice,
+    ptr,
 };
 
-use netip::{Ipv4Network, Ipv6Network};
 use yanet_shm::{
     opaque::Opaque,
     rel::RelPtr,
@@ -37,27 +27,10 @@ use yanet_shm::{
     shm::{MAX_ALIGN, ShmLayout},
 };
 
-pub use self::tree::{BURST, Decode, Join, Node, Rules, link};
-pub use crate::bindings::{
-    classify_line_range as LineRange, filter_port_range as PortRange, net4 as Net4, net6 as Net6,
-};
-use crate::{
-    bindings,
-    common::lpm::Lpm,
-    cp::{Build, FfiRecord, Init, MemoryContext, Owner, Place, Refusal},
-};
+pub use self::tree::{BURST, Decode, Join, Node, Rules};
+use crate::{bindings, common::lpm::Lpm};
 
 mod tree;
-
-// SAFETY: each is a `#[repr(C)]` bindgen struct of integers and byte arrays,
-// without drop glue, so every bit pattern is a value.
-unsafe impl FfiRecord for Net4 {}
-// SAFETY: as above.
-unsafe impl FfiRecord for Net6 {}
-// SAFETY: as above.
-unsafe impl FfiRecord for PortRange {}
-// SAFETY: as above.
-unsafe impl FfiRecord for LineRange {}
 
 /// The first rule a packet matches, by its index in the ruleset, or none.
 ///
@@ -82,214 +55,6 @@ impl Default for Rule {
     fn default() -> Self {
         Self::NONE
     }
-}
-
-/// The views of a rule a compile reads: each borrows the items of the rule's
-/// set for the build, as the C view of a set does, and holds only items the C
-/// compile reads as they say.
-macro_rules! views {
-    ($($(#[$doc:meta])* $name:ident: $raw:ident of $item:ty, $valid:ident or $refusal:ident;)*) => {$(
-        $(#[$doc])*
-        #[repr(transparent)]
-        pub struct $name<'a> {
-            raw: bindings::$raw,
-            _items: PhantomData<&'a [$item]>,
-        }
-
-        impl<'a> $name<'a> {
-            /// The view of the items.
-            ///
-            /// # Errors
-            ///
-            /// The set holds more items than C counts, `u32::MAX`, or an item
-            /// the C compile would read as other than it says.
-            pub fn new(items: &'a [$item]) -> Result<Self, Refusal> {
-                let count = u32::try_from(items.len()).map_err(|_| Refusal::TooManyItems)?;
-                if !items.iter().all($valid) {
-                    return Err(Refusal::$refusal);
-                }
-                Ok(Self {
-                    raw: bindings::$raw {
-                        // The compile only reads through the pointer.
-                        items: items.as_ptr().cast_mut().cast(),
-                        count,
-                    },
-                    _items: PhantomData,
-                })
-            }
-
-            /// The items the view was made of.
-            #[must_use]
-            pub fn as_slice(&self) -> &'a [$item] {
-                // SAFETY: the pointer and the count are those of a slice
-                // borrowed for 'a.
-                unsafe { slice::from_raw_parts(self.raw.items.cast::<$item>(), self.raw.count as usize) }
-            }
-        }
-    )*};
-}
-
-views! {
-    /// The IPv4 networks of one side of a rule, each of a contiguous mask;
-    /// none matches every address.
-    Nets4: filter_net4s of Net4, net4_valid or InvalidMask;
-    /// The IPv6 networks of one side of a rule, each of a mask contiguous in
-    /// each 64-bit half, as the IPv6 compile ranges the halves apart; none
-    /// matches every address.
-    Nets6: filter_net6s of Net6, net6_valid or InvalidMask;
-    /// The port ranges of one side of a rule, closed; none matches every
-    /// port.
-    Ports: filter_port_ranges of PortRange, port_range_valid or InvalidRange;
-    /// The closed byte ranges of a line attribute of a rule (the protocol
-    /// numbers, the TCP flags, the ICMP types), as the control plane that
-    /// authors the rules derives them; bounds beyond the byte domain are
-    /// clamped to it, and none matches every byte.
-    Lines: classify_line_ranges of LineRange, line_range_valid or InvalidRange;
-}
-
-fn net4_valid(net: &Net4) -> bool {
-    Ipv4Network::from_bits(u32::from_be_bytes(net.addr), u32::from_be_bytes(net.mask)).is_contiguous()
-}
-
-fn net6_valid(net: &Net6) -> bool {
-    Ipv6Network::from_bits(u128::from_be_bytes(net.addr), u128::from_be_bytes(net.mask)).is_bicontiguous()
-}
-
-fn port_range_valid(range: &PortRange) -> bool {
-    range.from <= range.to
-}
-
-fn line_range_valid(range: &LineRange) -> bool {
-    range.from <= range.to
-}
-
-/// A view of one attribute of a rule, which the classifier of the attribute
-/// is compiled from by [`Scope::compile`](crate::cp::Scope::compile).
-///
-/// Sealed: the attributes are the views of this module, each that of a C
-/// attribute.
-///
-/// ```compile_fail,E0277
-/// # use yanet_sys::classify::{Attribute, Net4Attr};
-/// struct Mine;
-/// impl Attribute for Mine {
-///     type Classifier = Net4Attr;
-///     unsafe fn compile(
-///         _: *mut yanet_sys::bindings::memory_context,
-///         _: *const core::ffi::c_char,
-///         _: *const *const Self,
-///         _: u32,
-///         _: *mut Net4Attr,
-///         _: *mut yanet_sys::bindings::classifier,
-///     ) -> core::ffi::c_int {
-///         0
-///     }
-/// }
-/// ```
-pub trait Attribute: sealed::Sealed {
-    /// The classifier of the attribute.
-    type Classifier: Build;
-
-    /// Compiles the classifier in place over the rules and fills the stage;
-    /// zero on success.
-    ///
-    /// # Safety
-    ///
-    /// As the shim compiles (`classify_shim.h`) take their arguments: each
-    /// rule null or a view of the attribute, borrowed for the call.
-    #[doc(hidden)]
-    unsafe fn compile(
-        memory: *mut bindings::memory_context,
-        name: *const core::ffi::c_char,
-        rules: *const *const Self,
-        count: u32,
-        classifier: *mut Self::Classifier,
-        stage: *mut bindings::classifier,
-    ) -> core::ffi::c_int;
-}
-
-impl Attribute for Nets4<'_> {
-    type Classifier = Net4Attr;
-
-    unsafe fn compile(
-        memory: *mut bindings::memory_context,
-        name: *const core::ffi::c_char,
-        rules: *const *const Self,
-        count: u32,
-        classifier: *mut Net4Attr,
-        stage: *mut bindings::classifier,
-    ) -> core::ffi::c_int {
-        // SAFETY: the caller's contract; the view is its C view.
-        unsafe {
-            bindings::yanet_sys_classify_net4_compile(memory, name, rules.cast(), count, classifier.cast(), stage)
-        }
-    }
-}
-
-impl Attribute for Nets6<'_> {
-    type Classifier = Net6Attr;
-
-    unsafe fn compile(
-        memory: *mut bindings::memory_context,
-        name: *const core::ffi::c_char,
-        rules: *const *const Self,
-        count: u32,
-        classifier: *mut Net6Attr,
-        stage: *mut bindings::classifier,
-    ) -> core::ffi::c_int {
-        // SAFETY: as above.
-        unsafe {
-            bindings::yanet_sys_classify_net6_compile(memory, name, rules.cast(), count, classifier.cast(), stage)
-        }
-    }
-}
-
-impl Attribute for Ports<'_> {
-    type Classifier = PortAttr;
-
-    unsafe fn compile(
-        memory: *mut bindings::memory_context,
-        name: *const core::ffi::c_char,
-        rules: *const *const Self,
-        count: u32,
-        classifier: *mut PortAttr,
-        stage: *mut bindings::classifier,
-    ) -> core::ffi::c_int {
-        // SAFETY: as above.
-        unsafe {
-            bindings::yanet_sys_classify_port_compile(memory, name, rules.cast(), count, classifier.cast(), stage)
-        }
-    }
-}
-
-impl Attribute for Lines<'_> {
-    type Classifier = LineAttr;
-
-    unsafe fn compile(
-        memory: *mut bindings::memory_context,
-        name: *const core::ffi::c_char,
-        rules: *const *const Self,
-        count: u32,
-        classifier: *mut LineAttr,
-        stage: *mut bindings::classifier,
-    ) -> core::ffi::c_int {
-        // SAFETY: as above.
-        unsafe {
-            bindings::yanet_sys_classify_line_compile(memory, name, rules.cast(), count, classifier.cast(), stage)
-        }
-    }
-}
-
-mod sealed {
-    pub trait Sealed {}
-
-    impl Sealed for super::Nets4<'_> {}
-
-    impl Sealed for super::Nets6<'_> {}
-
-    impl Sealed for super::Ports<'_> {}
-
-    impl Sealed for super::Lines<'_> {}
 }
 
 /// The memory context a C object of the classification allocates its blocks
@@ -403,9 +168,6 @@ impl Table {
 
 /// The classifier of an IPv4 address: the longest-prefix match of the
 /// address, whose value is its class.
-///
-/// Compiled only with its stage, by
-/// [`Scope::compile`](crate::cp::Scope::compile).
 #[repr(C)]
 pub struct Net4Attr {
     lpm: Lpm<4>,
@@ -415,8 +177,7 @@ pub struct Net4Attr {
 /// and a table of the regions the low half splits.
 ///
 /// The high half's value is the class of the address or, marked, a row of the
-/// table, read at the low half's class. Compiled only with its stage, as
-/// above.
+/// table, read at the low half's class.
 #[repr(C)]
 pub struct Net6Attr {
     hi: Lpm<8>,
@@ -425,8 +186,6 @@ pub struct Net6Attr {
 }
 
 /// The classifier of a port.
-///
-/// Compiled only with its stage, as above.
 #[repr(C)]
 pub struct PortAttr {
     line: Line,
@@ -434,8 +193,6 @@ pub struct PortAttr {
 
 /// The classifier of a byte of a packet: its protocol number, its TCP flags
 /// or its ICMP type.
-///
-/// Compiled only with its stage, as above.
 #[repr(C)]
 pub struct LineAttr {
     line: Line,
@@ -525,10 +282,10 @@ const _: fn(
 
 /// The shared-memory impls of the C objects of a classification.
 ///
-/// Each mirrors its C struct, is written only by its compile, join or decode
-/// and is freed by its C free.
+/// Each mirrors its C struct and is written only by its compile, join or
+/// decode.
 macro_rules! classifiers {
-    ($($name:ident: $raw:ident, $free:ident;)*) => {$(
+    ($($name:ident: $raw:ident;)*) => {$(
         const _: () = {
             assert!(size_of::<$name>() == size_of::<bindings::$raw>());
             assert!(align_of::<$name>() == align_of::<bindings::$raw>());
@@ -545,33 +302,17 @@ macro_rules! classifiers {
         unsafe impl ShmLayout for $name {
             c_layout!(stringify!($raw));
         }
-
-        // SAFETY: the C object is the whole value; the compile, the join or
-        // the decode that wrote it allocated only in the memory context, in
-        // blocks and child contexts its C free returns and unlinks.
-        unsafe impl Build for $name {
-            type Parts<'b, W: Owner> = Infallible;
-
-            fn write<'s, 'b, W: Owner>(parts: Infallible, _: Place<'s, 'b, Self, W>) -> Result<Init<'s, Self>, Refusal> {
-                match parts {}
-            }
-
-            unsafe fn free<W: Owner>(addr: usize, memory: &MemoryContext<'_, W>) {
-                // SAFETY: the object was written whole (caller contract).
-                unsafe { bindings::$free(memory.root().ptr(addr)) };
-            }
-        }
     )*};
 }
 
 classifiers! {
-    Net4Attr: classify_attr_net4, yanet_sys_classify_net4_free;
-    Net6Attr: classify_attr_net6, yanet_sys_classify_net6_free;
-    PortAttr: classify_attr_port, yanet_sys_classify_port_free;
-    LineAttr: classify_attr_line, yanet_sys_classify_line_free;
-    Joint: value_table, yanet_sys_classify_joint_free;
-    RuleTable: rule_table, yanet_sys_classify_rule_table_free;
-    RuleMap: vline, yanet_sys_classify_rule_map_free;
+    Net4Attr: classify_attr_net4;
+    Net6Attr: classify_attr_net6;
+    PortAttr: classify_attr_port;
+    LineAttr: classify_attr_line;
+    Joint: value_table;
+    RuleTable: rule_table;
+    RuleMap: vline;
 }
 
 /// The mark of a value of the high half of an IPv6 classifier that is a row
@@ -633,8 +374,8 @@ mod tests {
 
     use yanet_sdk_testing::{BlockArena, View};
 
-    use super::{Line, LineRange, Lines, Net4, Net6, Net6Attr, Nets4, Nets6, PortRange, Ports, ROW_MARK, Rule, Table};
-    use crate::{bindings, cp::Refusal};
+    use super::{Line, Net6Attr, ROW_MARK, Rule, Table};
+    use crate::bindings;
 
     /// Writes a value at an address of a block of the arena.
     pub fn put<T>(arena: &'static BlockArena, addr: usize, value: T) {
@@ -740,62 +481,6 @@ mod tests {
         };
         let classes = [addr(0x21, 1), addr(0x20, 0), addr(0x20, 5), addr(0x20, 1)].map(|addr| attr.class(&view, &addr));
         assert_eq!([7, 40, 41, 42], classes);
-    }
-
-    /// verifies that an IPv4 view takes contiguous masks only, the empty one
-    /// and the full one included.
-    #[test]
-    fn test_nets4_new_refuses_a_mask_that_is_not_contiguous() {
-        for (mask, result) in [
-            ([0, 0, 0, 0], Ok(())),
-            ([0xff, 0xff, 0xf0, 0], Ok(())),
-            ([0xff, 0xff, 0xff, 0xff], Ok(())),
-            ([0xff, 0, 0xff, 0], Err(Refusal::InvalidMask)),
-            ([0x7f, 0, 0, 0], Err(Refusal::InvalidMask)),
-        ] {
-            let nets = [Net4 { addr: [10, 0, 0, 0], mask }];
-            assert_eq!(result, Nets4::new(&nets).map(drop), "{mask:x?}");
-        }
-    }
-
-    /// verifies that an IPv6 view takes a mask contiguous in each 64-bit
-    /// half, a hole at the half boundary included, and refuses a hole inside
-    /// a half.
-    #[test]
-    fn test_nets6_new_refuses_a_hole_inside_a_half() {
-        for (mask, result) in [
-            ([0xff; 16], Ok(())),
-            ([0xff, 0xff, 0, 0, 0, 0, 0, 0, 0xff, 0, 0, 0, 0, 0, 0, 0], Ok(())),
-            (
-                [0xff, 0, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                Err(Refusal::InvalidMask),
-            ),
-            (
-                [
-                    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x0f, 0, 0, 0, 0, 0, 0, 0,
-                ],
-                Err(Refusal::InvalidMask),
-            ),
-        ] {
-            let nets = [Net6 { addr: [0; 16], mask }];
-            assert_eq!(result, Nets6::new(&nets).map(drop), "{mask:x?}");
-        }
-    }
-
-    /// verifies that port and byte views refuse a range that ends before it
-    /// starts and take a range of one value.
-    #[test]
-    fn test_range_views_refuse_a_reversed_range() {
-        assert_eq!(Ok(()), Ports::new(&[PortRange { from: 53, to: 53 }]).map(drop));
-        assert_eq!(
-            Err(Refusal::InvalidRange),
-            Ports::new(&[PortRange { from: 80, to: 53 }]).map(drop)
-        );
-        assert_eq!(Ok(()), Lines::new(&[LineRange { from: 6, to: 6 }]).map(drop));
-        assert_eq!(
-            Err(Refusal::InvalidRange),
-            Lines::new(&[LineRange { from: 17, to: 6 }]).map(drop)
-        );
     }
 
     /// verifies that no rule has no index and any other rule its own.

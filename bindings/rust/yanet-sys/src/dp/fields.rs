@@ -92,8 +92,8 @@ impl<T> TaggedCounter<T> {
     }
 }
 
-// The builder writes the two indices as the two words of the value, in the
-// order of the fields.
+// The control plane writes the two indices as the two words of the value, in
+// the order of the fields.
 const _: () = assert!(size_of::<TaggedCounter>() == 2 * size_of::<u64>());
 
 /// Per-worker counters of the module in one of its tagged registries, picked
@@ -144,8 +144,8 @@ impl<T> TaggedCounters<T> {
     }
 }
 
-// The builder writes the registry index and the number of counters as the two
-// words of the value, in the order of the fields.
+// The control plane writes the registry index and the number of counters as
+// the two words of the value, in the order of the fields.
 const _: () = assert!(size_of::<TaggedCounters>() == 2 * size_of::<u64>());
 
 /// Per-worker counter of an object, registered by the control plane in the
@@ -882,14 +882,13 @@ impl<'id, T: Copy + ShmLayout> WorkerSlot<'id, T> {
 unsafe impl<T: Copy + ShmLayout + Send> Sync for PerWorker<T> {}
 
 // SAFETY: as above; the block it names is owned by the graph and its slots
-// are plain values aligned for `T` by the builder.
+// are plain values aligned for `T` by the control plane.
 unsafe impl<T: Copy + ShmLayout> ShmLayout for PerWorker<T> {
     edge_layout!("per_worker", PerWorker<Param<0>>, [slots, workers], [T]);
 }
 
-// The builder writes and frees the field through two raw words, the offset
-// and then the count right after it, not through the struct, so its layout
-// must stay what these assertions state.
+// The field is two raw words, the offset and then the count right after it,
+// and its layout must stay what these assertions state.
 const _: () = {
     assert!(size_of::<PerWorker<u64>>() == 16);
     assert!(core::mem::offset_of!(PerWorker<u64>, workers) == size_of::<isize>());
@@ -1298,7 +1297,7 @@ impl<'id, T: Copy + ShmLayout> WorkerSlice<'id, T> {
 unsafe impl<T: Copy + ShmLayout + Send> Sync for PerWorkerSlice<T> {}
 
 // SAFETY: as above; the table and the regions it names are owned by the graph,
-// and the regions hold plain values aligned for `T` by the builder.
+// and the regions hold plain values aligned for `T` by the control plane.
 unsafe impl<T: Copy + ShmLayout> ShmLayout for PerWorkerSlice<T> {
     edge_layout!(
         "per_worker_slice",
@@ -1308,9 +1307,9 @@ unsafe impl<T: Copy + ShmLayout> ShmLayout for PerWorkerSlice<T> {
     );
 }
 
-// The builder writes and frees the field through three raw words, the table
-// offset, then the worker count and the length right after it, not through the
-// struct, so its layout must stay what these assertions state.
+// The field is three raw words, the table offset, then the worker count and
+// the length right after it, and its layout must stay what these assertions
+// state.
 const _: () = {
     assert!(size_of::<PerWorkerSlice<u64>>() == 24);
     assert!(core::mem::offset_of!(PerWorkerSlice<u64>, workers) == size_of::<isize>());

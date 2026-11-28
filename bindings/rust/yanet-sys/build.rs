@@ -3,7 +3,7 @@
 //! One source of C truth: the compiler, include directories, defines,
 //! warning options and forced includes of the dataplane's C sources, which
 //! meson's compilation database in `YANET_BUILD_DIR` records, drive bindgen
-//! and the C shims of `common/` and the dataplane. The bindings carry
+//! and the C shim of the dataplane. The bindings carry
 //! bindgen's own compile-time layout assertions. Generated files land in
 //! `OUT_DIR` only.
 
@@ -30,7 +30,6 @@ fn main() {
 
     generate_bindings(&flags, &shim_dir, &out_dir.join("bindings.rs"));
     build_shim(&flags, &shim_dir);
-    build_classify_tests(&flags, &shim_dir);
 
     println!(
         "cargo:rerun-if-changed={}",
@@ -69,58 +68,22 @@ fn c_build(flags: &CFlags, shim_dir: &Path) -> cc::Build {
     build
 }
 
-/// Compiles the shims.
+/// Compiles the dataplane shim.
 ///
-/// The dataplane shim wraps header-inline C routing helpers, the packet
-/// parser and the packet encapsulation routines, whose sources it compiles
-/// in; the common shim wraps the header-inline LPM and memory routines of
-/// `common/`; the classify shim wraps the compiles, the joins and the decode
-/// of `lib/classify`, which the builder calls, and the control-plane shim the
-/// header-inline pin of a generation, which an api crate's reads take, so a
-/// plugin pulls none of either.
-/// They are linked into every module plugin with hidden visibility, so a
-/// plugin exports nothing of them and imports none of the parsing or the
-/// encapsulation from the host.
+/// It wraps header-inline C routing helpers, the packet parser and the packet
+/// encapsulation routines, whose sources it compiles in. It is linked into
+/// every module plugin with hidden visibility, so a plugin exports nothing of
+/// it and imports none of the parsing or the encapsulation from the host.
 fn build_shim(flags: &CFlags, shim_dir: &Path) {
     let mut build = c_build(flags, shim_dir);
     build
-        .file(shim_dir.join("classify_cp_shim.c"))
-        .file(shim_dir.join("common_shim.c"))
-        .file(shim_dir.join("cp_shim.c"))
         .file(shim_dir.join("dp_shim.c"))
         .files(PACKET_SOURCES.map(|source| flags.source(source)))
         .flag("-fvisibility=hidden");
-    for file in [
-        "classify_cp_shim.c",
-        "classify_shim.h",
-        "common_shim.c",
-        "common_shim.h",
-        "cp_shim.c",
-        "cp_shim.h",
-        "dp_shim.c",
-        "dp_shim.h",
-        "shim_visibility.h",
-    ] {
+    for file in ["classify_shim.h", "dp_shim.c", "dp_shim.h", "shim_visibility.h"] {
         println!("cargo:rerun-if-changed={}", shim_dir.join(file).display());
     }
     build.compile("yanet_sys_shims");
-}
-
-/// Compiles the C the native classify tests build classifiers with: a block
-/// arena and the classification library's compiler.
-///
-/// The compile shim calls the compiler's joins and decode. Cargo is told
-/// nothing of the archive, so only a test that names it links it, and no
-/// plugin or api archive carries it; the shims' build already gives the
-/// linker the directory it lands in.
-fn build_classify_tests(flags: &CFlags, shim_dir: &Path) {
-    let arena = shim_dir.join("tests/classify_arena.c");
-    println!("cargo:rerun-if-changed={}", arena.display());
-    c_build(flags, shim_dir)
-        .file(arena)
-        .file(flags.source("lib/classify/compiler/helper.c"))
-        .cargo_metadata(false)
-        .compile("yanet_sys_classify_tests");
 }
 
 fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
@@ -173,42 +136,19 @@ fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
         // The parser's flag bits of a packet.
         .allowlist_type("packet_flag")
         .allowlist_type("rte_mbuf")
-        .allowlist_type("agent")
-        .allowlist_type("yanet_error")
-        .allowlist_type("yanet_error_kind")
-        .allowlist_function("yanet_sys_common_.*")
+        // The C objects of a classifier, which the tree mirrors.
+        .allowlist_type("classify_attr_(line|net4|net6|port)")
+        .allowlist_type("rule_table")
+        .allowlist_type("value_table")
+        .allowlist_type("vline")
         .allowlist_function("yanet_sys_dp_.*")
-        .allowlist_function("yanet_sys_classify_.*")
-        .allowlist_function("yanet_sys_cp_.*")
-        // The agent owner of the configuration builder: the C routines a C
-        // module's control-plane API calls for the same steps.
-        .allowlist_function("cp_module_(init|fini|try_destroy|link_device|link_object|counter_registry)")
-        .allowlist_function("cp_object_(init|fini|try_destroy)")
-        .allowlist_function("counter_registry_register")
-        // A read of what the dataplane runs finds the configuration and the
-        // objects it links in a pinned generation.
-        .allowlist_function("cp_config_gen_lookup_(module|object)")
-        .allowlist_function("agent_destroy_released")
-        // The dataplane's worker count, which sizes per-worker state; the ring
-        // object reads the same `dp_config` field.
-        .allowlist_function("agent_dp_config")
-        .allowlist_function("dataplane_instance_worker_count")
-        .allowlist_function("yanet_error_(free|message|cause|kind|add_kind)")
-        // errno of a failed C-facing export, set by the API side.
-        .allowlist_function("__errno_location")
-        .allowlist_var("E(AGAIN|INVAL|IO)")
         .allowlist_var("LPM_.*")
-        .allowlist_var("CP_(MODULE_TYPE|MODULE_NAME|DEVICE_NAME|OBJECT_TYPE|OBJECT_NAME)_LEN")
-        .allowlist_var("COUNTER_NAME_LEN")
-        // A tagged counter registry is found by its tag as a counter tag
-        // value, which C cuts to this length.
-        .allowlist_var("COUNTER_TAG_VALUE_LEN")
+        .allowlist_var("CP_OBJECT_TYPE_LEN")
         .allowlist_var("YANET_MODULE_ABI_VERSION")
         .allowlist_var("(MODULE|OBJECT)_TYPE_LEN")
         .allowlist_var("MBUF_MAX_SIZE")
         .allowlist_var("RTE_PKTMBUF_HEADROOM")
         .allowlist_var("MEMORY_BLOCK_MAX_ALIGN")
-        .allowlist_var("MEMORY_BLOCK_ALLOCATOR_MAX_SIZE")
         .allowlist_var("ASAN_RED_ZONE")
         .allowlist_var("PACKET_TRANSPORT_HEADER_UNAVAILABLE")
         .allowlist_var("YANET_SYS_CLASSIFY_.*")
@@ -221,7 +161,6 @@ fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
         .opaque_type("rte_mbuf_ext_shared_info")
         .opaque_type("dp_config")
         .opaque_type("cp_config")
-        .opaque_type("cp_config_gen")
         .opaque_type("config_gen_ectx")
         .opaque_type("device_entry_ectx")
         .generate()

@@ -39,9 +39,9 @@ if sdk_rust_fixtures.enabled()
     'YANET_BUILD_DIR': meson.global_build_root(),
   }
 
-  # An ASan C build needs instrumented Rust: the inline copy of the C block
-  # allocator in the shim must lay out red zones as the instrumented C library
-  # does.
+  # An ASan C build instruments the Rust code too, so the plugins' reads of
+  # shared memory are checked against the red zones and the freed blocks the
+  # instrumented C allocator poisons.
   #
   # That needs a nightly toolchain, which the environment names with
   # RUSTUP_TOOLCHAIN.
