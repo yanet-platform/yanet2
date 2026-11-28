@@ -41,8 +41,9 @@ mod tree;
 pub struct Rule(u32);
 
 impl Rule {
-    /// No rule: what a lookup reports for a packet no rule matches.
-    pub const NONE: Self = Self(bindings::YANET_SYS_CLASSIFY_NO_RULE);
+    /// No rule: what a lookup reports for a packet no rule matches, all ones
+    /// as the control plane writes it.
+    pub const NONE: Self = Self(u32::MAX);
 
     /// Index of the rule in the ruleset, `None` for no rule.
     #[inline(always)]
@@ -348,9 +349,6 @@ impl Net6Attr {
         self.comb.get(cx, value & !ROW_MARK, column)
     }
 }
-
-// The merge of two decodings takes the smaller word as the first match.
-const _: () = assert!(Rule::NONE.0 == u32::MAX);
 
 /// Keeps in each rule the first match of it and the rule of another decoding
 /// of the same packet, as `classify_results_min` does.

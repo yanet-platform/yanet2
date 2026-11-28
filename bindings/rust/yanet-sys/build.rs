@@ -80,7 +80,7 @@ fn build_shim(flags: &CFlags, shim_dir: &Path) {
         .file(shim_dir.join("dp_shim.c"))
         .files(PACKET_SOURCES.map(|source| flags.source(source)))
         .flag("-fvisibility=hidden");
-    for file in ["classify_shim.h", "dp_shim.c", "dp_shim.h", "shim_visibility.h"] {
+    for file in ["dp_shim.c", "dp_shim.h", "shim_visibility.h"] {
         println!("cargo:rerun-if-changed={}", shim_dir.join(file).display());
     }
     build.compile("yanet_sys_shims");
@@ -151,7 +151,6 @@ fn generate_bindings(flags: &CFlags, shim_dir: &Path, out: &Path) {
         .allowlist_var("MEMORY_BLOCK_MAX_ALIGN")
         .allowlist_var("ASAN_RED_ZONE")
         .allowlist_var("PACKET_TRANSPORT_HEADER_UNAVAILABLE")
-        .allowlist_var("YANET_SYS_CLASSIFY_.*")
         // The mark of an IPv6 classifier's value that is a row of its table.
         .allowlist_var("FILTER_NET6_ROW_MARK")
         .allowlist_var("YANET_SYS_DP_WORKER_IDX_NONE")

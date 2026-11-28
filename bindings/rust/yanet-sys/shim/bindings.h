@@ -25,5 +25,4 @@
 
 #include "yanet_build_config.h"
 
-#include "classify_shim.h"
 #include "dp_shim.h"
