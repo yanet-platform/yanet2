@@ -101,6 +101,8 @@ func (m *Generation) Counters(predicates []CounterTag) ([]CounterGroup, error) {
 
 	var groups []CounterGroup
 	groupIndex := map[string]int{}
+	// counterIndex holds each group's counter positions by name.
+	var counterIndex []map[string]int
 	for worker := range min(workerCount, len(roots)) {
 		root := roots[worker].Get()
 		if root == nil {
@@ -135,8 +137,9 @@ func (m *Generation) Counters(predicates []CounterTag) ([]CounterGroup, error) {
 				idx = len(groups)
 				groupIndex[key] = idx
 				groups = append(groups, CounterGroup{Tags: tagsOf(present)})
+				counterIndex = append(counterIndex, map[string]int{})
 			}
-			readStorage(&groups[idx], storage, worker, workerCount)
+			readStorage(&groups[idx], counterIndex[idx], storage, worker, workerCount)
 		}
 	}
 	for _, group := range groups {
@@ -156,9 +159,10 @@ func (m *Generation) Counters(predicates []CounterTag) ([]CounterGroup, error) {
 }
 
 // readStorage sets a worker's values of a storage's counters in the
-// group, adding the counters it does not hold yet. A counter whose values
-// cannot be reached reads as zeroes for the worker.
-func readStorage(group *CounterGroup, storage *layout.CounterStorage, worker, workerCount int) {
+// group, adding the counters it does not hold yet to the group and to its
+// index by name. A counter whose values cannot be reached reads as zeroes
+// for the worker.
+func readStorage(group *CounterGroup, index map[string]int, storage *layout.CounterStorage, worker, workerCount int) {
 	registry := storage.Registry.Get()
 	if registry == nil || registry.Count == 0 || registry.Names.Get() == nil {
 		return
@@ -170,9 +174,10 @@ func readStorage(group *CounterGroup, storage *layout.CounterStorage, worker, wo
 	}
 	for idx := range names {
 		name := shm.String(names[idx].Name[:])
-		counter := slices.IndexFunc(group.Counters, func(counter Counter) bool { return counter.Name == name })
-		if counter < 0 {
+		counter, found := index[name]
+		if !found {
 			counter = len(group.Counters)
+			index[name] = counter
 			group.Counters = append(group.Counters, Counter{Name: name, Values: make([][]uint64, workerCount)})
 		}
 		size := names[idx].Size
