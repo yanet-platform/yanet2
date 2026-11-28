@@ -51,6 +51,11 @@ var ErrMapLinkedByUntrackedConfig = fmt.Errorf(
 // on their own: dropping a config's reference only changes who references
 // what, and retrying the free of a map the dataplane no longer lists only
 // returns its memory.
+//
+// A session dump reads each of its pages under the same lock, and every
+// release of table memory happens under it, so no page walks a layer
+// that is being freed. The generation barriers a sweep publishes prove
+// only that the dataplane moved on, not that this process did.
 type MapRegistry struct {
 	agent *ffi.Agent
 	mu    sync.Mutex
@@ -431,4 +436,32 @@ func (m *MapRegistry) Acquire(config, name string) error {
 	}
 	m.users[name][config] = struct{}{}
 	return nil
+}
+
+// ErrMapUnknown reports a map name no config has created.
+var ErrMapUnknown = errors.New("nat64state map not found")
+
+// ReadSessions returns one page of the named map's live sessions and the
+// cursor to resume from. It creates nothing: an unknown map is
+// ErrMapUnknown.
+//
+// The page is read under the registry's lock, under which every release
+// of table memory happens as well, so none can free what the page walks
+// while it walks it. The lock is taken per page, so the registry can
+// recreate the map between two pages of one dump; the cursor then names
+// slots of its new first layer (see cnat64s.MapObjectConfig.ReadSessions).
+func (m *MapRegistry) ReadSessions(
+	name string,
+	cursor int64,
+	now uint64,
+	count uint32,
+) ([]cnat64s.Session, int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	object := m.maps[name]
+	if object == nil {
+		return nil, cursor, ErrMapUnknown
+	}
+	return object.ReadSessions(cursor, now, count)
 }

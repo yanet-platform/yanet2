@@ -35,7 +35,7 @@ type ModuleUpdate struct {
 	Prefixes [][]byte
 	// Pool is the public IPv4 pool in network byte order.
 	Pool []uint32
-	// Timeout carries the two session timeouts; zero knobs select
+	// Timeout carries the three session timeouts; zero knobs select
 	// their defaults.
 	Timeout SessionTimeout
 	MTUv4   uint16
@@ -49,12 +49,13 @@ type ModuleUpdate struct {
 	MapName string
 }
 
-// SessionTimeout carries the two session timeouts in seconds: one for
-// every session, and a longer one for a TCP session the remote has
-// answered.
+// SessionTimeout carries the three session timeouts in seconds: one for
+// every session, a longer one for a TCP session the remote has answered,
+// and the transitory one for a TCP session both ends have closed.
 type SessionTimeout struct {
 	Timeout        uint16
 	TCPEstablished uint16
+	TCPTransitory  uint16
 }
 
 // TimeoutMax is the largest session timeout in seconds the session state
@@ -130,6 +131,7 @@ func (m *ModuleConfig) Update(update ModuleUpdate) error {
 		timeouts: C.struct_nat64state_timeouts{
 			timeout:         C.uint16_t(update.Timeout.Timeout),
 			tcp_established: C.uint16_t(update.Timeout.TCPEstablished),
+			tcp_transitory:  C.uint16_t(update.Timeout.TCPTransitory),
 		},
 		mtu_ipv4: C.uint16_t(update.MTUv4),
 		mtu_ipv6: C.uint16_t(update.MTUv6),

@@ -90,9 +90,10 @@ struct nat64s_module_config {
 	uint32_t port_lo;
 	uint32_t port_hi;
 
-	/* The two session lifetimes in seconds, one for every session and a
-	 * longer one for an established TCP session, as the request carried
-	 * them. Their rules are stated with the structure. */
+	/* The three session lifetimes in seconds, as the request carried them:
+	 * one for every session, a longer one for an established TCP session,
+	 * and the transitory one a TCP session moves to once both ends have
+	 * closed it. Their rules are stated with the structure. */
 	struct nat64state_timeouts timeouts;
 
 	/* The MTU limits the translation works with, in bytes, stored as a

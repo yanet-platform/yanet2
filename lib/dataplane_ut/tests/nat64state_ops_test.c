@@ -27,35 +27,120 @@ test_entry_ttl(void) {
 	const struct nat64state_timeouts set = {
 		.timeout = 90,
 		.tcp_established = 7440,
+		.tcp_transitory = 240,
 	};
 	TEST_ASSERT(
-		nat64state_entry_ttl(IPPROTO_TCP, false, &set) ==
+		nat64state_entry_ttl(IPPROTO_TCP, false, false, &set) ==
 			90ull * 1000000000ull,
 		"a non-established session must age on the general timeout"
 	);
 	TEST_ASSERT(
-		nat64state_entry_ttl(IPPROTO_UDP, false, &set) ==
+		nat64state_entry_ttl(IPPROTO_UDP, false, false, &set) ==
 			90ull * 1000000000ull,
 		"a UDP session must age on the general timeout"
 	);
 	TEST_ASSERT(
-		nat64state_entry_ttl(IPPROTO_TCP, true, &set) ==
+		nat64state_entry_ttl(IPPROTO_TCP, true, false, &set) ==
 			7440ull * 1000000000ull,
 		"an established TCP session must age on the established timeout"
+	);
+	TEST_ASSERT(
+		nat64state_entry_ttl(IPPROTO_TCP, true, true, &set) ==
+			240ull * 1000000000ull,
+		"a TCP session both ends closed must age on the transitory "
+		"timeout"
+	);
+	TEST_ASSERT(
+		nat64state_entry_ttl(IPPROTO_TCP, false, true, &set) ==
+			240ull * 1000000000ull,
+		"a closed TCP session ages on the transitory timeout even if "
+		"it "
+		"never established"
+	);
+	TEST_ASSERT(
+		nat64state_entry_ttl(IPPROTO_UDP, false, true, &set) ==
+			90ull * 1000000000ull,
+		"the closing bits never move a non-TCP session off the general "
+		"timeout"
 	);
 
 	const struct nat64state_timeouts zero = {0};
 	TEST_ASSERT(
-		nat64state_entry_ttl(IPPROTO_UDP, false, &zero) ==
+		nat64state_entry_ttl(IPPROTO_UDP, false, false, &zero) ==
 			(uint64_t)NAT64STATE_TIMEOUT_DEFAULT * 1000000000ull,
 		"a zero timeout knob must select the default, not an expired "
 		"session"
 	);
 	TEST_ASSERT(
-		nat64state_entry_ttl(IPPROTO_TCP, true, &zero) ==
+		nat64state_entry_ttl(IPPROTO_TCP, true, false, &zero) ==
 			(uint64_t)NAT64STATE_TCP_ESTABLISHED_DEFAULT *
 				1000000000ull,
 		"a zero established knob must select its default"
+	);
+	TEST_ASSERT(
+		nat64state_entry_ttl(IPPROTO_TCP, true, true, &zero) ==
+			(uint64_t)NAT64STATE_TCP_TRANSITORY_DEFAULT *
+				1000000000ull,
+		"a zero transitory knob must select its default"
+	);
+	return TEST_SUCCESS;
+}
+
+// The closing halves latch independently: a refresh that saw one end
+// close keeps the other end's half as the session stored it.
+static int
+test_refresh_latches_closing_halves(void) {
+	struct nat64state_value first = session_value(100, 0x01020304, 40000);
+	first.tcp_established = true;
+
+	// The lan side closes: the refresh carries lan_closed only.
+	struct nat64state_value lan_fin = session_value(110, 0, 0);
+	lan_fin.tcp_established = true;
+	lan_fin.lan_closed = true;
+	fwmap_update_value_nat64state(&first, &lan_fin, false, sizeof(first));
+	TEST_ASSERT(
+		first.lan_closed && !first.wan_closed,
+		"one end closing must leave the other half open"
+	);
+
+	// The wan side closes later; the refresh knows nothing of the lan
+	// half, which the stored entry must still supply.
+	struct nat64state_value wan_fin = session_value(120, 0, 0);
+	wan_fin.tcp_established = true;
+	wan_fin.wan_closed = true;
+	fwmap_update_value_nat64state(&first, &wan_fin, false, sizeof(first));
+	TEST_ASSERT(
+		first.lan_closed && first.wan_closed,
+		"both closing halves must survive the second refresh"
+	);
+	TEST_ASSERT(
+		first.tcp_established,
+		"establishment must survive refreshes that omit it"
+	);
+	return TEST_SUCCESS;
+}
+
+// Promotion across a layer carries the same latches as an in-layer
+// refresh.
+static int
+test_promotion_latches_closing_halves(void) {
+	struct nat64state_value stale = session_value(100, 0x01020304, 40000);
+	stale.tcp_established = true;
+	stale.lan_closed = true;
+	struct nat64state_value fresh = session_value(300, 0, 0);
+	fresh.wan_closed = true;
+
+	struct nat64state_value promoted;
+	fwmap_promote_value_nat64state(
+		&promoted, &fresh, &stale, sizeof(promoted)
+	);
+	TEST_ASSERT(
+		promoted.tcp_established,
+		"promotion must keep the established latch from the stale layer"
+	);
+	TEST_ASSERT(
+		promoted.lan_closed && promoted.wan_closed,
+		"promotion must OR the closing halves of both layers"
 	);
 	return TEST_SUCCESS;
 }
@@ -172,10 +257,16 @@ main(void) {
 		res = test_refresh_keeps_identity();
 	}
 	if (res == TEST_SUCCESS) {
+		res = test_refresh_latches_closing_halves();
+	}
+	if (res == TEST_SUCCESS) {
 		res = test_first_write_copies();
 	}
 	if (res == TEST_SUCCESS) {
 		res = test_promotion_keeps_identity();
+	}
+	if (res == TEST_SUCCESS) {
+		res = test_promotion_latches_closing_halves();
 	}
 
 	dataplane_ut_free(ut);

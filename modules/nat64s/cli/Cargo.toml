@@ -16,6 +16,7 @@ clap_complete.workspace = true
 prost.workspace = true
 tonic.workspace = true
 serde = { workspace = true, features = ["derive"] }
+humantime.workspace = true
 serde_yaml.workspace = true
 
 [build-dependencies]

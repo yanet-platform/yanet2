@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package modules.nat64s.controlplane.nat64spb.v1;
 
+import "common/commonpb/v1/ipaddr.proto";
 import "common/commonpb/v1/ipv4addr.proto";
 import "common/commonpb/v1/ipv6prefix.proto";
 
@@ -21,12 +22,62 @@ service NAT64sService {
   // DeleteConfig removes the named config when it is no longer referenced
   // by any pipeline.
   rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse) {}
+
+  // ShowSessions streams the live sessions of the named config's session
+  // map, a page per message, until a page without a continuation.
+  rpc ShowSessions(ShowSessionsRequest) returns (stream SessionsPage) {}
 }
 
 message ListConfigsRequest {}
 
 // ListConfigsResponse contains existing configurations.
 message ListConfigsResponse { repeated string configs = 1; }
+
+// ShowSessionsRequest names the config whose sessions to stream. An
+// unknown config fails the whole stream before any page.
+message ShowSessionsRequest {
+  string name = 1;
+  // Sessions per page; the server clamps it to its own maximum.
+  uint32 page_size = 2;
+}
+
+// Session is one live session as the control plane read it: a snapshot
+// the dataplane may already have refreshed or expired by the time it is
+// received.
+message Session {
+  // IP protocol number; ICMP for both ICMP families.
+  uint32 proto = 1;
+  // The client's original IPv6 flow.
+  common.commonpb.v1.IPAddress client_addr = 2;
+  uint32 client_port = 3;
+  // The remote side as the client addressed it: the NAT64 prefix
+  // followed by the remote IPv4 address.
+  common.commonpb.v1.IPAddress remote_addr = 4;
+  uint32 remote_port = 5;
+  // The public identity the flow translates to.
+  common.commonpb.v1.IPv4Address external_addr = 6;
+  uint32 external_port = 7;
+  // Set once the remote has answered the TCP session, with its SYN.
+  bool established = 8;
+  // Set once that end has sent a FIN or an RST.
+  bool client_closed = 9;
+  bool remote_closed = 10;
+  // Dataplane timestamps in nanoseconds.
+  uint64 created_at = 11;
+  uint64 updated_at = 12;
+  uint64 expires_at = 13;
+}
+
+// SessionsPage is one page of a session dump. The server resumes the
+// walk itself; the stream ends after the page that reaches the end of
+// the table, so a caller only reads until the stream closes.
+message SessionsPage {
+  repeated Session sessions = 1;
+  // The dataplane instant, in nanoseconds on the dataplane's clock, that
+  // the page's sessions were judged live at: the base a reader subtracts
+  // each session's timestamps from. It is the same on every page.
+  uint64 now = 2;
+}
 
 // ShowConfigRequest requests the current configuration.
 message ShowConfigRequest { string name = 1; }
@@ -68,6 +119,10 @@ message Config {
   // the idle established connection's longer lifetime; zero selects the
   // default, and 65535 is the largest value.
   uint32 tcp_established_timeout = 8;
+  // The timeout in seconds of a TCP session both ends have closed — the
+  // transitory lifetime RFC 6146 3.5.2.2 gives it before the mapping is
+  // released; zero selects the default.
+  uint32 tcp_transitory_timeout = 9;
   MTUConfig mtu = 4;
   PortRange port_range = 5;
   // Name of the linked nat64state_map object, the instance's session

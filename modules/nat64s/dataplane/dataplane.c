@@ -302,6 +302,14 @@ nat64s_tcp_establishes_wan(struct packet *packet) {
 	return (nat64s_tcp_flags(packet) & RTE_TCP_SYN_FLAG) != 0;
 }
 
+// Whether the packet's sender closes its half of the TCP session: a FIN
+// or an RST from either end (RFC 6146 3.5.2.2).
+static inline bool
+nat64s_tcp_closes(struct packet *packet) {
+	return (nat64s_tcp_flags(packet) & (RTE_TCP_FIN_FLAG | RTE_TCP_RST_FLAG)
+	       ) != 0;
+}
+
 // The configured NAT64 prefix a destination embeds under, or NULL when
 // it embeds under none: with several prefixes configured, each session
 // uses the one its destination actually sits under.
@@ -1114,28 +1122,70 @@ nat64s_entry_established(fwmap_t *layer, int64_t idx) {
 	return stored != NULL && stored->tcp_established;
 }
 
+// Whether the entry an insert just stored has its client's half closed.
+static inline bool
+nat64s_entry_lan_closed(fwmap_t *layer, int64_t idx) {
+	const struct nat64state_value *stored =
+		(const struct nat64state_value *)fwmap_get_value(
+			layer, (uint32_t)idx
+		);
+	return stored != NULL && stored->lan_closed;
+}
+
+// Whether the entry an insert just stored has its remote's half closed.
+static inline bool
+nat64s_entry_wan_closed(fwmap_t *layer, int64_t idx) {
+	const struct nat64state_value *stored =
+		(const struct nat64state_value *)fwmap_get_value(
+			layer, (uint32_t)idx
+		);
+	return stored != NULL && stored->wan_closed;
+}
+
 // The session as the packet at hand sees it, with the lifetimes the
-// configuration gives its two states.
+// configuration gives its three states.
 struct nat64s_session_view {
 	uint64_t worker_idx;
 	uint64_t now;
-	// Turned true once an entry is found latched, for the entries
-	// refreshed after it.
+	// The latched state as the packet sees it: turned on once an entry
+	// is found latched, for the entries refreshed after it.
 	bool established;
+	bool lan_closed;
+	bool wan_closed;
 	uint64_t general_ttl;
 	uint64_t established_ttl;
+	uint64_t transitory_ttl;
 };
 
-// Insert or refresh one entry of a session on the lifetime its latch
-// calls for.
+static inline uint64_t
+nat64s_view_ttl(const struct nat64s_session_view *view) {
+	if (view->lan_closed && view->wan_closed) {
+		return view->transitory_ttl;
+	}
+	return view->established ? view->established_ttl : view->general_ttl;
+}
+
+static inline void
+nat64s_view_state(
+	struct nat64s_session_view *view, struct nat64state_value *entry
+) {
+	entry->tcp_established = view->established;
+	entry->lan_closed = view->lan_closed;
+	entry->wan_closed = view->wan_closed;
+	entry->last_ttl = nat64s_view_ttl(view);
+}
+
+// Insert or refresh one entry of a session on the lifetime its latched
+// state calls for.
 //
-// A packet of the session's other side can establish the session between
-// this packet's lookup and this insert; the merge then keeps the latch but
-// takes this packet's shorter lifetime. The entry is therefore read back
-// under the insert's lock and, latched while the packet saw the session
-// unestablished, inserted again on the established timeout. The session
-// reads as established from then on, for the entries refreshed after this
-// one. A failed insert releases its bucket's lock and reports false.
+// A packet of the session's other side can establish the session, or
+// close its half of it, between this packet's lookup and this insert; the
+// merge then keeps the latched state but takes this packet's lifetime. The
+// entry is therefore read back under the insert's lock and, latched into
+// a state of another lifetime than the packet saw, inserted again on that
+// lifetime. The session reads in that state from then on, for the entries
+// refreshed after this one. A failed insert releases its bucket's lock and
+// reports false.
 static inline bool
 nat64s_insert_latched(
 	fwtable_t *table,
@@ -1143,10 +1193,8 @@ nat64s_insert_latched(
 	struct nat64state_value *entry,
 	struct nat64s_session_view *view
 ) {
-	uint64_t ttl =
-		view->established ? view->established_ttl : view->general_ttl;
-	entry->tcp_established = view->established;
-	entry->last_ttl = ttl;
+	nat64s_view_state(view, entry);
+	uint64_t ttl = entry->last_ttl;
 	fwmap_t *layer = ATOMIC_ADDR_OF(&table->head);
 	rwlock_t *lock = NULL;
 	int64_t idx = fwtable_insert(
@@ -1156,22 +1204,28 @@ nat64s_insert_latched(
 		nat64s_insert_unlock(lock);
 		return false;
 	}
-	bool latched = ATOMIC_ADDR_OF(&table->head) == layer &&
-		       nat64s_entry_established(layer, idx);
+	bool same_layer = ATOMIC_ADDR_OF(&table->head) == layer;
+	bool established = same_layer && nat64s_entry_established(layer, idx);
+	bool lan_closed = same_layer && nat64s_entry_lan_closed(layer, idx);
+	bool wan_closed = same_layer && nat64s_entry_wan_closed(layer, idx);
 	rwlock_write_unlock(lock);
 
-	if (!latched || view->established) {
+	bool advanced = (established && !view->established) ||
+			(lan_closed && !view->lan_closed) ||
+			(wan_closed && !view->wan_closed);
+	if (!advanced) {
 		return true;
 	}
-	view->established = true;
-	entry->tcp_established = true;
-	entry->last_ttl = view->established_ttl;
+	view->established = view->established || established;
+	view->lan_closed = view->lan_closed || lan_closed;
+	view->wan_closed = view->wan_closed || wan_closed;
+	nat64s_view_state(view, entry);
 	lock = NULL;
 	if (fwtable_insert(
 		    table,
 		    view->worker_idx,
 		    view->now,
-		    view->established_ttl,
+		    entry->last_ttl,
 		    key,
 		    entry,
 		    &lock
@@ -1270,6 +1324,10 @@ nat64s_handle_v6(
 	rwlock_t *lock = NULL;
 	void *found = NULL;
 	bool from_stale = false;
+	// The sending end closes its half with this packet; the other end's
+	// half is whatever the session already carries.
+	bool lan_closed = proto == IPPROTO_TCP && nat64s_tcp_closes(packet);
+	bool wan_closed = false;
 	bool created = fwtable_lookup(
 			       prepared->lan.table,
 			       now,
@@ -1285,8 +1343,10 @@ nat64s_handle_v6(
 		value.port = existing->port;
 		// Establishment latches, and only the remote's answer latches
 		// it: until then the session ages on the general timeout,
-		// whatever its client sends.
+		// whatever its client sends. The closing halves latch as well.
 		established = existing->tcp_established;
+		lan_closed = lan_closed || existing->lan_closed;
+		wan_closed = existing->wan_closed;
 		memcpy(value.prefix, existing->prefix, NAT64S_PREFIX_LEN);
 		nat64s_lookup_unlock(lock);
 		if (!nat64s_session_served(config, value.ip4, value.prefix)) {
@@ -1324,17 +1384,27 @@ nat64s_handle_v6(
 	memcpy(value.prefix, prefix, NAT64S_PREFIX_LEN);
 	value.updated_at = now;
 	value.tcp_established = established;
-	value.last_ttl =
-		nat64state_entry_ttl(proto, established, &config->timeouts);
+	value.lan_closed = lan_closed;
+	value.wan_closed = wan_closed;
+	value.last_ttl = nat64state_entry_ttl(
+		proto, established, lan_closed && wan_closed, &config->timeouts
+	);
 	uint64_t ttl = (uint64_t)value.last_ttl;
 	struct nat64s_session_view view = {
 		.worker_idx = worker_idx,
 		.now = now,
 		.established = established,
-		.general_ttl =
-			nat64state_entry_ttl(proto, false, &config->timeouts),
-		.established_ttl =
-			nat64state_entry_ttl(proto, true, &config->timeouts),
+		.lan_closed = lan_closed,
+		.wan_closed = wan_closed,
+		.general_ttl = nat64state_entry_ttl(
+			proto, false, false, &config->timeouts
+		),
+		.established_ttl = nat64state_entry_ttl(
+			proto, true, false, &config->timeouts
+		),
+		.transitory_ttl = nat64state_entry_ttl(
+			proto, false, true, &config->timeouts
+		),
 	};
 
 	// Both directions are refreshed on every packet: return traffic only
@@ -1390,6 +1460,8 @@ nat64s_handle_v6(
 	wan_value.updated_at = now;
 	wan_value.last_ttl = ttl;
 	wan_value.tcp_established = established;
+	wan_value.lan_closed = lan_closed;
+	wan_value.wan_closed = wan_closed;
 	memcpy(wan_value.prefix, prefix, NAT64S_PREFIX_LEN);
 	wan_value.cli_port = sport;
 	memcpy(wan_value.src6, src6, sizeof(src6));
@@ -1444,24 +1516,31 @@ nat64s_handle_v6(
 		     nat64s_wan_entry_owned(wan_layer, wan_idx, &identity);
 	bool latched =
 		same_layer && nat64s_entry_established(wan_layer, wan_idx);
+	bool lan_latched =
+		same_layer && nat64s_entry_lan_closed(wan_layer, wan_idx);
+	bool wan_latched =
+		same_layer && nat64s_entry_wan_closed(wan_layer, wan_idx);
 	rwlock_write_unlock(lock);
 	if (!owned) {
 		nat64s_stats_bump(prepared, NAT64S_INSERT_FAILED);
 		return -1;
 	}
 
-	if (latched && !established) {
-		// Established by the session's other side since this packet's
-		// lookup: inserted again on the established timeout.
-		view.established = true;
-		wan_value.tcp_established = true;
-		wan_value.last_ttl = view.established_ttl;
+	if ((latched && !established) || (lan_latched && !lan_closed) ||
+	    (wan_latched && !wan_closed)) {
+		// Established, or half closed, by the session's other side
+		// since this packet's lookup: inserted again on that state's
+		// lifetime.
+		view.established = view.established || latched;
+		view.lan_closed = view.lan_closed || lan_latched;
+		view.wan_closed = view.wan_closed || wan_latched;
+		nat64s_view_state(&view, &wan_value);
 		lock = NULL;
 		if (fwtable_insert(
 			    prepared->wan.table,
 			    worker_idx,
 			    now,
-			    view.established_ttl,
+			    wan_value.last_ttl,
 			    &wan_key,
 			    &wan_value,
 			    &lock
@@ -1545,6 +1624,8 @@ nat64s_handle_v4(
 	uint8_t prefix[NAT64S_PREFIX_LEN];
 	uint16_t cli_port = session->cli_port;
 	bool established = session->tcp_established;
+	bool lan_closed = session->lan_closed;
+	bool wan_closed = session->wan_closed;
 	rte_memcpy(src6, session->src6, sizeof(src6));
 	rte_memcpy(prefix, session->prefix, sizeof(prefix));
 	nat64s_lookup_unlock(lock);
@@ -1553,17 +1634,25 @@ nat64s_handle_v4(
 		return -1;
 	}
 
-	// Establishment latches here too: the remote's SYN answering the
-	// handshake moves the session onto the established timeout.
+	// Two states are decided from this packet, each with its lifetime:
+	// the remote's SYN answering the handshake establishes the session,
+	// and the remote's FIN or RST closes the remote's half of it.
 	struct nat64s_session_view view = {
 		.worker_idx = worker_idx,
 		.now = now,
 		.established =
 			established || nat64s_tcp_establishes_wan(packet),
-		.general_ttl =
-			nat64state_entry_ttl(proto, false, &config->timeouts),
-		.established_ttl =
-			nat64state_entry_ttl(proto, true, &config->timeouts),
+		.lan_closed = lan_closed,
+		.wan_closed = wan_closed || nat64s_tcp_closes(packet),
+		.general_ttl = nat64state_entry_ttl(
+			proto, false, false, &config->timeouts
+		),
+		.established_ttl = nat64state_entry_ttl(
+			proto, true, false, &config->timeouts
+		),
+		.transitory_ttl = nat64state_entry_ttl(
+			proto, false, true, &config->timeouts
+		),
 	};
 
 	// The packet translates before anything is refreshed, under the port
@@ -1614,7 +1703,9 @@ nat64s_handle_v4(
 	// The client's next packet then finds this entry and refreshes it
 	// instead of creating a session, so the SYN-only rule for a new
 	// session does not apply to it: the wan lookup this path already
-	// made is what proves the session exists.
+	// made is what proves the session exists. The closing halves go
+	// along, so a session the lan side has not seen for a while still
+	// ages as a half-closed or a closed one.
 	if (prepared->lan.table != NULL) {
 		// An echo's original flow carried its own identifier as both
 		// ports.

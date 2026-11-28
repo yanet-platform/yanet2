@@ -268,6 +268,7 @@ nat64s_module_config_update(
 	// resolves each knob's zero to that knob's own default.
 	config->timeouts.timeout = update->timeouts.timeout;
 	config->timeouts.tcp_established = update->timeouts.tcp_established;
+	config->timeouts.tcp_transitory = update->timeouts.tcp_transitory;
 
 	// Zero selects the defaults; the translation core's length
 	// arithmetic assumes a nonzero limit, and holds the IPv6 difference

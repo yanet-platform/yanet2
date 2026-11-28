@@ -1,6 +1,7 @@
 package nat64s
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/yanet-platform/yanet2/controlplane/crud"
@@ -17,6 +18,16 @@ type Backend interface {
 	Update(name string, config *NAT64sConfig) (crud.Handle, error)
 	// Delete removes a module config.
 	Delete(name string) error
+	// Sessions returns one page of the named config's live sessions and
+	// the cursor to resume from. A cursor of zero starts at the
+	// beginning; an empty page ends the dump.
+	//
+	// Expiry is judged at the instant the caller passes, so every page of
+	// one dump agrees on which sessions are live.
+	Sessions(name string, cursor int64, now uint64, count uint32) ([]cnat64s.Session, int64, error)
+	// DataplaneTime returns the dataplane's clock, or false when the
+	// dataplane is not running.
+	DataplaneTime() (uint64, bool)
 }
 
 type backend struct {
@@ -104,4 +115,23 @@ func (m *backend) Delete(name string) error {
 		m.maps.Release(name, mapName)
 	}
 	return nil
+}
+
+// ErrNoSessionMap reports a config that links no session map.
+var ErrNoSessionMap = errors.New("config links no session map")
+
+func (m *backend) Sessions(
+	name string, cursor int64, now uint64, count uint32,
+) ([]cnat64s.Session, int64, error) {
+	// A dump creates nothing: it reads the map the config published, and
+	// a config that links none has no sessions to show.
+	mapName := m.maps.MapOf(name)
+	if mapName == "" {
+		return nil, cursor, ErrNoSessionMap
+	}
+	return m.maps.ReadSessions(mapName, cursor, now, count)
+}
+
+func (m *backend) DataplaneTime() (uint64, bool) {
+	return m.agent.DPConfig().CurrentTime()
 }
