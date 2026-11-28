@@ -51,6 +51,11 @@ crate-type = ["cdylib"]
 required-features = ["plugin"]
 
 [[example]]
+name = "hosts_dp"
+crate-type = ["cdylib"]
+required-features = ["plugin"]
+
+[[example]]
 name = "fixture_state_dp"
 crate-type = ["cdylib"]
 required-features = ["plugin"]

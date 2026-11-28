@@ -3,7 +3,6 @@
 package sdkfixture
 
 import (
-	"errors"
 	"fmt"
 	"sync/atomic"
 	"unsafe"
@@ -14,13 +13,9 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
 )
 
-// ErrInvalidArgument marks a request no memory state satisfies: a part
-// larger than the largest block.
-var ErrInvalidArgument = errors.New("invalid argument")
-
 const (
 	// stateRegionLen is the count of values of a worker's region of a
-	// state object, as the fixture api builds one.
+	// state object.
 	stateRegionLen = 2
 	// heldName and heldValues are the state object's gauge: its name in
 	// the object's own registry and its one value.
@@ -47,9 +42,8 @@ type stateObject struct {
 }
 
 // NewStateObject builds a state object named name of count slots in the
-// agent's memory, as the fixture api's build of the state object does:
-// slot n holds seed + n, wrapping, and each worker's slot and both
-// values of its region hold the seed, beside the object's gauge.
+// agent's memory: slot n holds seed + n, wrapping, and each worker's slot
+// and both values of its region hold the seed, beside the object's gauge.
 //
 // A name its field cannot hold, and slots past the largest block, are
 // refused before anything is allocated. A failure frees what the build
@@ -100,12 +94,10 @@ func buildState(object *stateObject, workers, seed, count uint64) error {
 	context := &object.Header.Entity.MemoryContext
 	body := &object.Body
 	body.Seed = seed
-	slots, ok := shmalloc.AllocArray[atomic.Uint64](context, count)
-	if !ok {
-		return fmt.Errorf("slots: %w", shmalloc.ErrNoMemory)
+	slots, err := newSlice(context, &body.Slots, count)
+	if err != nil {
+		return fmt.Errorf("slots: %w", err)
 	}
-	body.Slots.Ptr.Set(unsafe.SliceData(slots))
-	body.Slots.Len = count
 	for idx := range slots {
 		slots[idx].Store(seed + uint64(idx))
 	}
@@ -212,7 +204,7 @@ func newRegions[T any](context *layout.MemoryContext, field *PerWorkerSlice[T], 
 func destroyState(object *stateObject) {
 	context := &object.Header.Entity.MemoryContext
 	body := &object.Body
-	shmalloc.FreeArray(context, unsafe.Slice(body.Slots.Ptr.Get(), body.Slots.Len))
+	freeSlice(context, &body.Slots)
 	freeSlots(context, &body.Workers)
 	freeRegions(context, &body.Regions)
 
@@ -241,4 +233,91 @@ func freeRegions[T any](context *layout.MemoryContext, field *PerWorkerSlice[T])
 		}
 	}
 	shmalloc.FreeArray(context, entries)
+}
+
+// StateShape is the shape of a state object, as one query reads it: its
+// seed, its number of slots, and the workers and values per worker of
+// its regions.
+type StateShape struct {
+	Seed      uint64
+	Slots     uint64
+	Workers   uint64
+	RegionLen uint64
+}
+
+// stateOf returns the body of a state object.
+func stateOf(object *layout.CpObject) *StateConfig {
+	return &(*stateObject)(unsafe.Pointer(object)).Body
+}
+
+// stateSlots returns the slots of a state object.
+func stateSlots(state *StateConfig) []atomic.Uint64 {
+	return unsafe.Slice(state.Slots.Ptr.Get(), state.Slots.Len)
+}
+
+// stateSlot returns slot index of a state object, which may be
+// published; an index past the slots is refused.
+func stateSlot(object *layout.CpObject, index uint64) (*atomic.Uint64, error) {
+	slots := stateSlots(stateOf(object))
+	if index >= uint64(len(slots)) {
+		return nil, fmt.Errorf("slot %d of a state object of %d slots: %w", index, len(slots), ErrInvalidArgument)
+	}
+	return &slots[index], nil
+}
+
+// StateSlot returns the value of slot index of a state object, which may
+// be published.
+func StateSlot(object *layout.CpObject, index uint64) (uint64, error) {
+	slot, err := stateSlot(object, index)
+	if err != nil {
+		return 0, err
+	}
+	return slot.Load(), nil
+}
+
+// StateAdd adds delta to slot index of a state object, which may be
+// published, and returns the sum, wrapping.
+func StateAdd(object *layout.CpObject, index, delta uint64) (uint64, error) {
+	slot, err := stateSlot(object, index)
+	if err != nil {
+		return 0, err
+	}
+	return slot.Add(delta), nil
+}
+
+// StateSeed returns the seed a state object was built from.
+func StateSeed(object *layout.CpObject) uint64 {
+	return stateOf(object).Seed
+}
+
+// StateValues writes the values of a state object's slots, from the
+// first, into as many places as values has, and returns the number of
+// slots; the places past the slots end up zero.
+func StateValues(object *layout.CpObject, values []uint64) uint64 {
+	return readSlots(stateOf(object), values)
+}
+
+// readSlots writes the values of the slots into the places and returns
+// the number of slots, zeroing the places past them.
+func readSlots(state *StateConfig, values []uint64) uint64 {
+	slots := stateSlots(state)
+	clear(values)
+	for idx := range min(len(values), len(slots)) {
+		values[idx] = slots[idx].Load()
+	}
+	return uint64(len(slots))
+}
+
+// ReadStateShape writes the shape of a state object into shape and
+// returns its number of slots, the length of the places StateValues fills
+// whole.
+func ReadStateShape(object *layout.CpObject, shape *StateShape) uint64 {
+	state := stateOf(object)
+	*shape = StateShape{
+		Seed:      state.Seed,
+		Slots:     state.Slots.Len,
+		Workers:   state.Regions.Workers,
+		RegionLen: state.Regions.Len,
+	}
+	return shape.Slots
 }

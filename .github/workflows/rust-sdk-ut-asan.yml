@@ -29,10 +29,13 @@ on:
       - "lib/**.h"
       - "bindings/go/cerrors/**"
       - "bindings/go/dataplane_ut/**"
-      - "common/go/dataplane/**"
+      - "common/commonpb/**"
+      - "common/go/**"
+      - "controlplane/configstore/**"
+      - "controlplane/crud/**"
       - "controlplane/ffi/**"
       - "controlplane/native/**"
-      - "devices/plain/bindings/go/cplain/**"
+      - "tests/functional/framework/**"
       - "**/meson.build"
       - "meson_options.txt"
       - "Makefile"
@@ -79,7 +82,7 @@ jobs:
     env:
       # The Makefile runs just these Go packages, and no meson tests: the
       # fixture tests and the generated test of the fixture's Go views.
-      GO_TEST_PACKAGES: ./bindings/rust/yanet-sdk-fixture-api/bindings/go/cfixture ./controlplane/native/sdk/...
+      GO_TEST_PACKAGES: ./bindings/rust/yanet-sdk-fixture/tests/dataplane ./controlplane/native/sdk/...
       # Pinned with the rustfmt nightly, see rust-miri.yml.
       ASAN_TOOLCHAIN: nightly-2026-10-22
     steps:

@@ -46,6 +46,9 @@ var (
 	// ErrObjectLinked marks a delete of an object a module of the
 	// published generation links; C refuses it as busy.
 	ErrObjectLinked = errors.New("linked by a published module")
+	// ErrUnknownType marks a configuration of a module, object or device
+	// type the dataplane did not load; C refuses it without a kind.
+	ErrUnknownType = errors.New("unknown type")
 )
 
 // Deliver hands a published generation's contexts to the workers of a

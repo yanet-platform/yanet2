@@ -1,6 +1,6 @@
 //go:build sdk_rust_fixtures
 
-package cfixture_test
+package dataplane_test
 
 import (
 	"strings"
@@ -8,16 +8,29 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
-	"github.com/yanet-platform/yanet2/bindings/rust/yanet-sdk-fixture-api/bindings/go/cfixture"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/objects/ring/bindings/go/cring"
+	"github.com/yanet-platform/yanet2/controlplane/native/agent"
+	"github.com/yanet-platform/yanet2/controlplane/native/cpconfig"
+	"github.com/yanet-platform/yanet2/controlplane/native/layout"
+	"github.com/yanet-platform/yanet2/controlplane/native/sdk/sdkfixture"
+	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
 )
 
-// withRing also loads the ring object type, an object type other than the
+// ringType is the type of the ring object, an object type other than the
 // state's.
+const ringType = "ring"
+
+// withRing also loads the ring object type.
 func withRing(config *dataplaneut.Config) {
-	config.ObjectsToLoad = append(config.ObjectsToLoad, cring.ObjectType)
+	config.ObjectsToLoad = append(config.ObjectsToLoad, ringType)
+}
+
+// buildStash builds a stash configuration named name linking the state object
+// named state over the agent, without registering it for cleanup.
+func buildStash(owner *agent.Agent, name, state string) (*moduleConfig, error) {
+	module, err := sdkfixture.NewStashConfig(owner, name, state)
+	return moduleHandle(module, err, sdkfixture.FreeStashConfig)
 }
 
 // stashInstance builds a stash configuration named name linking the state
@@ -25,7 +38,7 @@ func withRing(config *dataplaneut.Config) {
 func (m *bed) stashInstance(name, state string) *instance {
 	m.t.Helper()
 
-	config, err := cfixture.NewStashConfig(m.agent, name, state)
+	config, err := buildStash(m.agent, name, state)
 	require.NoError(m.t, err)
 	m.freeAtEnd(config)
 	return &instance{moduleType: "stash", name: name, config: config}
@@ -33,7 +46,7 @@ func (m *bed) stashInstance(name, state string) *instance {
 
 // servedStash publishes a state object named state from seed 10 and serves a
 // stash linking it before a forwarding instance.
-func servedStash(t *testing.T) (*bed, *cfixture.StateObject) {
+func servedStash(t *testing.T) (*bed, *stateObject) {
 	t.Helper()
 
 	bed, object, _ := servedStashInstance(t)
@@ -41,17 +54,10 @@ func servedStash(t *testing.T) (*bed, *cfixture.StateObject) {
 }
 
 // servedStashInstance is servedStash that also returns the stash instance.
-func servedStashInstance(t *testing.T) (*bed, *cfixture.StateObject, *instance) {
+func servedStashInstance(t *testing.T) (*bed, *stateObject, *instance) {
 	t.Helper()
 
-	return servedStashBy(t, rustStateBuilder)
-}
-
-// servedStashBy is servedStashInstance over the builder.
-func servedStashBy(t *testing.T, builder stateBuilder) (*bed, *cfixture.StateObject, *instance) {
-	t.Helper()
-
-	bed := newStateBed(t, builder)
+	bed := newBed(t)
 	object := bed.state("state", 10)
 	bed.publishObjects(object)
 	stash := bed.stashInstance("stash", "state")
@@ -64,9 +70,9 @@ func servedStashBy(t *testing.T, builder stateBuilder) (*bed, *cfixture.StateObj
 func Test_Stash_Build_OverlongStateName_IsInvalidArgument(t *testing.T) {
 	bed := newBed(t)
 
-	_, err := cfixture.NewStashConfig(bed.agent, "stash", strings.Repeat("s", ffi.MaxObjectNameLen))
+	_, err := buildStash(bed.agent, "stash", strings.Repeat("s", len(layout.CpObject{}.Name)))
 
-	require.ErrorIs(t, err, ffi.ErrInvalidArgument)
+	require.ErrorIs(t, err, cpconfig.ErrInvalidName)
 }
 
 // Test_Stash_Build_OverlongStateName_ReturnsMemoryToBaseline verifies that a
@@ -74,10 +80,10 @@ func Test_Stash_Build_OverlongStateName_IsInvalidArgument(t *testing.T) {
 func Test_Stash_Build_OverlongStateName_ReturnsMemoryToBaseline(t *testing.T) {
 	bed := newBed(t)
 
-	_, err := cfixture.NewStashConfig(bed.agent, "stash", strings.Repeat("s", ffi.MaxObjectNameLen))
+	_, err := buildStash(bed.agent, "stash", strings.Repeat("s", len(layout.CpObject{}.Name)))
 
 	require.Error(t, err)
-	require.Equal(t, bed.baseline, bed.agent.BlockAllocatorFreeSize())
+	require.Equal(t, bed.baseline, freeSize(bed.agent))
 }
 
 // Test_Stash_Build_LongestStateName_IsAccepted verifies that a link to an
@@ -85,10 +91,25 @@ func Test_Stash_Build_OverlongStateName_ReturnsMemoryToBaseline(t *testing.T) {
 func Test_Stash_Build_LongestStateName_IsAccepted(t *testing.T) {
 	bed := newBed(t)
 
-	config, err := cfixture.NewStashConfig(bed.agent, "stash", strings.Repeat("s", ffi.MaxObjectNameLen-1))
+	config, err := buildStash(bed.agent, "stash", strings.Repeat("s", len(layout.CpObject{}.Name)-1))
 
 	require.NoError(t, err)
 	require.NoError(t, config.Free())
+}
+
+// Test_Stash_Build_EachAllocationRefused_ReturnsMemoryToBaseline verifies
+// that a build refused at any of its allocations refuses as exhausted and
+// gives back all it took.
+func Test_Stash_Build_EachAllocationRefused_ReturnsMemoryToBaseline(t *testing.T) {
+	bed := newBed(t)
+
+	sweepAllocations(t, bed.agent, func(owner *agent.Agent) (func() error, error) {
+		config, err := buildStash(owner, "stash", "state")
+		if err != nil {
+			return nil, err
+		}
+		return config.Free, nil
+	})
 }
 
 // Test_Stash_Install_ObjectUnpublished_IsFailedPrecondition verifies that a
@@ -97,9 +118,9 @@ func Test_Stash_Install_ObjectUnpublished_IsFailedPrecondition(t *testing.T) {
 	bed := newBed(t)
 	stash := bed.stashInstance("stash", "state")
 
-	err := bed.agent.UpdateModules([]ffi.ModuleConfig{stash.config.AsFFIModule()})
+	err := bed.updateModules(stash)
 
-	require.ErrorIs(t, err, ffi.ErrFailedPrecondition)
+	require.ErrorIs(t, kindOf(err), cerrors.FailedPrecondition)
 }
 
 // Test_Stash_Install_ObjectUnpublished_ReturnsMemoryToBaseline verifies that a
@@ -107,11 +128,11 @@ func Test_Stash_Install_ObjectUnpublished_IsFailedPrecondition(t *testing.T) {
 func Test_Stash_Install_ObjectUnpublished_ReturnsMemoryToBaseline(t *testing.T) {
 	bed := newBed(t)
 	stash := bed.stashInstance("stash", "state")
-	require.Error(t, bed.agent.UpdateModules([]ffi.ModuleConfig{stash.config.AsFFIModule()}))
+	require.Error(t, bed.updateModules(stash))
 
 	require.NoError(t, stash.config.Free())
 
-	require.Equal(t, bed.baseline, bed.agent.BlockAllocatorFreeSize())
+	require.Equal(t, bed.baseline, freeSize(bed.agent))
 }
 
 // Test_Stash_Install_ObjectOfAnotherType_IsFailedPrecondition verifies that a
@@ -119,15 +140,15 @@ func Test_Stash_Install_ObjectUnpublished_ReturnsMemoryToBaseline(t *testing.T) 
 // name does not satisfy it.
 func Test_Stash_Install_ObjectOfAnotherType_IsFailedPrecondition(t *testing.T) {
 	bed := newBed(t, withRing)
-	ring, err := cring.NewObject(bed.agent, "state", 64, cring.DefaultPublishBatch)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = ring.Free() })
-	require.NoError(t, ring.Publish())
+	ring := shmalloc.AllocNode[layout.CpObject](&bed.agent.Agent.MemoryContext, 0)
+	require.NotNil(t, ring)
+	require.NoError(t, cpconfig.InitObject(ring, bed.agent, ringType, "state"))
+	require.NoError(t, cpconfig.UpdateObjects(bed.instance, []*layout.CpObject{ring}, bed.deliver()))
 	stash := bed.stashInstance("stash", "state")
 
-	err = bed.agent.UpdateModules([]ffi.ModuleConfig{stash.config.AsFFIModule()})
+	err := bed.updateModules(stash)
 
-	require.ErrorIs(t, err, ffi.ErrFailedPrecondition)
+	require.ErrorIs(t, kindOf(err), cerrors.FailedPrecondition)
 }
 
 // Test_Stash_DeleteObject_Linked_IsBusy verifies that an object a published
@@ -138,9 +159,9 @@ func Test_Stash_DeleteObject_Linked_IsBusy(t *testing.T) {
 	bed.publishObjects(object)
 	bed.publishModules(bed.stashInstance("stash", "state"))
 
-	err := bed.agent.DeleteObject(cfixture.StateType, "state")
+	err := bed.deleteState("state")
 
-	require.ErrorIs(t, err, ffi.ErrBusy)
+	require.ErrorIs(t, err, cpconfig.ErrObjectLinked)
 }
 
 // Test_Stash_DeleteObject_Linked_KeepsTheObjectServed verifies that a refused
@@ -148,7 +169,7 @@ func Test_Stash_DeleteObject_Linked_IsBusy(t *testing.T) {
 // linking it.
 func Test_Stash_DeleteObject_Linked_KeepsTheObjectServed(t *testing.T) {
 	bed, object := servedStash(t)
-	require.ErrorIs(t, bed.agent.DeleteObject(cfixture.StateType, "state"), ffi.ErrBusy)
+	require.ErrorIs(t, bed.deleteState("state"), cpconfig.ErrObjectLinked)
 
 	bed.run(0, arpFrames(1)...)
 
@@ -163,7 +184,7 @@ func Test_Stash_DeleteObject_Unlinked_Succeeds(t *testing.T) {
 	bed.publishObjects(bed.state("other", 20))
 	bed.publishModules(bed.stashInstance("stash", "other"))
 
-	err := bed.agent.DeleteObject(cfixture.StateType, "state")
+	err := bed.deleteState("state")
 
 	require.NoError(t, err)
 }
@@ -172,12 +193,7 @@ func Test_Stash_DeleteObject_Unlinked_Succeeds(t *testing.T) {
 // packet, the seed the linked object prepared for the worker to the slot its
 // first byte selects.
 func Test_Stash_Run_WritesTheLinkedSlots(t *testing.T) {
-	forEachStateBuilder(t, stashRunWritesTheLinkedSlots)
-}
-
-// stashRunWritesTheLinkedSlots runs its test's scenario over a builder.
-func stashRunWritesTheLinkedSlots(t *testing.T, builder stateBuilder) {
-	bed, object, _ := servedStashBy(t, builder)
+	bed, object, _ := servedStashInstance(t)
 
 	bed.run(0, arpFrames(6)...)
 
@@ -187,17 +203,8 @@ func stashRunWritesTheLinkedSlots(t *testing.T, builder stateBuilder) {
 // Test_Stash_Run_ObjectWithoutSlots_PassesEveryPacket verifies that the
 // module passes the packets on when the linked object has no slot to write.
 func Test_Stash_Run_ObjectWithoutSlots_PassesEveryPacket(t *testing.T) {
-	forEachStateBuilder(t, stashRunObjectWithoutSlotsPassesEveryPacket)
-}
-
-// stashRunObjectWithoutSlotsPassesEveryPacket runs its test's scenario over a
-// builder.
-func stashRunObjectWithoutSlotsPassesEveryPacket(t *testing.T, builder stateBuilder) {
-	bed := newStateBed(t, builder)
-	object, err := builder(bed, "state", 10, 0)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = object.Free() })
-	bed.publishObjects(object)
+	bed := newBed(t)
+	bed.publishObjects(bed.stateOf("state", 10, 0))
 	bed.serveBeforeForward(bed.stashInstance("stash", "state"))
 	frames := arpFrames(2)
 
@@ -231,16 +238,10 @@ func Test_Stash_Run_AfterObjectReplace_WritesTheNewObject(t *testing.T) {
 }
 
 // Test_Stash_ObjectReplace_ReleasesTheOldObject verifies that an object
-// replaced under a configuration linking it is freed, gives back what its
-// build took, and a second free does nothing.
+// replaced under a configuration linking it is freed and gives back what its
+// build took.
 func Test_Stash_ObjectReplace_ReleasesTheOldObject(t *testing.T) {
-	forEachStateBuilder(t, stashObjectReplaceReleasesTheOldObject)
-}
-
-// stashObjectReplaceReleasesTheOldObject runs its test's scenario over a
-// builder.
-func stashObjectReplaceReleasesTheOldObject(t *testing.T, builder stateBuilder) {
-	bed, old, _ := servedStashBy(t, builder)
+	bed, old, _ := servedStashInstance(t)
 	before := bed.used()
 	replacement := bed.state("state", 20)
 	cost := bed.used() - before
@@ -248,10 +249,8 @@ func stashObjectReplaceReleasesTheOldObject(t *testing.T, builder stateBuilder) 
 	published := bed.used()
 
 	require.NoError(t, old.Free())
-	freed := bed.used()
-	require.NoError(t, old.Free())
 
-	require.Equal(t, []uint64{published - cost, published - cost}, []uint64{freed, bed.used()})
+	require.Equal(t, published-cost, bed.used())
 }
 
 // Test_Stash_ConfigReplace_KeepsTheObjectState verifies that the state of a
@@ -272,12 +271,7 @@ func Test_Stash_ConfigReplace_KeepsTheObjectState(t *testing.T) {
 // slots start at: two packets on worker 1 add 11 and 12, one on worker 2 adds
 // 11.
 func Test_Stash_ObjectWorkerSlot_CountsPerWorker(t *testing.T) {
-	forEachStateBuilder(t, stashObjectWorkerSlotCountsPerWorker)
-}
-
-// stashObjectWorkerSlotCountsPerWorker runs its test's scenario over a builder.
-func stashObjectWorkerSlotCountsPerWorker(t *testing.T, builder stateBuilder) {
-	bed, _, stash := servedStashBy(t, builder)
+	bed, _, stash := servedStashInstance(t)
 
 	bed.run(1, arpFrames(2)...)
 	bed.run(2, arpFrames(1)...)
@@ -308,13 +302,7 @@ func Test_Stash_ObjectWorkerSlot_SurvivesConfigReplace(t *testing.T) {
 // place: each packet adds one to both values, which start at the seed 10, so
 // two packets on worker 1 sum to 22 and 24, and one on worker 2 to 22.
 func Test_Stash_ObjectWorkerSlice_FillsTheRegionOfItsWorker(t *testing.T) {
-	forEachStateBuilder(t, stashObjectWorkerSliceFillsTheRegionOfItsWorker)
-}
-
-// stashObjectWorkerSliceFillsTheRegionOfItsWorker runs its test's
-// scenario over a builder.
-func stashObjectWorkerSliceFillsTheRegionOfItsWorker(t *testing.T, builder stateBuilder) {
-	bed, _, stash := servedStashBy(t, builder)
+	bed, _, stash := servedStashInstance(t)
 
 	bed.run(1, arpFrames(2)...)
 	bed.run(2, arpFrames(1)...)
@@ -391,7 +379,7 @@ func gaugeFrames(hold, release int) [][]byte {
 func (m *bed) stateGauge(state string) [][]uint64 {
 	m.t.Helper()
 
-	return m.objectCounter(cfixture.StateType, state, "held")
+	return m.objectCounter(sdkfixture.StateType, state, "held")
 }
 
 // Test_Stash_ObjectGauge_KeepsTheLevelOfEachWorker verifies that the module
@@ -399,13 +387,7 @@ func (m *bed) stateGauge(state string) [][]uint64 {
 // three packets held on worker 1 leave 3, two held and one let go on worker 2
 // leave 1, and no other worker's value moves.
 func Test_Stash_ObjectGauge_KeepsTheLevelOfEachWorker(t *testing.T) {
-	forEachStateBuilder(t, stashObjectGaugeKeepsTheLevelOfEachWorker)
-}
-
-// stashObjectGaugeKeepsTheLevelOfEachWorker runs its test's scenario over a
-// builder.
-func stashObjectGaugeKeepsTheLevelOfEachWorker(t *testing.T, builder stateBuilder) {
-	bed, _, _ := servedStashBy(t, builder)
+	bed, _, _ := servedStashInstance(t)
 
 	bed.run(1, gaugeFrames(3, 0)...)
 	bed.run(2, gaugeFrames(2, 1)...)
@@ -430,13 +412,7 @@ func Test_Stash_ObjectGauge_ReadsTheWorkersOwnValue(t *testing.T) {
 // that replaces the one that counted: two held before the replacement and one
 // after it make 3 on worker 1.
 func Test_Stash_ObjectGauge_CarriesOverToASameNameObject(t *testing.T) {
-	forEachStateBuilder(t, stashObjectGaugeCarriesOverToASameNameObject)
-}
-
-// stashObjectGaugeCarriesOverToASameNameObject runs its test's scenario over a
-// builder.
-func stashObjectGaugeCarriesOverToASameNameObject(t *testing.T, builder stateBuilder) {
-	bed, _, _ := servedStashBy(t, builder)
+	bed, _, _ := servedStashInstance(t)
 	bed.run(1, gaugeFrames(2, 0)...)
 	bed.publishObjects(bed.state("state", 20))
 
@@ -451,7 +427,7 @@ func stashObjectGaugeCarriesOverToASameNameObject(t *testing.T, builder stateBui
 func Test_Stash_PublishedSeed_ReadsTheLinkedObject(t *testing.T) {
 	bed, _ := servedStash(t)
 
-	seed, err := cfixture.PublishedSeed(bed.agent, "stash", cfixture.FaultNone)
+	seed, err := sdkfixture.PublishedSeed(bed.instance, "stash")
 
 	require.NoError(t, err)
 	require.Equal(t, uint64(10), seed)
@@ -464,9 +440,9 @@ func Test_Stash_PublishedSeed_Unpublished_IsNotFound(t *testing.T) {
 	bed := newBed(t)
 	bed.stashInstance("stash", "state")
 
-	_, err := cfixture.PublishedSeed(bed.agent, "stash", cfixture.FaultNone)
+	_, err := sdkfixture.PublishedSeed(bed.instance, "stash")
 
-	require.ErrorIs(t, err, ffi.ErrNotFound)
+	require.ErrorIs(t, kindOf(err), cerrors.NotFound)
 }
 
 // Test_Stash_PublishedValues_AfterObjectReplace_ReadsTheNewObject verifies
@@ -477,7 +453,7 @@ func Test_Stash_PublishedValues_AfterObjectReplace_ReadsTheNewObject(t *testing.
 	bed.publishObjects(bed.state("state", 20))
 	values := make([]uint64, stateSlots)
 
-	_, err := cfixture.PublishedValues(bed.agent, "stash", values)
+	_, err := sdkfixture.PublishedValues(bed.instance, "stash", values)
 	require.NoError(t, err)
 
 	require.Equal(t, []uint64{20, 21, 22, 23}, values)
@@ -488,10 +464,10 @@ func Test_Stash_PublishedValues_AfterObjectReplace_ReadsTheNewObject(t *testing.
 func Test_Stash_PublishedLinks_NamesTheLinkedObject(t *testing.T) {
 	bed, _ := servedStash(t)
 
-	links, err := cfixture.PublishedLinks(bed.agent, "stash")
+	links, err := sdkfixture.PublishedLinks(bed.instance, "stash")
 
 	require.NoError(t, err)
-	require.Equal(t, []cfixture.LinkedObject{{Type: cfixture.StateType, Name: "state"}}, links)
+	require.Equal(t, []sdkfixture.LinkedObject{{Type: sdkfixture.StateType, Name: "state"}}, links)
 }
 
 // Test_Stash_PublishedSeed_ReleasesThePin verifies that a read releases its
@@ -499,20 +475,8 @@ func Test_Stash_PublishedLinks_NamesTheLinkedObject(t *testing.T) {
 // once.
 func Test_Stash_PublishedSeed_ReleasesThePin(t *testing.T) {
 	bed, _, stash := servedStashInstance(t)
-	_, err := cfixture.PublishedSeed(bed.agent, "stash", cfixture.FaultNone)
+	_, err := sdkfixture.PublishedSeed(bed.instance, "stash")
 	require.NoError(t, err)
-
-	bed.publishModules(bed.stashInstance("stash", "state"))
-
-	require.NoError(t, stash.config.Free())
-}
-
-// Test_Stash_PublishedSeed_Panic_ReleasesThePin verifies that a read that
-// panics releases its pin of the generation as it unwinds.
-func Test_Stash_PublishedSeed_Panic_ReleasesThePin(t *testing.T) {
-	bed, _, stash := servedStashInstance(t)
-	_, err := cfixture.PublishedSeed(bed.agent, "stash", cfixture.FaultPanic)
-	require.ErrorContains(t, err, "panic: fixture fault")
 
 	bed.publishModules(bed.stashInstance("stash", "state"))
 

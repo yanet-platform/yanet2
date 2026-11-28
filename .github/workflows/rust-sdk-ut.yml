@@ -6,8 +6,8 @@ name: Rust SDK dataplane tests
 #
 # They are separate from build.yml, which excludes bindings/rust and installs no
 # Rust toolchain, while the meson build of these tests runs cargo. A change to
-# what the archive, the plugins and the tests are built from or link re-runs
-# the job. It writes its ccache and cargo caches from main only, since a cache
+# what the plugins and the tests are built from or link re-runs the job. It
+# writes its ccache and cargo caches from main only, since a cache
 # written on a pull-request ref is readable only from that pull request. The
 # Go build cache has profiles of its own, since the cgo package of the
 # fixtures is not in build.yml's.
@@ -27,10 +27,13 @@ on:
       - "lib/**.h"
       - "bindings/go/cerrors/**"
       - "bindings/go/dataplane_ut/**"
-      - "common/go/dataplane/**"
+      - "common/commonpb/**"
+      - "common/go/**"
+      - "controlplane/configstore/**"
+      - "controlplane/crud/**"
       - "controlplane/ffi/**"
       - "controlplane/native/**"
-      - "devices/plain/bindings/go/cplain/**"
+      - "tests/functional/framework/**"
       - "**/meson.build"
       - "meson_options.txt"
       - "Makefile"
@@ -58,10 +61,13 @@ on:
       - "lib/**.h"
       - "bindings/go/cerrors/**"
       - "bindings/go/dataplane_ut/**"
-      - "common/go/dataplane/**"
+      - "common/commonpb/**"
+      - "common/go/**"
+      - "controlplane/configstore/**"
+      - "controlplane/crud/**"
       - "controlplane/ffi/**"
       - "controlplane/native/**"
-      - "devices/plain/bindings/go/cplain/**"
+      - "tests/functional/framework/**"
       - "**/meson.build"
       - "meson_options.txt"
       - "Makefile"
@@ -102,7 +108,7 @@ jobs:
     env:
       # The Makefile runs just these Go packages, and no meson tests: the
       # fixture tests and the generated test of the fixture's Go views.
-      GO_TEST_PACKAGES: ./bindings/rust/yanet-sdk-fixture-api/bindings/go/cfixture ./controlplane/native/sdk/...
+      GO_TEST_PACKAGES: ./bindings/rust/yanet-sdk-fixture/tests/dataplane ./controlplane/native/sdk/...
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -142,6 +148,11 @@ jobs:
 
       - name: Test
         run: make test-only
+
+      # The fixture builders are native control-plane code: they build without
+      # cgo, as the rest of it does.
+      - name: Build the fixture builders without cgo
+        run: CGO_ENABLED=0 go build -tags sdk_rust_fixtures ./controlplane/native/sdk/...
 
       - name: Configure lint
         run: echo "CGO_CPPFLAGS=$(cat build/yanet_cgo_cppflags)" >> "$GITHUB_ENV"

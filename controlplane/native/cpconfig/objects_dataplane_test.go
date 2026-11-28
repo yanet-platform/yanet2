@@ -410,7 +410,7 @@ func Test_InitObject_UnknownTypeLeavesAgentAsFound(t *testing.T) {
 
 	err := cpconfig.InitObject(object, memory.owner, "ring", "state")
 
-	require.ErrorContains(t, err, `object type "ring" not found`)
+	require.ErrorIs(t, err, cpconfig.ErrUnknownType)
 	require.Same(t, firstChild, owner.MemoryContext.FirstChild.Get(), "the agent's memory contexts")
 	require.Equal(t, free, shmalloc.FreeSize(&owner.BlockAllocator), "the agent's free bytes")
 }

@@ -82,5 +82,5 @@ option(
   'sdk_rust_fixtures',
   type: 'feature',
   value: 'disabled',
-  description: 'Configure the Rust SDK fixture targets (the api archive and the plugins the Go tests load); needs cargo and a control-plane build.',
+  description: 'Configure the Rust SDK fixture targets (the plugins the Go tests load and the Go views of their configurations); needs cargo and a control-plane build.',
 )

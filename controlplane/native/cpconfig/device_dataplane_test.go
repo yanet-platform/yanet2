@@ -240,7 +240,7 @@ func Test_InitDevice_RefusesUnknownDeviceType(t *testing.T) {
 
 	err := cpconfig.InitDevice(&device, memory.owner, "vlan", cpconfig.DeviceConfig{Name: "port0"})
 
-	require.ErrorContains(t, err, `device type "vlan" not found`)
+	require.ErrorIs(t, err, cpconfig.ErrUnknownType)
 	require.Equal(t, free, shmalloc.FreeSize(&memory.owner.Agent.BlockAllocator), "the agent's free bytes")
 }
 

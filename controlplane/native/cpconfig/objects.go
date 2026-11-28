@@ -30,7 +30,7 @@ func InitObject(object *layout.CpObject, owner *agent.Agent, objectType, name st
 	*object = layout.CpObject{}
 	index, ok := lookupDataplaneObject(owner.Instance.Dp, objectType)
 	if !ok {
-		return fmt.Errorf("object type %q not found in dataplane config", objectType)
+		return fmt.Errorf("%w: object type %q not found in dataplane config", ErrUnknownType, objectType)
 	}
 	object.DpObjectIdx = index
 	shm.CopyString(object.Type[:], objectType)
