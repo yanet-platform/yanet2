@@ -101,7 +101,6 @@ func (m *Generation) Counters(predicates []CounterTag) ([]CounterGroup, error) {
 
 	var groups []CounterGroup
 	groupIndex := map[string]int{}
-	// counterIndex holds each group's counter positions by name.
 	var counterIndex []map[string]int
 	for worker := range min(workerCount, len(roots)) {
 		root := roots[worker].Get()
