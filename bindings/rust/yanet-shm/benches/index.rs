@@ -2,8 +2,8 @@
 //! and over the whole index, at 16 000 and 128 000 keys of each address
 //! family.
 //!
-//! The keys are placed in their slots as the build of a configuration places
-//! them, and every iteration looks one key up as a handler does. The keys of
+//! The keys are placed in their slots as the control plane places them, and
+//! every iteration looks one key up as a handler does. The keys of
 //! the iterations come in turn from a ring drawn at random from the keys, so
 //! a figure is the time of one lookup.
 
@@ -14,7 +14,7 @@ use core::{
 };
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use yanet_shm::index::{HashIndexKey, HashIndexRef, HashIndexSlot, place, slots_for};
+use yanet_shm::index::{HashIndexKey, HashIndexRef, HashIndexSlot};
 
 /// The sizes of the indexes measured.
 const SIZES: [u32; 2] = [16_000, 128_000];
@@ -56,10 +56,22 @@ fn ipv6(network: u32, idx: u32) -> Ipv6Addr {
 
 /// The slots of an index of the first `count` keys of network 10, each naming
 /// its own number.
+///
+/// The index has the least power of two of slots that leaves half of them
+/// free, and a key takes the first free slot from its Fibonacci-hashed home
+/// slot on.
 fn slots<K: HashIndexKey>(count: u32, key: fn(u32, u32) -> K) -> Vec<HashIndexSlot<K>> {
-    let records: Vec<_> = (0..count).map(|idx| (key(10, idx), idx)).collect();
-    let mut slots = vec![HashIndexSlot::FREE; slots_for(records.len()).expect("a count that fits")];
-    place(&mut slots, &records).expect("distinct keys");
+    let len = (2 * count as usize).next_power_of_two();
+    let mut slots = vec![HashIndexSlot::FREE; len];
+    for idx in 0..count {
+        let key = key(10, idx);
+        let hash = key.bits().wrapping_mul(0x9e37_79b9_7f4a_7c15);
+        let mut at = (hash >> (u64::BITS - len.trailing_zeros())) as usize;
+        while slots[at] != HashIndexSlot::FREE {
+            at = (at + 1) & (len - 1);
+        }
+        slots[at] = HashIndexSlot::new(key, idx);
+    }
     slots
 }
 

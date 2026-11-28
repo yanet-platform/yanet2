@@ -3,9 +3,9 @@
 
 use core::mem::{align_of, size_of};
 
-use yanet_shm::opaque::Opaque;
+use yanet_shm::{opaque::Opaque, shm::ShmLayout};
 
-use crate::{bindings, cp::Build, dp::cx::ObjectCommitCx};
+use crate::{bindings, dp::cx::ObjectCommitCx};
 
 /// A shared object written in Rust: named state that outlives the module
 /// configurations linking it, as C's `cp_object`.
@@ -13,8 +13,8 @@ use crate::{bindings, cp::Build, dp::cx::ObjectCommitCx};
 /// An object is built once by the control plane, published into a
 /// generation by name, and replaced by publishing another of the same type
 /// and name; module configurations come and go around it. One impl feeds both
-/// the object's plugin, which registers the type with the dataplane, and its
-/// api crate, which builds it.
+/// the object's plugin, which registers the type with the dataplane, and the
+/// layout description the control plane builds it to.
 ///
 /// An object type ships in the plugin of a module that lists it in its
 /// `export_module!`, or in a plugin of its own through `export_object!`, as
@@ -24,9 +24,10 @@ pub trait Object: Sized + 'static {
     /// Object type name, as the dataplane registers the type and as the
     /// object's plugin exports it.
     const TYPE: &'static str;
-    /// Configuration body, the object's state; the control plane builds it
-    /// with [`Build`] and may read it while it is published, so it is `Sync`.
-    type Config: Build + Sync;
+    /// Configuration body, the object's state; the control plane builds it as
+    /// its [`ShmLayout`] describes it and may read it while it is published,
+    /// so it is `Sync`.
+    type Config: ShmLayout + Sync;
 
     /// Value of each worker context of the object in a generation, made by
     /// the prepare step and read by the modules linking the object; the unit

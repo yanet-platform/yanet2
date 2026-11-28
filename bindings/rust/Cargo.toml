@@ -6,8 +6,6 @@
 resolver = "3"
 members = [
     "yanet-sdk",
-    "yanet-sdk-api",
-    "yanet-sdk-build",
     "yanet-sdk-derive",
     "yanet-sdk-fixture",
     "yanet-sdk-plugin",
@@ -21,8 +19,6 @@ members = [
 # runs, so a plain cargo build or test leaves it out.
 default-members = [
     "yanet-sdk",
-    "yanet-sdk-api",
-    "yanet-sdk-build",
     "yanet-sdk-derive",
     "yanet-sdk-fixture",
     "yanet-sdk-plugin",
@@ -74,20 +70,12 @@ wildcard_imports = "deny"
 broken_intra_doc_links = "deny"
 private_intra_doc_links = "deny"
 
-# Plugins and the api archive build with thin LTO, the rest of the workspace
-# without.
+# Plugins build with thin LTO, the rest of the workspace without.
 #
 # The precompiled `core` references the unwinder's personality routine, which
-# a `no_std` plugin does not define and the loader would fail to resolve; and
-# an api staticlib bundles the module crate's handlers, which call the
-# dataplane's packet routines, though no export reaches them. Whole-program
-# optimisation drops both. A `no_std` cdylib cannot unwind, while an api
-# staticlib needs unwinding for the panic guards of its exports.
+# a `no_std` plugin does not define and the loader would fail to resolve.
+# Whole-program optimisation drops it. A `no_std` cdylib cannot unwind.
 [profile.plugin]
 inherits = "release"
 lto = "thin"
 panic = "abort"
-
-[profile.api]
-inherits = "release"
-lto = "thin"

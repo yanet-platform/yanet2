@@ -235,13 +235,10 @@ gate_sdk() {
 	else
 		skipped+=("cargo-shear (not installed)")
 	fi
-	step sdk-clippy "${sdk[@]}" CARGO_BUILD_WARNINGS=deny cargo "+$stable" clippy --workspace --exclude yanet-sdk-build --all-targets --locked --keep-going || return 1
-	step sdk-build-clippy "${sdk[@]}" CARGO_BUILD_WARNINGS=deny cargo "+$stable" clippy -p yanet-sdk-build --all-targets --locked --keep-going || return 1
+	step sdk-clippy "${sdk[@]}" CARGO_BUILD_WARNINGS=deny cargo "+$stable" clippy --workspace --all-targets --locked --keep-going || return 1
 	step sdk-clippy-plugin "${sdk[@]}" CARGO_BUILD_WARNINGS=deny cargo "+$stable" clippy --profile plugin -p yanet-sdk-fixture --features plugin --examples --locked --keep-going || return 1
-	step sdk-clippy-deps "${sdk[@]}" cargo "+$stable" clippy --workspace --exclude yanet-sdk-build --lib --locked -- -D unused_crate_dependencies || return 1
-	step sdk-build-clippy-deps "${sdk[@]}" cargo "+$stable" clippy -p yanet-sdk-build --lib --locked -- -D unused_crate_dependencies || return 1
-	step sdk-doc "${sdk[@]}" RUSTDOCFLAGS='-D warnings' cargo "+$stable" doc --workspace --exclude yanet-sdk-build --no-deps --locked --features yanet-sdk-testing/cp || return 1
-	step sdk-build-doc "${sdk[@]}" RUSTDOCFLAGS='-D warnings' cargo "+$stable" doc -p yanet-sdk-build --no-deps --locked || return 1
+	step sdk-clippy-deps "${sdk[@]}" cargo "+$stable" clippy --workspace --lib --locked -- -D unused_crate_dependencies || return 1
+	step sdk-doc "${sdk[@]}" RUSTDOCFLAGS='-D warnings' cargo "+$stable" doc --workspace --no-deps --locked || return 1
 	target="$(uname -m)-unknown-none"
 	if rustup target list --installed --toolchain "$stable" 2>/dev/null | grep -qx "$target"; then
 		step sdk-no-std "${sdk[@]}" cargo "+$stable" check --locked --target "$target" -p yanet-shm -p yanet-sys -p yanet-sdk -p yanet-sdk-plugin -p yanet-packet || return 1
@@ -250,8 +247,7 @@ gate_sdk() {
 	fi
 	step sdk-test "${sdk[@]}" PROPTEST_CASES=200 PROPTEST_RNG_SEED=19567271 cargo "+$stable" test --workspace --locked || return 1
 	step sdk-test-release "${sdk[@]}" cargo "+$stable" test -p yanet-sys --release --locked || return 1
-	step sdk-bench "${sdk[@]}" cargo "+$stable" test -p yanet-sys --bench dp --bench lookup --locked || return 1
-	step sdk-bench-release "${sdk[@]}" cargo "+$stable" test -p yanet-sys --release --bench lookup --locked || return 1
+	step sdk-bench "${sdk[@]}" cargo "+$stable" test -p yanet-sys --bench dp --locked || return 1
 
 	# The packet crate is meant to move to a repository of its own; rust-sdk.yml
 	# checks that by building a copy outside the workspace.
@@ -374,14 +370,10 @@ if [ "$c" = 1 ] || matching '(\.go$|^go\.(mod|sum)$|\.proto$)' >/dev/null; then 
 # The SDK workspace is not a member of the root one; as in CI, only its own
 # layer checks it.
 matching '(\.rs$|(^|/)Cargo\.(toml|lock)$|^\.rustfmt\.toml$|^\.cargo/|\.proto$)' | grep -qv '^bindings/rust/' && gate_rust
-# The SDK layer runs on the paths rust-sdk.yml lists and on the C inputs of
-# its bindings the workflow misses.
-#
-# The listed paths are the C headers, packet sources and build configuration
-# that feed its bindings and shims, and the workflow itself; the missed ones
-# are the agent API headers the bindings include and the classifier helper the
-# SDK tests compile.
-matching '(^bindings/rust/|^\.rustfmt\.toml$|^\.cargo/config\.toml$|^(api|common|lib)/.*\.h$|^lib/dataplane/packet/.*\.c$|^lib/classify/compiler/helper\.c$|^subprojects/dpdk$|(^|/)meson\.build$|^meson_options\.txt$|^\.github/workflows/rust-sdk\.yml$)' >/dev/null && gate_sdk
+# The SDK layer runs on the paths rust-sdk.yml lists: the C headers, packet
+# sources and build configuration that feed its bindings and shim, and the
+# workflow itself.
+matching '(^bindings/rust/|^\.rustfmt\.toml$|^\.cargo/config\.toml$|^(common|lib)/.*\.h$|^lib/dataplane/packet/.*\.c$|^subprojects/dpdk$|(^|/)meson\.build$|^meson_options\.txt$|^\.github/workflows/rust-sdk\.yml$)' >/dev/null && gate_sdk
 matching '(^|/)web/|^package(-lock)?\.json$' >/dev/null && gate_web
 matching '\.proto$' >/dev/null && step proto-lint make --no-print-directory proto-lint
 [ -n "$(git rev-list "$base"..HEAD)" ] && step commitlint lint/commit/commitlint.sh --range "$base..HEAD"

@@ -1,15 +1,11 @@
 //! Counters of a tagged registry picked by id: the handle a module's prepare
 //! step resolves for them over a hand-laid context, and the adds through it.
 
-use core::{
-    convert::Infallible,
-    mem::{offset_of, size_of},
-};
+use core::mem::{offset_of, size_of};
 
 use yanet_shm::{rel::RelPtr, shm::ShmLayout};
 use yanet_sys::{
     bindings,
-    cp::{Build, Init, MemoryContext, Owner, Place, Refusal},
     dp::{Batch, CommitCx, Cx, Module, TaggedCounters, TaggedCountersRef, Traffic, Verdict},
 };
 
@@ -25,18 +21,6 @@ struct Config {
 // SAFETY: a registry index and a number of counters of eight bytes, which
 // accept every bit pattern, with no padding and no drop.
 unsafe impl ShmLayout for Config {}
-
-// SAFETY: the configuration is laid out by hand and never built: its parts
-// cannot exist, so nothing is ever written, and it owns no block to free.
-unsafe impl Build for Config {
-    type Parts<'b, W: Owner> = Infallible;
-
-    fn write<'s, 'b, W: Owner>(parts: Infallible, _: Place<'s, 'b, Self, W>) -> Result<Init<'s, Self>, Refusal> {
-        match parts {}
-    }
-
-    unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
-}
 
 /// Adds each packet to the counter of id 0 through the handle its prepare
 /// step resolved, and passes the packets.

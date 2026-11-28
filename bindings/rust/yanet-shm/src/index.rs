@@ -1,10 +1,10 @@
-//! The slots of an exact-match index, their placement and their lookup.
+//! The slots of an exact-match index and their lookup.
 //!
 //! The index of a configuration names the position of a key in an array of
-//! the author's, or tells that no position has it. Its build places the keys
-//! of records, each key at most once and every position below `u32::MAX`,
-//! and the dataplane reads the slots through a [`HashIndexRef`] resolved for a
-//! batch.
+//! the author's, or tells that no position has it. The control plane places
+//! the keys of records, each key at most once and every position below
+//! `u32::MAX`, and the dataplane reads the slots through a [`HashIndexRef`]
+//! resolved for a batch.
 //!
 //! The slots are open addressing with linear probing over a power of two of
 //! them, at least half free, so that a walk ends at a free slot after a short
@@ -28,9 +28,7 @@ const FREE: u32 = u32::MAX;
 ///
 /// Equal keys must give equal bits, as a hash and an equality must agree for a
 /// map of the standard library. A key that breaks this makes an index that
-/// misses keys and lets a key given twice through, and nothing worse. A key
-/// whose code panics fails the build of an index, which then leaves nothing
-/// allocated.
+/// misses keys, and nothing worse.
 pub trait HashIndexKey: ShmLayout + Copy + Eq {
     /// The key a free slot holds.
     ///
@@ -40,7 +38,8 @@ pub trait HashIndexKey: ShmLayout + Copy + Eq {
 
     /// The bits of the key that pick its first slot.
     ///
-    /// The index mixes the bits itself, so a key gives them as they are.
+    /// The index mixes the bits itself, so a key gives them as they are. The
+    /// control plane places the key from the same bits.
     fn bits(self) -> u64;
 }
 
@@ -74,6 +73,11 @@ pub struct HashIndexSlot<K> {
 impl<K: HashIndexKey> HashIndexSlot<K> {
     /// A slot that holds no key.
     pub const FREE: Self = Self { key: K::UNSPECIFIED, position: FREE };
+
+    /// A slot that holds the key and names the position.
+    pub const fn new(key: K, position: u32) -> Self {
+        Self { key, position }
+    }
 }
 
 // SAFETY: a key of a fixed layout and a 32-bit word, both valid for every bit
@@ -96,15 +100,6 @@ unsafe impl<K: ShmLayout> ShmLayout for HashIndexSlot<K> {
     });
 }
 
-/// How many slots an index of the given number of records takes: a power of
-/// two that leaves at least half of them free.
-///
-/// `None` when the count overflows.
-#[doc(hidden)]
-pub fn slots_for(records: usize) -> Option<usize> {
-    records.checked_mul(2)?.checked_next_power_of_two()
-}
-
 /// An exact-match index resolved for the batch of one handler call.
 #[derive(Clone, Copy)]
 pub struct HashIndexRef<'g, K> {
@@ -112,7 +107,7 @@ pub struct HashIndexRef<'g, K> {
 }
 
 impl<'g, K: HashIndexKey> HashIndexRef<'g, K> {
-    /// The index over the slots that a build placed.
+    /// The index over the slots that the control plane placed.
     #[doc(hidden)]
     pub fn new(slots: &'g [HashIndexSlot<K>]) -> Self {
         Self { slots }
@@ -135,71 +130,6 @@ impl<'g, K: HashIndexKey> HashIndexRef<'g, K> {
     }
 }
 
-/// Why the records of a build do not make an index.
-#[doc(hidden)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Unplaced {
-    /// Two records give one key.
-    DuplicateKey {
-        /// The position of the record that holds the key.
-        first: u32,
-        /// The position of the record refused.
-        second: u32,
-    },
-    /// A record names the position that marks a free slot.
-    InvalidPosition,
-    /// The iterator yields fewer or more records than its declared length.
-    LengthMismatch,
-}
-
-/// Places the key of every record in a slot, in the order of the records.
-///
-/// The slots are free and number at least twice the records, as the count of
-/// an index gives them, so the walk of every key meets a free slot. On a
-/// refusal the slots hold the keys placed before it.
-#[doc(hidden)]
-pub fn place<K: HashIndexKey>(slots: &mut [HashIndexSlot<K>], records: &[(K, u32)]) -> Result<(), Unplaced> {
-    place_iter(slots, records.len(), records.iter().copied())
-}
-
-/// Places records in iterator order and checks their declared count.
-///
-/// The slots number at least twice the declared count. An empty input may
-/// have no slots. A refusal leaves the records placed before it in the slots.
-#[doc(hidden)]
-pub fn place_iter<K: HashIndexKey>(
-    slots: &mut [HashIndexSlot<K>],
-    len: usize,
-    mut records: impl Iterator<Item = (K, u32)>,
-) -> Result<(), Unplaced> {
-    debug_assert!(len == 0 || slots.len() > len, "a free slot is left for every key");
-    for _ in 0..len {
-        let (key, position) = records.next().ok_or(Unplaced::LengthMismatch)?;
-        if position == FREE {
-            return Err(Unplaced::InvalidPosition);
-        }
-        for at in probe(slots.len(), key) {
-            let Some(slot) = slots.get_mut(at) else {
-                break;
-            };
-            if slot.position == FREE {
-                *slot = HashIndexSlot { key, position };
-                break;
-            }
-            if slot.key == key {
-                return Err(Unplaced::DuplicateKey {
-                    first: slot.position,
-                    second: position,
-                });
-            }
-        }
-    }
-    if records.next().is_some() {
-        return Err(Unplaced::LengthMismatch);
-    }
-    Ok(())
-}
-
 /// The slots that the walk of a key visits, in order: every slot of an index
 /// of the given length once, from the key's home slot on.
 fn probe<K: HashIndexKey>(len: usize, key: K) -> impl Iterator<Item = usize> {
@@ -216,7 +146,7 @@ fn probe<K: HashIndexKey>(len: usize, key: K) -> impl Iterator<Item = usize> {
 mod tests {
     use core::net::Ipv4Addr;
 
-    use super::{HashIndexKey, HashIndexRef, HashIndexSlot, place, probe, slots_for};
+    use super::{HashIndexKey, HashIndexRef, HashIndexSlot, probe};
 
     /// The first `N` addresses whose walks start at the home slot of the
     /// address 0.0.0.1 in an index of the given length.
@@ -228,17 +158,9 @@ mod tests {
         core::array::from_fn(|_| keys.next().unwrap())
     }
 
-    /// An index over slots a placement filled.
+    /// An index over the slots.
     fn index<K: HashIndexKey>(slots: &[HashIndexSlot<K>]) -> HashIndexRef<'_, K> {
         HashIndexRef::new(slots)
-    }
-
-    #[test]
-    fn test_slots_for_leaves_half_of_the_slots_free() {
-        assert_eq!(Some(2), slots_for(1));
-        assert_eq!(Some(8), slots_for(3));
-        assert_eq!(Some(262_144), slots_for(128_000));
-        assert_eq!(None, slots_for(usize::MAX / 2 + 1));
     }
 
     #[test]
@@ -248,19 +170,6 @@ mod tests {
         assert_eq!(None, index(&slots).get(Ipv4Addr::UNSPECIFIED));
     }
 
-    /// verifies that keys with one home slot are all kept and all found.
-    #[test]
-    fn test_place_keeps_keys_of_one_home_slot() {
-        let mut slots = [HashIndexSlot::FREE; 8];
-        let [first, second, third] = colliding(slots.len());
-        assert_eq!(Ok(()), place(&mut slots, &[(first, 0), (second, 1), (third, 2)]));
-
-        assert_eq!(
-            [Some(0), Some(1), Some(2)],
-            [first, second, third].map(|key| index(&slots).get(key))
-        );
-    }
-
     /// verifies that a walk passes over the slots of other keys: a key whose
     /// home slot another key took is found, and an absent key with that home
     /// slot is not.
@@ -268,7 +177,9 @@ mod tests {
     fn test_get_passes_over_the_slots_of_other_keys() {
         let mut slots = [HashIndexSlot::FREE; 8];
         let [first, second, absent] = colliding(slots.len());
-        assert_eq!(Ok(()), place(&mut slots, &[(first, 0), (second, 1)]));
+        let home = probe(slots.len(), first).next().unwrap();
+        slots[home] = HashIndexSlot { key: first, position: 0 };
+        slots[(home + 1) % slots.len()] = HashIndexSlot { key: second, position: 1 };
 
         assert_eq!(Some(1), index(&slots).get(second));
         assert_eq!(None, index(&slots).get(absent));

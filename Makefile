@@ -138,6 +138,9 @@ CLI_RELEASE_BINARIES := $(addprefix $(RELEASE_DIR)/,$(CLI_BINARIES))
 	test-tsan \
 	test-functional \
 	bench \
+	bench-classify \
+	classify-lookup-trees \
+	test-classify-bench \
 	fuzz \
 	cli \
 	cli-build \
@@ -430,6 +433,28 @@ test-functional:
 bench:
 	$(MAKE) go-test-prepare
 	CGO_CPPFLAGS="$(strip $(CGO_CPPFLAGS) $(YANET_CGO_CPPFLAGS))" go test -run='^$$' -bench=. -benchmem ./bindings/go/dataplane_ut/... ./modules/acl/tests/functional/...
+
+# The file of the classifier trees the Rust lookup bench reads.
+CLASSIFY_LOOKUP_TREES = $(CURDIR)/build/classify-lookup-trees.bin
+
+# Lay out the classifier trees of the Rust lookup bench with the native Go
+# builder, which needs build/ configured with -Dsdk_rust_fixtures=enabled.
+classify-lookup-trees: native-layout
+	@grep -qs '^build sdk-rust-fixtures:' build/build.ninja || { echo "ERROR: build/ does not build the SDK fixtures; run 'meson configure build -Dsdk_rust_fixtures=enabled'"; exit 1; }
+	YANET_CLASSIFY_LOOKUP_TREES=$(CLASSIFY_LOOKUP_TREES) CGO_ENABLED=0 go test -tags=sdk_rust_fixtures -count=1 \
+		-run='^Test_BuildAssignClassifiers_LookupBenchTrees$$' ./controlplane/native/sdk/sdkfixture
+
+# Time the Rust SDK's classifier lookups over those trees.
+#
+# BENCH_ARGS go to criterion, e.g. BENCH_ARGS='--save-baseline main'.
+bench-classify: classify-lookup-trees
+	cd bindings/rust && YANET_CLASSIFY_LOOKUP_TREES=$(CLASSIFY_LOOKUP_TREES) $(CARGO) bench -p yanet-sys --bench lookup -- $(BENCH_ARGS)
+
+# Check the lookups of the bench, unoptimised and optimised and without timing
+# them, against the first rules a first-match scan in the Go test computes.
+test-classify-bench: classify-lookup-trees
+	cd bindings/rust && YANET_CLASSIFY_LOOKUP_TREES=$(CLASSIFY_LOOKUP_TREES) $(CARGO) test -p yanet-sys --bench lookup --locked
+	cd bindings/rust && YANET_CLASSIFY_LOOKUP_TREES=$(CLASSIFY_LOOKUP_TREES) $(CARGO) test -p yanet-sys --release --bench lookup --locked
 
 # Reconfigure an existing fuzz build so its Go targets keep current flags.
 fuzz:

@@ -1,48 +1,132 @@
-//! Classifier lookups over prebuilt trees, with oracle checks outside timing.
+//! Classifier lookups over trees the native Go control plane builds, with
+//! oracle checks outside timing.
+//!
+//! A Go test lays the trees out in one block with the assign fixture's
+//! builder and writes it to the file `YANET_CLASSIFY_LOOKUP_TREES` names; `make
+//! bench-classify` runs both steps. The block holds relative pointers only,
+//! so a copy at the same page alignment reads as the original. Its head
+//! carries the keys of each tree and the first rule each key matches, which
+//! the Go test computes by a first-match scan of the rules.
 
 extern crate alloc;
 
-#[path = "../tests/support/arena.rs"]
-mod arena;
-#[path = "../tests/support/classify.rs"]
-mod classify;
+use alloc::alloc::{alloc, handle_alloc_error};
+use core::{alloc::Layout, hint::black_box, mem::size_of, ptr::NonNull, time::Duration};
+use std::{env, fs};
 
-use core::{hint::black_box, time::Duration};
-
-use arena::ArenaOwner;
-use classify::{TestRule, any_or, build_any, build4, build6, edges, first, in4, in6, net4, net6};
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use yanet_sys::classify::{LineRange, Net4, Net6, PortRange, Rule};
+use yanet_sdk_testing::View;
+use yanet_shm::{
+    rel::{ShmBox, ShmSlice},
+    root::ShmRoot,
+};
+use yanet_sys::classify::{Decode, Join, LineAttr, Net4Attr, Net6Attr, PortAttr, Rule, Rules};
 
-/// Eight source networks with shared transport ranges and no fallback.
-fn rules4() -> Vec<TestRule<Net4>> {
-    (0..8)
-        .map(|index| TestRule {
-            src: vec![net4([10, index, 0, 0], 16)],
-            dst: vec![net4([172, 16, 0, 0], 12)],
-            protos: vec![LineRange { from: 6, to: 17 }],
-            ports: vec![PortRange {
-                from: 1000,
-                to: 2000 + u16::from(index) * 100,
-            }],
-        })
-        .collect()
+/// The environment variable that names the file of the trees.
+const TREES: &str = "YANET_CLASSIFY_LOOKUP_TREES";
+
+/// The alignment of the copy of the block: the Go test maps the block at the
+/// start of a page, so a copy at the start of a page keeps every block's
+/// alignment, up to a page.
+const PAGE: usize = 4096;
+
+/// The keys each tree is looked up at: one burst.
+const KEYS: usize = 32;
+
+/// The protocol and the destination port joined.
+type Transport = Join<LineAttr, PortAttr>;
+
+/// The tree of the IPv4 rules: the networks joined, against the transport.
+type Tree4 = Rules<Join<Net4Attr, Net4Attr>, Transport>;
+
+/// The tree of the IPv6 rules, shaped as the IPv4 one.
+type Tree6 = Rules<Join<Net6Attr, Net6Attr>, Transport>;
+
+/// The tree of the rules of either family, by protocol and port only.
+type TreeAny = Decode<Transport>;
+
+/// An IPv4 key: the addresses, the protocol and the destination port.
+#[repr(C)]
+struct Key4 {
+    src: [u8; 4],
+    dst: [u8; 4],
+    proto: u8,
+    port: u16,
 }
 
-/// Overlapping high halves whose constrained low halves require combination
-/// rows.
-fn rules6() -> Vec<TestRule<Net6>> {
-    (0..8)
-        .map(|index| TestRule {
-            src: vec![net6((0x2001_0db8_0000_0000u128 << 64) | (index << 32), 96)],
-            dst: vec![net6(0x2001_0db9_0000_0000u128 << 64, 64)],
-            protos: vec![LineRange { from: 6, to: 17 }],
-            ports: vec![PortRange {
-                from: 1000,
-                to: 2000 + index as u16 * 100,
-            }],
-        })
-        .collect()
+/// An IPv6 key.
+#[repr(C)]
+struct Key6 {
+    src: [u8; 16],
+    dst: [u8; 16],
+    proto: u8,
+    port: u16,
+}
+
+/// A key of the tree of either family.
+#[repr(C)]
+struct Key {
+    proto: u8,
+    port: u16,
+}
+
+/// The head of the block, as the Go test writes it: its own size, the
+/// trees, and the keys of each tree with the index of the first rule each
+/// matches, -1 for none.
+#[repr(C)]
+struct Head {
+    size: u64,
+    v4: ShmBox<Tree4>,
+    v6: ShmBox<Tree6>,
+    any: ShmBox<TreeAny>,
+    /// The actions of the assign configuration the trees are built for, which
+    /// the block leaves empty.
+    _actions: ShmSlice<u8>,
+    keys4: [Key4; KEYS],
+    want4: [i32; KEYS],
+    keys6: [Key6; KEYS],
+    want6: [i32; KEYS],
+    transport: [Key; KEYS],
+    want_any: [i32; KEYS],
+}
+
+/// A page-aligned copy of the block the file holds, leaked: its root and its
+/// head.
+///
+/// # Panics
+///
+/// When the file cannot be read or holds no head of this layout.
+fn load() -> (ShmRoot, &'static Head) {
+    let path = env::var_os(TREES)
+        .unwrap_or_else(|| panic!("{TREES} names no file of trees; run `make bench-classify` at the repository root"));
+    let bytes = fs::read(&path).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+    assert!(
+        bytes.len() >= size_of::<Head>(),
+        "{}: {} bytes hold no head",
+        path.display(),
+        bytes.len()
+    );
+    let layout = Layout::from_size_align(bytes.len(), PAGE).expect("block layout");
+    // SAFETY: the layout has a non-zero size, at least that of the head.
+    let base = NonNull::new(unsafe { alloc(layout) }).unwrap_or_else(|| handle_alloc_error(layout));
+    // SAFETY: the copy fills the fresh allocation, which is never freed.
+    unsafe { base.copy_from_nonoverlapping(NonNull::from(bytes.as_slice()).cast(), bytes.len()) };
+    // SAFETY: the allocation is aligned for the head, holds its bytes, every
+    // pattern of which its fields accept, and is never written again.
+    let head = unsafe { base.cast::<Head>().as_ref() };
+    assert_eq!(
+        size_of::<Head>() as u64,
+        head.size,
+        "{}: the head is of another layout; rebuild it with `make bench-classify`",
+        path.display()
+    );
+    (ShmRoot::from_mapping(base), head)
+}
+
+/// The indices of the first rules the Go test's first-match scan found,
+/// `None` for none.
+fn indices(want: &[i32]) -> Vec<Option<usize>> {
+    want.iter().map(|&rule| usize::try_from(rule).ok()).collect()
 }
 
 /// Measures the same key batch in scalar and burst form after checking both.
@@ -80,112 +164,51 @@ fn measure<K: Copy>(
 }
 
 fn lookup(criterion: &mut Criterion) {
-    let owner = ArenaOwner::new();
-    let free = owner.free_bytes();
-    let rules4 = rules4();
-    let rules6 = rules6();
-    let built4 = build4(&owner, &rules4);
-    let built6 = build6(&owner, &rules6);
-    let projection = (0..rules4.len()).map(|index| index % 2 == 1).collect::<Vec<_>>();
-    let decoded = build_any(&owner, &rules4, &projection);
-    let tree4 = owner.body(&built4).get(&owner);
-    let tree6 = owner.body(&built6).get(&owner);
-    let decode = owner.body(&decoded).get(&owner);
-    let (protos, ports) = edges(&rules4);
-    let transport = (0..32)
-        .map(|index| (protos[index % protos.len()], ports[index % ports.len()]))
-        .collect::<Vec<_>>();
-    let keys4 = transport
+    let (root, head) = load();
+    // SAFETY: the root covers the whole leaked copy of the block, whose
+    // trees the Go builder completed and nothing writes again.
+    let view = unsafe { View::new(root) };
+    let (tree4, tree6, decode) = (head.v4.get(&view), head.v6.get(&view), head.any.get(&view));
+    let keys4 = head
+        .keys4
         .iter()
-        .enumerate()
-        .map(|(index, &(proto, port))| {
-            let src = [10, (index % 10) as u8, 0, 1];
-            let dst = [172, 17, 0, 1];
-            ((src, dst), (proto, port))
-        })
+        .map(|key| ((key.src, key.dst), (key.proto, key.port)))
         .collect::<Vec<_>>();
-    let expected4 = transport
+    let keys6 = head
+        .keys6
         .iter()
-        .enumerate()
-        .map(|(index, &(proto, port))| {
-            let src = u32::from_be_bytes([10, (index % 10) as u8, 0, 1]);
-            let dst = u32::from_be_bytes([172, 17, 0, 1]);
-            first(
-                &rules4,
-                |rule| any_or(&rule.src, |net| in4(net, src)) && any_or(&rule.dst, |net| in4(net, dst)),
-                proto,
-                port,
-            )
-        })
+        .map(|key| ((key.src, key.dst), (key.proto, key.port)))
         .collect::<Vec<_>>();
-    let keys6 = transport
+    let transport = head
+        .transport
         .iter()
-        .enumerate()
-        .map(|(index, &(proto, port))| {
-            let src = (0x2001_0db8_0000_0000u128 << 64) | (((index % 10) as u128) << 32) | 1;
-            let dst = (0x2001_0db9_0000_0000u128 << 64) | 1;
-            ((src.to_be_bytes(), dst.to_be_bytes()), (proto, port))
-        })
-        .collect::<Vec<_>>();
-    let expected6 = keys6
-        .iter()
-        .map(|&((src, dst), (proto, port))| {
-            first(
-                &rules6,
-                |rule| {
-                    any_or(&rule.src, |net| in6(net, u128::from_be_bytes(src)))
-                        && any_or(&rule.dst, |net| in6(net, u128::from_be_bytes(dst)))
-                },
-                proto,
-                port,
-            )
-        })
-        .collect::<Vec<_>>();
-    let expected_decode = transport
-        .iter()
-        .map(|&(proto, port)| {
-            rules4.iter().enumerate().find_map(|(index, rule)| {
-                (projection[index]
-                    && any_or(&rule.protos, |range| {
-                        (range.from..=range.to).contains(&u32::from(proto))
-                    })
-                    && any_or(&rule.ports, |range| (range.from..=range.to).contains(&port)))
-                .then_some(index)
-            })
-        })
+        .map(|key| (key.proto, key.port))
         .collect::<Vec<_>>();
 
     measure(
         criterion,
         "rules4",
         &keys4,
-        &expected4,
-        |key| tree4.lookup(&owner, key),
-        |keys, output| tree4.lookup_burst(&owner, keys, |&key| key, output),
+        &indices(&head.want4),
+        |key| tree4.lookup(&view, key),
+        |keys, output| tree4.lookup_burst(&view, keys, |&key| key, output),
     );
     measure(
         criterion,
         "rules6",
         &keys6,
-        &expected6,
-        |key| tree6.lookup(&owner, key),
-        |keys, output| tree6.lookup_burst(&owner, keys, |&key| key, output),
+        &indices(&head.want6),
+        |key| tree6.lookup(&view, key),
+        |keys, output| tree6.lookup_burst(&view, keys, |&key| key, output),
     );
     measure(
         criterion,
         "decode",
         &transport,
-        &expected_decode,
-        |key| decode.lookup(&owner, key),
-        |keys, output| decode.lookup_burst(&owner, keys, |&key| key, output),
+        &indices(&head.want_any),
+        |key| decode.lookup(&view, key),
+        |keys, output| decode.lookup_burst(&view, keys, |&key| key, output),
     );
-    // SAFETY: each tree was built by this owner and no lookup remains live.
-    unsafe { built4.destroy(&owner) };
-    // SAFETY: as above, this tree has no remaining borrowers.
-    unsafe { built6.destroy(&owner) };
-    // SAFETY: as above, this decoding has no remaining borrowers.
-    unsafe { decoded.destroy(&owner) };
-    assert_eq!(free, owner.free_bytes());
 }
 
 criterion_group! {
