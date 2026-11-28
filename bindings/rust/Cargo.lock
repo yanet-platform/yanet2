@@ -840,16 +840,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "yanet-sdk-fixture-api"
-version = "0.8.0"
-dependencies = [
- "yanet-sdk",
- "yanet-sdk-api",
- "yanet-sdk-build",
- "yanet-sdk-fixture",
-]
-
-[[package]]
 name = "yanet-sdk-plugin"
 version = "0.8.0"
 dependencies = [

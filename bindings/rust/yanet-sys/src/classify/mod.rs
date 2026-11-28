@@ -14,8 +14,8 @@
 //!
 //! The compiles are C the shim compiles in, but the joins and the decode call
 //! the classification library's compiler (`lib/classify/compiler/helper.c`):
-//! a program that builds with them links that library, as the fixture api
-//! archive does in meson; a missing link shows only when the program links.
+//! a program that builds with them links that library; a missing link shows
+//! only when the program links.
 //!
 //! A ruleset is a slice with one slot per rule, `None` for a rule outside the
 //! projection a compile or a join covers, as C spells a projection with NULL

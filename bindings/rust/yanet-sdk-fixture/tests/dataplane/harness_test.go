@@ -1,6 +1,6 @@
 //go:build sdk_rust_fixtures
 
-package cfixture_test
+package dataplane_test
 
 import (
 	"os"
@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
-	"github.com/yanet-platform/yanet2/bindings/rust/yanet-sdk-fixture-api/bindings/go/cfixture"
+	"github.com/yanet-platform/yanet2/bindings/rust/yanet-sdk-fixture/tests/dataplane"
 )
 
 // startHarness starts a harness that loads the requested modules from the
@@ -33,11 +33,13 @@ func startHarness(t *testing.T, pluginDir string, modules ...string) (*dataplane
 }
 
 // moduleNames returns the names of the modules the harness has registered.
-func moduleNames(harness *dataplaneut.Harness) []string {
-	modules := harness.SharedMemory().DPConfig(0).Modules()
+func moduleNames(t *testing.T, harness *dataplaneut.Harness) []string {
+	t.Helper()
+
+	modules := harness.NativeInstance(t).DataplaneModules()
 	names := make([]string, 0, len(modules))
-	for idx := range modules {
-		names = append(names, modules[idx].Name())
+	for _, module := range modules {
+		names = append(names, module.Name)
 	}
 	return names
 }
@@ -46,19 +48,19 @@ func moduleNames(harness *dataplaneut.Harness) []string {
 // harness is asked for is loaded from the plugin of the directory and
 // registered.
 func Test_PluginDir_RequestedModule_IsRegistered(t *testing.T) {
-	harness, err := startHarness(t, cfixture.PluginDir, "fixture")
+	harness, err := startHarness(t, dataplane.PluginDir, "fixture")
 	require.NoError(t, err)
 
-	require.Contains(t, moduleNames(harness), "fixture")
+	require.Contains(t, moduleNames(t, harness), "fixture")
 }
 
 // Test_PluginDir_UnrequestedModule_IsNotRegistered verifies that a plugin in
 // the directory is not loaded when its module is not asked for.
 func Test_PluginDir_UnrequestedModule_IsNotRegistered(t *testing.T) {
-	harness, err := startHarness(t, cfixture.PluginDir)
+	harness, err := startHarness(t, dataplane.PluginDir)
 	require.NoError(t, err)
 
-	require.NotContains(t, moduleNames(harness), "fixture")
+	require.NotContains(t, moduleNames(t, harness), "fixture")
 }
 
 // Test_PluginDir_RequestedModuleWithoutPlugin_RefusesToStart verifies that the
@@ -78,7 +80,7 @@ func onlyJoinedPlugin(t *testing.T) func(*dataplaneut.Config) {
 	t.Helper()
 
 	dir := t.TempDir()
-	joined := filepath.Join(cfixture.PluginDir, "libstash_state_plugin.so")
+	joined := filepath.Join(dataplane.PluginDir, "libstash_state_plugin.so")
 	require.NoError(t, os.Symlink(joined, filepath.Join(dir, "libstash_dp.so")))
 	return func(config *dataplaneut.Config) {
 		config.PluginDir = dir

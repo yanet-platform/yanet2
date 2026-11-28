@@ -30,6 +30,16 @@ func (m *Harness) NativeAgent(t testing.TB, attached *ffi.Agent) *agent.Agent {
 	return nil
 }
 
+// NativeInstance returns the native view of the harness's instance, for
+// the native control plane to attach agents to and publish through.
+func (m *Harness) NativeInstance(t testing.TB) *zone.Instance {
+	t.Helper()
+	storage, err := zone.FromMemory(m.storage())
+	require.NoError(t, err)
+	require.NotEmpty(t, storage.Instances)
+	return storage.Instances[0]
+}
+
 // NativeDelivery returns the delivery that hands the harness's workers a
 // generation the native control plane published, for its update option;
 // a failed delivery fails the test.

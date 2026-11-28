@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
-	"unsafe"
 
 	"github.com/yanet-platform/yanet2/controlplane/native/agent"
 	"github.com/yanet-platform/yanet2/controlplane/native/classify"
@@ -58,13 +57,6 @@ type AssignRule struct {
 // transport is the joint of the protocol and the destination port.
 type transport = Join[layout.ClassifyAttrLine, layout.ClassifyAttrPort]
 
-// assignModule is the block of an assign configuration: the module
-// header, then the body.
-type assignModule struct {
-	Header layout.CpModule
-	Body   AssignConfig
-}
-
 // NewAssignConfig builds an assign configuration named name in the
 // agent's memory, as the SDK's build of the fixture's assign module
 // does: a classifier tree of each family's rules, one of the rules of
@@ -77,30 +69,15 @@ type assignModule struct {
 // took through the configuration's own free; an exhausted agent fails
 // with the allocator's out-of-memory error.
 func NewAssignConfig(owner *agent.Agent, name string, rules []AssignRule) (*layout.CpModule, error) {
-	if err := cpconfig.CheckModuleNames(assignType, name); err != nil {
-		return nil, err
-	}
 	for idx, rule := range rules {
 		if err := checkAssignRule(rule); err != nil {
 			return nil, fmt.Errorf("rule %d of assign module %q: %w", idx, name, err)
 		}
 	}
-
-	context := &owner.Agent.MemoryContext
-	config := shmalloc.AllocNode[assignModule](context, 0)
-	if config == nil {
-		return nil, fmt.Errorf("allocate assign module %q: %w", name, shmalloc.ErrNoMemory)
+	build := func(config *moduleBlock[AssignConfig]) error {
+		return buildAssign(config, rules)
 	}
-	config.Body = AssignConfig{}
-	if err := cpconfig.InitModule(&config.Header, owner, assignType, name); err != nil {
-		shmalloc.FreeNode(context, config, 0)
-		return nil, err
-	}
-	if err := buildAssign(config, rules); err != nil {
-		destroyAssign(config)
-		return nil, fmt.Errorf("build assign module %q: %w", name, err)
-	}
-	return &config.Header, nil
+	return newModule(owner, assignType, name, build, destroyAssign)
 }
 
 // FreeAssignConfig frees an assign configuration no generation holds.
@@ -108,13 +85,7 @@ func NewAssignConfig(owner *agent.Agent, name string, rules []AssignRule) (*layo
 // One a generation holds is refused as still referenced, and nothing is
 // freed.
 func FreeAssignConfig(module *layout.CpModule) error {
-	if err := cpconfig.TryDestroyModule(module); err != nil {
-		return err
-	}
-	owner := module.Entity.Agent.Get()
-	destroyAssign((*assignModule)(unsafe.Pointer(module)))
-	cpconfig.DestroyReleased(owner)
-	return nil
+	return freeModule(module, destroyAssign)
 }
 
 // checkAssignRule refuses a rule of an unknown family, and a range that
@@ -139,7 +110,7 @@ func checkAssignRule(rule AssignRule) error {
 
 // buildAssign builds the body: the classifiers of IPv4, IPv6 and either
 // family, then the actions.
-func buildAssign(config *assignModule, rules []AssignRule) error {
+func buildAssign(config *moduleBlock[AssignConfig], rules []AssignRule) error {
 	context := &config.Header.Entity.MemoryContext
 	body := &config.Body
 	if err := buildFamily(context, &body.V4, "assign v4", rules, membersOf(rules, AssignIPv4), compileNet4); err != nil {
@@ -151,12 +122,10 @@ func buildAssign(config *assignModule, rules []AssignRule) error {
 	if err := buildAny(context, &body.Any, rules, membersOf(rules, AssignAny)); err != nil {
 		return err
 	}
-	actions, ok := shmalloc.AllocArray[Action](context, uint64(len(rules)))
-	if !ok {
-		return fmt.Errorf("actions: %w", shmalloc.ErrNoMemory)
+	actions, err := newSlice(context, &body.Actions, uint64(len(rules)))
+	if err != nil {
+		return fmt.Errorf("actions: %w", err)
 	}
-	body.Actions.Ptr.Set(unsafe.SliceData(actions))
-	body.Actions.Len = uint64(len(actions))
 	for idx, rule := range rules {
 		id, err := cpconfig.RegisterCounter(&config.Header.CounterRegistry, rule.Counter, trafficValues)
 		if err != nil {
@@ -360,7 +329,7 @@ func newNode[T any](context *layout.MemoryContext, box *Box[T]) (*T, error) {
 
 // destroyAssign frees what the body holds in the SDK's release order,
 // field by field, then the header and the block.
-func destroyAssign(config *assignModule) {
+func destroyAssign(config *moduleBlock[AssignConfig]) {
 	context := &config.Header.Entity.MemoryContext
 	body := &config.Body
 	freeFamily(context, &body.V4, classify.FreeNet4)
@@ -369,11 +338,8 @@ func destroyAssign(config *assignModule) {
 		classify.FreeDecode(&node.Map)
 		freeTransport(context, &node.Input)
 	})
-	shmalloc.FreeArray(context, unsafe.Slice(body.Actions.Ptr.Get(), body.Actions.Len))
-
-	owner := config.Header.Entity.Agent.Get()
-	cpconfig.FiniModule(&config.Header)
-	shmalloc.FreeNode(&owner.MemoryContext, config, 0)
+	freeSlice(context, &body.Actions)
+	finiModule(config)
 }
 
 // freeFamily frees a family's classifier the box holds.

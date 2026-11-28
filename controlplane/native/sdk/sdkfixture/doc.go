@@ -7,7 +7,8 @@
 // a test against the same description in zz_layout_<arch>_test.go. Neither
 // file is committed.
 //
-// The native builders of the fixture modules' configurations and objects
-// name those views, so their files build only under the sdk_rust_fixtures
-// tag, which the Makefile passes where the build generates the views.
+// The native builders of the fixture modules' configurations and objects,
+// the state object's queries and the stash's published reads name those
+// views, so their files build only under the sdk_rust_fixtures tag, which
+// the Makefile passes where the build generates the views.
 package sdkfixture

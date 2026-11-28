@@ -461,7 +461,9 @@ where
 
 // SAFETY: a device index accepts every bit pattern; the control plane writes
 // the index the module's device list assigned.
-unsafe impl ShmLayout for Device {}
+unsafe impl ShmLayout for Device {
+    edge_layout!("device", Self, [index], []);
+}
 
 // SAFETY: a link index accepts every bit pattern, and the object type is a
 // zero-sized marker; the control plane writes the index the module's object

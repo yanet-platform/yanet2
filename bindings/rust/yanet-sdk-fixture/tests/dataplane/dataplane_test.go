@@ -1,6 +1,6 @@
 //go:build sdk_rust_fixtures
 
-package cfixture_test
+package dataplane_test
 
 import (
 	"testing"
@@ -8,7 +8,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/yanet-platform/yanet2/bindings/rust/yanet-sdk-fixture-api/bindings/go/cfixture"
+	"github.com/yanet-platform/yanet2/controlplane/native/agent"
+	"github.com/yanet-platform/yanet2/controlplane/native/cpconfig"
+	"github.com/yanet-platform/yanet2/controlplane/native/sdk/sdkfixture"
 )
 
 // Test_Fixture_Mode_FatesOfEachPacket verifies that a verdict puts a packet on
@@ -17,25 +19,25 @@ import (
 func Test_Fixture_Mode_FatesOfEachPacket(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
-		mode  cfixture.Mode
+		mode  uint64
 		count int
 		want  []fate
 	}{
 		{
 			name:  "forgotten packets are on no list",
-			mode:  cfixture.ModeForget,
+			mode:  sdkfixture.FixtureModeForget,
 			count: 3,
 			want:  []fate{fateLost, fateLost, fateOutput},
 		},
 		{
 			name:  "packets taken together are disposed of out of order",
-			mode:  cfixture.ModeShuffle,
+			mode:  sdkfixture.FixtureModeShuffle,
 			count: 3,
 			want:  []fate{fateDrop, fateOutput, fateOutput},
 		},
 		{
 			name:  "dispatch applies every verdict without a prepared value",
-			mode:  cfixture.ModeParity,
+			mode:  sdkfixture.FixtureModeParity,
 			count: 4,
 			want:  []fate{fateOutput, fateDrop, fateOutput, fateDrop},
 		},
@@ -56,7 +58,7 @@ func Test_Fixture_Mode_FatesOfEachPacket(t *testing.T) {
 // it passed on the way out, and no drop.
 func Test_Fixture_ForgottenPackets_CountedByTheModuleCounters(t *testing.T) {
 	bed := newBed(t)
-	inst := bed.fixtureInstance(fixtureOf(cfixture.ModeForget))
+	inst := bed.fixtureInstance(fixtureOf(sdkfixture.FixtureModeForget))
 	bed.serveBeforeForward(inst)
 	bed.run(0, arpFrames(3)...)
 
@@ -90,7 +92,7 @@ func Test_Fixture_WorkerMode_ReadsTheRunningWorker(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			bed := newBed(t)
 			bed.harness.SetCurrentTime(time.Unix(0, 0))
-			bed.serveBeforeForward(bed.fixtureInstance(fixtureOf(cfixture.ModeWorker)))
+			bed.serveBeforeForward(bed.fixtureInstance(fixtureOf(sdkfixture.FixtureModeWorker)))
 			frames := arpFrames(1)
 
 			result := bed.run(tc.worker, frames...)
@@ -114,7 +116,7 @@ func Test_Fixture_WorkerMode_ReadsTheRoundTime(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			bed := newBed(t)
 			bed.harness.SetCurrentTime(time.Unix(0, int64(tc.now)))
-			bed.serveBeforeForward(bed.fixtureInstance(fixtureOf(cfixture.ModeWorker)))
+			bed.serveBeforeForward(bed.fixtureInstance(fixtureOf(sdkfixture.FixtureModeWorker)))
 			frames := arpFrames(1)
 
 			result := bed.run(0, frames...)
@@ -315,15 +317,8 @@ func Test_Tally_TaggedCounters_CarryAcrossEmptyRegistry(t *testing.T) {
 			bed.serveBeforeForward(inst)
 			bed.run(1, arpFrames(1)...)
 			for range tc.absent {
-				config, err := cfixture.NewTallyConfig(bed.agent, inst.name, 7, false)
-				require.NoError(t, err)
-				bed.freeAtEnd(config)
-				empty := &instance{
-					moduleType: "tally",
-					name:       inst.name,
-					config:     config,
-					path:       inst.path,
-				}
+				empty := bed.tallyInstanceOf(inst.name, 7, false)
+				empty.path = inst.path
 				bed.publishModules(empty)
 				bed.run(1, arpFrames(1)...)
 			}
@@ -434,9 +429,36 @@ func Test_Tally_PerWorker_SizedByTheWorkers(t *testing.T) {
 
 		require.NoError(t, inst.config.Free())
 
-		require.Equal(t, bed.baseline, bed.agent.BlockAllocatorFreeSize(), "%d workers", workers)
+		require.Equal(t, bed.baseline, freeSize(bed.agent), "%d workers", workers)
 	}
 	require.Greater(t, used[workerCount], used[1])
+}
+
+// Test_Tally_Build_NameWithNUL_IsInvalidName verifies that a configuration
+// name that holds a NUL is refused instead of being cut short at it.
+func Test_Tally_Build_NameWithNUL_IsInvalidName(t *testing.T) {
+	bed := newBed(t)
+
+	_, err := sdkfixture.NewTallyConfig(bed.agent, "con\x00fig", 7, true)
+
+	require.ErrorIs(t, err, cpconfig.ErrInvalidName)
+}
+
+// Test_Tally_Build_EachAllocationRefused_ReturnsMemoryToBaseline verifies
+// that a build refused at any of its allocations, those of its registries
+// and its worker slots included, refuses as exhausted and gives back all it
+// took.
+func Test_Tally_Build_EachAllocationRefused_ReturnsMemoryToBaseline(t *testing.T) {
+	bed := newBed(t)
+
+	sweepAllocations(t, bed.agent, func(owner *agent.Agent) (func() error, error) {
+		module, err := sdkfixture.NewTallyConfig(owner, "config", 7, true)
+		config, err := moduleHandle(module, err, sdkfixture.FreeTallyConfig)
+		if err != nil {
+			return nil, err
+		}
+		return config.Free, nil
+	})
 }
 
 // Test_Fixture_DeviceResolution_ByTheGeneration verifies that the device of a
@@ -446,14 +468,14 @@ func Test_Tally_PerWorker_SizedByTheWorkers(t *testing.T) {
 func Test_Fixture_DeviceResolution_ByTheGeneration(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
-		mode   cfixture.Mode
+		mode   uint64
 		device string
 		want   fate
 	}{
-		{name: "device of the generation as output target", mode: cfixture.ModeResolve, device: "port0", want: fateOutput},
-		{name: "device of the generation as input target", mode: cfixture.ModeResolveInput, device: "port0", want: fateOutput},
-		{name: "absent device as output target", mode: cfixture.ModeResolve, device: "absent", want: fateDrop},
-		{name: "absent device as input target", mode: cfixture.ModeResolveInput, device: "absent", want: fateDrop},
+		{name: "device of the generation as output target", mode: sdkfixture.FixtureModeResolve, device: "port0", want: fateOutput},
+		{name: "device of the generation as input target", mode: sdkfixture.FixtureModeResolveInput, device: "port0", want: fateOutput},
+		{name: "absent device as output target", mode: sdkfixture.FixtureModeResolve, device: "absent", want: fateDrop},
+		{name: "absent device as input target", mode: sdkfixture.FixtureModeResolveInput, device: "absent", want: fateDrop},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bed := newBed(t)
@@ -500,7 +522,7 @@ func Test_Fixture_RedirectToInput_EndsOnTheTransmitList(t *testing.T) {
 	bed := newBed(t)
 	bed.serve(
 		[]*instance{
-			bed.fixtureInstance(fixtureOf(cfixture.ModeReenter)),
+			bed.fixtureInstance(fixtureOf(sdkfixture.FixtureModeReenter)),
 			bed.tapInstance("second"),
 			bed.forwardInstance(),
 		},
@@ -520,7 +542,7 @@ func Test_Fixture_RedirectToInput_EndsOnTheTransmitList(t *testing.T) {
 // module again: each of the two packets passes the redirecting module twice.
 func Test_Fixture_RedirectToInput_RunsTheInputPipelineAgain(t *testing.T) {
 	bed := newBed(t)
-	first := bed.fixtureInstance(fixtureOf(cfixture.ModeReenter))
+	first := bed.fixtureInstance(fixtureOf(sdkfixture.FixtureModeReenter))
 	bed.serve([]*instance{first, bed.tapInstance("second"), bed.forwardInstance()}, nil)
 	bed.run(0, arpFrames(2)...)
 
@@ -534,7 +556,7 @@ func Test_Fixture_RedirectToInput_PassesTheFollowingModuleOnce(t *testing.T) {
 	bed := newBed(t)
 	second := bed.tapInstance("second")
 	bed.serve(
-		[]*instance{bed.fixtureInstance(fixtureOf(cfixture.ModeReenter)), second, bed.forwardInstance()},
+		[]*instance{bed.fixtureInstance(fixtureOf(sdkfixture.FixtureModeReenter)), second, bed.forwardInstance()},
 		nil,
 	)
 	bed.run(0, arpFrames(2)...)

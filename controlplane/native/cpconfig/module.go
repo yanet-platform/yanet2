@@ -72,7 +72,7 @@ func initModule(module *layout.CpModule, owner *agent.Agent, moduleType, name st
 	*module = layout.CpModule{}
 	index, ok := lookupDataplaneModule(owner.Instance.Dp, moduleType)
 	if !ok {
-		return fmt.Errorf("module type %q not found in dataplane config", moduleType)
+		return fmt.Errorf("%w: module type %q not found in dataplane config", ErrUnknownType, moduleType)
 	}
 	module.DpModuleIdx = index
 	shm.CopyString(module.Type[:], moduleType)

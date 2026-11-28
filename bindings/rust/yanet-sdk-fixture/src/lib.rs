@@ -1,11 +1,14 @@
 //! Modules for the tests that load them as plugins into the C dataplane
-//! harness and build their configurations through the fixture api crate.
+//! harness and build their configurations through the native Go control
+//! plane.
 //!
 //! [`Fixture`] is a test program in module form: it has no prepared value, and
 //! its configuration's mode word selects what it does with a batch. [`Tally`]
 //! has a prepared value made at commit and a slot per worker, and counts.
 //! [`Fib`] forwards by a route FIB. [`assign::Assign`] passes or drops by the
-//! first rule a packet matches, through the classify bindings. [`State`] is an
+//! first rule a packet matches, through the classify bindings.
+//! [`hosts::Hosts`] counts a packet by its destination, through an exact-match
+//! index. [`State`] is an
 //! object type: state that outlives the configurations, changed by the control
 //! plane and by [`Stash`], which links it.
 
@@ -17,6 +20,7 @@
 )]
 
 pub mod assign;
+pub mod hosts;
 
 use core::sync::atomic::{AtomicU64, Ordering};
 
@@ -27,7 +31,8 @@ use yanet_sdk::{
 };
 
 // What the fixture module does with a batch, as values of its mode word. The
-// names are prefixed because the api crate's C header carries them as macros.
+// names are prefixed because the Go views carry them among the constants of
+// every fixture.
 
 /// Passes every packet.
 pub const FIXTURE_MODE_PASS: u64 = 0;

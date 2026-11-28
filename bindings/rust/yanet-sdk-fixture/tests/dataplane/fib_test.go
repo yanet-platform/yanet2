@@ -1,38 +1,39 @@
 //go:build sdk_rust_fixtures
 
-package cfixture_test
+package dataplane_test
 
 import (
-	"errors"
 	"fmt"
 	"net/netip"
+	"strings"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 	"github.com/yanet-platform/xnetip"
 
-	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
-	"github.com/yanet-platform/yanet2/bindings/rust/yanet-sdk-fixture-api/bindings/go/cfixture"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/native/agent"
+	"github.com/yanet-platform/yanet2/controlplane/native/cpconfig"
+	"github.com/yanet-platform/yanet2/controlplane/native/layout"
+	"github.com/yanet-platform/yanet2/controlplane/native/sdk/sdkfixture"
 	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
 )
 
 // prefix4 returns the range of the IPv4 prefix, mapped to the value.
-func prefix4(prefix string, value uint32) cfixture.Range4 {
+func prefix4(prefix string, value uint32) sdkfixture.Range4 {
 	parsed := netip.MustParsePrefix(prefix)
 	network, _ := xnetip.NetworkFromPrefix(parsed)
 	first := parsed.Masked().Addr().As4()
-	return cfixture.NewRange4(first, network.LastAddr().As4(), value)
+	return sdkfixture.Range4{From: first, To: network.LastAddr().As4(), Value: value}
 }
 
 // prefix6 returns the range of the IPv6 prefix, mapped to the value.
-func prefix6(prefix string, value uint32) cfixture.Range6 {
+func prefix6(prefix string, value uint32) sdkfixture.Range6 {
 	parsed := netip.MustParsePrefix(prefix)
 	network, _ := xnetip.NetworkFromPrefix(parsed)
 	first := parsed.Masked().Addr().As16()
-	return cfixture.NewRange6(first, network.LastAddr().As16(), value)
+	return sdkfixture.Range6{From: first, To: network.LastAddr().As16(), Value: value}
 }
 
 // fibInput returns a FIB of three routes over two devices, eth0 and eth1, with
@@ -42,40 +43,22 @@ func prefix6(prefix string, value uint32) cfixture.Range6 {
 // The ranges are in insertion order, the broad before the narrow, as the later
 // insert wins on an overlap. The twelve /64 prefixes are enough for the IPv6
 // table to need more pages than its first chunk holds.
-func fibInput(t *testing.T) cfixture.Fib {
-	t.Helper()
-
-	devices := make([]cfixture.FibDevice, 0, 2)
-	for _, name := range []string{"eth0", "eth1"} {
-		device, err := cfixture.NewFibDevice(name)
-		require.NoError(t, err)
-		devices = append(devices, device)
-	}
-	routes := make([]cfixture.FibRoute, 0, 3)
-	for _, spec := range []struct {
-		neighbour byte
-		device    uint16
-		counter   string
-	}{
-		{neighbour: 1, device: 0, counter: "via_eth0"},
-		{neighbour: 2, device: 1, counter: "via_eth1"},
-		{neighbour: 3, device: 0, counter: "via_eth0_backup"},
-	} {
-		route, err := cfixture.NewFibRoute([6]byte{0, 0, 0, 0, 0, spec.neighbour}, spec.device, spec.counter)
-		require.NoError(t, err)
-		routes = append(routes, route)
-	}
-	v6 := []cfixture.Range6{prefix6("2001:db8::/32", 0)}
+func fibInput() sdkfixture.Fib {
+	v6 := []sdkfixture.Range6{prefix6("2001:db8::/32", 0)}
 	for subnet := 1; subnet <= 12; subnet++ {
 		v6 = append(v6, prefix6(fmt.Sprintf("2001:db8:%x::/64", subnet), 1))
 	}
-	return cfixture.Fib{
-		Devices: devices,
-		Routes:  routes,
-		Lists:   []cfixture.FibList{cfixture.NewFibList(0, 2), cfixture.NewFibList(2, 1)},
+	return sdkfixture.Fib{
+		Devices: []string{"eth0", "eth1"},
+		Routes: []sdkfixture.FibRoute{
+			{DstAddr: [6]byte{0, 0, 0, 0, 0, 1}, Device: 0, Counter: "via_eth0"},
+			{DstAddr: [6]byte{0, 0, 0, 0, 0, 2}, Device: 1, Counter: "via_eth1"},
+			{DstAddr: [6]byte{0, 0, 0, 0, 0, 3}, Device: 0, Counter: "via_eth0_backup"},
+		},
+		Lists:   []sdkfixture.RouteList{{Start: 0, Count: 2}, {Start: 2, Count: 1}},
 		Indexes: []uint64{0, 2, 1},
 		V6:      v6,
-		V4: []cfixture.Range4{
+		V4: []sdkfixture.Range4{
 			prefix4("10.0.0.0/8", 0),
 			prefix4("10.1.0.0/16", 1),
 			prefix4("10.1.2.0/24", 0),
@@ -141,7 +124,7 @@ func newFibBed(t *testing.T) *fibBed {
 	bed := newBed(t, func(config *dataplaneut.Config) {
 		config.Devices = []string{"port0", "eth0", "eth1"}
 	})
-	config, err := cfixture.NewFibConfig(bed.agent, "fib", fibInput(t))
+	config, err := buildFib(bed.agent, fibInput())
 	require.NoError(t, err)
 	bed.freeAtEnd(config)
 	fib := &instance{moduleType: "fib", name: "fib", config: config}
@@ -334,65 +317,152 @@ func Test_Fib_IPv6Subnets_BeyondTheFirstPageChunk_RouteToTheirList(t *testing.T)
 	}
 }
 
+// reversedFibInput returns the test FIB with an IPv4 range that ends before
+// it starts.
+func reversedFibInput() sdkfixture.Fib {
+	input := fibInput()
+	input.V4 = append(input.V4, sdkfixture.Range4{From: [4]byte{10, 1, 2, 3}, To: [4]byte{10, 1, 2, 2}})
+	return input
+}
+
 // Test_Fib_Build_ReversedRange_IsInvalidArgument verifies that a build refuses
-// an LPM range that ends before it starts, and says why.
+// an LPM range that ends before it starts.
 func Test_Fib_Build_ReversedRange_IsInvalidArgument(t *testing.T) {
 	bed := newBed(t)
-	input := fibInput(t)
-	input.V4 = append(input.V4, cfixture.NewRange4([4]byte{10, 1, 2, 3}, [4]byte{10, 1, 2, 2}, 0))
 
-	_, err := cfixture.NewFibConfig(bed.agent, "fib", input)
+	_, err := buildFib(bed.agent, reversedFibInput())
 
-	require.ErrorIs(t, err, ffi.ErrInvalidArgument)
-	require.ErrorContains(t, err, "a range ends before it starts")
+	require.ErrorIs(t, err, sdkfixture.ErrInvalidArgument)
 }
 
 // Test_Fib_Build_ReversedRange_ReturnsMemoryToBaseline verifies that a build
 // that refuses a reversed range gives back what it built before the table.
 func Test_Fib_Build_ReversedRange_ReturnsMemoryToBaseline(t *testing.T) {
 	bed := newBed(t)
-	input := fibInput(t)
-	input.V4 = append(input.V4, cfixture.NewRange4([4]byte{10, 1, 2, 3}, [4]byte{10, 1, 2, 2}, 0))
 
-	_, err := cfixture.NewFibConfig(bed.agent, "fib", input)
+	_, err := buildFib(bed.agent, reversedFibInput())
 
 	require.Error(t, err)
-	require.Equal(t, bed.baseline, bed.agent.BlockAllocatorFreeSize())
+	require.Equal(t, bed.baseline, freeSize(bed.agent))
 }
 
-// sweep builds a configuration in a fresh agent of each memory limit in turn,
-// from start up to end in steps, until a build fits, and returns the limit
-// that fits, zero when none does.
+// Test_Fib_Build_RouteOfAnAbsentDevice_IsInvalidArgument verifies that a
+// build refuses a route naming a device past the list, before it allocates
+// anything.
+func Test_Fib_Build_RouteOfAnAbsentDevice_IsInvalidArgument(t *testing.T) {
+	bed := newBed(t)
+	input := fibInput()
+	input.Routes[1].Device = len(input.Devices)
+
+	_, err := buildFib(bed.agent, input)
+
+	require.ErrorIs(t, err, sdkfixture.ErrInvalidArgument)
+	require.Equal(t, bed.baseline, freeSize(bed.agent))
+}
+
+// refusedNames are the names that do not fit a name field whole.
+func refusedNames(field int) []struct {
+	name string
+	text string
+} {
+	return []struct {
+		name string
+		text string
+	}{
+		{name: "name with a NUL", text: "eth\x000"},
+		{name: "name without room for the terminator", text: strings.Repeat("n", field)},
+	}
+}
+
+// Test_Fib_Build_RefusedDeviceName_IsInvalidName verifies that a device name
+// that holds a NUL or leaves no room for the terminator is refused instead of
+// being cut short.
+func Test_Fib_Build_RefusedDeviceName_IsInvalidName(t *testing.T) {
+	for _, tc := range refusedNames(len(layout.CpModuleDevice{}.Name)) {
+		t.Run(tc.name, func(t *testing.T) {
+			bed := newBed(t)
+			input := fibInput()
+			input.Devices[0] = tc.text
+
+			_, err := buildFib(bed.agent, input)
+
+			require.ErrorIs(t, err, cpconfig.ErrInvalidName)
+		})
+	}
+}
+
+// Test_Fib_Build_RefusedCounterName_IsInvalidName verifies that a counter
+// name that holds a NUL or leaves no room for the terminator is refused
+// instead of being cut short.
+func Test_Fib_Build_RefusedCounterName_IsInvalidName(t *testing.T) {
+	for _, tc := range refusedNames(len(layout.Counter{}.Name)) {
+		t.Run(tc.name, func(t *testing.T) {
+			bed := newBed(t)
+			input := fibInput()
+			input.Routes[0].Counter = tc.text
+
+			_, err := buildFib(bed.agent, input)
+
+			require.ErrorIs(t, err, cpconfig.ErrInvalidName)
+		})
+	}
+}
+
+// Test_Fib_Build_LongestDeviceName_IsAccepted verifies that a device name
+// which leaves room for the terminator fits whole.
+func Test_Fib_Build_LongestDeviceName_IsAccepted(t *testing.T) {
+	bed := newBed(t)
+	input := fibInput()
+	input.Devices[0] = strings.Repeat("n", len(layout.CpModuleDevice{}.Name)-1)
+
+	config, err := buildFib(bed.agent, input)
+
+	require.NoError(t, err)
+	require.NoError(t, config.Free())
+}
+
+// Test_Fib_Build_NameWithNUL_IsInvalidName verifies that a configuration name
+// that holds a NUL is refused instead of being cut short at it.
+func Test_Fib_Build_NameWithNUL_IsInvalidName(t *testing.T) {
+	bed := newBed(t)
+
+	_, err := sdkfixture.NewFibConfig(bed.agent, "con\x00fig", sdkfixture.Fib{})
+
+	require.ErrorIs(t, err, cpconfig.ErrInvalidName)
+}
+
+// sweep builds a configuration over a fresh agent of each memory limit in
+// turn, from start up to end in steps, until a build fits, and returns the
+// limit that fits, zero when none does.
 //
-// Each build that fails must be refused as exhausted memory, or, by C, for its
-// header's registries, which C reports without a kind, and leave the agent's
-// free memory as it was; the one that fits is freed, which must restore it as
-// well. The agents live as long as the harness does.
+// Each build that fails must be refused as exhausted memory and leave the
+// agent's free memory as it was; the one that fits is freed, which must
+// restore it as well. The agents live as long as the harness does.
 func sweep(
 	t *testing.T,
 	bed *bed,
-	build func(agent *ffi.Agent) (moduleConfig, error),
+	build func(owner *agent.Agent) (*moduleConfig, error),
 	start, end, stride int,
 ) int {
 	t.Helper()
 
 	for step, limit := 0, start; limit < end; step, limit = step+1, limit+stride {
 		name := fmt.Sprintf("sweep-%d-%d", limit, step)
-		agent, err := bed.harness.SharedMemory().AgentAttach(name, 0, datasize.ByteSize(limit))
+		owner, err := agent.Attach(bed.instance, name, uint64(limit))
 		if err != nil {
 			require.Zero(t, limit, "the agent attaches at any limit but zero")
 			continue
 		}
-		baseline := agent.BlockAllocatorFreeSize()
+		baseline := freeSize(owner)
 
-		config, err := build(agent)
+		config, err := build(owner)
 		if err == nil {
 			require.NoError(t, config.Free())
-		} else if !exhaustedOrUntagged(err) {
-			require.FailNow(t, "unexpected refusal", "%d bytes: %v", limit, err)
+		} else {
+			require.ErrorIs(t, err, shmalloc.ErrNoMemory, "a limit of %d bytes", limit)
 		}
 
-		require.Equal(t, baseline, agent.BlockAllocatorFreeSize(), "a limit of %d bytes", limit)
+		require.Equal(t, baseline, freeSize(owner), "a limit of %d bytes", limit)
 		if err == nil {
 			return limit
 		}
@@ -400,33 +470,16 @@ func sweep(
 	return 0
 }
 
-// buildFib returns the build of a FIB of the input for a sweep.
-func buildFib(input cfixture.Fib) func(agent *ffi.Agent) (moduleConfig, error) {
-	return func(agent *ffi.Agent) (moduleConfig, error) {
-		return cfixture.NewFibConfig(agent, "fib", input)
-	}
+// buildFib builds a FIB named fib of the input over the agent, without
+// registering it for cleanup.
+func buildFib(owner *agent.Agent, input sdkfixture.Fib) (*moduleConfig, error) {
+	module, err := sdkfixture.NewFibConfig(owner, "fib", input)
+	return moduleHandle(module, err, sdkfixture.FreeFibConfig)
 }
 
-// exhaustedOrUntagged reports whether the error is a refusal for lack of
-// memory, or one of C that carries no kind.
-func exhaustedOrUntagged(err error) bool {
-	if errors.Is(err, shmalloc.ErrNoMemory) {
-		return true
-	}
-	if _, ok := errors.AsType[*cerrors.Error](err); !ok {
-		return false
-	}
-	for _, kind := range []error{
-		ffi.ErrNotFound,
-		ffi.ErrFailedPrecondition,
-		ffi.ErrBusy,
-		ffi.ErrInvalidArgument,
-	} {
-		if errors.Is(err, kind) {
-			return false
-		}
-	}
-	return true
+// buildTestFib builds the test FIB over the agent for a sweep.
+func buildTestFib(owner *agent.Agent) (*moduleConfig, error) {
+	return buildFib(owner, fibInput())
 }
 
 // Test_Fib_Build_NoRoomForBlocksOrHeader_ReturnsMemoryToBaseline verifies that
@@ -438,13 +491,14 @@ func Test_Fib_Build_NoRoomForBlocksOrHeader_ReturnsMemoryToBaseline(t *testing.T
 		config.CPMemory = uint64(64 * datasize.MB)
 	})
 
-	fits := sweep(t, bed, buildFib(fibInput(t)), 0, 16<<10, 64)
+	fits := sweep(t, bed, buildTestFib, 0, 16<<10, 64)
 
 	require.Zero(t, fits)
 }
 
 // Test_Fib_Build_CMemoryRunsOut_ReturnsMemoryToBaseline verifies that a build
-// whose C memory runs out gives back all it took, at every capacity.
+// whose prefix tables run out of memory gives back all it took, at every
+// capacity.
 //
 // A buddy allocator fails monotonically with its capacity, so a sweep up in
 // steps well below a page chunk crosses each failure point in turn: the first
@@ -455,7 +509,22 @@ func Test_Fib_Build_CMemoryRunsOut_ReturnsMemoryToBaseline(t *testing.T) {
 	})
 	start := 16 << 10
 
-	fits := sweep(t, bed, buildFib(fibInput(t)), start, 8<<20, 8<<10)
+	fits := sweep(t, bed, buildTestFib, start, 8<<20, 8<<10)
 
 	require.Greater(t, fits, start, "a build fits only above where the first tables fail")
+}
+
+// Test_Fib_Build_EachAllocationRefused_ReturnsMemoryToBaseline verifies that
+// a build refused at any of its allocations, those of its prefix tables
+// included, refuses as exhausted and gives back all it took.
+func Test_Fib_Build_EachAllocationRefused_ReturnsMemoryToBaseline(t *testing.T) {
+	bed := newBed(t)
+
+	sweepAllocations(t, bed.agent, func(owner *agent.Agent) (func() error, error) {
+		config, err := buildTestFib(owner)
+		if err != nil {
+			return nil, err
+		}
+		return config.Free, nil
+	})
 }

@@ -6,7 +6,7 @@
 # lives in it. The plugin of the stash module with the state type is named
 # outside that pattern, as it would collide with their plugins of their own; a
 # test links it into a directory of its own. The plugins build under their own
-# profile: a no_std plugin cannot unwind, which the api archive needs.
+# profile: a no_std plugin cannot unwind.
 rust_sdk_fixture_plugins = custom_target(
   'rust-sdk-fixture-plugins',
   output: [
@@ -14,6 +14,7 @@ rust_sdk_fixture_plugins = custom_target(
     'libtally_dp.so',
     'libfib_dp.so',
     'libassign_dp.so',
+    'libhosts_dp.so',
     'libfixture_state_dp.so',
     'libstash_dp.so',
     'libstash_state_plugin.so',

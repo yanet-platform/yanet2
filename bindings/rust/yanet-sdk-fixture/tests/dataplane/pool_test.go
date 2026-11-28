@@ -1,6 +1,6 @@
 //go:build sdk_rust_fixtures
 
-package cfixture_test
+package dataplane_test
 
 import (
 	"bytes"
@@ -9,13 +9,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
-	"github.com/yanet-platform/yanet2/bindings/rust/yanet-sdk-fixture-api/bindings/go/cfixture"
+	"github.com/yanet-platform/yanet2/bindings/rust/yanet-sdk-fixture/tests/dataplane"
+	"github.com/yanet-platform/yanet2/controlplane/native/sdk/sdkfixture"
 )
 
 // poolBed starts a bed that publishes a fixture of that mode before a
 // forwarding instance, so a packet it passes ends on the transmit list and one
 // it drops on the drop list.
-func poolBed(t *testing.T, mode cfixture.Mode, arg uint64) *bed {
+func poolBed(t *testing.T, mode, arg uint64) *bed {
 	t.Helper()
 
 	bed := newBed(t)
@@ -36,7 +37,7 @@ func setBudget(t *testing.T, bed *bed, budget int) {
 // from the pool ends on the list its verdict names: the passed one on the
 // transmit list, the dropped one on the drop list.
 func Test_Emit_AllocatedPackets_EndByVerdict(t *testing.T) {
-	bed := poolBed(t, cfixture.ModeEmit, 0)
+	bed := poolBed(t, sdkfixture.FixtureModeEmit, 0)
 	source := ipv4UDP()
 
 	result := bed.run(0, source)
@@ -48,7 +49,7 @@ func Test_Emit_AllocatedPackets_EndByVerdict(t *testing.T) {
 // Test_Emit_AllocatedPackets_LeaveNothingOutstanding verifies that once the
 // round is over, every packet a module made from the pool is back in it.
 func Test_Emit_AllocatedPackets_LeaveNothingOutstanding(t *testing.T) {
-	bed := poolBed(t, cfixture.ModeEmit, 0)
+	bed := poolBed(t, sdkfixture.FixtureModeEmit, 0)
 
 	bed.run(0, ipv4UDP())
 
@@ -58,7 +59,7 @@ func Test_Emit_AllocatedPackets_LeaveNothingOutstanding(t *testing.T) {
 // Test_Emit_ExhaustedPool_MakesNoPacket verifies that a module finds the pool
 // empty when it asks for a packet, and makes none.
 func Test_Emit_ExhaustedPool_MakesNoPacket(t *testing.T) {
-	bed := poolBed(t, cfixture.ModeEmit, 0)
+	bed := poolBed(t, sdkfixture.FixtureModeEmit, 0)
 	setBudget(t, bed, 0)
 
 	result := bed.run(0, ipv4UDP())
@@ -70,7 +71,7 @@ func Test_Emit_ExhaustedPool_MakesNoPacket(t *testing.T) {
 // Test_Emit_ExhaustedPool_StillPassesTheInput verifies that a module whose
 // allocation fails still passes the packet it was given.
 func Test_Emit_ExhaustedPool_StillPassesTheInput(t *testing.T) {
-	bed := poolBed(t, cfixture.ModeEmit, 0)
+	bed := poolBed(t, sdkfixture.FixtureModeEmit, 0)
 	setBudget(t, bed, 0)
 	source := ipv4UDP()
 
@@ -82,7 +83,7 @@ func Test_Emit_ExhaustedPool_StillPassesTheInput(t *testing.T) {
 // Test_Emit_PoolGivenBack_MakesPacketsAgain verifies that a module allocates
 // again once the pool has packets to give.
 func Test_Emit_PoolGivenBack_MakesPacketsAgain(t *testing.T) {
-	bed := poolBed(t, cfixture.ModeEmit, 0)
+	bed := poolBed(t, sdkfixture.FixtureModeEmit, 0)
 	setBudget(t, bed, 0)
 	bed.run(0, ipv4UDP())
 	setBudget(t, bed, 2)
@@ -97,7 +98,7 @@ func Test_Emit_PoolGivenBack_MakesPacketsAgain(t *testing.T) {
 // Test_Clone_ExhaustedPool_MakesNoCopy verifies that a module finds the pool
 // empty when it asks for a copy of a packet, and gets none.
 func Test_Clone_ExhaustedPool_MakesNoCopy(t *testing.T) {
-	bed := poolBed(t, cfixture.ModeClone, 0)
+	bed := poolBed(t, sdkfixture.FixtureModeClone, 0)
 	setBudget(t, bed, 0)
 
 	result := bed.run(0, ipv4UDP())
@@ -108,7 +109,7 @@ func Test_Clone_ExhaustedPool_MakesNoCopy(t *testing.T) {
 // Test_Clone_PoolGivenBack_MakesACopyAgain verifies that a module gets a copy
 // once the pool has a packet to give.
 func Test_Clone_PoolGivenBack_MakesACopyAgain(t *testing.T) {
-	bed := poolBed(t, cfixture.ModeClone, 0)
+	bed := poolBed(t, sdkfixture.FixtureModeClone, 0)
 	setBudget(t, bed, 0)
 	bed.run(0, ipv4UDP())
 	setBudget(t, bed, 1)
@@ -121,7 +122,7 @@ func Test_Clone_PoolGivenBack_MakesACopyAgain(t *testing.T) {
 // Test_Clone_Copy_CarriesTheSourcesFrame verifies that the copy of a packet has
 // the frame of the packet, but for the byte the module sets.
 func Test_Clone_Copy_CarriesTheSourcesFrame(t *testing.T) {
-	bed := poolBed(t, cfixture.ModeClone, 0)
+	bed := poolBed(t, sdkfixture.FixtureModeClone, 0)
 	expected := ipv4UDP()
 	expected[0] = 0xff
 
@@ -134,7 +135,7 @@ func Test_Clone_Copy_CarriesTheSourcesFrame(t *testing.T) {
 // packet is parsed as the packet is: the source and the copy have their
 // network header at 14 and their transport header at 34.
 func Test_Clone_Copy_CarriesTheSourcesParsedOffsets(t *testing.T) {
-	bed := poolBed(t, cfixture.ModeClone, 0)
+	bed := poolBed(t, sdkfixture.FixtureModeClone, 0)
 
 	result := bed.run(0, ipv4UDP())
 
@@ -148,7 +149,7 @@ func Test_Clone_Copy_CarriesTheSourcesParsedOffsets(t *testing.T) {
 // Test_Clone_Source_IsLeftUnchanged verifies that copying a packet leaves the
 // frame of the packet as it was.
 func Test_Clone_Source_IsLeftUnchanged(t *testing.T) {
-	bed := poolBed(t, cfixture.ModeClone, 0)
+	bed := poolBed(t, sdkfixture.FixtureModeClone, 0)
 	source := ipv4UDP()
 
 	result := bed.run(0, source)
@@ -185,7 +186,7 @@ func cloneWithoutForward(t *testing.T) (*dataplaneut.RawResult, []byte, []byte) 
 	t.Helper()
 
 	bed := newBed(t, withRecirculationLimit(7))
-	bed.serve([]*instance{bed.fixtureInstance(fixtureOf(cfixture.ModeClone))}, nil)
+	bed.serve([]*instance{bed.fixtureInstance(fixtureOf(sdkfixture.FixtureModeClone))}, nil)
 	source := ipv4UDP()
 	copied := ipv4UDP()
 	copied[0] = 0xff
@@ -214,18 +215,18 @@ func Test_Clone_Copy_TakesTheFloorOfTheRecirculationBudget(t *testing.T) {
 // module prepends to a pool packet as many bytes as its buffer holds in front
 // of the frame beyond the descriptor that shares it.
 func Test_AllocPrepend_UpToTheHeadroomBeyondTheDescriptor_Succeeds(t *testing.T) {
-	bed := poolBed(t, cfixture.ModeAllocPrepend, uint64(cfixture.PrependRoom))
+	bed := poolBed(t, sdkfixture.FixtureModeAllocPrepend, uint64(dataplane.PrependRoom))
 
 	result := bed.run(0, ipv4UDP())
 
-	require.Contains(t, result.Output, bytes.Repeat([]byte{0xbb}, cfixture.PrependRoom))
+	require.Contains(t, result.Output, bytes.Repeat([]byte{0xbb}, dataplane.PrependRoom))
 }
 
 // Test_AllocPrepend_OneByteBeyondTheHeadroom_IsRefused verifies that a prepend
 // one byte past the room a pool packet's buffer has is refused, so that the
 // module drops the packet.
 func Test_AllocPrepend_OneByteBeyondTheHeadroom_IsRefused(t *testing.T) {
-	bed := poolBed(t, cfixture.ModeAllocPrepend, uint64(cfixture.PrependRoom+1))
+	bed := poolBed(t, sdkfixture.FixtureModeAllocPrepend, uint64(dataplane.PrependRoom+1))
 
 	result := bed.run(0, ipv4UDP())
 
@@ -236,7 +237,7 @@ func Test_AllocPrepend_OneByteBeyondTheHeadroom_IsRefused(t *testing.T) {
 // and freed, a copy and an allocated one, end on neither the transmit nor the
 // drop list, where the input it passed ends on the transmit list.
 func Test_Free_FreedPackets_EndOnNoList(t *testing.T) {
-	bed := poolBed(t, cfixture.ModeFree, 0)
+	bed := poolBed(t, sdkfixture.FixtureModeFree, 0)
 	source := ipv4UDP()
 
 	result := bed.run(0, source)
@@ -248,7 +249,7 @@ func Test_Free_FreedPackets_EndOnNoList(t *testing.T) {
 // Test_Free_FreedPackets_LeaveNothingOutstanding verifies that once the round
 // is over, every packet a module made and freed is back in the pool.
 func Test_Free_FreedPackets_LeaveNothingOutstanding(t *testing.T) {
-	bed := poolBed(t, cfixture.ModeFree, 0)
+	bed := poolBed(t, sdkfixture.FixtureModeFree, 0)
 
 	bed.run(0, ipv4UDP())
 
@@ -260,7 +261,7 @@ func Test_Free_FreedPackets_LeaveNothingOutstanding(t *testing.T) {
 // out, and none of the freed packets.
 func Test_Free_FreedPackets_CountedByNoModuleCounter(t *testing.T) {
 	bed := newBed(t)
-	inst := bed.fixtureInstance(fixtureOf(cfixture.ModeFree))
+	inst := bed.fixtureInstance(fixtureOf(sdkfixture.FixtureModeFree))
 	bed.serveBeforeForward(inst)
 	source := ipv4UDP()
 	bed.run(0, source)

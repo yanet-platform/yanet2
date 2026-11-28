@@ -119,7 +119,7 @@ func initDevice(device *layout.CpDevice, owner *agent.Agent, deviceType string, 
 	*device = layout.CpDevice{}
 	index, ok := lookupDataplaneDevice(owner.Instance.Dp, deviceType)
 	if !ok {
-		return fmt.Errorf("device type %q not found in dataplane config", deviceType)
+		return fmt.Errorf("%w: device type %q not found in dataplane config", ErrUnknownType, deviceType)
 	}
 	device.DpDeviceIdx = index
 	shm.CopyString(device.Type[:], deviceType)
