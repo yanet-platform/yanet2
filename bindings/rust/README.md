@@ -66,6 +66,21 @@ cargo bench -p yanet-sys --bench dp --profile plugin --no-run                   
 taskset -c 2 cargo bench -p yanet-sys --bench dp --profile plugin -- --save-baseline main-plugin   # a baseline of its own, -- --baseline main-plugin on the change
 ```
 
+The `lookup` benchmark times classifier lookups, one key and a burst at a
+time, over trees the native Go builder of the `assign` fixture lays out in
+one block: a Go test writes the block, with the keys and the first rule each
+matches by a first-match scan of the rules, to the file
+`YANET_CLASSIFY_LOOKUP_TREES` names, and the benchmark checks its lookups
+against those rules before it times them. It needs a `build/` configured with
+the fixtures (see below); CI runs the checks alone, without timing, through
+`make test-classify-bench`:
+
+```sh
+make bench-classify                                   # from the repository root: the Go step, then cargo bench
+make bench-classify BENCH_ARGS='--save-baseline main' # criterion's arguments, --baseline main on the change
+make test-classify-bench                              # the checks only, unoptimised and optimised, as CI runs them
+```
+
 ## Classifier table checks
 
 Classifier lines, row directories and columns check indices in debug builds.

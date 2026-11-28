@@ -27,3 +27,7 @@ yanet-sdk-testing = { path = "../yanet-sdk-testing" }
 [[bench]]
 name = "dp"
 harness = false
+
+[[bench]]
+name = "lookup"
+harness = false

@@ -108,18 +108,11 @@ func checkAssignRule(rule AssignRule) error {
 	return nil
 }
 
-// buildAssign builds the body: the classifiers of IPv4, IPv6 and either
-// family, then the actions.
+// buildAssign builds the body: the classifiers, then the actions.
 func buildAssign(config *moduleBlock[AssignConfig], rules []AssignRule) error {
 	context := &config.Header.Entity.MemoryContext
 	body := &config.Body
-	if err := buildFamily(context, &body.V4, "assign v4", rules, membersOf(rules, AssignIPv4), compileNet4); err != nil {
-		return err
-	}
-	if err := buildFamily(context, &body.V6, "assign v6", rules, membersOf(rules, AssignIPv6), compileNet6); err != nil {
-		return err
-	}
-	if err := buildAny(context, &body.Any, rules, membersOf(rules, AssignAny)); err != nil {
+	if err := buildClassifiers(context, body, rules); err != nil {
 		return err
 	}
 	actions, err := newSlice(context, &body.Actions, uint64(len(rules)))
@@ -137,6 +130,34 @@ func buildAssign(config *moduleBlock[AssignConfig], rules []AssignRule) error {
 		}
 	}
 	return nil
+}
+
+// BuildAssignClassifiers builds the classifiers of an assign body from
+// the context's memory, as NewAssignConfig does: those of IPv4, IPv6 and
+// either family, the actions left to the caller.
+//
+// Rules are refused as NewAssignConfig refuses them, before anything is
+// allocated. Nodes are allocated parent first, so a failure leaves what
+// the build took reachable from the body.
+func BuildAssignClassifiers(context *layout.MemoryContext, body *AssignConfig, rules []AssignRule) error {
+	for idx, rule := range rules {
+		if err := checkAssignRule(rule); err != nil {
+			return fmt.Errorf("rule %d: %w", idx, err)
+		}
+	}
+	return buildClassifiers(context, body, rules)
+}
+
+// buildClassifiers builds the classifiers of IPv4, IPv6 and either family
+// of rules already checked.
+func buildClassifiers(context *layout.MemoryContext, body *AssignConfig, rules []AssignRule) error {
+	if err := buildFamily(context, &body.V4, "assign v4", rules, membersOf(rules, AssignIPv4), compileNet4); err != nil {
+		return err
+	}
+	if err := buildFamily(context, &body.V6, "assign v6", rules, membersOf(rules, AssignIPv6), compileNet6); err != nil {
+		return err
+	}
+	return buildAny(context, &body.Any, rules, membersOf(rules, AssignAny))
 }
 
 // membersOf marks the rules of the family.
