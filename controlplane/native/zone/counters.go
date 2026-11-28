@@ -158,9 +158,8 @@ func (m *Generation) Counters(predicates []CounterTag) ([]CounterGroup, error) {
 }
 
 // readStorage sets a worker's values of a storage's counters in the
-// group, adding the counters it does not hold yet to the group and to its
-// index by name. A counter whose values cannot be reached reads as zeroes
-// for the worker.
+// group, adding the counters it does not hold yet. A counter whose values
+// cannot be reached reads as zeroes for the worker.
 func readStorage(group *CounterGroup, index map[string]int, storage *layout.CounterStorage, worker, workerCount int) {
 	registry := storage.Registry.Get()
 	if registry == nil || registry.Count == 0 || registry.Names.Get() == nil {
