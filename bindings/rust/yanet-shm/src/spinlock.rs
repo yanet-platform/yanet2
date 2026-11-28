@@ -1,28 +1,30 @@
-//! The private lock byte of a shared-memory mutex.
+//! The private lock word of a shared-memory mutex.
 
 #![forbid(unsafe_code)]
 
 use core::{
     hint,
-    sync::atomic::{AtomicU8, Ordering},
+    sync::atomic::{AtomicU32, Ordering},
 };
 
 /// How many times a waiter spins between calls of its wait hook.
 const SPINS_PER_WAIT: u32 = 1024;
 
-/// A test-and-test-and-set spinlock over one shared-memory byte.
+/// A test-and-test-and-set spinlock over one 32-bit shared-memory word.
 ///
-/// Zero is free and any other value held, so every bit pattern is valid.
+/// Zero is free and any other value held, so every bit pattern is valid. The
+/// word is as wide as C's spinlock, so the Go control plane takes it with
+/// atomics of the same size.
 #[repr(C)]
 #[derive(Debug, Default)]
 pub struct Spinlock {
-    word: AtomicU8,
+    word: AtomicU32,
 }
 
 impl Spinlock {
     /// A free lock.
     pub const fn new() -> Self {
-        Self { word: AtomicU8::new(0) }
+        Self { word: AtomicU32::new(0) }
     }
 
     /// Spins until the lock is free, takes it and returns the guard that
@@ -108,6 +110,6 @@ impl Drop for SpinlockGuard<'_> {
 }
 
 const _: () = {
-    assert!(size_of::<Spinlock>() == 1);
-    assert!(align_of::<Spinlock>() == 1);
+    assert!(size_of::<Spinlock>() == 4);
+    assert!(align_of::<Spinlock>() == 4);
 };

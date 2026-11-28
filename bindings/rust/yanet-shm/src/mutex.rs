@@ -2,10 +2,13 @@
 
 use core::{
     cell::UnsafeCell,
+    mem::offset_of,
     ops::{Deref, DerefMut},
+    sync::atomic::AtomicU32,
 };
 
 use crate::{
+    layout::{Field, Kind, Node, Param},
     shm::ShmLayout,
     spinlock::{Spinlock, SpinlockGuard},
 };
@@ -16,11 +19,12 @@ use crate::{
 /// previous holder's writes; dropping the guard publishes this holder's
 /// writes. An unwinding panic releases the lock without poisoning it. A
 /// holder that never returns, such as a killed process or a forgotten guard,
-/// leaves it locked. The layout is independent of the C spinlock's layout.
+/// leaves it locked.
 /// Only copyable layout values are accepted, so the guard cannot move an
 /// owning edge or an address-relative pointer out of its storage.
-/// Storage follows the C representation: a lock byte, alignment padding and
-/// the value. Padding is not initialized data and must never be read as bytes.
+/// Storage follows the C representation: a 32-bit lock word, alignment padding
+/// and the value, which starts at the larger of 4 and its own alignment.
+/// Padding is not initialized data and must never be read as bytes.
 ///
 /// ```
 /// #![forbid(unsafe_code)]
@@ -103,10 +107,35 @@ where
 // holder's access, and the payload can be transferred between threads.
 unsafe impl<T> Sync for Mutex<T> where T: Copy + ShmLayout + Send {}
 
-// SAFETY: the lock byte and payload accept every bit pattern and need no
+// SAFETY: the lock word and payload accept every bit pattern and need no
 // drop. C representation aligns the payload; padding is never accessed as
 // data, and the whole value has the payload's permitted alignment.
-unsafe impl<T> ShmLayout for Mutex<T> where T: Copy + ShmLayout {}
+unsafe impl<T> ShmLayout for Mutex<T>
+where
+    T: Copy + ShmLayout,
+{
+    // The lock as the atomic word it is, and the payload as the type argument.
+    //
+    // The payload's offset and the mutex's size follow the payload's
+    // alignment, so each instance describes its own; a Go view places the
+    // payload by the alignment of the argument's view.
+    const LAYOUT: &'static Node = &Node::of::<Self>(Kind::Edge {
+        kind: "mutex",
+        members: &[
+            Field {
+                name: "lock",
+                offset: offset_of!(Self, lock),
+                ty: AtomicU32::LAYOUT,
+            },
+            Field {
+                name: "value",
+                offset: offset_of!(Self, value),
+                ty: <Param<0>>::LAYOUT,
+            },
+        ],
+        args: &[T::LAYOUT],
+    });
+}
 
 /// An exclusive borrow that releases the mutex when dropped.
 ///
@@ -179,10 +208,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use core::{cell::Cell, marker::PhantomData};
+    use core::{assert_matches, cell::Cell, marker::PhantomData, mem::offset_of};
 
     use super::{Mutex, MutexGuard};
-    use crate::shm::ShmLayout;
+    use crate::{layout::Kind, shm::ShmLayout};
 
     #[derive(Clone, Copy)]
     #[repr(C, align(64))]
@@ -198,16 +227,18 @@ mod tests {
     // SAFETY: a word and a zero-sized marker, without padding or drop.
     unsafe impl ShmLayout for Local {}
 
-    /// Checks the compact representation and the payload's alignment.
+    /// Checks that the payload follows the lock word at the larger of 4 and
+    /// its alignment, and that the mutex takes that alignment.
     fn check_layout<T: Copy + ShmLayout>() {
-        assert_eq!(align_of::<T>(), core::mem::offset_of!(Mutex<T>, value));
-        assert_eq!(align_of::<T>() + size_of::<T>(), size_of::<Mutex<T>>());
-        assert_eq!(align_of::<T>(), align_of::<Mutex<T>>());
+        let align = align_of::<T>().max(4);
+        assert_eq!(align, offset_of!(Mutex<T>, value));
+        assert_eq!((align + size_of::<T>()).next_multiple_of(align), size_of::<Mutex<T>>());
+        assert_eq!(align, align_of::<Mutex<T>>());
         assert!(!core::mem::needs_drop::<Mutex<T>>());
     }
 
     #[test]
-    fn test_mutex_layout_is_compact_for_small_empty_and_aligned_payloads() {
+    fn test_mutex_layout_places_small_empty_and_aligned_payloads_after_the_lock_word() {
         check_layout::<()>();
         check_layout::<u8>();
         check_layout::<[u8; 3]>();
@@ -215,6 +246,34 @@ mod tests {
         check_layout::<u32>();
         check_layout::<u64>();
         check_layout::<Wide>();
+    }
+
+    /// The offset of the payload member and the type argument a mutex's
+    /// layout description gives.
+    fn described<T: Copy + ShmLayout>() -> (usize, usize) {
+        let Kind::Edge { kind, members, args } = &<Mutex<T>>::LAYOUT.kind else {
+            panic!("a mutex is a field type");
+        };
+        assert_eq!("mutex", *kind);
+        let [lock, value] = members else {
+            panic!("a mutex has two members");
+        };
+        assert_eq!(("lock", 0, 4), (lock.name, lock.offset, lock.ty.size));
+        assert_matches!(lock.ty.kind, Kind::Int { signed: false, atomic: true });
+        assert_eq!("value", value.name);
+        assert_matches!(value.ty.kind, Kind::Param { index: 0 });
+        let [arg] = args else {
+            panic!("a mutex has one type argument");
+        };
+        (value.offset, arg.size)
+    }
+
+    #[test]
+    fn test_mutex_layout_describes_the_lock_word_and_the_payload_offset() {
+        assert_eq!((4, 1), described::<u8>());
+        assert_eq!((4, 4), described::<u32>());
+        assert_eq!((8, 8), described::<u64>());
+        assert_eq!((64, 64), described::<Wide>());
     }
 
     #[test]

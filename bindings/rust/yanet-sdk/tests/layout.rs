@@ -31,6 +31,14 @@ struct Outer {
     counter: Counter<Traffic>,
 }
 
+/// A struct of two fields, each of its own type argument.
+#[derive(ShmLayout)]
+#[repr(C)]
+struct Pair<L, R> {
+    left: L,
+    right: R,
+}
+
 /// An object type, for a link to it.
 struct State;
 
@@ -84,6 +92,20 @@ fn test_layout_derive_describes_fields() {
         ],
         fields(Outer::LAYOUT),
     );
+}
+
+/// Verifies that the derive describes a generic struct's type arguments in
+/// their order, which tell its instances apart.
+#[test]
+fn test_layout_derive_describes_type_arguments() {
+    let Kind::Struct { args, .. } = &<Pair<u16, u64>>::LAYOUT.kind else {
+        panic!("not a struct");
+    };
+    assert_eq!(&[u16::LAYOUT, u64::LAYOUT], args);
+    let Kind::Struct { args, .. } = &Inner::LAYOUT.kind else {
+        panic!("not a struct");
+    };
+    assert!(args.is_empty());
 }
 
 /// Verifies that the members of each SDK field type cover its bytes, each

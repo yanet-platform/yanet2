@@ -143,8 +143,12 @@ from the layout description of its `ShmLayout` types: the derive gives rustc's
 own offsets of every field, private ones included, and each SDK field type its
 members over placeholder type arguments. `HashIndex` takes no type argument
 in its description: its slots hold the key, so a module's indices take one key
-type. `Mutex` describes nothing, and a root that reaches one fails
-generation. `yanet-layout` lists the fixture modules' roots;
+type. `Mutex` is its 32-bit lock word and its value, which Go places by the
+value's alignment as Rust does; the native control plane takes the lock with
+`shm.Lock`. A generic struct reached in several instances has a view of each,
+named with a suffix of its type arguments (`Pair4x16`). A type without a
+description and an atomic narrower than 32 bits fail generation.
+`yanet-layout` lists the fixture modules' roots;
 `make native-layout` runs it, with the plugins' profile and target, when the
 fixtures are on (see the `sdkfixture` package for what it writes). Views for
 arm64 come from `make native-layout` in a build directory configured on arm64.
