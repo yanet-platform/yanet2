@@ -25,6 +25,7 @@ import (
 	l3b "github.com/yanet-platform/yanet2/modules/l3b/controlplane"
 	mirror "github.com/yanet-platform/yanet2/modules/mirror/controlplane"
 	nat64 "github.com/yanet-platform/yanet2/modules/nat64/controlplane"
+	nat64s "github.com/yanet-platform/yanet2/modules/nat64s/controlplane"
 	pdump "github.com/yanet-platform/yanet2/modules/pdump/controlplane"
 	route_mpls "github.com/yanet-platform/yanet2/modules/route-mpls/controlplane"
 	route "github.com/yanet-platform/yanet2/modules/route/controlplane"
@@ -161,6 +162,13 @@ func buildServices(
 			Configured: modulesCfg.NAT64.Unwrap() != nil,
 			New: func() (gateway.Service, error) {
 				return nat64.NewNAT64Module(modulesCfg.NAT64.Unwrap(), nat64.WithLog(log))
+			},
+		},
+		{
+			Name:       "nat64s module",
+			Configured: modulesCfg.NAT64s.Unwrap() != nil,
+			New: func() (gateway.Service, error) {
+				return nat64s.NewNAT64sModule(modulesCfg.NAT64s.Unwrap(), nat64s.WithLog(log))
 			},
 		},
 		{

@@ -2884,6 +2884,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "yanet-cli-nat64s"
+version = "0.8.0"
+dependencies = [
+ "clap",
+ "clap_complete",
+ "prost",
+ "serde",
+ "serde_yaml",
+ "tonic",
+ "yanet-cli",
+ "yanet-cli-build",
+ "yanet-commonpb",
+]
+
+[[package]]
 name = "yanet-cli-operator-neighbour"
 version = "0.8.0"
 dependencies = [

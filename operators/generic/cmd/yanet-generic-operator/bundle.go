@@ -4,10 +4,11 @@ package main
 // binary, so a target may spell any public module or device method.
 //
 // A module built outside this tree is configured through the descriptor
-// set its instance entry names, with no bundle of its own. The aclpb,
-// fwstatepb, and fwstatemappb packages are absent on purpose: their
-// handwritten helpers import CGO bindings, which this pure-Go binary
-// does not link.
+// set its instance entry names, with no bundle of its own. The ACL and
+// firewall-state services are left out, so their methods need a
+// descriptor set. The stateful NAT64 service brings the firewall-state
+// map service along: it validates its map names with that service's
+// rules, so a firewall-state map method resolves without a set as well.
 import (
 	_ "github.com/yanet-platform/yanet2/devices/plain/controlplane/plainpb/v1"
 	_ "github.com/yanet-platform/yanet2/devices/trafgen/controlplane/trafgenpb/v1"
@@ -18,6 +19,7 @@ import (
 	_ "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb/v1"
 	_ "github.com/yanet-platform/yanet2/modules/mirror/controlplane/mirrorpb/v1"
 	_ "github.com/yanet-platform/yanet2/modules/nat64/controlplane/nat64pb/v1"
+	_ "github.com/yanet-platform/yanet2/modules/nat64s/controlplane/nat64spb/v1"
 	_ "github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb/v1"
 	_ "github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb/v1"
 	_ "github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1"

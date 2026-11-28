@@ -88,6 +88,27 @@ The module config file is written as for a linked module. A field whose linked t
 
 Go callers of the framework pass the set as a new last argument of `operator.NewMethodRequest` and of the generic operator's `LoadRequest`, nil meaning the descriptors linked into the binary, and `operator.StaticTarget.Descriptors` names the set a target is resolved in.
 
+## Stateful NAT64 is the `nat64s` module
+
+The stateful NAT64 translator is a module of its own, `nat64s`, beside the
+stateless `nat64` one, and `yanet-cli-nat64s` reaches it only where the
+control-plane config lists that module. The packaged default config lists it.
+A config written before this release adds the block:
+
+```yaml
+modules:
+  nat64s:
+    instance_id: 0
+    memory_path: *memory_path
+    memory_requirements: 1GB
+```
+
+The `nat64state-map` object a nat64s config links allocates in this module's
+agent zone, one map per config and about 272 MiB per map at the default
+sizing — size `memory_requirements` for the number of configs. A deployment
+whose control-plane memory was sized to the earlier default needs 1 GiB
+more.
+
 ## DSCP supports optional source prefixes
 
 DSCP configs may add `source_prefixes4` and `source_prefixes6`. Destinations are
