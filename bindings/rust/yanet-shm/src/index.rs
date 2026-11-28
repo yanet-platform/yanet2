@@ -73,6 +73,11 @@ pub struct HashIndexSlot<K> {
 impl<K: HashIndexKey> HashIndexSlot<K> {
     /// A slot that holds no key.
     pub const FREE: Self = Self { key: K::UNSPECIFIED, position: FREE };
+
+    /// A slot that holds the key and names the position.
+    pub const fn new(key: K, position: u32) -> Self {
+        Self { key, position }
+    }
 }
 
 // SAFETY: a key of a fixed layout and a 32-bit word, both valid for every bit

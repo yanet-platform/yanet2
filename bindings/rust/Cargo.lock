@@ -674,6 +674,7 @@ dependencies = [
 name = "yanet-shm"
 version = "0.8.0"
 dependencies = [
+ "criterion",
  "yanet-sdk-testing",
 ]
 
