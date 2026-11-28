@@ -119,6 +119,9 @@ func (m *NAT64sService) UpdateConfig(
 	ctx context.Context,
 	req *nat64spb.UpdateConfigRequest,
 ) (*nat64spb.UpdateConfigResponse, error) {
+	if err := validateInProcess(req); err != nil {
+		return nil, err
+	}
 	config, err := decodeConfig(req.GetConfig())
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
@@ -138,10 +141,25 @@ func (m *NAT64sService) DeleteConfig(
 	ctx context.Context,
 	req *nat64spb.DeleteConfigRequest,
 ) (*nat64spb.DeleteConfigResponse, error) {
+	if err := validateInProcess(req); err != nil {
+		return nil, err
+	}
 	if err := m.core.Delete(req.GetName()); err != nil {
 		return nil, crud.DeleteError(req.GetName(), err)
 	}
 	return &nat64spb.DeleteConfigResponse{}, nil
+}
+
+// validateInProcess checks a request that changes a config by name and
+// reached its handler in process, past the validating interceptor a
+// remote one passes. The module layer carries a name cut short at a NUL
+// byte or at the end of its buffer, where the service would list it whole,
+// so the name must be whole before anything is published.
+func validateInProcess(request interface{ Validate() error }) error {
+	if err := request.Validate(); err != nil {
+		return status.Error(codes.InvalidArgument, err.Error())
+	}
+	return nil
 }
 
 // decodeConfig converts a whole wire config into its stored form,

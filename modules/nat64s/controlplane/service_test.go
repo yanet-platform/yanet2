@@ -564,6 +564,41 @@ func Test_NAT64sService_UpdateConfig_DecodeRefusesLargeTimeouts(t *testing.T) {
 	require.Empty(t, backend.Configs)
 }
 
+// Test_NAT64sService_Mutations_RefuseBadNameInProcess verifies that an
+// update or a delete handed to the service in process, past the validating
+// interceptor, still refuses a name the dataplane cannot carry whole: one
+// with a NUL byte, or as long as the module layer's name buffer. That
+// layer would cut either short, so two such names would list apart while
+// replacing one config.
+func Test_NAT64sService_Mutations_RefuseBadNameInProcess(t *testing.T) {
+	names := map[string]string{
+		"nul byte": "a\x00b",
+		"too long": strings.Repeat("n", commonpb.MaxModuleNameLen),
+	}
+	for name, value := range names {
+		t.Run(name, func(t *testing.T) {
+			backend := &mockBackend{}
+			service := nat64s.NewNAT64sService(backend)
+
+			_, err := service.UpdateConfig(t.Context(), validUpdate(value))
+			require.Error(t, err)
+			require.Equal(t, codes.InvalidArgument, status.Code(err))
+			require.Empty(
+				t,
+				backend.Configs,
+				"a name the dataplane cannot carry whole must publish nothing",
+			)
+
+			_, err = service.DeleteConfig(
+				t.Context(),
+				&nat64spb.DeleteConfigRequest{Name: value},
+			)
+			require.Error(t, err)
+			require.Equal(t, codes.InvalidArgument, status.Code(err))
+		})
+	}
+}
+
 // Test_NAT64sService_Requests_RefuseMissingName verifies that a show,
 // update or delete request that names no config is refused before it
 // reaches the service.
