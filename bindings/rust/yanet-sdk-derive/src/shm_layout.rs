@@ -100,6 +100,7 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     let p = quote!(#sdk::__private);
 
     let generic = !input.generics.params.is_empty();
+    let type_params: Vec<_> = input.generics.type_params().map(|param| &param.ident).collect();
     let (generics, args) = bind_generics(&input.generics, &p)?;
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
     let predicates: Vec<_> = where_clause.iter().flat_map(|w| w.predicates.iter()).collect();
@@ -227,6 +228,7 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
             const LAYOUT: &'static #p::LayoutNode = &#p::LayoutNode::of::<Self>(#p::LayoutKind::Struct {
                 name: #core::concat!(#core::module_path!(), "::", #core::stringify!(#name)),
                 fields: &[#(#layout_fields),*],
+                args: &[#(<#type_params as #p::ShmLayout>::LAYOUT),*],
             });
         }
 

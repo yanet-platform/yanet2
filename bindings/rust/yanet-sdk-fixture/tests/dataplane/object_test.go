@@ -380,6 +380,17 @@ func Test_StateObject_Seed_ReadsTheSeed(t *testing.T) {
 	require.Equal(t, uint64(10), sdkfixture.StateSeed(object.entity))
 }
 
+// Test_StateObject_LockedAdd_ChangesThePublishedCount verifies that the
+// control plane adds to a published object's locked count under its lock,
+// from the seed the count starts at.
+func Test_StateObject_LockedAdd_ChangesThePublishedCount(t *testing.T) {
+	_, object := publishedState(t)
+
+	sum := sdkfixture.StateLockedAdd(object.entity, 5)
+
+	require.Equal(t, []uint64{15, 15}, []uint64{sum, sdkfixture.StateLocked(object.entity)})
+}
+
 // Test_StateObject_Values_ReadsEverySlotInOneCall verifies that a query fills
 // the caller's slice with the values it reads.
 func Test_StateObject_Values_ReadsEverySlotInOneCall(t *testing.T) {

@@ -2,11 +2,12 @@
 //! configuration are generated from.
 //!
 //! A [`ShmLayout`] type describes itself in its constant: a derived struct by
-//! Rust's own offsets of its fields, a leaf as an integer or an array, a mirror
-//! of a C struct by its tag name, and an SDK field type by its members, each
-//! with its type over placeholder type arguments; the rest stay opaque. Each
-//! number is evaluated by rustc in the crate that defines the type, so the
-//! description holds private fields and the SDK's internals as well.
+//! Rust's own offsets of its fields and by its type arguments, a leaf as an
+//! integer or an array, a mirror of a C struct by its tag name, and an SDK
+//! field type by its members, each with its type over placeholder type
+//! arguments; the rest stay opaque. Each number is evaluated by rustc in the
+//! crate that defines the type, so the description holds private fields and the
+//! SDK's internals as well.
 //!
 //! [`ShmLayout`]: crate::shm::ShmLayout
 
@@ -59,6 +60,8 @@ pub enum Kind {
         name: &'static str,
         /// Fields, in declaration order.
         fields: &'static [Field],
+        /// Layouts of its type arguments, which tell its instances apart.
+        args: &'static [&'static Node],
     },
     /// A field type of the SDK.
     Edge {

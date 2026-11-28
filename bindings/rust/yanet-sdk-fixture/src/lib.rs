@@ -25,9 +25,9 @@ pub mod hosts;
 use core::sync::atomic::{AtomicU64, Ordering};
 
 use yanet_sdk::{
-    Batch, CommitCx, Counter, CounterRef, Cx, Device, Gauge, Lpm4, Lpm6, Module, Object, ObjectCommitCx, ObjectCounter,
-    ObjectLink, PerWorker, PerWorkerSlice, ShmLayout, ShmSlice, TaggedCounter, TaggedCounters, TaggedCountersRef,
-    Traffic, Verdict, WorkerSlice, WorkerSlot,
+    Batch, CommitCx, Counter, CounterRef, Cx, Device, Gauge, Lpm4, Lpm6, Module, Mutex, Object, ObjectCommitCx,
+    ObjectCounter, ObjectLink, PerWorker, PerWorkerSlice, ShmLayout, ShmSlice, TaggedCounter, TaggedCounters,
+    TaggedCountersRef, Traffic, Verdict, WorkerSlice, WorkerSlot,
 };
 
 // What the fixture module does with a batch, as values of its mode word. The
@@ -423,8 +423,9 @@ fn route_indexes<'id>(cx: &Cx<'id, Fib>, fib: &'id RouteFib, frame: &[u8]) -> Op
 
 /// The configuration of [`State`]: the seed it was built from, a slot per
 /// item, which the control plane changes while the object is published, a
-/// slot per worker, a region per worker and a gauge of the object's own, which
-/// [`Stash`] keeps.
+/// slot per worker, a region per worker, a gauge of the object's own, which
+/// [`Stash`] keeps, and a count under a lock, which [`Stash`] and the control
+/// plane both add to while the object is published.
 #[derive(ShmLayout)]
 #[repr(C)]
 pub struct StateConfig {
@@ -433,6 +434,7 @@ pub struct StateConfig {
     pub workers: PerWorker<u64>,
     pub regions: PerWorkerSlice<u64>,
     pub held: ObjectCounter<Gauge>,
+    pub locked: Mutex<u64>,
 }
 
 /// An object of atomic slots, the shape of state kept across configuration
@@ -482,7 +484,8 @@ pub struct StashConfig {
 /// worker and their sum to the filled counter, each unless the object's commit
 /// made no handle. Holds a packet of an even first byte in the object's
 /// counter of the worker, kept as a gauge, and lets one go for a packet of an
-/// odd first byte while the worker holds any.
+/// odd first byte while the worker holds any. Adds one per packet to the
+/// object's locked count, taking its lock for each.
 pub struct Stash;
 
 impl Module for Stash {
@@ -493,6 +496,7 @@ impl Module for Stash {
     fn handle<'id>(cx: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
         let state = &cx.config().state;
         let slots = state.get(cx).slots.as_slice(cx);
+        let locked = &state.get(cx).locked;
         let prepared = state.prepared(cx);
         let seed = prepared.seed;
         let seen = &cx.config().seen;
@@ -525,6 +529,8 @@ impl Module for Stash {
                 Some(..) if held.get() != 0 => held.sub(1),
                 _ => {}
             }
+            let mut count = locked.lock();
+            *count = count.wrapping_add(1);
             Verdict::Pass
         });
     }

@@ -27,6 +27,34 @@ func UnlockSpin(lock *uint32) {
 	atomic.StoreUint32(lock, 0)
 }
 
+// Lock takes the lock of an SDK mutex, a 32-bit word that is zero while
+// free, as the dataplane's workers take it.
+//
+// Taking it sees every write the previous holder made before releasing
+// it. Waiting backs off as LockSpin does. A goroutine holding the lock
+// keeps workers spinning, so it writes the guarded value and releases
+// it without allocating, logging or calling into the system.
+func Lock(word *atomic.Uint32) {
+	for attempt := 0; !TryLock(word); attempt++ {
+		backoff(attempt)
+	}
+}
+
+// TryLock takes the lock of an SDK mutex if it is free, without waiting,
+// and reports whether it did.
+//
+// A held lock is refused on a plain load, which leaves its cache line
+// shared with the workers spinning on it.
+func TryLock(word *atomic.Uint32) bool {
+	return word.Load() == 0 && word.CompareAndSwap(0, 1)
+}
+
+// Unlock releases the lock of an SDK mutex taken by Lock or TryLock,
+// publishing the holder's writes to whoever takes it next.
+func Unlock(word *atomic.Uint32) {
+	word.Store(0)
+}
+
 // PidLock is a lock C keeps as the process id of its holder.
 type PidLock struct {
 	word *int32

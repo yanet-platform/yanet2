@@ -67,6 +67,102 @@ func Test_LockSpin_WaitsForHolder(t *testing.T) {
 	})
 }
 
+// Test_Lock_HoldsWordUntilUnlock verifies that the word of an SDK mutex
+// reads one while held and zero once released, as the Rust lock keeps it.
+func Test_Lock_HoldsWordUntilUnlock(t *testing.T) {
+	var word atomic.Uint32
+	shm.Lock(&word)
+	require.Equal(t, uint32(1), word.Load())
+	shm.Unlock(&word)
+	require.Zero(t, word.Load())
+}
+
+// Test_TryLock_TakesOnlyAFreeLock verifies that a nonblocking take takes a
+// free lock and refuses one of any nonzero word, which the Rust lock counts
+// as held, leaving the word as it was.
+func Test_TryLock_TakesOnlyAFreeLock(t *testing.T) {
+	cases := []struct {
+		name  string
+		word  uint32
+		taken bool
+		after uint32
+	}{
+		{name: "free lock", word: 0, taken: true, after: 1},
+		{name: "held lock", word: 1, taken: false, after: 1},
+		{name: "other nonzero word", word: 7, taken: false, after: 7},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var word atomic.Uint32
+			word.Store(tc.word)
+
+			taken := shm.TryLock(&word)
+
+			require.Equal(t, tc.taken, taken)
+			require.Equal(t, tc.after, word.Load())
+		})
+	}
+}
+
+// Test_Lock_WaitsForHolder verifies that an SDK mutex a worker holds, its
+// word set to one, keeps a taker waiting until the worker clears it.
+func Test_Lock_WaitsForHolder(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var word atomic.Uint32
+		word.Store(1)
+
+		var taker errgroup.Group
+		var acquired atomic.Bool
+		taker.Go(func() error {
+			shm.Lock(&word)
+			acquired.Store(true)
+			return nil
+		})
+		requireBlocked(t, &acquired)
+
+		word.Store(0)
+		require.NoError(t, taker.Wait())
+		require.Equal(t, uint32(1), word.Load())
+		shm.Unlock(&word)
+	})
+}
+
+// Test_Lock_ExcludesConcurrentHolders verifies that goroutines adding to a
+// plain count under an SDK mutex, half of them taking it without waiting,
+// never overlap: no add is lost.
+//
+// Under the race detector, a missing happens-before edge between one
+// holder's release and the next holder's take is a reported race.
+func Test_Lock_ExcludesConcurrentHolders(t *testing.T) {
+	const goroutines, rounds = 8, 10_000
+	var word atomic.Uint32
+	var count uint64
+
+	var holders errgroup.Group
+	for idx := range goroutines {
+		take := shm.Lock
+		if idx%2 == 1 {
+			take = func(word *atomic.Uint32) {
+				for !shm.TryLock(word) {
+					runtime.Gosched()
+				}
+			}
+		}
+		holders.Go(func() error {
+			for range rounds {
+				take(&word)
+				count++
+				shm.Unlock(&word)
+			}
+			return nil
+		})
+	}
+	require.NoError(t, holders.Wait())
+
+	require.Equal(t, uint64(goroutines*rounds), count)
+	require.Zero(t, word.Load())
+}
+
 // Test_LockPid_HoldsPidUntilUnlock verifies that a process-id lock stores
 // its holder's id while held, clears it on release, and that a second
 // release leaves a later holder's lock alone.

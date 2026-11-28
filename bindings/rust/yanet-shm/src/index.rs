@@ -93,6 +93,7 @@ unsafe impl<K: ShmLayout> ShmLayout for HashIndexSlot<K> {
                 ty: u32::LAYOUT,
             },
         ],
+        args: &[K::LAYOUT],
     });
 }
 

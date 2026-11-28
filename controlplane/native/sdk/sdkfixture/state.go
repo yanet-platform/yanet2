@@ -10,6 +10,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/native/agent"
 	"github.com/yanet-platform/yanet2/controlplane/native/cpconfig"
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
+	"github.com/yanet-platform/yanet2/controlplane/native/shm"
 	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
 )
 
@@ -42,8 +43,9 @@ type stateObject struct {
 }
 
 // NewStateObject builds a state object named name of count slots in the
-// agent's memory: slot n holds seed + n, wrapping, and each worker's slot
-// and both values of its region hold the seed, beside the object's gauge.
+// agent's memory: slot n holds seed + n, wrapping, and each worker's slot,
+// both values of its region and the locked count hold the seed, beside the
+// object's gauge.
 //
 // A name its field cannot hold, and slots past the largest block, are
 // refused before anything is allocated. A failure frees what the build
@@ -89,7 +91,7 @@ func FreeStateObject(object *layout.CpObject) error {
 }
 
 // buildState builds the body in the SDK's order: the seed, the slots,
-// the slot per worker, the regions and the gauge.
+// the slot per worker, the regions, the gauge and the locked count.
 func buildState(object *stateObject, workers, seed, count uint64) error {
 	context := &object.Header.Entity.MemoryContext
 	body := &object.Body
@@ -112,6 +114,7 @@ func buildState(object *stateObject, workers, seed, count uint64) error {
 		return fmt.Errorf("gauge: %w", err)
 	}
 	body.Held.ID = id
+	body.Locked.Value = seed
 	return nil
 }
 
@@ -283,6 +286,23 @@ func StateAdd(object *layout.CpObject, index, delta uint64) (uint64, error) {
 		return 0, err
 	}
 	return slot.Add(delta), nil
+}
+
+// StateLocked returns the locked count of a state object, which may be
+// published, read under its lock.
+func StateLocked(object *layout.CpObject) uint64 {
+	return StateLockedAdd(object, 0)
+}
+
+// StateLockedAdd adds delta to the locked count of a state object, which
+// may be published, under its lock, as the stash adds to it, and returns
+// the sum, wrapping.
+func StateLockedAdd(object *layout.CpObject, delta uint64) uint64 {
+	locked := &stateOf(object).Locked
+	shm.Lock(&locked.Lock)
+	defer shm.Unlock(&locked.Lock)
+	locked.Value += delta
+	return locked.Value
 }
 
 // StateSeed returns the seed a state object was built from.

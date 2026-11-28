@@ -4,9 +4,11 @@ package dataplane_test
 
 import (
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
@@ -198,6 +200,59 @@ func Test_Stash_Run_WritesTheLinkedSlots(t *testing.T) {
 	bed.run(0, arpFrames(6)...)
 
 	require.Equal(t, []uint64{30, 31, 22, 23}, slots(t, object))
+}
+
+// Test_Stash_Run_AddsToTheLockedCount verifies that the module adds one per
+// packet to the linked object's locked count, from the seed the control
+// plane wrote there.
+func Test_Stash_Run_AddsToTheLockedCount(t *testing.T) {
+	bed, object := servedStash(t)
+
+	bed.run(0, arpFrames(3)...)
+
+	require.Equal(t, uint64(13), sdkfixture.StateLocked(object.entity))
+}
+
+// Test_Stash_Run_LockedCount_CountsEveryAddUnderContention verifies that
+// adds from control-plane goroutines and from workers running packets, all
+// under the count's lock, are each counted once.
+//
+// The workers take the lock in the plugin and the goroutines in Go, on the
+// same 32-bit word, and the goroutines add for as long as the workers run,
+// so a lost add means the two do not exclude each other.
+func Test_Stash_Run_LockedCount_CountsEveryAddUnderContention(t *testing.T) {
+	const goroutines, rounds, packets = 4, 1000, 32
+	bed, object := servedStash(t)
+	frames := make([][][]byte, 0, packets)
+	for _, frame := range arpFrames(packets) {
+		frames = append(frames, [][]byte{frame})
+	}
+
+	var running atomic.Bool
+	running.Store(true)
+	var adds atomic.Uint64
+	var group errgroup.Group
+	group.Go(func() error {
+		defer running.Store(false)
+		for round := range rounds {
+			if _, err := bed.harness.HandleSegmentedPacketsOnDevice(round%workerCount, 0, frames...); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	for range goroutines {
+		group.Go(func() error {
+			for running.Load() {
+				sdkfixture.StateLockedAdd(object.entity, 1)
+				adds.Add(1)
+			}
+			return nil
+		})
+	}
+	require.NoError(t, group.Wait())
+
+	require.Equal(t, 10+adds.Load()+rounds*packets, sdkfixture.StateLocked(object.entity))
 }
 
 // Test_Stash_Run_ObjectWithoutSlots_PassesEveryPacket verifies that the
