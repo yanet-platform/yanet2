@@ -189,7 +189,7 @@ func Test_Inspector_PrintsEmptyLists(t *testing.T) {
 
 	require.Len(t, report["instances"], 1)
 	instance := report["instances"][0]
-	for _, key := range []string{"dataplane_modules", "modules", "agents", "counters"} {
+	for _, key := range []string{"dataplane_modules", "dataplane_objects", "modules", "objects", "agents", "counters"} {
 		require.Equal(t, []any{}, instance[key], key)
 	}
 }

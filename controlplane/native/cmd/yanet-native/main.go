@@ -40,8 +40,10 @@ type InstanceReport struct {
 	NumaNode         uint32                 `json:"numa_node"`
 	Workers          []zone.Worker          `json:"workers"`
 	DataplaneModules []zone.DataplaneModule `json:"dataplane_modules"`
+	DataplaneObjects []zone.DataplaneObject `json:"dataplane_objects"`
 	Generation       uint64                 `json:"generation"`
 	Modules          []zone.Module          `json:"modules"`
+	Objects          []zone.Object          `json:"objects"`
 	Agents           []zone.Agent           `json:"agents"`
 	// Counters holds every counter storage the generation publishes.
 	Counters []zone.CounterGroup `json:"counters"`
@@ -77,6 +79,7 @@ func run(path string) error {
 			NumaNode:         instance.Dp.NumaIdx,
 			Workers:          orEmpty(workers),
 			DataplaneModules: orEmpty(instance.DataplaneModules()),
+			DataplaneObjects: orEmpty(instance.DataplaneObjects()),
 			Agents:           orEmpty(instance.Agents()),
 		}
 		if now, ok := instance.CurrentTime(); ok {
@@ -104,6 +107,7 @@ func readGeneration(instance *zone.Instance, entry *InstanceReport) error {
 		entry.Generation = generation.Gen.Gen
 	}
 	entry.Modules = orEmpty(generation.Modules())
+	entry.Objects = orEmpty(generation.Objects())
 	counters, err := generation.Counters(nil)
 	if err != nil {
 		return err
