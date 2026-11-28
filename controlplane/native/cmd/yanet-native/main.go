@@ -2,17 +2,18 @@
 
 // Command yanet-native inspects a running YANET dataplane through its
 // shared memory, without cgo: it maps the storage file and prints the
-// instances, workers, module types, published module configurations,
-// agents, counters and dataplane time it finds, as JSON.
+// instances, workers, module and object types, published module
+// configurations and objects, agents, counters and dataplane time it
+// finds, as JSON.
 //
 // It is a developer tool that reads as the control plane does, so it
 // writes to the storage too: it needs write access to the file, takes the
-// C locks (the dataplane zone's configuration lock to list module types,
-// the publication lock to pin a generation, the agent lock to list
-// agents) and raises the pinned generation's reference count while it
-// reads. Each instance is read on its own, so the report is no snapshot
-// of the whole storage. A generation a publication retires while pinned
-// keeps the reference this tool took and is not freed until native
+// C locks (the dataplane zone's configuration lock to list module and
+// object types, the publication lock to pin a generation, the agent lock
+// to list agents) and raises the pinned generation's reference count
+// while it reads. Each instance is read on its own, so the report is no
+// snapshot of the whole storage. A generation a publication retires while
+// pinned keeps the reference this tool took and is not freed until native
 // generation teardown lands.
 //
 // Usage:
@@ -40,8 +41,10 @@ type InstanceReport struct {
 	NumaNode         uint32                 `json:"numa_node"`
 	Workers          []zone.Worker          `json:"workers"`
 	DataplaneModules []zone.DataplaneModule `json:"dataplane_modules"`
+	DataplaneObjects []zone.DataplaneObject `json:"dataplane_objects"`
 	Generation       uint64                 `json:"generation"`
 	Modules          []zone.Module          `json:"modules"`
+	Objects          []zone.Object          `json:"objects"`
 	Agents           []zone.Agent           `json:"agents"`
 	// Counters holds every counter storage the generation publishes.
 	Counters []zone.CounterGroup `json:"counters"`
@@ -77,6 +80,7 @@ func run(path string) error {
 			NumaNode:         instance.Dp.NumaIdx,
 			Workers:          orEmpty(workers),
 			DataplaneModules: orEmpty(instance.DataplaneModules()),
+			DataplaneObjects: orEmpty(instance.DataplaneObjects()),
 			Agents:           orEmpty(instance.Agents()),
 		}
 		if now, ok := instance.CurrentTime(); ok {
@@ -104,6 +108,7 @@ func readGeneration(instance *zone.Instance, entry *InstanceReport) error {
 		entry.Generation = generation.Gen.Gen
 	}
 	entry.Modules = orEmpty(generation.Modules())
+	entry.Objects = orEmpty(generation.Objects())
 	counters, err := generation.Counters(nil)
 	if err != nil {
 		return err

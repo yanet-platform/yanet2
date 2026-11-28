@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
@@ -19,6 +20,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/native/cpconfig"
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
 	"github.com/yanet-platform/yanet2/controlplane/native/nativetest"
+	"github.com/yanet-platform/yanet2/controlplane/native/shmalloc"
 	"github.com/yanet-platform/yanet2/controlplane/native/zone"
 )
 
@@ -86,14 +88,15 @@ func inspect(t *testing.T, path string) []byte {
 
 // Test_Inspector_ReportsPublishedTopology verifies that the command, run
 // as a separate process on a dataplane's storage, reports the instance,
-// module types, published generation and modules, agents, counters and
-// dataplane time of the topology an agent published.
+// module and object types, published generation, modules and objects,
+// agents, counters and dataplane time of the topology an agent published.
 func Test_Inspector_ReportsPublishedTopology(t *testing.T) {
 	dataplane, path := keptDataplane(t, nativetest.Config{
 		Workers:     2,
 		Devices:     []string{"port0"},
 		Modules:     []string{"blackhole"},
 		DeviceTypes: []string{"plain"},
+		ObjectTypes: []string{"ring"},
 	})
 	instance := dataplane.Instance()
 	owner, err := agent.Attach(instance, "native-demo", uint64(16*datasize.MB))
@@ -114,6 +117,10 @@ func Test_Inspector_ReportsPublishedTopology(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NoError(t, cpconfig.UpdateDevices(instance, []*layout.CpDevice{device}, deliver))
+	ring := (*layout.CpObject)(shmalloc.ContextAlloc(&owner.Agent.MemoryContext, unsafe.Sizeof(layout.CpObject{})))
+	require.NotNil(t, ring)
+	require.NoError(t, cpconfig.InitObject(ring, owner, "ring", "events"))
+	require.NoError(t, cpconfig.UpdateObjects(instance, []*layout.CpObject{ring}, deliver))
 	now := time.Unix(1_700_000_000, 5)
 	require.NoError(t, dataplane.SetTime(now))
 	generation := instance.Cp.CpConfigGen.Get().Gen
@@ -146,6 +153,9 @@ func Test_Inspector_ReportsPublishedTopology(t *testing.T) {
 			}
 			require.Equal(t, []string{"blackhole"}, types)
 		}},
+		{"dataplane object types", func(t *testing.T) {
+			require.Equal(t, []zone.DataplaneObject{{Name: "ring"}}, got.DataplaneObjects)
+		}},
 		{"published generation", func(t *testing.T) {
 			require.Equal(t, generation, got.Generation)
 		}},
@@ -154,6 +164,9 @@ func Test_Inspector_ReportsPublishedTopology(t *testing.T) {
 				{Type: "blackhole", Name: "first", Agent: "native-demo"},
 				{Type: "blackhole", Name: "second", Agent: "native-demo"},
 			}, got.Modules)
+		}},
+		{"published objects", func(t *testing.T) {
+			require.Equal(t, []zone.Object{{Type: "ring", Name: "events", Agent: "native-demo"}}, got.Objects)
 		}},
 		{"agents", func(t *testing.T) {
 			var names []string
@@ -180,7 +193,7 @@ func Test_Inspector_ReportsPublishedTopology(t *testing.T) {
 
 // Test_Inspector_PrintsEmptyLists verifies that lists with nothing in
 // them print as empty JSON arrays, not as null: a dataplane that loads no
-// module type and to which nothing attached or published.
+// module or object type and to which nothing attached or published.
 func Test_Inspector_PrintsEmptyLists(t *testing.T) {
 	_, path := keptDataplane(t, nativetest.Config{})
 
@@ -189,7 +202,7 @@ func Test_Inspector_PrintsEmptyLists(t *testing.T) {
 
 	require.Len(t, report["instances"], 1)
 	instance := report["instances"][0]
-	for _, key := range []string{"dataplane_modules", "modules", "agents", "counters"} {
+	for _, key := range []string{"dataplane_modules", "dataplane_objects", "modules", "objects", "agents", "counters"} {
 		require.Equal(t, []any{}, instance[key], key)
 	}
 }

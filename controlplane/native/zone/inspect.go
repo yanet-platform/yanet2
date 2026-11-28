@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
+	"github.com/yanet-platform/yanet2/controlplane/native/internal/registry"
 	"github.com/yanet-platform/yanet2/controlplane/native/layout"
 	"github.com/yanet-platform/yanet2/controlplane/native/shm"
 )
@@ -36,6 +37,12 @@ type DataplaneModule struct {
 	PreparedSize uint64 `json:"prepared_size"`
 }
 
+// DataplaneObject is an object type the dataplane loaded.
+type DataplaneObject struct {
+	Name         string `json:"name"`
+	PreparedSize uint64 `json:"prepared_size"`
+}
+
 // Module is a module configuration a generation publishes.
 type Module struct {
 	Type  string `json:"type"`
@@ -44,6 +51,13 @@ type Module struct {
 	// Generation is the configuration generation the module was
 	// published in.
 	Generation uint64 `json:"generation"`
+}
+
+// Object is an object a generation publishes.
+type Object struct {
+	Type  string `json:"type"`
+	Name  string `json:"name"`
+	Agent string `json:"agent"`
 }
 
 // Agent is a control-plane agent registered in an instance.
@@ -115,43 +129,70 @@ func (m *Instance) DataplaneModules() []DataplaneModule {
 	return modules
 }
 
+// DataplaneObjects returns the object types the dataplane loaded, in
+// load order, under the dataplane zone's lock as module types are read
+// (attach: trust).
+//
+// They are the types dp_config_lookup_object searches.
+func (m *Instance) DataplaneObjects() []DataplaneObject {
+	lock := shm.LockPid(&m.Dp.ConfigLock, int32(os.Getpid()))
+	defer lock.Unlock()
+
+	var objects []DataplaneObject
+	for _, object := range registry.Slice(m.Dp.DpObjects.Get(), m.Dp.ObjectCount) {
+		objects = append(objects, DataplaneObject{
+			Name:         shm.String(object.Name[:]),
+			PreparedSize: object.PreparedSize,
+		})
+	}
+	return objects
+}
+
 // Modules returns the module configurations the generation publishes, in
 // registry order (attach: trust).
 func (m *Generation) Modules() []Module {
 	if m.Gen == nil {
 		return nil
 	}
-	registry := &m.Gen.ModuleRegistry.EntityRegistry.Registry
-	items := registry.Items.Get()
-	if items == nil {
-		return nil
-	}
-	slots := unsafe.Slice(items, registry.Capacity)
-	// A free slot links to the next free one inside this array; a live
-	// item never lies inside it.
-	start := uintptr(unsafe.Pointer(items))
-	end := start + uintptr(registry.Capacity)*unsafe.Sizeof(slots[0])
-
 	var modules []Module
-	for idx := range slots {
-		item := slots[idx].Get()
-		address := uintptr(unsafe.Pointer(item))
-		if item == nil || (address >= start && address < end) {
-			continue
-		}
-		// The registry item opens the entity, which opens the module.
-		module := (*layout.CpModule)(unsafe.Pointer(item))
-		entry := Module{
+	for _, item := range registry.Items(&m.Gen.ModuleRegistry.EntityRegistry.Registry) {
+		module := registry.Container[layout.CpModule](item, 0)
+		modules = append(modules, Module{
 			Type:       shm.String(module.Type[:]),
 			Name:       shm.String(module.Name[:]),
+			Agent:      ownerName(item),
 			Generation: module.Gen,
-		}
-		if agent := module.Entity.Agent.Get(); agent != nil {
-			entry.Agent = shm.String(agent.Name[:])
-		}
-		modules = append(modules, entry)
+		})
 	}
 	return modules
+}
+
+// Objects returns the objects the generation publishes, in registry
+// order, as cp_config_gen_get_object reads them slot by slot (attach:
+// trust).
+func (m *Generation) Objects() []Object {
+	if m.Gen == nil {
+		return nil
+	}
+	var objects []Object
+	for _, item := range registry.Items(&m.Gen.ObjectRegistry.EntityRegistry.Registry) {
+		object := registry.Container[layout.CpObject](item, 0)
+		objects = append(objects, Object{
+			Type:  shm.String(object.Type[:]),
+			Name:  shm.String(object.Name[:]),
+			Agent: ownerName(item),
+		})
+	}
+	return objects
+}
+
+// ownerName returns the name of the agent an entity belongs to, or an
+// empty one for an entity of none.
+func ownerName(item *layout.RegistryItem) string {
+	if owner := registry.Owner(item); owner != nil {
+		return shm.String(owner.Name[:])
+	}
+	return ""
 }
 
 // Agents returns the agents registered in the instance, under the agent
