@@ -36,36 +36,15 @@ fn check_repr(input: &DeriveInput) -> syn::Result<Vec<LitInt>> {
     }
 }
 
-/// The struct's generics with every type parameter bound by `Build`, and the
-/// parameters as the arguments that name the struct.
+/// The struct's generics with every type parameter bound by `ShmLayout`.
 ///
 /// Shared memory holds only `'static` data, so a lifetime is refused.
-fn bind_generics(generics: &Generics, p: &TokenStream) -> syn::Result<(Generics, Vec<TokenStream>)> {
+fn bind_generics(generics: &Generics, p: &TokenStream) -> syn::Result<Generics> {
     let mut bound = generics.clone();
-    let mut args = Vec::new();
     for param in &mut bound.params {
         match param {
-            GenericParam::Type(ty) if ty.ident == "__W" => {
-                return Err(syn::Error::new(
-                    ty.ident.span(),
-                    "ShmLayout reserves the parameter name `__W` for the owner of the parts",
-                ));
-            }
-            GenericParam::Type(ty) => {
-                ty.bounds.push(syn::parse_quote!(#p::Build));
-                let ident = &ty.ident;
-                args.push(quote!(#ident));
-            }
-            GenericParam::Const(konst) if konst.ident == "__W" => {
-                return Err(syn::Error::new(
-                    konst.ident.span(),
-                    "ShmLayout reserves the parameter name `__W` for the owner of the parts",
-                ));
-            }
-            GenericParam::Const(konst) => {
-                let ident = &konst.ident;
-                args.push(quote!(#ident));
-            }
+            GenericParam::Type(ty) => ty.bounds.push(syn::parse_quote!(#p::ShmLayout)),
+            GenericParam::Const(_) => {}
             GenericParam::Lifetime(lifetime) => {
                 return Err(syn::Error::new(
                     lifetime.span(),
@@ -74,7 +53,7 @@ fn bind_generics(generics: &Generics, p: &TokenStream) -> syn::Result<(Generics,
             }
         }
     }
-    Ok((bound, args))
+    Ok(bound)
 }
 
 pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
@@ -101,51 +80,17 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
 
     let generic = !input.generics.params.is_empty();
     let type_params: Vec<_> = input.generics.type_params().map(|param| &param.ident).collect();
-    let (generics, args) = bind_generics(&input.generics, &p)?;
+    let generics = bind_generics(&input.generics, &p)?;
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
-    let predicates: Vec<_> = where_clause.iter().flat_map(|w| w.predicates.iter()).collect();
     let ty = quote!(#name #ty_generics);
 
     let mut bounds = Vec::new();
-    let mut parts_fields = Vec::new();
-    let mut writes = Vec::new();
-    let mut guards = Vec::new();
-    let mut frees = Vec::new();
-    let mut debug_bounds = Vec::new();
-    let mut idents = Vec::new();
-    let mut field_idents = Vec::new();
-    let mut field_names = Vec::new();
     let mut layout_fields = Vec::new();
-    for (idx, field) in fields.named.iter().enumerate() {
+    for field in &fields.named {
         let ident = field.ident.as_ref().expect("named field");
         let field_ty = &field.ty;
-        let vis = &field.vis;
-        let binding = format_ident!("__f{}", idx);
-        let guard = format_ident!("__g{}", idx);
         bounds.push(quote_spanned! {field_ty.span()=>
-            __field_is_build::<#field_ty>();
-        });
-        let field_doc = format!("Builder input for [`{name}::{ident}`].");
-        parts_fields.push(quote_spanned! {field_ty.span()=>
-            #[doc = #field_doc]
-            #vis #ident: <#field_ty as #p::Build>::Parts<'b, __W>
-        });
-        debug_bounds
-            .push(quote_spanned!(field_ty.span()=> <#field_ty as #p::Build>::Parts<'b, __W>: #core::fmt::Debug));
-        writes.push(quote_spanned! {field_ty.span()=>
-            __addr.write_field::<#field_ty>(#core::mem::offset_of!(#ty, #ident), #binding)?;
-            let #guard = #p::Partial::<#field_ty, __W>::new(
-                __addr.memory(),
-                __addr.addr() + #core::mem::offset_of!(#ty, #ident),
-                1,
-            );
-        });
-        guards.push(guard);
-        frees.push(quote_spanned! {field_ty.span()=>
-            <#field_ty as #p::Build>::free::<__W>(
-                __addr + #core::mem::offset_of!(#ty, #ident),
-                __memory,
-            );
+            __field_is_shm_layout::<#field_ty>();
         });
         let layout_name = ident.to_string();
         layout_fields.push(quote_spanned! {field_ty.span()=>
@@ -155,29 +100,13 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
                 ty: <#field_ty as #p::ShmLayout>::LAYOUT,
             }
         });
-        idents.push(quote!(#ident: #binding));
-        field_idents.push(ident);
-        field_names.push(ident.to_string());
     }
     let drop_msg = format!("ShmLayout: `{name}` needs drop; shared-memory types are never dropped");
     let align_msg = format!("ShmLayout: `{name}` is aligned to more than the block allocator's MAX_ALIGN");
-    let vis = &input.vis;
-    let parts_name = format_ident!("{}Parts", name);
-    let name_str = parts_name.to_string();
-    let parts_doc = format!("Parts of [`{name}`]: one per field, each written at the field's place.");
-
-    // The parts take the build's lifetime and owner, then the struct's own
-    // parameters.
-    let mut parts_generics = generics.clone();
-    parts_generics.params.insert(0, syn::parse_quote!(__W: #p::Owner));
-    parts_generics.params.insert(0, syn::parse_quote!('b));
-    let (parts_impl_generics, parts_ty_generics, _) = parts_generics.split_for_impl();
-    let parts_where = &generics.where_clause;
 
     // A non-generic type is checked once here. A generic one cannot name its
-    // parameters in a constant, so every alignment it asks for is checked here,
-    // a `Drop` impl clashes with the blanket impl below, and the value's
-    // layout is checked again where each instance is written or freed.
+    // parameters in a constant, so every alignment it asks for is checked here
+    // and a `Drop` impl clashes with the blanket impl below.
     let checks = if generic {
         quote! {
             #(#core::assert!(#aligns <= #p::MAX_ALIGN, #align_msg);)*
@@ -193,14 +122,6 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
             #core::assert!(#core::mem::align_of::<#name>() <= #p::MAX_ALIGN, #align_msg);
         }
     };
-    let instance_checks = generic.then(|| {
-        quote! {
-            const {
-                #core::assert!(!#core::mem::needs_drop::<Self>(), #drop_msg);
-                #core::assert!(#core::mem::align_of::<Self>() <= #p::MAX_ALIGN, #align_msg);
-            }
-        }
-    });
 
     Ok(quote! {
         #[allow(non_snake_case)]
@@ -209,9 +130,9 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         extern crate core as #core;
 
         const _: () = {
-            fn __field_is_build<T: #p::Build>() {}
+            fn __field_is_shm_layout<T: #p::ShmLayout>() {}
             // Generic over the struct's own parameters, so each field is
-            // `Build` for every argument the bounds admit.
+            // `ShmLayout` for every argument the bounds admit.
             fn __fields #impl_generics () #where_clause {
                 #(#bounds)*
             }
@@ -230,60 +151,6 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
                 fields: &[#(#layout_fields),*],
                 args: &[#(<#type_params as #p::ShmLayout>::LAYOUT),*],
             });
-        }
-
-        #[doc = #parts_doc]
-        #vis struct #parts_name #parts_generics #parts_where {
-            #(#parts_fields),*
-        }
-
-        impl #parts_impl_generics #core::fmt::Debug for #parts_name #parts_ty_generics
-        where
-            #(#predicates,)*
-            #(#debug_bounds,)*
-        {
-            fn fmt(&self, __f: &mut #core::fmt::Formatter<'_>) -> #core::result::Result<(), #core::fmt::Error> {
-                __f.debug_struct(#name_str)
-                    #(.field(#field_names, &self.#field_idents))*
-                    .finish()
-            }
-        }
-
-        // SAFETY: every field is written at its own offset from the parts of
-        // its own type, each exactly once, and nothing else is written; a
-        // refused field returns the fields before it, last first, and the
-        // parts after it are dropped; the blocks owned are exactly those of
-        // the fields, each freed once.
-        unsafe impl #impl_generics #p::Build for #ty #where_clause {
-            type Parts<'b, __W: #p::Owner> = #parts_name<'b, __W, #(#args),*>;
-
-            fn write<'slot, 'b, __W: #p::Owner>(
-                __parts: #parts_name<'b, __W, #(#args),*>,
-                mut __addr: #p::Place<'slot, 'b, Self, __W>,
-            ) -> #core::result::Result<#p::Init<'slot, Self>, #p::Refusal> {
-                #instance_checks
-                let #parts_name { #(#idents),* } = __parts;
-                // SAFETY: the offsets name distinct fields of this place.
-                // Each completed field stays guarded until the whole value
-                // takes over, without moving any address-relative edge.
-                unsafe {
-                    #(#writes)*
-                    #(#core::mem::forget(#guards);)*
-                    #core::result::Result::Ok(__addr.assume_init())
-                }
-            }
-
-            unsafe fn free<__W: #p::Owner>(
-                __addr: usize,
-                __memory: &#p::MemoryContext<'_, __W>,
-            ) {
-                #instance_checks
-                // SAFETY: each field lies in the value at the address, which
-                // was written whole (caller contract).
-                unsafe {
-                    #(#frees)*
-                }
-            }
         }
     })
 }

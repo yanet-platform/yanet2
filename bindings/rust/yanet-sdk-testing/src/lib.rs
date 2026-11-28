@@ -2,14 +2,9 @@
 //!
 //! [`BlockArena`] carves every block out of one region and roots its
 //! pointers at the region's base, as a product roots them at its one
-//! mapping. [`View`] resolves edges through the arena's root. The `cp` module
-//! (feature `cp`) is the owner of the configuration builder built on it, with
-//! no C memory.
+//! mapping. [`View`] resolves edges through the arena's root.
 
 extern crate alloc;
-
-#[cfg(feature = "cp")]
-pub mod cp;
 
 use alloc::alloc::{alloc, handle_alloc_error};
 use core::{
@@ -33,7 +28,7 @@ const REGION_SIZE: usize = 1 << 20;
 const BLOCK: usize = 64;
 
 /// Alignment of a block of a line or more: the 128 bytes the C block
-/// allocator aligns such a block to, the most an owner promises.
+/// allocator aligns such a block to.
 const LINE: usize = 128;
 
 /// Shared memory of a test: one leaked region, whose base is the root.

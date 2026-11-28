@@ -27,7 +27,7 @@ struct CHeader {
 /// Offset of a counter C updates in its object header.
 const COUNTER: usize = offset_of!(CHeader, counter);
 
-/// A block as the builder lays it out: a C object, then the body.
+/// A block as the control plane lays it out: a C object, then the body.
 #[repr(C)]
 struct Block<B> {
     header: Opaque<CHeader>,
@@ -77,9 +77,9 @@ unsafe fn point(arena: &'static BlockArena, slot: usize, target: usize) {
     unsafe { write(arena, slot, target.wrapping_sub(slot) as u64) };
 }
 
-/// A graph laid out as the builder lays it out, in blocks of the arena: the
-/// configuration block (the C object, then the body) with the supplied boxed
-/// value and the items 0..4. Returns the header.
+/// A graph laid out as the control plane lays it out, in blocks of the arena:
+/// the configuration block (the C object, then the body) with the supplied
+/// boxed value and the items 0..4. Returns the header.
 fn build(arena: &'static BlockArena, boxed_value: u64) -> usize {
     let header = arena.alloc(size_of::<Block<Graph>>()).as_ptr().addr();
     let body = header + BODY_OFFSET;

@@ -3,11 +3,10 @@
 
 use core::mem::{align_of, size_of};
 
-use yanet_shm::opaque::Opaque;
+use yanet_shm::{opaque::Opaque, shm::ShmLayout};
 
 use crate::{
     bindings,
-    cp::Build,
     dp::{
         batch::Batch,
         cx::{CommitCx, Cx},
@@ -16,16 +15,16 @@ use crate::{
 
 /// A dataplane module written in Rust.
 ///
-/// One impl feeds both the generated plugin and the module's api crate, so
-/// the body the control plane builds and the body the handler reads are one
-/// type.
+/// One impl feeds both the generated plugin and the layout description the
+/// Go views of the control plane are generated from, so the body the control
+/// plane builds and the body the handler reads are one type.
 pub trait Module: Sized + 'static {
     /// Module type name, as the dataplane registers the module.
     const NAME: &'static str;
 
     /// Configuration body, frozen for a generation and shared by workers; the
-    /// control plane builds it with [`Build`].
-    type Config: Build + Sync;
+    /// control plane builds it as its [`ShmLayout`] describes it.
+    type Config: ShmLayout + Sync;
 
     /// Per-worker value of each placement and generation, made by the
     /// prepare step; the unit type when unused.

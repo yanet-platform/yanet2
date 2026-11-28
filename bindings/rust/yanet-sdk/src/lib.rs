@@ -3,15 +3,13 @@
 //! A module is one `impl Module` in a `#![no_std]`, `#![forbid(unsafe_code)]`
 //! crate: shared-memory types derive [`ShmLayout`], the handler receives the
 //! invocation context [`Cx`] and the packet [`Batch`], and edges of the
-//! configuration resolve through the context. The control plane builds a
-//! configuration in place: the derive generates the `<Type>Parts` struct that a
-//! build closure returns, and the scope the closure receives allocates the
-//! owned blocks and registers counters and devices. A device is registered once
-//! and the [`Registered`] it returns is copied into every entry that uses it.
-//! The parts of a table are the author's ranges, borrowed for the build:
+//! configuration resolve through the context. The control plane, in Go,
+//! builds a configuration in place through the views generated from the layout
+//! description the derive gives. A device is registered once and every entry
+//! that uses it holds its index:
 //!
 //! ```
-//! use yanet_sdk::{Device, Lpm4, LpmRange, ShmBox, ShmLayout, ShmSlice};
+//! use yanet_sdk::{Device, Lpm4, ShmBox, ShmLayout, ShmSlice};
 //!
 //! #[derive(ShmLayout)]
 //! #[repr(C)]
@@ -27,63 +25,22 @@
 //!     entries: ShmSlice<Entry>,
 //!     routes: Lpm4,
 //! }
-//!
-//! fn config<'b, W: yanet_sdk::Owner, E: From<yanet_sdk::BuildError<W::Error>>>(
-//!     scope: yanet_sdk::Scope<'b, '_, W, E>,
-//!     ranges: &'b [LpmRange<4>],
-//! ) -> Result<ConfigParts<'b, W>, E> {
-//!     let eth0 = scope.device("eth0")?;
-//!     Ok(ConfigParts {
-//!         default: scope.boxed(EntryParts { device: eth0, weight: 0 })?,
-//!         entries: scope.slice(3, |i| Ok(EntryParts { device: eth0, weight: [1, 2, 3][i] }))?,
-//!         routes: ranges,
-//!     })
-//! }
 //! ```
 //!
-//! An exact-match table is a [`HashIndex`] field: its parts are records of a
-//! key and the position it names in an array of the author's, borrowed for the
-//! build, and the build refuses a key given twice. The handler looks keys up
-//! through the [`HashIndexRef`] it resolves for its batch:
+//! An exact-match table is a [`HashIndex`] field: the position each key names
+//! in an array of the author's. The handler looks keys up through the
+//! [`HashIndexRef`] it resolves for its batch:
 //!
 //! ```
 //! use core::net::Ipv4Addr;
 //!
-//! use yanet_sdk::{
-//!     BuildError, Builder, Built, Cx, HashIndex, Module, Owner, ShmLayout, ShmSlice,
-//! };
+//! use yanet_sdk::{Cx, HashIndex, Module, ShmLayout, ShmSlice};
 //!
 //! #[derive(ShmLayout)]
 //! #[repr(C)]
 //! struct Config {
 //!     hosts: HashIndex<Ipv4Addr>,
 //!     weights: ShmSlice<u64>,
-//! }
-//!
-//! fn config<'b, W: yanet_sdk::Owner, E: From<yanet_sdk::BuildError<W::Error>>>(
-//!     scope: yanet_sdk::Scope<'b, '_, W, E>,
-//!     hosts: &'b [(Ipv4Addr, u32)],
-//! ) -> Result<ConfigParts<'b, W>, E> {
-//!     Ok(ConfigParts {
-//!         hosts: hosts.into(),
-//!         weights: scope.slice(hosts.len(), |i| Ok(10 * i as u64))?,
-//!     })
-//! }
-//!
-//! fn projected_config<W: Owner, M: Module<Config = Config>>(
-//!     owner: &W,
-//!     addresses: &[[u8; 4]],
-//! ) -> Result<Built<M, W>, BuildError<W::Error>> {
-//!     let mut records = addresses
-//!         .iter()
-//!         .enumerate()
-//!         .map(|(i, address)| (Ipv4Addr::from(*address), i as u32));
-//!     Builder::build(owner, "hosts", |scope| {
-//!         Ok(ConfigParts {
-//!             hosts: HashIndex::builder(&mut records),
-//!             weights: scope.slice(addresses.len(), |i| Ok(10 * i as u64))?,
-//!         })
-//!     })
 //! }
 //!
 //! fn weight<'id, M: Module<Config = Config>>(cx: &Cx<'id, M>, host: Ipv4Addr) -> Option<u64> {
@@ -108,11 +65,10 @@
 //! its prepare step keeps.
 //!
 //! State that outlives the configurations, rebuilt whole on every update, is
-//! an [`Object`]: built the same way by [`ObjectBuilder`], over a scope that
-//! registers counters of the object's own, [`ObjectCounter`] fields its
-//! prepare step resolves, and links no device or object, published by name
-//! before a module links it and released by its owner once no generation holds
-//! it. A module's scope links it by type and name into an [`ObjectLink`] field,
+//! an [`Object`]: built the same way, with counters of the object's own,
+//! [`ObjectCounter`] fields its prepare step resolves, published by name
+//! before a module links it and released once no generation holds it. A
+//! module configuration links it by type and name in an [`ObjectLink`] field,
 //! which the handler resolves to the object's configuration and to the value
 //! the object's prepare step made for the worker:
 //!
@@ -145,14 +101,6 @@
 //!     state: ObjectLink<State>,
 //! }
 //!
-//! fn config<'b, W: yanet_sdk::Owner, E: From<yanet_sdk::BuildError<W::Error>>>(
-//!     scope: yanet_sdk::Scope<'b, '_, W, E>,
-//! ) -> Result<ConfigParts<'b, W>, E> {
-//!     Ok(ConfigParts {
-//!         state: scope.object::<State>("state0")?,
-//!     })
-//! }
-//!
 //! fn touch<'id, M: Module<Config = Config>>(cx: &Cx<'id, M>) {
 //!     let link = &cx.config().state;
 //!     if let Some(slot) = link.get(cx).slots.as_slice(cx).first() {
@@ -166,7 +114,7 @@
 
 /// Packet header views, the `yanet-packet` crate.
 pub use yanet_packet as packet;
-pub use yanet_sdk_derive::{FfiRecord, ShmLayout, api};
+pub use yanet_sdk_derive::ShmLayout;
 pub use yanet_shm::{
     index::{HashIndexKey, HashIndexRef},
     layout,
@@ -176,18 +124,10 @@ pub use yanet_shm::{
     shm::ShmLayout,
 };
 pub use yanet_sys::{
-    classify::{
-        Attribute, BURST, Decode, Join, LineAttr, LineRange, Lines, Net4, Net4Attr, Net6, Net6Attr, Nets4, Nets6, Node,
-        PortAttr, PortRange, Ports, Rule, Rules, results_min,
-    },
+    classify::{BURST, Decode, Join, LineAttr, Net4Attr, Net6Attr, Node, PortAttr, Rule, Rules, results_min},
     common::{
         index::HashIndex,
-        lpm::{Lpm4, Lpm6, LpmKey, LpmRange},
-    },
-    cp::{
-        BlockAddr, Branch, Build, BuildError, Builder, Built, BuiltObject, Context, CounterRegistrar, FfiRecord, Freed,
-        Fresh, HashIndexParts, Header, Kind, Live, LiveContext, ModuleKind, ObjectBuilder, ObjectKind, Owned,
-        OwnedRegions, OwnedSlice, OwnedSlots, Owner, Refusal, Registered, Retiring, Scope,
+        lpm::{Lpm4, Lpm6, LpmKey},
     },
     dp::{
         Batch, BoundCounter, CommitCx, Counter, CounterLayout, CounterRef, Cx, Device, DeviceRef, Gauge, Module,
@@ -212,127 +152,12 @@ pub mod __private {
         layout::{Field as LayoutField, Kind as LayoutKind, Node as LayoutNode},
         shm::{MAX_ALIGN, ShmLayout},
     };
-    pub use yanet_sys::cp::{Build, FfiRecord, Init, MemoryContext, Owner, Partial, Place, Refusal};
 }
 
-/// Doc tests that pin what a build refuses, with the compile error each
-/// refusal produces, and the accepted twin of the ranges case.
+/// Doc tests that pin what a configuration refuses, with the compile error
+/// each refusal produces, and the accepted twin of each.
 #[cfg(doctest)]
 mod doctests {
-
-    /// An object scope's counter is the object's: it does not build a
-    /// module's counter field, which indexes the module's registry.
-    ///
-    /// ```compile_fail,E0308
-    /// use yanet_sdk::{BuildError, Counter, ObjectKind, Owner, Registered, Scope};
-    /// fn count<'b, W: Owner>(
-    ///     scope: Scope<'b, '_, W, BuildError<W::Error>, ObjectKind>,
-    /// ) -> Result<Registered<'b, Counter>, BuildError<W::Error>> {
-    ///     scope.counter::<u64>("hits")
-    /// }
-    /// ```
-    struct ObjectCounterAsModuleCounterRefused;
-
-    /// A module scope's counter does not build an object's counter field
-    /// either.
-    ///
-    /// ```compile_fail,E0308
-    /// use yanet_sdk::{BuildError, ModuleKind, ObjectCounter, Owner, Registered, Scope};
-    /// fn count<'b, W: Owner>(
-    ///     scope: Scope<'b, '_, W, BuildError<W::Error>, ModuleKind>,
-    /// ) -> Result<Registered<'b, ObjectCounter>, BuildError<W::Error>> {
-    ///     scope.counter::<u64>("hits")
-    /// }
-    /// ```
-    struct ModuleCounterAsObjectCounterRefused;
-
-    /// An object scope registers counters of its own, which build an object's
-    /// counter field, the accepted twin of the two above.
-    ///
-    /// ```
-    /// use yanet_sdk::{BuildError, ObjectCounter, ObjectKind, Owner, Registered, Scope};
-    /// fn count<'b, W: Owner>(
-    ///     scope: Scope<'b, '_, W, BuildError<W::Error>, ObjectKind>,
-    /// ) -> Result<Registered<'b, ObjectCounter>, BuildError<W::Error>> {
-    ///     scope.counter::<u64>("hits")
-    /// }
-    /// ```
-    struct ObjectCounterAccepted;
-
-    /// An object scope registers no tagged counter: an object header carries
-    /// no tagged counter registries.
-    ///
-    /// ```compile_fail,E0599
-    /// use yanet_sdk::{BuildError, ObjectKind, Owner, Scope};
-    /// fn count<W: Owner>(scope: Scope<'_, '_, W, BuildError<W::Error>, ObjectKind>) {
-    ///     let _ = scope.counter_in::<u64>("rules", "hits");
-    /// }
-    /// ```
-    struct ObjectTaggedCounterRefused;
-
-    /// An object scope registers no counters of a tagged registry through a
-    /// registrar either.
-    ///
-    /// ```compile_fail,E0599
-    /// use yanet_sdk::{BuildError, ObjectKind, Owner, Scope};
-    /// fn count<W: Owner>(scope: Scope<'_, '_, W, BuildError<W::Error>, ObjectKind>) {
-    ///     let _ = scope.counters_in::<u64>("rules");
-    /// }
-    /// ```
-    struct ObjectTaggedCountersRefused;
-
-    /// An object scope links no device: an object header carries no module
-    /// device list.
-    ///
-    /// ```compile_fail,E0599
-    /// use yanet_sdk::{BuildError, ObjectKind, Owner, Scope};
-    /// fn link<W: Owner>(scope: Scope<'_, '_, W, BuildError<W::Error>, ObjectKind>) {
-    ///     let _ = scope.device("eth0");
-    /// }
-    /// ```
-    struct ObjectDeviceRefused;
-
-    /// An object scope links no object: an object header carries no module
-    /// object links.
-    ///
-    /// ```compile_fail,E0599
-    /// use yanet_sdk::{BuildError, Object, ObjectCommitCx, ObjectKind, Owner, Scope};
-    /// struct State;
-    /// impl Object for State {
-    ///     const TYPE: &'static str = "state";
-    ///     type Config = u64;
-    ///     type Prepared<'p> = ();
-    ///     fn prepare(_: &ObjectCommitCx<'_, Self>) {}
-    /// }
-    /// fn link<W: Owner>(scope: Scope<'_, '_, W, BuildError<W::Error>, ObjectKind>) {
-    ///     let _ = scope.object::<State>("state");
-    /// }
-    /// ```
-    struct ObjectObjectRefused;
-
-    /// A module scope registers a counter, tagged counters and a device and
-    /// links an object, the accepted twin of the object scope's refusals
-    /// above.
-    ///
-    /// ```
-    /// use yanet_sdk::{BuildError, ModuleKind, Object, ObjectCommitCx, Owner, Scope};
-    /// struct State;
-    /// impl Object for State {
-    ///     const TYPE: &'static str = "state";
-    ///     type Config = u64;
-    ///     type Prepared<'p> = ();
-    ///     fn prepare(_: &ObjectCommitCx<'_, Self>) {}
-    /// }
-    /// fn register<W: Owner>(scope: Scope<'_, '_, W, BuildError<W::Error>, ModuleKind>) {
-    ///     let _ = scope.counter::<u64>("hits");
-    ///     let _ = scope.counter_in::<u64>("rules", "hits");
-    ///     let _ = scope.counters_in::<u64>("rules");
-    ///     let _ = scope.device("eth0");
-    ///     let _ = scope.object::<State>("state");
-    /// }
-    /// ```
-    struct ModuleCounterDeviceAndObjectAccepted;
-
     /// A per-worker slot holds plain values only: a slot owning a block is
     /// not `Copy`, so a configuration with one does not build.
     ///
@@ -443,152 +268,4 @@ mod doctests {
     /// fn main() {}
     /// ```
     struct CallerAliasesKeepValidAlignment;
-
-    /// A block belongs to the build that allocated it; another build refuses
-    /// it.
-    ///
-    /// ```compile_fail
-    /// # use yanet_sdk::{prelude::*, BuildError, Builder};
-    /// # use yanet_sdk_testing::cp::{TestError, TestOwner};
-    /// # struct Outer;
-    /// # impl Module for Outer {
-    /// #     const NAME: &'static str = "outer";
-    /// #     type Config = u64;
-    /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sdk::CommitCx<'_, Self>) {}
-    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
-    /// #         batch.dispatch(|_| Verdict::Pass);
-    /// #     }
-    /// # }
-    /// # struct Inner;
-    /// # impl Module for Inner {
-    /// #     const NAME: &'static str = "inner";
-    /// #     type Config = ShmBox<u64>;
-    /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sdk::CommitCx<'_, Self>) {}
-    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
-    /// #         batch.dispatch(|_| Verdict::Pass);
-    /// #     }
-    /// # }
-    /// # fn main() {
-    /// let owner = TestOwner::new();
-    /// Builder::<Outer>::build::<BuildError<TestError>, _>(&owner, "outer", |outer| {
-    ///     let block = outer.boxed::<u64>(1)?;
-    ///     Builder::<Inner>::build::<BuildError<TestError>, _>(&owner, "inner", |_| Ok(block))?;
-    ///     Ok(0)
-    /// })
-    /// .unwrap();
-    /// # }
-    /// ```
-    struct BlockOfAnotherBuildRefused;
-
-    /// A block cannot outlive the build that allocated it.
-    ///
-    /// ```compile_fail,E0521
-    /// # use yanet_sdk::{prelude::*, BuildError, Builder};
-    /// # use yanet_sdk_testing::cp::{TestError, TestOwner};
-    /// # struct Mine;
-    /// # impl Module for Mine {
-    /// #     const NAME: &'static str = "mine";
-    /// #     type Config = u64;
-    /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sdk::CommitCx<'_, Self>) {}
-    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
-    /// #         batch.dispatch(|_| Verdict::Pass);
-    /// #     }
-    /// # }
-    /// # fn main() {
-    /// let owner = TestOwner::new();
-    /// let mut leaked = None;
-    /// Builder::<Mine>::build::<BuildError<TestError>, _>(&owner, "mine", |scope| {
-    ///     leaked = Some(scope.boxed::<u64>(1)?);
-    ///     Ok(0)
-    /// })
-    /// .unwrap();
-    /// # }
-    /// ```
-    struct BlockOutlivingBuildRefused;
-
-    /// Ranges made inside the closure die with it, so a table refuses them.
-    ///
-    /// ```compile_fail,E0515
-    /// # use yanet_sdk::{prelude::*, BuildError, Builder, Lpm4, LpmRange};
-    /// # use yanet_sdk_testing::cp::{TestError, TestOwner};
-    /// # struct Mine;
-    /// # impl Module for Mine {
-    /// #     const NAME: &'static str = "mine";
-    /// #     type Config = Lpm4;
-    /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sdk::CommitCx<'_, Self>) {}
-    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
-    /// #         batch.dispatch(|_| Verdict::Pass);
-    /// #     }
-    /// # }
-    /// fn build(owner: &TestOwner) {
-    ///     Builder::<Mine>::build::<BuildError<TestError>, _>(owner, "mine", |_| {
-    ///         let ranges = [LpmRange { from: [0; 4], to: [255; 4], value: 1 }];
-    ///         Ok(&ranges[..])
-    ///     })
-    ///     .unwrap();
-    /// }
-    /// ```
-    struct RangesMadeInBuildRefused;
-
-    /// Ranges made before the build outlive it, so a table accepts them.
-    ///
-    /// ```
-    /// # use yanet_sdk::{prelude::*, BuildError, Builder, Lpm4, LpmRange};
-    /// # use yanet_sdk_testing::cp::{TestError, TestOwner};
-    /// # struct Mine;
-    /// # impl Module for Mine {
-    /// #     const NAME: &'static str = "mine";
-    /// #     type Config = Lpm4;
-    /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sdk::CommitCx<'_, Self>) {}
-    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
-    /// #         batch.dispatch(|_| Verdict::Pass);
-    /// #     }
-    /// # }
-    /// fn build(owner: &TestOwner) {
-    ///     let ranges = [LpmRange { from: [0; 4], to: [255; 4], value: 1 }];
-    ///     Builder::<Mine>::build::<BuildError<TestError>, _>(owner, "mine", |_| Ok(&ranges[..]))
-    ///         .unwrap();
-    /// }
-    /// ```
-    struct RangesMadeBeforeBuildAccepted;
-
-    /// A block of a zero-sized type is refused at compile time, as C has none.
-    ///
-    /// ```compile_fail,E0080
-    /// # use yanet_sdk::{prelude::*, BuildError, Builder};
-    /// # use yanet_sdk_testing::cp::{TestError, TestOwner};
-    /// # struct Mine;
-    /// # impl Module for Mine {
-    /// #     const NAME: &'static str = "mine";
-    /// #     type Config = ShmBox<()>;
-    /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sdk::CommitCx<'_, Self>) {}
-    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
-    /// #         batch.dispatch(|_| Verdict::Pass);
-    /// #     }
-    /// # }
-    /// # fn main() {
-    /// let owner = TestOwner::new();
-    /// Builder::<Mine>::build::<BuildError<TestError>, _>(&owner, "mine", |scope| scope.boxed::<()>(())).unwrap();
-    /// # }
-    /// ```
-    struct ZeroSizedBlockRefused;
-
-    /// A build runs on one thread, so its blocks never cross to another.
-    ///
-    /// ```compile_fail,E0277
-    /// use yanet_sdk::{Owned, Owner};
-    ///
-    /// fn sendable<T: Send>() {}
-    ///
-    /// fn owned_on_any_thread<W: Owner + Sync>() {
-    ///     sendable::<Owned<'static, u64, W>>();
-    /// }
-    /// ```
-    struct OwnedAcrossThreadsRefused;
 }

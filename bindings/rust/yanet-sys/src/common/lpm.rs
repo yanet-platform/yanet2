@@ -3,8 +3,7 @@
 //! [`Lpm`] mirrors `struct lpm` with its embedded memory context opaque, so
 //! a reference to it stays sound while C rewrites the context's sibling
 //! link. The lookup is a Rust port of the C one, compiling to the same loads,
-//! over a table the C routines of `common/` build: the configuration builder
-//! embeds one by calling them.
+//! over a table the control plane builds as the C routines of `common/` do.
 
 use core::{
     borrow::Borrow,
@@ -19,7 +18,7 @@ use yanet_shm::{
     shm::{MAX_ALIGN, ShmLayout},
 };
 
-use crate::{bindings, cp::FfiRecord};
+use crate::bindings;
 
 /// One LPM trie page, as bytes: 256 slots indexed by a key byte.
 ///
@@ -29,68 +28,9 @@ use crate::{bindings, cp::FfiRecord};
 /// `Sync`, while a module configuration must be `Sync`.
 type Page = [u64; 256];
 
-/// An inclusive range of keys of `K` big-endian bytes and the value it maps
-/// to, as the C insert takes them.
-///
-/// Values keep the C semantics documented on [`Lpm::lookup`].
-///
-/// The first key must not exceed the last: the C insert does not check it and
-/// a reversed range would wrap round, so a build refuses one. Ranges are
-/// inserted in slice order, and on an overlap the later range wins, so a broad
-/// range goes before the narrow ones in it.
-///
-/// The ranges are borrowed for the whole build, so they are made before it
-/// starts, for a table in a box or a slice too. A range is also a record of an
-/// api crate: the ranges C hands in are borrowed by the build as they are.
-#[derive(Clone, Copy, Debug)]
-#[repr(C)]
-pub struct LpmRange<const K: usize> {
-    /// First key of the range.
-    pub from: [u8; K],
-    /// Last key of the range.
-    pub to: [u8; K],
-    /// Value every key of the range maps to.
-    pub value: u32,
-}
-
-impl<const K: usize> LpmRange<K> {
-    /// The range of the leading bits of an address, mapped to a value.
-    ///
-    /// The bits of the address past the prefix length are ignored.
-    ///
-    /// ```
-    /// use yanet_sys::common::lpm::LpmRange;
-    ///
-    /// let range = LpmRange::prefix([10, 1, 2, 3], 12, 7);
-    /// assert_eq!(([10, 0, 0, 0], [10, 15, 255, 255]), (range.from, range.to));
-    /// ```
-    ///
-    /// # Panics
-    ///
-    /// The prefix length is more than the bits of a key.
-    #[must_use]
-    pub fn prefix(addr: [u8; K], len: usize, value: u32) -> Self {
-        assert!(len <= 8 * K, "a prefix of {len} bits in a key of {K} bytes");
-        let mut from = addr;
-        let mut to = addr;
-        for (idx, (from, to)) in from.iter_mut().zip(&mut to).enumerate() {
-            let kept = len.saturating_sub(idx * 8).min(8);
-            let host = (0xffu16 >> kept) as u8;
-            *from &= !host;
-            *to |= host;
-        }
-        Self { from, to, value }
-    }
-}
-
-// SAFETY: `#[repr(C)]` over byte arrays and an integer, without drop glue;
-// every bit pattern is a range, a reversed one refused by the build.
-unsafe impl<const K: usize> FfiRecord for LpmRange<K> {}
-
 /// Longest-prefix-match table over big-endian keys of `K` bytes.
 ///
-/// A table built from no ranges is empty: it holds no page, opens no C memory
-/// context and finds nothing, so it costs only its own bytes.
+/// A table built from no ranges is empty: it holds no page and finds nothing.
 #[repr(C)]
 pub struct Lpm<const K: usize> {
     /// The allocator context of the table's blocks. C rewrites its sibling

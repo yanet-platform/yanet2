@@ -115,7 +115,7 @@ unsafe impl<T: ShmLayout, const N: usize> ShmLayout for [T; N] {
 }
 
 // SAFETY: an offset accepts every bit pattern; the block it names is owned
-// by the graph and aligned for `T` by the builder.
+// by the graph and aligned for `T` by the control plane.
 unsafe impl<T: ShmLayout> ShmLayout for ShmBox<T> {
     const LAYOUT: &'static Node = &Node::of::<Self>(Kind::Edge {
         kind: "box",

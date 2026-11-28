@@ -3,13 +3,12 @@
 //! module's or an object's prepare step made, across calls and next to other
 //! workers' slots and regions.
 
-use core::{cell::Cell, convert::Infallible};
+use core::cell::Cell;
 
 use yanet_sdk_testing::BlockArena;
 use yanet_shm::shm::ShmLayout;
 use yanet_sys::{
     bindings,
-    cp::{Build, Init, MemoryContext, Owner, Place, Refusal},
     dp::{
         Batch, CommitCx, Cx, Module, Object, ObjectCommitCx, ObjectConfig, ObjectLink, PerWorker, PerWorkerSlice,
         Verdict, WorkerSlice, WorkerSlot,
@@ -37,19 +36,6 @@ struct Config<T = u64> {
 // SAFETY: a per-worker field, an offset and a count, which accept every bit
 // pattern, with no padding and no drop.
 unsafe impl<T: Copy + ShmLayout> ShmLayout for Config<T> {}
-
-// SAFETY: the configuration is laid out by hand and never built: its parts
-// cannot exist, so nothing is ever written, and its slot block belongs to the
-// test.
-unsafe impl<T: Copy + ShmLayout> Build for Config<T> {
-    type Parts<'b, W: Owner> = Infallible;
-
-    fn write<'s, 'b, W: Owner>(parts: Infallible, _: Place<'s, 'b, Self, W>) -> Result<Init<'s, Self>, Refusal> {
-        match parts {}
-    }
-
-    unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
-}
 
 /// The committed context of a module of a counting configuration over a slot
 /// block of [`WORKERS`] zeroed slots, and the block's address.
@@ -420,17 +406,6 @@ struct Regions {
 // SAFETY: a per-worker slice field, an offset and two counts, which accept
 // every bit pattern, with no padding and no drop.
 unsafe impl ShmLayout for Regions {}
-
-// SAFETY: as for `Config`: laid out by hand and never built.
-unsafe impl Build for Regions {
-    type Parts<'b, W: Owner> = Infallible;
-
-    fn write<'s, 'b, W: Owner>(parts: Infallible, _: Place<'s, 'b, Self, W>) -> Result<Init<'s, Self>, Refusal> {
-        match parts {}
-    }
-
-    unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
-}
 
 /// Lays out the table and the [`WORKERS`] zeroed regions of `len` values of a
 /// per-worker slice field at an address, and returns the region blocks.

@@ -172,9 +172,9 @@ impl CFlags {
     /// The sanitizer options of the dataplane's C sources, for the shim of a
     /// Rust build that is sanitized itself.
     ///
-    /// The block allocator lays out red zones when its C is instrumented, so
-    /// the shim's inline copy of it must be instrumented too; an
-    /// uninstrumented Rust binary has no sanitizer runtime to link it with.
+    /// The shim of a sanitized plugin is instrumented as the dataplane's C is,
+    /// so the whole plugin is checked; an uninstrumented Rust binary has no
+    /// sanitizer runtime to link it with.
     pub fn sanitizer_args(&self) -> &[String] {
         &self.sanitizers
     }

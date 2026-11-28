@@ -8,34 +8,27 @@
 
 #![forbid(unsafe_code)]
 
-mod api;
-mod ffi_record;
 mod shm_layout;
 
 use proc_macro::TokenStream;
-use syn::{DeriveInput, ItemImpl, parse_macro_input};
+use syn::{DeriveInput, parse_macro_input};
 
-/// Derives `ShmLayout` and `Build`, with the `<Type>Parts` struct a build
-/// writes the value from, for a shared-memory struct.
+/// Derives `ShmLayout` for a shared-memory struct.
 ///
 /// Accepts only a `#[repr(C)]` struct with named fields (an alignment up to 64
-/// may be added), every field of which is `Build`, with no drop glue. Padding
-/// is never read as data. The generated `<Type>Parts` has one field per field
-/// of the struct, holding the parts of that field's type, each written at the
-/// field's place. The fields are written in order, and a refused field returns
-/// the ones before it.
+/// may be added), every field of which is `ShmLayout`, with no drop glue.
+/// Padding is never read as data.
 ///
 /// A struct may take type and const parameters, but no lifetime: each type
-/// parameter is bound by `Build`, and every field must be `Build` for every
-/// argument the bounds admit. `<Type>Parts` takes the build's lifetime and
-/// owner, then the struct's parameters.
+/// parameter is bound by `ShmLayout`, and every field must be `ShmLayout` for
+/// every argument the bounds admit.
 ///
 /// The layout description of the struct, which the Go views are generated
 /// from, gives its path, its size, its alignment and each field's offset as
 /// Rust lays them out.
 ///
 /// ```
-/// use yanet_sdk::{Build, OwnedSlice, Owner, ShmLayout, ShmSlice};
+/// use yanet_sdk::{ShmLayout, ShmSlice};
 ///
 /// #[derive(ShmLayout)]
 /// #[repr(C)]
@@ -44,15 +37,14 @@ use syn::{DeriveInput, ItemImpl, parse_macro_input};
 ///     heads: [u32; N],
 /// }
 ///
-/// fn parts<'b, W: Owner, T: Build>(slots: OwnedSlice<'b, T, W>) -> TableParts<'b, W, T, 4> {
-///     TableParts { slots, heads: [0; 4] }
-/// }
+/// fn is_layout<T: ShmLayout>() {}
+/// is_layout::<Table<u64, 4>>();
 /// ```
 ///
 /// ```
 /// #![forbid(unsafe_code)]
 ///
-/// use yanet_sdk::{Owned, Owner, ShmBox, ShmLayout};
+/// use yanet_sdk::{ShmBox, ShmLayout};
 ///
 /// #[derive(ShmLayout)]
 /// #[repr(C)]
@@ -68,142 +60,11 @@ use syn::{DeriveInput, ItemImpl, parse_macro_input};
 ///     // Reserved bytes remain explicit when they are part of an ABI.
 ///     pad: u32,
 /// }
-///
-/// // The parts of a box are the block that holds its value, and the parts of a
-/// // configuration name the owner that builds it.
-/// fn parts<W: Owner>(first: Owned<'_, Item, W>) -> ConfigParts<'_, W> {
-///     ConfigParts { first, flags: 0, pad: 0 }
-/// }
 /// ```
 #[proc_macro_derive(ShmLayout)]
 pub fn derive_shm_layout(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     shm_layout::expand(&input)
-        .unwrap_or_else(syn::Error::into_compile_error)
-        .into()
-}
-
-/// Derives `FfiRecord` for a struct an api crate's exports take by pointer.
-///
-/// Accepts only a non-generic struct with named fields and the plain
-/// `#[repr(C)]` (no alignment or packing), every field of which is a record: a
-/// fixed-width integer, an array of records or another derived struct. Padding
-/// is never read as a field, so it needs no naming. The C header generated for
-/// the api crate declares the struct.
-///
-/// ```
-/// use yanet_sdk::FfiRecord;
-///
-/// #[derive(FfiRecord)]
-/// #[repr(C)]
-/// struct Range {
-///     from: [u8; 4],
-///     to: [u8; 4],
-///     value: u32,
-/// }
-/// ```
-#[proc_macro_derive(FfiRecord)]
-pub fn derive_ffi_record(input: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(input as DeriveInput);
-    ffi_record::expand(&input)
-        .unwrap_or_else(syn::Error::into_compile_error)
-        .into()
-}
-
-/// Exports the `pub` functions of an inherent impl to C.
-///
-/// `#[yanet_sdk::api(module = M)]` goes on an impl of a local type of an api
-/// crate and turns each `pub fn` into an `extern "C"` function named
-/// `yanet_cp_<crate>__<snake type>_<fn>`, where `<crate>` is the crate's name
-/// (`CARGO_CRATE_NAME`); the impl itself is kept as written, and a private fn
-/// stays an ordinary one. The impl gains
-/// `yanet_cp_<crate>__<snake type>_free(struct cp_module *, struct yanet_error
-/// **)`, which releases a configuration, as a C module's
-/// `<name>_module_config_free` does: 0, or -1 with errno `EAGAIN` and a busy
-/// error while a live generation holds it, the handle then staying valid.
-///
-/// `#[yanet_sdk::api(object = O)]` does the same for an object type: its
-/// builds return objects, and its `_free` takes a `struct cp_object *` and
-/// releases an object as a C object's owner does, with the same results.
-///
-/// Parameters keep their order and a trailing `struct yanet_error **err`
-/// follows them (null for "no error wanted"; a chain already in `*err` stays
-/// as the cause of the new error, as `yanet_error_add` keeps it):
-///
-/// | Rust | C |
-/// |------|---|
-/// | `&Agent` (exactly one) | `struct agent *` |
-/// | `&str` | `const char *`, NUL terminated UTF-8 |
-/// | `&T`, `T: FfiRecord` | `const T *` |
-/// | `&[T]`, `T: FfiRecord` | `const T *x, size_t x_len`; `(NULL, 0)` is empty |
-/// | `&mut T`, `T: FfiRecord` (a query only) | `T *`, a record the query writes |
-/// | `&mut [T]`, `T: FfiRecord` (a query only) | `T *x, size_t x_len`, records the query writes; `(NULL, 0)` is empty |
-/// | `&BuiltObject<O, Agent>` (`object = O` only) | `struct cp_object *`, an object a build of the crate returned and nothing releases; one of another type is refused |
-/// | `u8`..`u64`, `i8`..`i64`, `usize` | the same C integer |
-/// | returns `Result<Built<M, Agent>, Error>` (`module = M`) | `struct cp_module *`, `NULL` on failure |
-/// | returns `Result<BuiltObject<O, Agent>, Error>` (`object = O`) | `struct cp_object *`, `NULL` on failure |
-/// | returns `Result<u64, Error>` (a query) | `int`, 0 or -1 on failure, with a trailing `uint64_t *out` before `err` that a success writes |
-///
-/// Anything else is a compile error at the offending type. A null or
-/// misaligned pointer for an argument is refused as an invalid argument. A
-/// panic of the method is caught and comes back as an error with its message.
-/// Only a `_free` sets errno, which tells a busy refusal from a failure; a
-/// build or a query reports through its result and `err` alone, and errno is
-/// unspecified after it.
-///
-/// A query reads several values in one call through its outputs, records the
-/// caller owns and nothing else reaches during the call, the other arguments
-/// included. The export zeroes them once it accepts every argument, so the
-/// method starts from zero even over memory C left uninitialised, and a
-/// refused argument leaves them untouched; a failed method leaves what it
-/// wrote. A query that fills a slice commonly returns how many values it has,
-/// so a caller whose slice was short calls again with a longer one.
-///
-/// The expansion's `unsafe` carries the macro's own spans, so the api crate
-/// keeps `#![forbid(unsafe_code)]`:
-///
-/// ```no_run
-/// #![forbid(unsafe_code)]
-///
-/// use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
-/// use yanet_sdk_api::{Agent, Error};
-///
-/// struct Mine;
-/// impl Module for Mine {
-///     const NAME: &'static str = "mine";
-///     type Config = u64;
-///     type Prepared<'p> = ();
-///     fn prepare(_: &CommitCx<'_, Self>) {}
-///     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
-///         batch.dispatch(|_| Verdict::Pass);
-///     }
-/// }
-///
-/// #[derive(FfiRecord)]
-/// #[repr(C)]
-/// pub struct Input {
-///     weight: u64,
-/// }
-///
-/// pub struct MineApi;
-///
-/// #[yanet_sdk::api(module = Mine)]
-/// impl MineApi {
-///     pub fn new(
-///         agent: &Agent,
-///         name: &str,
-///         input: &Input,
-///         ranges: &[u32],
-///     ) -> Result<Built<Mine, Agent>, Error> {
-///         Builder::<Mine>::build(agent, name, |_| Ok(input.weight + ranges.len() as u64))
-///     }
-/// }
-/// ```
-#[proc_macro_attribute]
-pub fn api(args: TokenStream, item: TokenStream) -> TokenStream {
-    let args = parse_macro_input!(args as api::Args);
-    let item = parse_macro_input!(item as ItemImpl);
-    api::expand(args, item)
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }
@@ -294,7 +155,7 @@ mod doctests {
     /// shared-memory data.
     ///
     /// ```
-    /// use yanet_sdk::{Build, Owner, ShmBox, ShmLayout};
+    /// use yanet_sdk::{ShmBox, ShmLayout};
     ///
     /// #[derive(ShmLayout)]
     /// #[repr(C)]
@@ -306,13 +167,6 @@ mod doctests {
     /// fn is_layout<T: ShmLayout>() {}
     /// is_layout::<Config<u64>>();
     /// is_layout::<Config<Config<u32>>>();
-    ///
-    /// fn parts<'b, W: Owner, T: Build>(
-    ///     value: T::Parts<'b, W>,
-    ///     boxed: yanet_sdk::Owned<'b, T, W>,
-    /// ) -> ConfigParts<'b, W, T> {
-    ///     ConfigParts { value, boxed }
-    /// }
     /// ```
     struct GenericAccepted;
 
@@ -333,8 +187,8 @@ mod doctests {
     /// ```
     struct GenericBoolArgumentRefused;
 
-    /// A field that needs more of a parameter than `Build`, as a mutex needs
-    /// `Copy`, is refused unless the struct bounds the parameter.
+    /// A field that needs more of a parameter than `ShmLayout`, as a mutex
+    /// needs `Copy`, is refused unless the struct bounds the parameter.
     ///
     /// ```compile_fail,E0277
     /// use yanet_sdk::{Mutex, ShmLayout};
@@ -584,554 +438,4 @@ mod doctests {
     /// }
     /// ```
     struct Align64Accepted;
-
-    /// Parts that leave a field out are refused.
-    ///
-    /// ```compile_fail,E0063
-    /// use yanet_sdk::{Owner, ShmLayout};
-    ///
-    /// #[derive(ShmLayout)]
-    /// #[repr(C)]
-    /// struct Config {
-    ///     first: u64,
-    ///     second: u64,
-    /// }
-    ///
-    /// fn parts<'b, W: Owner>() -> ConfigParts<'b, W> {
-    ///     ConfigParts { first: 1 }
-    /// }
-    /// ```
-    struct PartsMissingFieldRefused;
-
-    /// With every field named they are accepted.
-    ///
-    /// ```
-    /// use yanet_sdk::{Owner, ShmLayout};
-    ///
-    /// #[derive(ShmLayout)]
-    /// #[repr(C)]
-    /// struct Config {
-    ///     first: u64,
-    ///     second: u64,
-    /// }
-    ///
-    /// fn parts<'b, W: Owner>() -> ConfigParts<'b, W> {
-    ///     ConfigParts { first: 1, second: 2 }
-    /// }
-    /// ```
-    struct PartsAllFieldsAccepted;
-
-    /// Each field takes the parts of its own type; a string is not a number.
-    ///
-    /// ```compile_fail,E0308
-    /// use yanet_sdk::{Owner, ShmLayout};
-    ///
-    /// #[derive(ShmLayout)]
-    /// #[repr(C)]
-    /// struct Config {
-    ///     first: u64,
-    /// }
-    ///
-    /// fn parts<'b, W: Owner>() -> ConfigParts<'b, W> {
-    ///     ConfigParts { first: "one" }
-    /// }
-    /// ```
-    struct PartsWrongTypeRefused;
-
-    /// A number is accepted as the parts of a number field.
-    ///
-    /// ```
-    /// use yanet_sdk::{Owner, ShmLayout};
-    ///
-    /// #[derive(ShmLayout)]
-    /// #[repr(C)]
-    /// struct Config {
-    ///     first: u64,
-    /// }
-    ///
-    /// fn parts<'b, W: Owner>() -> ConfigParts<'b, W> {
-    ///     ConfigParts { first: 1 }
-    /// }
-    /// ```
-    struct PartsRightTypeAccepted;
-
-    /// Parts of plain fields alone do not name their owner; refused.
-    ///
-    /// Outside a build closure, whose return type fixes it, a signature does.
-    ///
-    /// ```compile_fail,E0283
-    /// use yanet_sdk::ShmLayout;
-    ///
-    /// #[derive(ShmLayout)]
-    /// #[repr(C)]
-    /// struct Config {
-    ///     first: u64,
-    /// }
-    ///
-    /// let _ = ConfigParts { first: 1 };
-    /// ```
-    struct PartsOwnerUnnamedRefused;
-
-    /// A parameter outside the table, such as `bool`, is refused.
-    ///
-    /// ```compile_fail
-    /// # use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
-    /// # use yanet_sdk_api::{Agent, Error};
-    /// # struct Mine;
-    /// # struct Other;
-    /// # impl Module for Mine {
-    /// #     const NAME: &'static str = "mine";
-    /// #     type Config = u64;
-    /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &CommitCx<'_, Self>) {}
-    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
-    /// #         batch.dispatch(|_| Verdict::Pass);
-    /// #     }
-    /// # }
-    /// # pub struct Api;
-    /// #[yanet_sdk::api(module = Mine)]
-    /// impl Api {
-    ///     pub fn new(agent: &Agent, name: &str, _flag: bool) -> Result<Built<Mine, Agent>, Error> {
-    ///         Builder::<Mine>::build(agent, name, |_| Ok(0))
-    ///     }
-    /// }
-    /// ```
-    struct BoolParameterRefused;
-
-    /// A parameter of the table is accepted.
-    ///
-    /// ```no_run
-    /// # use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
-    /// # use yanet_sdk_api::{Agent, Error};
-    /// # struct Mine;
-    /// # struct Other;
-    /// # impl Module for Mine {
-    /// #     const NAME: &'static str = "mine";
-    /// #     type Config = u64;
-    /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &CommitCx<'_, Self>) {}
-    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
-    /// #         batch.dispatch(|_| Verdict::Pass);
-    /// #     }
-    /// # }
-    /// # pub struct Api;
-    /// #[yanet_sdk::api(module = Mine)]
-    /// impl Api {
-    ///     pub fn new(agent: &Agent, name: &str, _flag: u8) -> Result<Built<Mine, Agent>, Error> {
-    ///         Builder::<Mine>::build(agent, name, |_| Ok(0))
-    ///     }
-    /// }
-    /// ```
-    struct IntParameterAccepted;
-
-    /// A result other than the build's is refused.
-    ///
-    /// ```compile_fail
-    /// # use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
-    /// # use yanet_sdk_api::{Agent, Error};
-    /// # struct Mine;
-    /// # struct Other;
-    /// # impl Module for Mine {
-    /// #     const NAME: &'static str = "mine";
-    /// #     type Config = u64;
-    /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &CommitCx<'_, Self>) {}
-    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
-    /// #         batch.dispatch(|_| Verdict::Pass);
-    /// #     }
-    /// # }
-    /// # pub struct Api;
-    /// #[yanet_sdk::api(module = Mine)]
-    /// impl Api {
-    ///     pub fn new(agent: &Agent, name: &str, _flag: u8) -> u32 {
-    ///         0
-    ///     }
-    /// }
-    /// ```
-    struct PlainResultRefused;
-
-    /// The build's result is accepted.
-    ///
-    /// ```no_run
-    /// # use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
-    /// # use yanet_sdk_api::{Agent, Error};
-    /// # struct Mine;
-    /// # struct Other;
-    /// # impl Module for Mine {
-    /// #     const NAME: &'static str = "mine";
-    /// #     type Config = u64;
-    /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &CommitCx<'_, Self>) {}
-    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
-    /// #         batch.dispatch(|_| Verdict::Pass);
-    /// #     }
-    /// # }
-    /// # pub struct Api;
-    /// #[yanet_sdk::api(module = Mine)]
-    /// impl Api {
-    ///     pub fn new(agent: &Agent, name: &str, _flag: u8) -> Result<Built<Mine, Agent>, Error> {
-    ///         Builder::<Mine>::build(agent, name, |_| Ok(0))
-    ///     }
-    /// }
-    /// ```
-    struct BuiltResultAccepted;
-
-    /// A configuration of another module than the attribute's is refused.
-    ///
-    /// ```compile_fail
-    /// # use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
-    /// # use yanet_sdk_api::{Agent, Error};
-    /// # struct Mine;
-    /// # struct Other;
-    /// # impl Module for Mine {
-    /// #     const NAME: &'static str = "mine";
-    /// #     type Config = u64;
-    /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &CommitCx<'_, Self>) {}
-    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
-    /// #         batch.dispatch(|_| Verdict::Pass);
-    /// #     }
-    /// # }
-    /// # pub struct Api;
-    /// #[yanet_sdk::api(module = Mine)]
-    /// impl Api {
-    ///     pub fn new(agent: &Agent, name: &str, _flag: u8) -> Result<Built<Other, Agent>, Error> {
-    ///         Err(Error::from(yanet_sdk::Refusal::OutOfMemory))
-    ///     }
-    /// }
-    /// ```
-    struct OtherModuleRefused;
-
-    /// The attribute's module is accepted.
-    ///
-    /// ```no_run
-    /// # use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, FfiRecord, Module, Verdict};
-    /// # use yanet_sdk_api::{Agent, Error};
-    /// # struct Mine;
-    /// # struct Other;
-    /// # impl Module for Mine {
-    /// #     const NAME: &'static str = "mine";
-    /// #     type Config = u64;
-    /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &CommitCx<'_, Self>) {}
-    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
-    /// #         batch.dispatch(|_| Verdict::Pass);
-    /// #     }
-    /// # }
-    /// # pub struct Api;
-    /// #[yanet_sdk::api(module = Mine)]
-    /// impl Api {
-    ///     pub fn new(agent: &Agent, name: &str, _flag: u8) -> Result<Built<Mine, Agent>, Error> {
-    ///         Builder::<Mine>::build(agent, name, |_| Ok(0))
-    ///     }
-    /// }
-    /// ```
-    struct OwnModuleAccepted;
-
-    /// An object api builds objects of its type, and its queries take one of
-    /// them.
-    ///
-    /// ```no_run
-    /// # use yanet_sdk::{BuiltObject, Object, ObjectBuilder};
-    /// # use yanet_sdk_api::{Agent, Error};
-    /// # struct Mine;
-    /// # impl Object for Mine {
-    /// #     const TYPE: &'static str = "mine";
-    /// #     type Config = u64;
-    /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
-    /// # }
-    /// # pub struct Api;
-    /// #[yanet_sdk::api(object = Mine)]
-    /// impl Api {
-    ///     pub fn new(
-    ///         agent: &Agent,
-    ///         name: &str,
-    ///         word: u64,
-    ///     ) -> Result<BuiltObject<Mine, Agent>, Error> {
-    ///         ObjectBuilder::<Mine>::build(agent, name, |_| Ok(word))
-    ///     }
-    ///
-    ///     pub fn word(agent: &Agent, mine: &BuiltObject<Mine, Agent>) -> Result<u64, Error> {
-    ///         Ok(agent.read(mine, |_, word| *word))
-    ///     }
-    /// }
-    /// ```
-    struct OwnObjectAccepted;
-
-    /// An object of another type than the attribute's is refused.
-    ///
-    /// ```compile_fail,E0308
-    /// # use yanet_sdk::{BuiltObject, Object, ObjectBuilder};
-    /// # use yanet_sdk_api::{Agent, Error};
-    /// # struct Mine;
-    /// # struct Other;
-    /// # impl Object for Mine {
-    /// #     const TYPE: &'static str = "mine";
-    /// #     type Config = u64;
-    /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
-    /// # }
-    /// # impl Object for Other {
-    /// #     const TYPE: &'static str = "other";
-    /// #     type Config = u64;
-    /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
-    /// # }
-    /// # pub struct Api;
-    /// #[yanet_sdk::api(object = Mine)]
-    /// impl Api {
-    ///     pub fn new(agent: &Agent, name: &str) -> Result<BuiltObject<Other, Agent>, Error> {
-    ///         ObjectBuilder::<Other>::build(agent, name, |_| Ok(0))
-    ///     }
-    /// }
-    /// ```
-    struct OtherObjectRefused;
-
-    /// An object parameter of another type than the attribute's is refused.
-    ///
-    /// ```compile_fail,E0308
-    /// # use yanet_sdk::{BuiltObject, Object};
-    /// # use yanet_sdk_api::{Agent, Error};
-    /// # struct Mine;
-    /// # struct Other;
-    /// # impl Object for Mine {
-    /// #     const TYPE: &'static str = "mine";
-    /// #     type Config = u64;
-    /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
-    /// # }
-    /// # impl Object for Other {
-    /// #     const TYPE: &'static str = "other";
-    /// #     type Config = u64;
-    /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
-    /// # }
-    /// # pub struct Api;
-    /// #[yanet_sdk::api(object = Mine)]
-    /// impl Api {
-    ///     pub fn word(agent: &Agent, other: &BuiltObject<Other, Agent>) -> Result<u64, Error> {
-    ///         Ok(agent.read(other, |_, word| *word))
-    ///     }
-    /// }
-    /// ```
-    struct OtherObjectParameterRefused;
-
-    /// A build writes no output.
-    ///
-    /// ```compile_fail
-    /// # use yanet_sdk::{BuiltObject, Object, ObjectBuilder};
-    /// # use yanet_sdk_api::{Agent, Error};
-    /// # struct Mine;
-    /// # impl Object for Mine {
-    /// #     const TYPE: &'static str = "mine";
-    /// #     type Config = u64;
-    /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
-    /// # }
-    /// # pub struct Api;
-    /// #[yanet_sdk::api(object = Mine)]
-    /// impl Api {
-    ///     pub fn new(agent: &Agent, name: &str, words: &mut [u64]) -> Result<BuiltObject<Mine, Agent>, Error> {
-    ///         words.fill(0);
-    ///         ObjectBuilder::<Mine>::build(agent, name, |_| Ok(0))
-    ///     }
-    /// }
-    /// ```
-    struct BuildOutputRefused;
-
-    /// A query writes outputs: a record and a slice of records.
-    ///
-    /// ```no_run
-    /// # use yanet_sdk::{BuiltObject, FfiRecord, Object};
-    /// # use yanet_sdk_api::{Agent, Error};
-    /// # struct Mine;
-    /// # impl Object for Mine {
-    /// #     const TYPE: &'static str = "mine";
-    /// #     type Config = u64;
-    /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
-    /// # }
-    /// #[derive(FfiRecord)]
-    /// #[repr(C)]
-    /// pub struct Shape {
-    ///     word: u64,
-    /// }
-    ///
-    /// # pub struct Api;
-    /// #[yanet_sdk::api(object = Mine)]
-    /// impl Api {
-    ///     pub fn read(
-    ///         agent: &Agent,
-    ///         mine: &BuiltObject<Mine, Agent>,
-    ///         shape: &mut Shape,
-    ///         words: &mut [u64],
-    ///     ) -> Result<u64, Error> {
-    ///         shape.word = agent.read(mine, |_, word| *word);
-    ///         words.fill(shape.word);
-    ///         Ok(words.len() as u64)
-    ///     }
-    /// }
-    /// ```
-    struct QueryOutputsAccepted;
-
-    /// A string is no output.
-    ///
-    /// ```compile_fail
-    /// # use yanet_sdk::{BuiltObject, Object};
-    /// # use yanet_sdk_api::{Agent, Error};
-    /// # struct Mine;
-    /// # impl Object for Mine {
-    /// #     const TYPE: &'static str = "mine";
-    /// #     type Config = u64;
-    /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
-    /// # }
-    /// # pub struct Api;
-    /// #[yanet_sdk::api(object = Mine)]
-    /// impl Api {
-    ///     pub fn word(agent: &Agent, mine: &BuiltObject<Mine, Agent>, name: &mut str) -> Result<u64, Error> {
-    ///         name.make_ascii_lowercase();
-    ///         Ok(agent.read(mine, |_, word| *word))
-    ///     }
-    /// }
-    /// ```
-    struct StringOutputRefused;
-
-    /// An output of a type that is not a record, such as `bool`, is refused.
-    ///
-    /// ```compile_fail,E0277
-    /// # use yanet_sdk::{BuiltObject, Object};
-    /// # use yanet_sdk_api::{Agent, Error};
-    /// # struct Mine;
-    /// # impl Object for Mine {
-    /// #     const TYPE: &'static str = "mine";
-    /// #     type Config = u64;
-    /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
-    /// # }
-    /// # pub struct Api;
-    /// #[yanet_sdk::api(object = Mine)]
-    /// impl Api {
-    ///     pub fn word(agent: &Agent, mine: &BuiltObject<Mine, Agent>, set: &mut bool) -> Result<u64, Error> {
-    ///         *set = true;
-    ///         Ok(agent.read(mine, |_, word| *word))
-    ///     }
-    /// }
-    /// ```
-    struct NonRecordOutputRefused;
-
-    /// A module api takes no object parameter.
-    ///
-    /// ```compile_fail
-    /// # use yanet_sdk::{Batch, Builder, Built, BuiltObject, CommitCx, Cx, Module, Object, Verdict};
-    /// # use yanet_sdk_api::{Agent, Error};
-    /// # struct Mine;
-    /// # impl Module for Mine {
-    /// #     const NAME: &'static str = "mine";
-    /// #     type Config = u64;
-    /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &CommitCx<'_, Self>) {}
-    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
-    /// #         batch.dispatch(|_| Verdict::Pass);
-    /// #     }
-    /// # }
-    /// # impl Object for Mine {
-    /// #     const TYPE: &'static str = "mine";
-    /// #     type Config = u64;
-    /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
-    /// # }
-    /// # pub struct Api;
-    /// #[yanet_sdk::api(module = Mine)]
-    /// impl Api {
-    ///     pub fn new(agent: &Agent, name: &str, mine: &BuiltObject<Mine, Agent>) -> Result<Built<Mine, Agent>, Error> {
-    ///         let word = agent.read(mine, |_, word| *word);
-    ///         Builder::<Mine>::build(agent, name, |_| Ok(word))
-    ///     }
-    /// }
-    /// ```
-    struct ObjectParameterOfModuleApiRefused;
-
-    /// A module configuration is refused from an object api.
-    ///
-    /// ```compile_fail,E0308
-    /// # use yanet_sdk::{Batch, Builder, Built, CommitCx, Cx, Module, Object, Verdict};
-    /// # use yanet_sdk_api::{Agent, Error};
-    /// # struct Mine;
-    /// # impl Module for Mine {
-    /// #     const NAME: &'static str = "mine";
-    /// #     type Config = u64;
-    /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &CommitCx<'_, Self>) {}
-    /// #     fn handle<'id>(_: &mut Cx<'id, Self>, batch: &mut Batch<'id>) {
-    /// #         batch.dispatch(|_| Verdict::Pass);
-    /// #     }
-    /// # }
-    /// # impl Object for Mine {
-    /// #     const TYPE: &'static str = "mine";
-    /// #     type Config = u64;
-    /// #     type Prepared<'p> = ();
-    /// #     fn prepare(_: &yanet_sdk::ObjectCommitCx<'_, Self>) {}
-    /// # }
-    /// # pub struct Api;
-    /// #[yanet_sdk::api(object = Mine)]
-    /// impl Api {
-    ///     pub fn new(agent: &Agent, name: &str) -> Result<Built<Mine, Agent>, Error> {
-    ///         Builder::<Mine>::build(agent, name, |_| Ok(0))
-    ///     }
-    /// }
-    /// ```
-    struct ModuleFromObjectApiRefused;
-
-    /// A record without `#[repr(C)]` is refused.
-    ///
-    /// ```compile_fail
-    /// use yanet_sdk::FfiRecord;
-    ///
-    /// #[derive(FfiRecord)]
-    /// struct Record {
-    ///     value: u32,
-    /// }
-    /// ```
-    struct RecordWithoutReprCRefused;
-
-    /// A `repr(C)` record is accepted.
-    ///
-    /// ```
-    /// use yanet_sdk::FfiRecord;
-    ///
-    /// #[derive(FfiRecord)]
-    /// #[repr(C)]
-    /// struct Record {
-    ///     value: u32,
-    /// }
-    /// ```
-    struct ReprCRecordAccepted;
-
-    /// A field that is not a record, such as `bool`, is refused.
-    ///
-    /// ```compile_fail,E0277
-    /// use yanet_sdk::FfiRecord;
-    ///
-    /// #[derive(FfiRecord)]
-    /// #[repr(C)]
-    /// struct Record {
-    ///     flag: bool,
-    /// }
-    /// ```
-    struct BoolFieldRecordRefused;
-
-    /// A field of a fixed-width integer is accepted.
-    ///
-    /// ```
-    /// use yanet_sdk::FfiRecord;
-    ///
-    /// #[derive(FfiRecord)]
-    /// #[repr(C)]
-    /// struct Record {
-    ///     flag: u8,
-    /// }
-    /// ```
-    struct IntFieldRecordAccepted;
 }

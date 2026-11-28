@@ -4,11 +4,10 @@ name: Rust Miri
 # module SDK workspace (bindings/rust): strict provenance under Stacked and Tree
 # Borrows.
 #
-# The bindings crate's build script runs bindgen and compiles both C shims, of
-# common/ and of the dataplane, into one shim library over the repository's C
-# headers with the compiler and flags of a meson configuration's compilation
-# database. The job runs in the CI image (ci/README.md) and configures meson
-# (no compilation) before Miri.
+# The bindings crate's build script runs bindgen and compiles the dataplane C
+# shim over the repository's C headers with the compiler and flags of a meson
+# configuration's compilation database. The job runs in the CI image
+# (ci/README.md) and configures meson (no compilation) before Miri.
 #
 # Miri interprets only Rust: no C runs under it, so C changes reach the suites
 # only through bindgen layouts and signatures, which the Rust SDK workflow

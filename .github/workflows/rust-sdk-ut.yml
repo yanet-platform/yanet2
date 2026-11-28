@@ -154,6 +154,12 @@ jobs:
       - name: Build the fixture builders without cgo
         run: CGO_ENABLED=0 go build -tags sdk_rust_fixtures ./controlplane/native/sdk/...
 
+      # The Rust lookup bench reads trees the Go builder lays out; its checks
+      # run here, where the fixtures are built. Cargo shares meson's cached
+      # target directory.
+      - name: Check the classifier lookup bench
+        run: CARGO_TARGET_DIR="$PWD/build/bindings/rust/cargo-target" make test-classify-bench
+
       - name: Configure lint
         run: echo "CGO_CPPFLAGS=$(cat build/yanet_cgo_cppflags)" >> "$GITHUB_ENV"
 

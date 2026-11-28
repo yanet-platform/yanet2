@@ -1,9 +1,8 @@
-//! Bindings of `common/`: the LPM type with its lookup and the range it is
-//! built from, and the exact-match index, whose slots a memory context of
-//! `common/memory.h` holds.
+//! Bindings of `common/`: the LPM type with its lookup, and the exact-match
+//! index, whose slots a memory context of `common/memory.h` holds.
 //!
-//! The table is built by the C routines of `common/`, and the shared-memory
-//! alignment bound is checked against the C block allocator's.
+//! The shared-memory alignment bound is checked against the C block
+//! allocator's.
 
 use yanet_shm::shm::MAX_ALIGN;
 

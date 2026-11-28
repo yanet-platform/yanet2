@@ -11,7 +11,6 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-netip = "0.5.0"
 yanet-packet = { path = "../yanet-packet" }
 yanet-shm = { path = "../yanet-shm" }
 
@@ -23,8 +22,7 @@ shlex = "1"
 
 [dev-dependencies]
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
-proptest = { version = "1.12", default-features = false, features = ["std"] }
-yanet-sdk-testing = { path = "../yanet-sdk-testing", features = ["cp"] }
+yanet-sdk-testing = { path = "../yanet-sdk-testing" }
 
 [[bench]]
 name = "dp"

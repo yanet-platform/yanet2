@@ -3,25 +3,19 @@
 //!
 //! C joins two stages into a table sized by their class counts, and its
 //! queries pass the table only the classes of those stages
-//! (`lib/classify/query.h`). The tree keeps that promise by construction: a
-//! node is written only by a [`Scope`](crate::cp::Scope), together with the
-//! very nodes it was joined or decoded from, and its fields are private, so no
-//! lookup takes a class from module code. Private table access checks indices
-//! in debug builds.
+//! (`lib/classify/query.h`). The tree keeps that promise by construction: the
+//! control plane writes a node together with the very nodes it was joined or
+//! decoded from, and its fields are private, so no lookup takes a class from
+//! module code. Private table access checks indices in debug builds.
 
 use core::{
     array,
-    convert::Infallible,
     mem::{offset_of, size_of},
 };
 
 use yanet_shm::{layout::Param, rel::ShmBox, resolve::Resolve, shm::ShmLayout};
 
 use super::{Joint, LineAttr, Net4Attr, Net6Attr, PortAttr, Rule, RuleMap, RuleTable, lpm_value};
-use crate::{
-    bindings,
-    cp::{Build, Init, MemoryContext, Owned, Owner, Place, Refusal},
-};
 
 /// A classifier of a tree: an attribute, or a joint of two classifiers.
 ///
@@ -30,21 +24,11 @@ use crate::{
 ///
 /// ```compile_fail,E0277
 /// use yanet_shm::{resolve::Resolve, shm::ShmLayout};
-/// use yanet_sys::{
-///     classify::Node,
-///     cp::{Build, Init, MemoryContext, Owner, Place, Refusal},
-/// };
+/// use yanet_sys::classify::Node;
 /// #[repr(C)]
 /// struct Mine(u32);
+/// // SAFETY: an integer accepts every bit pattern and needs no drop.
 /// unsafe impl ShmLayout for Mine {}
-/// unsafe impl Build for Mine {
-///     type Parts<'b, W: Owner> = u32;
-///     fn write<'s, 'b, W: Owner>(value: u32, place: Place<'s, 'b, Self, W>) -> Result<Init<'s, Self>, Refusal> {
-///         // SAFETY: the integer owns nothing and has no relative edges.
-///         Ok(unsafe { place.put(Self(value)) })
-///     }
-///     unsafe fn free<W: Owner>(_: usize, _: &MemoryContext<'_, W>) {}
-/// }
 /// impl Node for Mine {
 ///     type Key = u32;
 ///     fn class<'g>(&'g self, _: &impl Resolve<'g>, key: u32) -> u32 {
@@ -52,7 +36,7 @@ use crate::{
 ///     }
 /// }
 /// ```
-pub trait Node: Build + sealed::Sealed {
+pub trait Node: ShmLayout + sealed::Sealed {
     /// What the node classifies: an attribute's value, or the pair of keys
     /// of a joint.
     type Key: Copy + Default;
@@ -118,9 +102,6 @@ impl Node for LineAttr {
 }
 
 /// The joint of two classifiers: the class of each pair of their classes.
-///
-/// Joined only with its stage, by
-/// [`Scope::join`](crate::cp::Scope::join).
 #[repr(C)]
 pub struct Join<L, R> {
     table: Joint,
@@ -129,8 +110,6 @@ pub struct Join<L, R> {
 }
 
 /// The first rule each pair of classes of two classifiers matches.
-///
-/// Joined by [`Scope::join_rules`](crate::cp::Scope::join_rules).
 #[repr(C)]
 pub struct Rules<L, R> {
     table: RuleTable,
@@ -139,8 +118,6 @@ pub struct Rules<L, R> {
 }
 
 /// The first rule each class of a classifier matches.
-///
-/// Decoded by [`Scope::decode`](crate::cp::Scope::decode).
 #[repr(C)]
 pub struct Decode<N> {
     map: RuleMap,
@@ -356,7 +333,7 @@ const _: () = {
 
 /// The shared-memory impls of the nodes that hold their inputs.
 macro_rules! holders {
-    ($($name:ident<$($param:ident),*> $kind:literal $shape:ty { $table:ident: $raw:ty, $free:ident; $($edge:ident: $ty:ident),* })*) => {$(
+    ($($name:ident<$($param:ident),*> $kind:literal $shape:ty { $table:ident; $($edge:ident),* })*) => {$(
         // SAFETY: a `#[repr(C)]` struct of an opaque C object, which accepts
         // every pattern, and offset words, without padding (asserted above);
         // the C object leads, so the node has its alignment, and dropping is
@@ -364,38 +341,13 @@ macro_rules! holders {
         unsafe impl<$($param: ShmLayout),*> ShmLayout for $name<$($param),*> {
             edge_layout!($kind, $shape, [$table, $($edge),*], [$($param),*]);
         }
-
-        // SAFETY: written only by the scope's joins and decodes, which put
-        // the C object and the owned edges whole; freeing returns what the C
-        // build allocated in its context, then its inputs, the right one
-        // before the left.
-        unsafe impl<$($param: Build),*> Build for $name<$($param),*> {
-            type Parts<'b, W: Owner> = Infallible;
-
-            fn write<'s, 'b, W: Owner>(
-                parts: Infallible,
-                _: Place<'s, 'b, Self, W>,
-            ) -> Result<Init<'s, Self>, Refusal> {
-                match parts {}
-            }
-
-            unsafe fn free<W: Owner>(addr: usize, memory: &MemoryContext<'_, W>) {
-                // SAFETY: the node holds a value (caller contract), which only
-                // the scope's joins and decodes write, whole: the C object at
-                // its start, then the edges.
-                unsafe {
-                    bindings::$free(memory.root().ptr::<$raw>(addr + offset_of!(Self, $table)));
-                    $(<ShmBox<$ty> as Build>::free::<W>(addr + offset_of!(Self, $edge), memory);)*
-                }
-            }
-        }
     )*};
 }
 
 holders! {
-    Join<L, R> "join" Join<Param<0>, Param<1>> { table: bindings::value_table, yanet_sys_classify_joint_free; right: R, left: L }
-    Rules<L, R> "rules" Rules<Param<0>, Param<1>> { table: bindings::rule_table, yanet_sys_classify_rule_table_free; right: R, left: L }
-    Decode<N> "decode" Decode<Param<0>> { map: bindings::vline, yanet_sys_classify_rule_map_free; input: N }
+    Join<L, R> "join" Join<Param<0>, Param<1>> { table; right, left }
+    Rules<L, R> "rules" Rules<Param<0>, Param<1>> { table; right, left }
+    Decode<N> "decode" Decode<Param<0>> { map; input }
 }
 
 mod sealed {
@@ -410,39 +362,6 @@ mod sealed {
     impl Sealed for super::LineAttr {}
 
     impl<L, R> Sealed for super::Join<L, R> {}
-}
-
-/// Writes an owned edge of a node whose C object a build has just written.
-///
-/// # Safety
-///
-/// The edge is an unwritten offset word of a node in a block of the memory
-/// context's build, whose C object is written whole; the part is of the same
-/// build.
-#[doc(hidden)]
-pub unsafe fn link<'b, W: Owner, T: Build>(memory: &'b MemoryContext<'b, W>, edge: usize, part: Owned<'b, T, W>) {
-    // SAFETY: the edge is an aligned, unwritten offset word of the node
-    // (caller contract); a box write only stores the offset.
-    let written = unsafe { memory.write_at::<ShmBox<T>>(edge, part) };
-    debug_assert!(written.is_ok(), "a box write does not fail");
-}
-
-impl<L, R> Join<L, R> {
-    /// Offsets of the left and the right edge.
-    #[doc(hidden)]
-    pub const EDGES: (usize, usize) = (offset_of!(Self, left), offset_of!(Self, right));
-}
-
-impl<L, R> Rules<L, R> {
-    /// Offsets of the left and the right edge.
-    #[doc(hidden)]
-    pub const EDGES: (usize, usize) = (offset_of!(Self, left), offset_of!(Self, right));
-}
-
-impl<N> Decode<N> {
-    /// Offset of the edge of the input.
-    #[doc(hidden)]
-    pub const EDGE: usize = offset_of!(Self, input);
 }
 
 #[cfg(test)]
@@ -497,16 +416,15 @@ mod tests {
             join + offset_of!(bindings::value_table, values),
             &[&[0, 1], &[2, 3], &[4, 5]],
         );
-        let (left_edge, right_edge) = Join::<LineAttr, LineAttr>::EDGES;
-        point(arena, join + left_edge, left);
-        point(arena, join + right_edge, right);
+        point(arena, join + offset_of!(Join<LineAttr, LineAttr>, left), left);
+        point(arena, join + offset_of!(Join<LineAttr, LineAttr>, right), right);
         // The last joint class matches no rule.
         let tree = block(arena, size_of::<Tree>());
         lay_line(arena, tree, &[10, 11, 12, 13, 14, Rule::NONE.0]);
-        point(arena, tree + Tree::EDGE, join);
+        point(arena, tree + offset_of!(Tree, input), join);
 
-        // SAFETY: laid out as C lays it out and a build links it, and frozen
-        // for the test.
+        // SAFETY: laid out as C lays it out and the control plane links it,
+        // and frozen for the test.
         let (view, tree) = unsafe { (View::new(arena.root()), &*arena.root().ptr::<Tree>(tree)) };
         let expected = keys().map(|(left, right)| match left % 3 * 2 + right % 2 {
             5 => Rule::NONE,
@@ -536,12 +454,11 @@ mod tests {
         lay_line(arena, tree + offset_of!(C, class_map), &[1, 0, 1]);
         lay_rows(arena, tree + offset_of!(C, rows), &[&[5, Rule::NONE.0], &[2, 4]]);
         put(arena, tree + offset_of!(C, class_count), 2u32);
-        let (left_edge, right_edge) = Tree::EDGES;
-        point(arena, tree + left_edge, left);
-        point(arena, tree + right_edge, right);
+        point(arena, tree + offset_of!(Tree, left), left);
+        point(arena, tree + offset_of!(Tree, right), right);
 
-        // SAFETY: laid out as C lays it out and a build links it, and frozen
-        // for the test.
+        // SAFETY: laid out as C lays it out and the control plane links it,
+        // and frozen for the test.
         let (view, tree) = unsafe { (View::new(arena.root()), &*arena.root().ptr::<Tree>(tree)) };
         let rows = [[Rule(5), Rule::NONE], [Rule(2), Rule(4)]];
         let expected = keys().map(|(left, right)| rows[[1, 0, 1][usize::from(left % 3)]][usize::from(right % 2)]);
