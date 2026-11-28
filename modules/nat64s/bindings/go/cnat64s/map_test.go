@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/nat64s/bindings/go/cnat64s"
 	nat64spb "github.com/yanet-platform/yanet2/modules/nat64s/controlplane/nat64spb/v1"
 )
@@ -91,6 +92,44 @@ func Test_MapObjectConfig_CreateMap_ReportsTheCauseOfARefusal(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = unworked.Free() })
 	require.ErrorIs(t, unworked.CreateMap(zeroWorkers), syscall.EINVAL)
+}
+
+// Test_MapObjectConfig_CreateMap_ReportsExhaustionByKind verifies that
+// tables the agent's zone cannot hold are reported as the resource running
+// out, the kind a publish maps to its status, with the allocator's own
+// cause in the chain.
+func Test_MapObjectConfig_CreateMap_ReportsExhaustionByKind(t *testing.T) {
+	harness, err := dataplaneut.NewHarness(dataplaneut.Config{
+		CPMemory:      uint64(64 * datasize.MB),
+		DPMemory:      uint64(4 * datasize.MB),
+		WorkerCount:   1,
+		ObjectsToLoad: []string{cnat64s.MapObjectType},
+	})
+	require.NoError(t, err)
+	t.Cleanup(harness.Free)
+
+	agent, err := harness.SharedMemory().AgentAttach(
+		"nat64s-binding-exhaustion-test",
+		0,
+		datasize.MB,
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = agent.CleanUp() })
+
+	created, err := cnat64s.NewMapObjectConfig(agent, "too-large")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = created.Free() })
+
+	// More than the zone holds, and within every limit: about 4.5 MiB of
+	// tables.
+	tooLarge := cnat64s.MapConfig{
+		IndexSize:        16384,
+		ExtraBucketCount: 1024,
+		WorkerCount:      1,
+	}
+	err = created.CreateMap(tooLarge)
+	require.ErrorIs(t, err, ffi.ErrResourceExhausted)
+	require.ErrorIs(t, err, syscall.ENOMEM)
 }
 
 // Test_MapObjectConfig_DroppedUnreleasedCollectsQuietly verifies that a

@@ -81,7 +81,11 @@ nat64s_module_config_create(
 			sizeof(struct nat64s_module_config)
 		);
 	if (config == NULL) {
-		yanet_error_add(err, "failed to allocate config");
+		yanet_error_add_kind(
+			err,
+			YANET_ERROR_RESOURCE_EXHAUSTED,
+			"failed to allocate config"
+		);
 		return NULL;
 	}
 
@@ -126,8 +130,9 @@ nat64s_module_config_create(
 			err
 		);
 		if (id == (uint64_t)-1) {
-			yanet_error_add(
+			yanet_error_add_kind(
 				err,
+				YANET_ERROR_RESOURCE_EXHAUSTED,
 				"failed to register counter '%s'",
 				counter_names[slot]
 			);
@@ -205,7 +210,11 @@ nat64s_module_config_update(
 			memory_context, NAT64S_PREFIX_LEN * update->prefix_count
 		);
 		if (prefixes == NULL) {
-			yanet_error_add(err, "failed to allocate the prefixes");
+			yanet_error_add_kind(
+				err,
+				YANET_ERROR_RESOURCE_EXHAUSTED,
+				"failed to allocate the prefixes"
+			);
 			return -1;
 		}
 		memcpy(prefixes,
@@ -220,7 +229,11 @@ nat64s_module_config_update(
 			memory_context, sizeof(uint32_t) * update->pool_count
 		);
 		if (pool == NULL) {
-			yanet_error_add(err, "failed to allocate the pool");
+			yanet_error_add_kind(
+				err,
+				YANET_ERROR_RESOURCE_EXHAUSTED,
+				"failed to allocate the pool"
+			);
 			return -1;
 		}
 		memcpy(pool, update->pool, sizeof(uint32_t) * update->pool_count

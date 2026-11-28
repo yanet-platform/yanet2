@@ -2,6 +2,7 @@ package nat64s_test
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"net/netip"
 	"testing"
@@ -12,6 +13,8 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
 	"github.com/yanet-platform/xnetip"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
@@ -82,12 +85,23 @@ func sessionMapGone(agent *ffi.Agent, name string) bool {
 }
 
 // setupNAT64sHarness wires the module end to end, down to its service
-// over the real backend and map registry.
+// over the real backend and map registry, in an agent zone of 16 MiB.
+func setupNAT64sHarness(
+	t *testing.T,
+) (*dataplaneut.Harness, *ffi.Agent, *nat64s.MapRegistry, *nat64s.NAT64sService) {
+	t.Helper()
+
+	return setupNAT64sHarnessInZone(t, 16*datasize.MB)
+}
+
+// setupNAT64sHarnessInZone is setupNAT64sHarness in an agent zone of the
+// given size.
 //
 // The maps are created small: the default sizing needs a block as large
 // as the allocator's largest, which a sanitizer build cannot provide.
-func setupNAT64sHarness(
+func setupNAT64sHarnessInZone(
 	t *testing.T,
+	zone datasize.ByteSize,
 ) (*dataplaneut.Harness, *ffi.Agent, *nat64s.MapRegistry, *nat64s.NAT64sService) {
 	t.Helper()
 
@@ -106,7 +120,7 @@ func setupNAT64sHarness(
 	agent, err := harness.SharedMemory().AgentAttach(
 		"nat64s-functional-test",
 		0,
-		16*datasize.MB,
+		zone,
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = agent.CleanUp() })
@@ -612,4 +626,155 @@ func Test_MapRegistry_Acquire_RefusesMapOfAnEarlierControlPlane(t *testing.T) {
 	})
 	require.NoError(t, err)
 	registry.ReclaimUnreferenced()
+}
+
+// Test_NAT64sService_UpdateConfig_FullZoneReportsResourceExhausted
+// verifies that a config whose session map the agent's zone has no room
+// for is refused with the status a caller can act on, ResourceExhausted,
+// naming the allocator's cause, and publishes nothing.
+//
+// The zone holds as many maps as it holds: configs are published one by
+// one, each with a map of its own, until one is refused. Deleting one of
+// the published configs gives its map's room to the refused one.
+func Test_NAT64sService_UpdateConfig_FullZoneReportsResourceExhausted(t *testing.T) {
+	_, _, _, service := setupNAT64sHarnessInZone(t, 4*datasize.MB)
+	ctx := t.Context()
+
+	// The zone holds a few maps of the small test sizing; a few hundred
+	// is beyond any layout.
+	const mostConfigs = 512
+
+	published := 0
+	for ; published < mostConfigs; published++ {
+		_, err := service.UpdateConfig(ctx, &nat64spb.UpdateConfigRequest{
+			Name:   fmt.Sprintf("t%d", published),
+			Config: sessionConfig(fmt.Sprintf("sessions%d", published)),
+		})
+		if err == nil {
+			continue
+		}
+		require.Equal(
+			t,
+			codes.ResourceExhausted,
+			status.Code(err),
+			"a config the zone has no room for must say so",
+		)
+		require.ErrorContains(
+			t,
+			err,
+			"cannot allocate memory",
+			"the allocator's cause must stay in the error",
+		)
+		break
+	}
+	require.Less(
+		t,
+		published,
+		mostConfigs,
+		"the zone must refuse a config eventually",
+	)
+	require.GreaterOrEqual(
+		t,
+		published,
+		2,
+		"the zone must hold more than one map for the round to mean anything",
+	)
+
+	list, err := service.ListConfigs(ctx, &nat64spb.ListConfigsRequest{})
+	require.NoError(t, err)
+	require.Len(
+		t,
+		list.GetConfigs(),
+		published,
+		"the refused config must publish nothing",
+	)
+
+	// One published config deleted, the refused one takes its map's room.
+	_, err = service.DeleteConfig(ctx, &nat64spb.DeleteConfigRequest{
+		Name: "t0",
+	})
+	require.NoError(t, err)
+	_, err = service.UpdateConfig(ctx, &nat64spb.UpdateConfigRequest{
+		Name:   fmt.Sprintf("t%d", published),
+		Config: sessionConfig(fmt.Sprintf("sessions%d", published)),
+	})
+	require.NoError(
+		t,
+		err,
+		"the room of a deleted config's map must go to the next one",
+	)
+}
+
+// Test_NAT64sService_UpdateConfig_OversizedArraysReportResourceExhausted
+// verifies that a config whose pool or prefix list the agent's zone has no
+// room for is refused as the resource running out, and publishes nothing.
+func Test_NAT64sService_UpdateConfig_OversizedArraysReportResourceExhausted(t *testing.T) {
+	_, _, _, service := setupNAT64sHarnessInZone(t, datasize.MB)
+	ctx := t.Context()
+
+	// Each list takes more than the zone holds: 300,000 entries, four or
+	// twelve bytes each.
+	const entries = 300_000
+
+	pool := make([]*commonpb.IPv4Address, 0, entries)
+	for number := range entries {
+		pool = append(pool, &commonpb.IPv4Address{
+			Addr: uint32(0x0a000000) + uint32(number),
+		})
+	}
+	prefixes := make([]*commonpb.IPv6Prefix, 0, entries)
+	for number := range entries {
+		address := [16]byte{
+			0x20, 0x01, 0x0d, 0xb8,
+			byte(number >> 16), byte(number >> 8), byte(number),
+		}
+		prefixes = append(
+			prefixes,
+			&commonpb.IPv6Prefix{
+				Addr:      commonpb.NewIPv6Address(address),
+				PrefixLen: 96,
+			},
+		)
+	}
+
+	for _, tc := range []struct {
+		name    string
+		config  *nat64spb.Config
+		refused string
+	}{
+		{
+			name:    "pool",
+			config:  &nat64spb.Config{Prefixes: sessionConfig("s0").GetPrefixes(), Pool: pool, Map: "s0"},
+			refused: "failed to allocate the pool",
+		},
+		{
+			name:    "prefixes",
+			config:  &nat64spb.Config{Prefixes: prefixes, Pool: sessionConfig("s1").GetPool(), Map: "s1"},
+			refused: "failed to allocate the prefixes",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := service.UpdateConfig(ctx, &nat64spb.UpdateConfigRequest{
+				Name:   "t0",
+				Config: tc.config,
+			})
+			require.Error(t, err)
+			require.Equal(
+				t,
+				codes.ResourceExhausted,
+				status.Code(err),
+				"a config the zone has no room for must say so",
+			)
+			require.ErrorContains(
+				t,
+				err,
+				tc.refused,
+				"the list the zone could not hold must be the one named",
+			)
+		})
+	}
+
+	list, err := service.ListConfigs(ctx, &nat64spb.ListConfigsRequest{})
+	require.NoError(t, err)
+	require.Empty(t, list.GetConfigs(), "the refused configs must publish nothing")
 }

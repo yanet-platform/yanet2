@@ -36,56 +36,41 @@ enum nat64s_stat {
  * Configuration of one stateful NAT64 instance.
  *
  * Routing around the instance is the pipeline's business: this config
- * carries only the translation identity. The NAT64 prefixes are the ones
- * the IPv4 side's addresses may embed under (v4->v6 destinations); the
- * pool is the public IPv4 address space the lan-side flows translate to.
- * An outbound packet uses the prefix its destination sits under, and the
- * session keeps that prefix for its return traffic. Under the Well-Known
- * Prefix a source or destination standing for an address of a block no
- * global traffic uses is refused, whatever the configuration carries
- * (RFC 6052 3.1). A source or destination no router forwards a packet
- * under — the unspecified, the loopback, a link-local, a multicast or an
- * IPv4-mapped address — and a destination standing for an IPv4 address
- * no unicast packet can be sent to are refused under every prefix, before
- * they can take a session.
- *
- * Of ICMP only errors and echoes cross: any other message is dropped
- * before it could take a session, as the translation could not carry it.
- * An error crosses only with a quote the translation can size: one whose
- * transport header sits right behind its IPv6 header, and whose IPv4
- * header carries no options.
- *
- * Session state lives in one linked nat64state_map object: its lan fwtable
- * keyed by the original IPv6 flow, its wan fwtable keyed by the translated
- * IPv4 flow. A NULL table (no link) makes the module drop every packet,
- * counting it: without sessions stateful translation cannot answer the
- * return path.
- *
- * A session is served while its public address is one of the pool's and
- * its prefix one of the configured ones. An update that takes either away
- * leaves the session unserved on both sides, its packets dropped and
- * counted, for as long as its entries live.
- *
- * Ports translate inside the configured window: a source port already
- * inside it is kept, any other is rewritten to a hash-derived port of the
- * window, derived from the client's address, protocol and port alone so
- * every worker picks the same one. Return traffic restores the client's
- * original port from the wan entry, zero included. Towards one remote an
- * external tuple belongs to one client: a new session whose tuple is
- * already taken moves to a neighboring port of the window.
+ * carries only the translation identity, the prefixes, the pool, the port
+ * window, the session lifetimes, the MTU limits and the link to the
+ * session tables, each with the rule the dataplane applies to it stated
+ * at its field.
  */
 struct nat64s_module_config {
 	struct cp_module cp_module;
 
-	/* NAT64 prefixes (first 12 bytes each, /96) the destinations may
-	 * embed under, allocated in the module's memory context */
+	/* NAT64 prefixes (first 12 bytes each, /96), allocated in the
+	 * module's memory context.
+	 *
+	 * An outbound packet is translated under the prefix its destination
+	 * sits under, and the session keeps that prefix for its return
+	 * traffic. A source or destination no router forwards a packet under
+	 * — the unspecified, the loopback, a link-local, a multicast or an
+	 * IPv4-mapped address — is refused under every prefix, and so is a
+	 * destination standing for an IPv4 address no unicast packet can be
+	 * sent to. Under the Well-Known Prefix a source or destination
+	 * standing for an address of a block no global traffic uses is
+	 * refused as well, whatever the configuration carries (RFC 6052
+	 * 3.1). All of it before a packet can take a session. */
 	struct {
 		uint8_t *list;
 		uint64_t count;
 	} prefixes;
 
 	/* Public IPv4 pool in network byte order, kept sorted, allocated in
-	 * the module's memory context */
+	 * the module's memory context: the public address space the
+	 * lan-side flows translate to.
+	 *
+	 * A session takes one address of it by a hash of the client endpoint,
+	 * and is served while that address is one of the pool's and its
+	 * prefix one of the configured ones: an update that takes either away
+	 * leaves the session unserved on both sides, its packets dropped and
+	 * counted, for as long as its entries live. */
 	struct {
 		uint32_t *pool;
 		uint64_t count;
@@ -93,20 +78,46 @@ struct nat64s_module_config {
 
 	/* Translated source-port window [port_lo, port_hi), host order, the
 	 * upper bound up to 65536 so that the window may end with port
-	 * 65535. A flow whose source port already lies inside keeps it; the
-	 * others are translated to a hash-derived port of the window. */
+	 * 65535.
+	 *
+	 * A flow whose source port already lies inside keeps it; the others
+	 * are translated to a hash-derived port of the window, derived from
+	 * the client's address, protocol and port alone so every worker picks
+	 * the same one. Return traffic restores the client's original port
+	 * from the wan entry, zero included. Towards one remote an external
+	 * tuple belongs to one client: a new session whose tuple is already
+	 * taken moves to a neighboring port of the window. */
 	uint32_t port_lo;
 	uint32_t port_hi;
 
+	/* The two session lifetimes in seconds, one for every session and a
+	 * longer one for an established TCP session, as the request carried
+	 * them. Their rules are stated with the structure. */
 	struct nat64state_timeouts timeouts;
 
+	/* The MTU limits the translation works with, in bytes, stored as a
+	 * request's zero has already selected its family's default.
+	 *
+	 * A translated error that reports a packet too big carries a next-hop
+	 * MTU held to both limits, each adjusted for the twenty bytes an IPv6
+	 * header adds over an IPv4 one. Towards the client that is the IPv6
+	 * limit as it is and the IPv4 one widened by them, floored at 1280;
+	 * towards the remote the IPv6 one narrowed by them and the IPv4 limit
+	 * as it is, floored at 68. An IPv6 limit stays within 32767: the
+	 * translation keeps the difference between the limit and a packet's
+	 * length in a signed 16-bit number. */
 	struct {
 		uint16_t ipv4;
 		uint16_t ipv6;
 	} mtu;
 
 	/* Index of the linked nat64state_map object, NAT64S_OBJECT_LINK_NONE
-	 * when the config declared none */
+	 * when the config declared none.
+	 *
+	 * The map holds the lan fwtable, keyed by the original IPv6 flow, and
+	 * the wan fwtable, keyed by the translated IPv4 flow. Without a link
+	 * the module drops every packet, counting it: without session state
+	 * the return path cannot be answered. */
 	uint64_t map_object_link_idx;
 
 	/* Ids of the module's counters in its counter registry, one per slot

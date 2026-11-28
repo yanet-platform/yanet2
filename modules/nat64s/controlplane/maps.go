@@ -40,11 +40,17 @@ var ErrMapLinkedByUntrackedConfig = fmt.Errorf(
 // creates them on first reference, and its sweeper reclaims the layers
 // their tables park.
 //
-// Every operation that changes the registry or a map publishes a new
-// object generation, which waits for every dataplane worker to advance —
-// the RCU grace period layer reclamation requires — and runs under the
-// registry's lock, the sweeper's rounds included: no map is released
-// underneath a hand that still holds it.
+// Every operation that changes a map in the dataplane — its creation,
+// its deletion and the sweeper's rounds — publishes a new object
+// generation under the registry's lock, and that generation waits for
+// every dataplane worker to advance, which is the grace period layer
+// reclamation requires: no map is released underneath a hand that still
+// holds it.
+//
+// The lock guards the reference records as well, which publish nothing
+// on their own: dropping a config's reference only changes who references
+// what, and retrying the free of a map the dataplane no longer lists only
+// returns its memory.
 type MapRegistry struct {
 	agent *ffi.Agent
 	mu    sync.Mutex

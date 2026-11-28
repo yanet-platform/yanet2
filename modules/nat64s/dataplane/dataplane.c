@@ -1295,8 +1295,10 @@ nat64s_handle_v6(
 		}
 	} else {
 		// RFC 6146 3.5.2.2: IPv6-initiated TCP state is created by a
-		// SYN alone; any other first packet would let a spoofed
-		// sender fill the table with established-lifetime entries.
+		// SYN alone.
+		//
+		// A first packet of any other kind is dropped, so a spoofed
+		// sender cannot open a TCP session with bare data.
 		if (proto == IPPROTO_TCP &&
 		    !(nat64s_tcp_flags(packet) & RTE_TCP_SYN_FLAG)) {
 			nat64s_stats_bump(prepared, NAT64S_NOT_SYN);

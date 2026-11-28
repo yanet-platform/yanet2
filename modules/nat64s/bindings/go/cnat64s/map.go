@@ -96,13 +96,11 @@ func (m *MapObjectConfig) CreateMap(config MapConfig) error {
 		return fmt.Errorf("nat64state map object is nil")
 	}
 	cConfig := config.toC()
-	// The failure's cause is the libc errno: a size the agent cannot
-	// allocate, or a count the tables refuse.
 	rc, errno := C.fwstate_map_nat64_object_create(
 		C.cnat64s_from_cp_object(m.ptr), &cConfig,
 	)
 	if rc != 0 {
-		return fmt.Errorf("failed to create the nat64state tables: %w", errno)
+		return tablesFailure("create the nat64state tables", errno)
 	}
 	return nil
 }
@@ -119,9 +117,27 @@ func (m *MapObjectConfig) InsertLayer(config MapConfig) error {
 		cConfig.worker_count,
 	)
 	if rc != 0 {
-		return fmt.Errorf("failed to insert the nat64state layers: %w", errno)
+		return tablesFailure("insert the nat64state layers", errno)
 	}
 	return nil
+}
+
+// tablesFailure reports a refused creation of tables by its cause, the
+// libc errno: a size the agent cannot allocate, or a count the tables
+// refuse.
+//
+// A zone with no room is the resource the config draws from running out,
+// the kind the publish reports as such; the cause stays in the chain.
+func tablesFailure(what string, errno error) error {
+	if errors.Is(errno, syscall.ENOMEM) {
+		return fmt.Errorf(
+			"failed to %s: %w: %w",
+			what,
+			ffi.ErrResourceExhausted,
+			errno,
+		)
+	}
+	return fmt.Errorf("failed to %s: %w", what, errno)
 }
 
 // UnlinkStaleLayers parks expired layers of both tables in their stale
